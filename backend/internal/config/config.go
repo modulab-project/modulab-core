@@ -6,6 +6,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
 // Config holds all environment-derived settings for a single Core process.
@@ -38,11 +39,20 @@ type Config struct {
 	HTTPAddr string
 }
 
-// Load reads configuration from the process environment. It does not
-// validate cross-field invariants (e.g. OIDC completeness) - that happens
-// once the Setup Wizard is implemented, since an empty OIDC config is a
-// valid pre-setup state.
+// Load reads configuration from the process environment. Before reading any
+// variable, it fills gaps from a local .env file if one exists (checking
+// both ./.env and ../.env, to support running `go run ./cmd/core` from
+// either the backend/ directory or the repository root). Real environment
+// variables that are already set always take precedence over .env content -
+// this is meant for local development convenience only; production deploys
+// set real environment variables via docker-compose's env_file directive.
+//
+// Load does not validate cross-field invariants (e.g. OIDC completeness) -
+// that happens once the Setup Wizard is implemented, since an empty OIDC
+// config is a valid pre-setup state.
 func Load() (Config, error) {
+	loadDotEnvFiles()
+
 	cfg := Config{
 		MasterKey:         os.Getenv("MODULAB_MASTER_KEY"),
 		BootstrapTokenTTL: getEnvDefault("MODULAB_BOOTSTRAP_TOKEN_TTL", "24h"),
@@ -80,4 +90,43 @@ func getEnvDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// loadDotEnvFiles fills process environment gaps from .env / ../.env. It is
+// intentionally forgiving: a missing file, an unreadable file, or malformed
+// lines are all silently skipped rather than treated as fatal, since this
+// path only ever supplies *additional* defaults on top of the real
+// environment.
+func loadDotEnvFiles() {
+	for _, path := range []string{".env", "../.env"} {
+		applyDotEnvFile(path)
+	}
+}
+
+func applyDotEnvFile(path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		value = strings.Trim(value, `"'`)
+
+		if _, alreadySet := os.LookupEnv(key); alreadySet {
+			continue // real environment variables always win over .env content
+		}
+		_ = os.Setenv(key, value)
+	}
 }
