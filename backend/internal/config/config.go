@@ -121,6 +121,15 @@ func applyDotEnvFile(path string) {
 		if key == "" {
 			continue
 		}
+
+		// Strip a trailing inline comment ("KEY=value  # comment") before
+		// trimming. This is a deliberately simple heuristic - it does not
+		// understand quoting, so a value that legitimately contains "#"
+		// will be truncated. Acceptable for this dev-convenience loader;
+		// .env.example avoids "#" inside real values for this reason.
+		if idx := strings.Index(value, "#"); idx != -1 {
+			value = value[:idx]
+		}
 		value = strings.TrimSpace(value)
 		value = strings.Trim(value, `"'`)
 
