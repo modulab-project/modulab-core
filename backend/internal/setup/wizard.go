@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -25,6 +26,20 @@ type StatusResponse struct {
 type InitResponse struct {
 	MasterKey string `json:"master_key"`
 	Generated bool   `json:"generated"`
+}
+
+// MasterKeyConfigured reports whether a master key has already been
+// bootstrapped via core_settings (set by InitHandler below). This only
+// covers the database half of the picture; callers such as /healthz are
+// expected to also check cfg.MasterKey (the env/.env value) themselves and
+// OR the two together, since config.Config is intentionally not imported
+// here to avoid a setup -> config -> setup dependency tangle.
+func MasterKeyConfigured(ctx context.Context, pool *db.Pool) (bool, error) {
+	_, exists, err := pool.GetSetting(ctx, masterKeySettingKey)
+	if err != nil {
+		return false, err
+	}
+	return exists, nil
 }
 
 // StatusHandler reports whether the master key has already been bootstrapped.
