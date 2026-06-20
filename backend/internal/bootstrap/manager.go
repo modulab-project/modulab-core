@@ -224,16 +224,51 @@ func base58Encode(input []byte) string {
 	return strings.Repeat("1", leadingZeros) + string(encoded)
 }
 
+// boxInnerWidth is the number of characters between the box's two vertical
+// borders. boxLine/centeredBoxLine pad to this width at runtime rather than
+// via hand-counted literal spaces, since the latter is exactly the kind of
+// thing that silently drifts out of alignment whenever a line's text
+// changes (as happened with the German-to-English wording switch).
+const boxInnerWidth = 66
+
+// boxLine pads text with trailing spaces so the line's right "║" lands at
+// boxInnerWidth. If text is already too long to fit, it is returned with no
+// padding or trailing border rather than corrupting the box - this is what
+// happens to the bootstrap token line itself, since the token's length can
+// vary slightly with its leading-zero-byte encoding.
+func boxLine(text string) string {
+	n := boxInnerWidth - len([]rune(text))
+	if n < 0 {
+		return "║" + text
+	}
+	return "║" + text + strings.Repeat(" ", n) + "║"
+}
+
+// centeredBoxLine is boxLine but centers text within boxInnerWidth instead
+// of left-aligning it.
+func centeredBoxLine(text string) string {
+	n := boxInnerWidth - len([]rune(text))
+	if n < 0 {
+		return boxLine(text)
+	}
+	left := n / 2
+	right := n - left
+	return "║" + strings.Repeat(" ", left) + text + strings.Repeat(" ", right) + "║"
+}
+
 func logToken(token string) {
+	top := "╔" + strings.Repeat("═", boxInnerWidth) + "╗"
+	bottom := "╚" + strings.Repeat("═", boxInnerWidth) + "╝"
+
 	log.Print("\n" + strings.Join([]string{
-		"╔══════════════════════════════════════════════════════════════╗",
-		"║              MODULAB CORE — FIRST-TIME SETUP REQUIRED         ║",
-		"║                                                                ║",
-		"║  Bootstrap Token:                                             ║",
-		"║  " + token,
-		"║                                                                ║",
-		"║  This token is shown ONLY ONCE.                               ║",
-		"║  Setup cannot be completed without it.                       ║",
-		"╚══════════════════════════════════════════════════════════════╝",
+		top,
+		centeredBoxLine("MODULAB CORE — FIRST-TIME SETUP REQUIRED"),
+		boxLine(""),
+		boxLine("  Bootstrap Token:"),
+		boxLine("  " + token),
+		boxLine(""),
+		boxLine("  This token is shown ONLY ONCE."),
+		boxLine("  Setup cannot be completed without it."),
+		bottom,
 	}, "\n") + "\n")
 }
