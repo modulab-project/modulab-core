@@ -1,22 +1,23 @@
 // Command core is the entry point for the modulab-core backend.
 //
-// This is the v1 skeleton: it boots an HTTP server with a /healthz endpoint
-// and reports whether Postgres and Valkey are reachable at the TCP level.
-// It deliberately does not yet speak the Postgres or Valkey wire protocols,
-// run migrations, or supervise the Deno subprocess (spec section 4.7) - those
-// land in follow-up commits once a real driver/dependency set is vendored.
-// The goal of this commit is a buildable, runnable foundation that the rest
-// of Core grows from.
+// This commit adds a real Postgres connection (pgx) and the first Setup
+// Wizard step: master-key bootstrap (spec section 2.4). Valkey and the Deno
+// subprocess supervisor (spec section 4.7) are still TCP-reachability
+// stubs - they get their own real clients in follow-up commits.
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"time"
 
 	"github.com/modulab-project/modulab-core/backend/internal/config"
+	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/setup"
 )
 
 type healthStatus struct {
@@ -32,17 +33,35 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
+	ctx := context.Background()
+
+	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable",
+		cfg.DBUser, cfg.DBPassword, cfg.DBHost, cfg.DBPort, cfg.DBName)
+	pool, err := db.Connect(ctx, dsn)
+	if err != nil {
+		log.Fatalf("db: %v", err)
+	}
+	defer pool.Close()
+
+	if err := pool.EnsureCoreSchema(ctx); err != nil {
+		log.Fatalf("db: %v", err)
+	}
+
 	mux := http.NewServeMux()
+
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		status := healthStatus{
 			Status:         "ok",
-			PostgresUp:     tcpReachable(cfg.DBHost, cfg.DBPort),
+			PostgresUp:     pool.Ping(r.Context()) == nil,
 			ValkeyUp:       tcpReachable(cfg.ValkeyHost, cfg.ValkeyPort),
 			MasterKeySetUp: cfg.MasterKey != "",
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(status)
 	})
+
+	mux.HandleFunc("/v1/setup/status", setup.StatusHandler(pool))
+	mux.HandleFunc("/v1/setup/init", setup.InitHandler(pool))
 
 	log.Printf("modulab-core listening on %s (group prefix %q)", cfg.HTTPAddr, cfg.GroupPrefix)
 	if err := http.ListenAndServe(cfg.HTTPAddr, mux); err != nil {
@@ -51,8 +70,7 @@ func main() {
 }
 
 // tcpReachable performs a best-effort TCP dial to confirm a dependency is at
-// least listening on its port. It is not a substitute for a real protocol
-// handshake and will be replaced once the Postgres/Valkey clients land.
+// least listening on its port. Used for Valkey until a real client lands.
 func tcpReachable(host, port string) bool {
 	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, port), 2*time.Second)
 	if err != nil {
