@@ -50,11 +50,22 @@ func main() {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		// master_key_present reflects either source of truth: a real
+		// MODULAB_MASTER_KEY (env/.env) or a key already persisted to
+		// core_settings by the Setup Wizard's /v1/setup/init. Without the
+		// second check, this would falsely report false right after a
+		// fresh install bootstraps its key but before the operator copies
+		// it into .env.
+		dbKeyConfigured, err := setup.MasterKeyConfigured(r.Context(), pool)
+		if err != nil {
+			log.Printf("healthz: master key lookup failed: %v", err)
+		}
+
 		status := healthStatus{
 			Status:         "ok",
 			PostgresUp:     pool.Ping(r.Context()) == nil,
 			ValkeyUp:       tcpReachable(cfg.ValkeyHost, cfg.ValkeyPort),
-			MasterKeySetUp: cfg.MasterKey != "",
+			MasterKeySetUp: cfg.MasterKey != "" || dbKeyConfigured,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(status)
