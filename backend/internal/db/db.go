@@ -1,0 +1,92 @@
+// Package db wraps a Postgres connection pool (pgx) and provides the
+// minimal key/value access Core needs for its own bootstrap state
+// (core_settings). Module-specific schemas and roles (spec section 4.3) are
+// handled elsewhere, once the module installation pipeline lands.
+package db
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// Pool wraps *pgxpool.Pool so Core-specific helper methods can be attached
+// without polluting the pgx API surface everywhere it's used.
+type Pool struct {
+	*pgxpool.Pool
+}
+
+// Connect opens a pooled connection to Postgres and verifies it is reachable.
+func Connect(ctx context.Context, dsn string) (*Pool, error) {
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		return nil, fmt.Errorf("db: connect: %w", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("db: ping: %w", err)
+	}
+	return &Pool{pool}, nil
+}
+
+// EnsureCoreSchema creates Core's bootstrap tables if they do not exist yet.
+// This mirrors migrations/0001_init_core_schema.up.sql and lets a fresh Core
+// instance boot without a separate migration step having been run first.
+// Once a real golang-migrate runner is wired in, this becomes redundant and
+// can be removed - tracked as a follow-up, not done here to keep this
+// commit reviewable.
+func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
+	if _, err := p.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS core_settings (
+			key        TEXT PRIMARY KEY,
+			value      TEXT NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		)
+	`); err != nil {
+		return fmt.Errorf("db: ensure core_settings: %w", err)
+	}
+
+	if _, err := p.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS installed_modules (
+			name         TEXT PRIMARY KEY,
+			version      TEXT NOT NULL,
+			tier         SMALLINT NOT NULL CHECK (tier IN (1, 2, 3)),
+			scope        TEXT NOT NULL CHECK (scope IN ('per-location', 'cross-location')),
+			status       TEXT NOT NULL DEFAULT 'installing',
+			installed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		)
+	`); err != nil {
+		return fmt.Errorf("db: ensure installed_modules: %w", err)
+	}
+
+	return nil
+}
+
+// GetSetting returns the stored value for key and whether it was present.
+func (p *Pool) GetSetting(ctx context.Context, key string) (string, bool, error) {
+	var value string
+	err := p.QueryRow(ctx, `SELECT value FROM core_settings WHERE key = $1`, key).Scan(&value)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("db: get setting %q: %w", key, err)
+	}
+	return value, true, nil
+}
+
+// SetSetting upserts key/value into core_settings.
+func (p *Pool) SetSetting(ctx context.Context, key, value string) error {
+	_, err := p.Exec(ctx, `
+		INSERT INTO core_settings (key, value, updated_at)
+		VALUES ($1, $2, now())
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+	`, key, value)
+	if err != nil {
+		return fmt.Errorf("db: set setting %q: %w", key, err)
+	}
+	return nil
+}
