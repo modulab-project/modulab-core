@@ -9,6 +9,7 @@
 package setup
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -41,6 +42,18 @@ type GroupPrefixStatusResponse struct {
 	Configured bool     `json:"configured"`
 	Prefix     string   `json:"prefix,omitempty"`
 	Groups     []string `json:"groups,omitempty"`
+}
+
+// GroupPrefixConfigured reports whether a group prefix has already been
+// persisted, without exposing the underlying setting key to callers outside
+// this package. Used by main.go's startup log to summarize Setup Wizard
+// progress.
+func GroupPrefixConfigured(ctx context.Context, pool *db.Pool) (bool, error) {
+	_, exists, err := pool.GetSetting(ctx, groupPrefixSettingKey)
+	if err != nil {
+		return false, err
+	}
+	return exists, nil
 }
 
 // GroupPrefixStatusHandler reports the currently persisted group prefix, if
