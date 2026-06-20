@@ -1,9 +1,12 @@
 // Command core is the entry point for the modulab-core backend.
 //
-// This commit adds the Setup Wizard's group-prefix step (spec section 6.5
-// step 5), on top of the bootstrap-token gate, master-key bootstrap, and
-// OIDC configuration steps already wired up below. Valkey and the Deno
-// subprocess supervisor (spec section 4.7) are still TCP-reachability
+// This commit improves startup observability: a version/project banner, an
+// explicit Postgres connection confirmation, an active Valkey reachability
+// check (rather than only checking lazily on /healthz), and a one-line
+// summary of how far the Setup Wizard has progressed. None of this changes
+// behavior - it exists so an operator staring at `docker logs` can tell
+// what state the instance is in without reaching for curl. Valkey and the
+// Deno subprocess supervisor (spec section 4.7) are still TCP-reachability
 // stubs - they get their own real clients in follow-up commits.
 package main
 
@@ -20,6 +23,7 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/config"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
+	"github.com/modulab-project/modulab-core/backend/internal/version"
 )
 
 type healthStatus struct {
@@ -34,6 +38,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
+
+	log.Printf("ModuLab Core %s — %s", version.Version, version.ProjectURL)
 
 	// Generated and logged before the DB connection, so the token is visible
 	// as early as possible after boot even if Postgres takes a moment to
@@ -52,10 +58,34 @@ func main() {
 		log.Fatalf("db: %v", err)
 	}
 	defer pool.Close()
+	log.Printf("db: connected to postgres at %s:%s/%s", cfg.DBHost, cfg.DBPort, cfg.DBName)
 
 	if err := pool.EnsureCoreSchema(ctx); err != nil {
 		log.Fatalf("db: %v", err)
 	}
+
+	// Checked once, actively, at boot - unlike /healthz's lazy per-request
+	// check below, this gives the operator immediate feedback in the log
+	// without having to curl anything.
+	if tcpReachable(cfg.ValkeyHost, cfg.ValkeyPort) {
+		log.Printf("valkey: reachable at %s:%s", cfg.ValkeyHost, cfg.ValkeyPort)
+	} else {
+		log.Printf("valkey: WARNING - not reachable at %s:%s yet (rechecked on every /healthz request)", cfg.ValkeyHost, cfg.ValkeyPort)
+	}
+
+	masterKeyConfigured, err := setup.MasterKeyConfigured(ctx, pool)
+	if err != nil {
+		log.Printf("setup: master key check failed: %v", err)
+	}
+	oidcConfigured, err := setup.OIDCConfigured(ctx, pool)
+	if err != nil {
+		log.Printf("setup: oidc check failed: %v", err)
+	}
+	groupPrefixConfigured, err := setup.GroupPrefixConfigured(ctx, pool)
+	if err != nil {
+		log.Printf("setup: group prefix check failed: %v", err)
+	}
+	log.Printf("setup wizard progress: master-key=%t oidc=%t group-prefix=%t", masterKeyConfigured, oidcConfigured, groupPrefixConfigured)
 
 	mux := http.NewServeMux()
 
