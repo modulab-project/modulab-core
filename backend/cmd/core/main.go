@@ -1,9 +1,10 @@
 // Command core is the entry point for the modulab-core backend.
 //
-// This commit adds a real Postgres connection (pgx) and the first Setup
-// Wizard step: master-key bootstrap (spec section 2.4). Valkey and the Deno
-// subprocess supervisor (spec section 4.7) are still TCP-reachability
-// stubs - they get their own real clients in follow-up commits.
+// This commit adds the Setup Wizard's OIDC configuration step (spec section
+// 6.5) on top of the master-key bootstrap (spec section 2.4). Valkey and
+// the Deno subprocess supervisor (spec section 4.7) are still
+// TCP-reachability stubs - they get their own real clients in follow-up
+// commits.
 package main
 
 import (
@@ -73,6 +74,21 @@ func main() {
 
 	mux.HandleFunc("/v1/setup/status", setup.StatusHandler(pool))
 	mux.HandleFunc("/v1/setup/init", setup.InitHandler(pool))
+
+	mux.HandleFunc("/v1/setup/oidc/status", setup.OIDCStatusHandler(pool))
+	mux.HandleFunc("/v1/setup/oidc/configure", func(w http.ResponseWriter, r *http.Request) {
+		// The OIDC step needs the master key to encrypt the client secret,
+		// so it can only run after step 1 (master-key bootstrap) has
+		// completed. Resolving it per-request (rather than once at startup)
+		// means a key generated via /v1/setup/init works immediately,
+		// without requiring a process restart.
+		masterKey, err := setup.ResolveMasterKey(r.Context(), pool, cfg.MasterKey)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusPreconditionFailed)
+			return
+		}
+		setup.OIDCConfigureHandler(pool, masterKey)(w, r)
+	})
 
 	log.Printf("modulab-core listening on %s (group prefix %q)", cfg.HTTPAddr, cfg.GroupPrefix)
 	if err := http.ListenAndServe(cfg.HTTPAddr, mux); err != nil {
