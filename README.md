@@ -20,6 +20,8 @@ Per the specification's MVP guidance, build a Tier 1 module first (for example a
 
 Copy .env.example to .env, then run docker compose -f deploy/docker-compose.dev.yml up -d to start Postgres and Valkey only. Run the backend with cd backend && go run ./cmd/core, and the frontend with cd frontend && npm install && npm run dev.
 
+The dev stack runs Postgres directly, without PgBouncer, unlike production. After copying .env.example, override two values in your local .env: set MODULAB_DB_PORT=5432 (the dev stack exposes Postgres directly on 5432, not the PgBouncer port 6432 assumed by .env.example) and MODULAB_DB_PASSWORD=modulab-dev (matching docker-compose.dev.yml's POSTGRES_PASSWORD). Without this override, the backend cannot reach Postgres locally.
+
 See .env.example for required environment variables (MODULAB_MASTER_KEY, DB/Valkey connection strings, and so on, spec section 2.4).
 
 ## License
