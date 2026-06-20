@@ -16,7 +16,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.23"
-          cache-dependency-path: backend/go.sum
       - name: Lint
         uses: golangci/golangci-lint-action@v6
         with:
@@ -49,5 +48,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Playwright smoke tests
-        run: |
-          echo "TODO: Setup Wizard, login flow, module installation (spec section 13.3)"
+        run: echo "TODO: Setup Wizard, login flow, module installation (spec section 13.3)" 
