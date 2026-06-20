@@ -1,11 +1,10 @@
 // Command core is the entry point for the modulab-core backend.
 //
-// This commit adds the Setup Wizard's bootstrap-token gate (spec section
-// 6.5): a one-time, in-memory-only token printed to the log at startup,
-// required on every /v1/setup/* request until the wizard has been
-// completed. Valkey and the Deno subprocess supervisor (spec section 4.7)
-// are still TCP-reachability stubs - they get their own real clients in
-// follow-up commits.
+// This commit adds the Setup Wizard's group-prefix step (spec section 6.5
+// step 5), on top of the bootstrap-token gate, master-key bootstrap, and
+// OIDC configuration steps already wired up below. Valkey and the Deno
+// subprocess supervisor (spec section 4.7) are still TCP-reachability
+// stubs - they get their own real clients in follow-up commits.
 package main
 
 import (
@@ -106,6 +105,9 @@ func main() {
 		}
 		setup.OIDCConfigureHandler(pool, masterKey)(w, r)
 	})))
+
+	mux.Handle("/v1/setup/group-prefix/status", bootstrapMgr.Middleware(setup.GroupPrefixStatusHandler(pool)))
+	mux.Handle("/v1/setup/group-prefix/configure", bootstrapMgr.Middleware(setup.GroupPrefixConfigureHandler(pool)))
 
 	log.Printf("modulab-core listening on %s (group prefix %q)", cfg.HTTPAddr, cfg.GroupPrefix)
 	if err := http.ListenAndServe(cfg.HTTPAddr, mux); err != nil {
