@@ -1,6 +1,6 @@
-// Package setup implements the first-boot Setup Wizard's backend endpoints.
-// Only the master-key bootstrap step is implemented here; the OIDC
-// configuration step (spec section 6.5) is a follow-up commit.
+// Package setup implements the first-boot Setup Wizard's backend endpoints:
+// master-key bootstrap (spec section 2.4, this file) and OIDC provider
+// configuration (spec section 6.5, oidc.go).
 package setup
 
 import (
@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/modulab-project/modulab-core/backend/internal/db"
@@ -85,6 +86,26 @@ func InitHandler(pool *db.Pool) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusCreated, InitResponse{MasterKey: key, Generated: true})
 	}
+}
+
+// ResolveMasterKey returns the currently active master key: envValue (the
+// real MODULAB_MASTER_KEY from env/.env, as loaded by config.Load) if it is
+// set, otherwise the value InitHandler persisted to core_settings. Later
+// setup steps that need to encrypt something (e.g. the OIDC client secret
+// in oidc.go) call this rather than reading core_settings directly, so
+// there is a single place that encodes "env always wins" precedence.
+func ResolveMasterKey(ctx context.Context, pool *db.Pool, envValue string) (string, error) {
+	if envValue != "" {
+		return envValue, nil
+	}
+	value, exists, err := pool.GetSetting(ctx, masterKeySettingKey)
+	if err != nil {
+		return "", err
+	}
+	if !exists {
+		return "", fmt.Errorf("setup: master key has not been bootstrapped yet (call /v1/setup/init first)")
+	}
+	return value, nil
 }
 
 // generateMasterKey produces a 256-bit random key, hex-encoded.
