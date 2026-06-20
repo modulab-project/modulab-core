@@ -48,4 +48,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Playwright smoke tests
-        run: echo "TODO: Setup Wizard, login flow, module installation (spec section 13.3)"
+        run: |
+          echo "TODO: Setup Wizard, login flow, module installation (spec section 13.3)"
