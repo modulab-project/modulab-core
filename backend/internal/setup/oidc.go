@@ -6,6 +6,7 @@
 package setup
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -37,6 +38,18 @@ type OIDCStatusResponse struct {
 	Configured bool   `json:"configured"`
 	IssuerURL  string `json:"issuer_url,omitempty"`
 	ClientID   string `json:"client_id,omitempty"`
+}
+
+// OIDCConfigured reports whether the OIDC provider has already been
+// configured, without exposing the underlying setting key to callers
+// outside this package. Used by main.go's startup log to summarize Setup
+// Wizard progress.
+func OIDCConfigured(ctx context.Context, pool *db.Pool) (bool, error) {
+	_, exists, err := pool.GetSetting(ctx, oidcIssuerSettingKey)
+	if err != nil {
+		return false, err
+	}
+	return exists, nil
 }
 
 // OIDCStatusHandler reports whether OIDC has been configured, and if so,
