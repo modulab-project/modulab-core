@@ -227,13 +227,13 @@ func base58Encode(input []byte) string {
 func logToken(token string) {
 	log.Print("\n" + strings.Join([]string{
 		"╔══════════════════════════════════════════════════════════════╗",
-		"║           MODULAB CORE — ERSTEINRICHTUNG ERFORDERLICH         ║",
+		"║              MODULAB CORE — FIRST-TIME SETUP REQUIRED         ║",
 		"║                                                                ║",
-		"║  Bootstrap-Token:                                             ║",
+		"║  Bootstrap Token:                                             ║",
 		"║  " + token,
 		"║                                                                ║",
-		"║  Dieser Token wird NUR EINMAL angezeigt.                      ║",
-		"║  Ohne ihn kann der Wizard nicht abgeschlossen werden.         ║",
+		"║  This token is shown ONLY ONCE.                               ║",
+		"║  Setup cannot be completed without it.                       ║",
 		"╚══════════════════════════════════════════════════════════════╝",
 	}, "\n") + "\n")
 }
