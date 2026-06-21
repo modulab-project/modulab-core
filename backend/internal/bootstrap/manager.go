@@ -55,11 +55,9 @@ type attemptState struct {
 // format spec section 6.5 shows operators to look for. Call it once at
 // startup, before wiring up the Setup Wizard's routes.
 //
-// Marking the wizard as completed (which permanently disables this gate) is
-// not implemented yet - it depends on the super-admin OIDC binding step
-// (spec section 6.5 step 6), which has not landed. Until then, Manager
-// always starts in the "not completed" state on every restart, which is the
-// correct behaviour for an instance that has never finished setup.
+// Manager always starts in the "not completed" state on every restart, even
+// after a real install has finished the wizard once - see Complete's doc
+// comment for why that is an acceptable trade-off rather than a bug.
 func New() (*Manager, error) {
 	token, err := generateToken()
 	if err != nil {
@@ -116,6 +114,35 @@ func (m *Manager) Middleware(next http.Handler) http.Handler {
 		w.Header().Set("Retry-After", fmt.Sprintf("%d", int(retryAfter.Seconds())))
 		http.Error(w, fmt.Sprintf("missing or invalid %s header", HeaderName), http.StatusUnauthorized)
 	})
+}
+
+// Complete permanently disables the bootstrap-token gate for the lifetime
+// of this process (spec section 6.5 step 7: "Bootstrap-Token invalidiert,
+// System geht in Normalbetrieb"). Called by setup.CompleteHandler once it
+// has verified every prior wizard step (master key, OIDC, group prefix,
+// DNS-challenge provider, and a bound Super-Admin) is actually persisted -
+// Manager itself does not re-check those, it only flips the gate.
+//
+// This flag lives in memory only, exactly like the token itself: a restart
+// after a real install has already completed the wizard once will print a
+// fresh token and re-lock /v1/setup/* until CompleteHandler is called again.
+// That is intentional rather than an oversight - every check CompleteHandler
+// performs reads already-persisted state, so calling it again after a
+// restart is a harmless no-op (idempotent), and re-locking the operator-only
+// setup API on every restart is the conservative default until there is a
+// concrete reason to persist completion to the database instead.
+func (m *Manager) Complete() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.completed = true
+}
+
+// Completed reports whether Complete has been called on this Manager
+// instance yet.
+func (m *Manager) Completed() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.completed
 }
 
 func (m *Manager) validate(supplied string) bool {
