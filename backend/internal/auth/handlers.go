@@ -239,13 +239,15 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 			}
 		}
 
-		// The row always stores the live derived role, even on a login
-		// that ends up with a RolePending session below - so the moment an
-		// admin approves this subject, their very next login immediately
-		// grants whichever role the IdP's groups claim calls for right
-		// then, not whatever was true back when this row was first
-		// created.
-		if err := d.Pool.UpsertUser(ctx, claims.Subject, claims.Email, derivedRole, approved); err != nil {
+		// The row always stores the live derived role and the current
+		// display name, even on a login that ends up with a RolePending
+		// session below - so the moment an admin approves this subject,
+		// their very next login immediately grants whichever role the
+		// IdP's groups claim calls for right then, not whatever was true
+		// back when this row was first created. name is included so an
+		// admin reviewing approved = false rows in the database can tell
+		// who someone actually is, not just their email address.
+		if err := d.Pool.UpsertUser(ctx, claims.Subject, claims.Email, claims.Name, derivedRole, approved); err != nil {
 			redirectToFrontend(w, r, target, url.Values{"error": {"server_error"}})
 			return
 		}
