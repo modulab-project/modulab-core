@@ -6,12 +6,29 @@
 // that tie all of it together (handlers.go).
 package auth
 
-// The four roles spec section 3.3 defines. RolePending is not a real role -
-// it means "authenticated, but not a member of any of the three configured
-// groups yet", and exists so a future admin UI has something to assign.
-// There is currently no enforcement anywhere that actually restricts
-// RolePending users from anything, since no protected endpoints exist yet
-// to restrict.
+// The four roles spec section 3.3 defines. RolePending covers two
+// different situations, both ultimately "not in yet", handled by two
+// different gates in handlers.go's CallbackHandler:
+//
+//   - Returned by DeriveRole itself, below: the user is not a member of
+//     any of the three configured groups at all. CallbackHandler treats
+//     this as an outright access denial (error=access_denied) - it is
+//     never sent to the frontend as a session role, and no user row is
+//     even created for them.
+//   - Set explicitly by CallbackHandler, overriding an otherwise-valid
+//     derived role: the user IS a member of one of the three groups, but
+//     has not been approved yet (db.Pool.UserApproved) - a second,
+//     independent gate on top of group membership, covering both "never
+//     logged in before" and "logged in before, still not approved". This
+//     exists specifically so that an operator accidentally adding someone
+//     to a ModuLab group in the IdP does not hand them instant access -
+//     someone still has to approve them first (today: a manual
+//     UPDATE users SET approved = true, since there is no /admin/users UI
+//     yet). This gate is skipped entirely while the Setup Wizard itself is
+//     still incomplete, since the very first login has to bind the first
+//     Super-Admin and there is no admin yet who could approve them. This
+//     is the only case where role "pending" is actually persisted to a
+//     session and shown to the frontend (/pending).
 const (
 	RoleSuperAdmin = "super-admin"
 	RoleOrgAdmin   = "org-admin"
@@ -24,7 +41,8 @@ const (
 // prefix+"user" appears in their groups claim, checked in that priority
 // order so membership in multiple groups resolves to the most privileged
 // role rather than an arbitrary one. A user in none of the three groups
-// gets RolePending.
+// gets RolePending - see the doc comment above on RolePending for what
+// CallbackHandler does with that (a hard rejection, not a "wait" state).
 //
 // The group-name suffixes are lowercase snake_case rather than the
 // Title-Case-with-hyphen form spec section 3.3's examples use - changed on
