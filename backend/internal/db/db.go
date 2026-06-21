@@ -69,6 +69,7 @@ func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
 		CREATE TABLE IF NOT EXISTS users (
 			id TEXT PRIMARY KEY,
 			email TEXT NOT NULL,
+			name TEXT NOT NULL DEFAULT '',
 			role TEXT NOT NULL CHECK (role IN ('super-admin', 'org-admin', 'user', 'pending')),
 			approved BOOLEAN NOT NULL DEFAULT false,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -78,14 +79,20 @@ func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
 		return fmt.Errorf("db: ensure users: %w", err)
 	}
 
-	// users.approved was added after the table itself - CREATE TABLE IF NOT
-	// EXISTS above is a no-op against an already-existing table from before
-	// this column existed, so a separate idempotent ALTER is needed to pick
-	// up the new column on an upgrade rather than just on a fresh database.
+	// approved and name were both added after the table itself - CREATE
+	// TABLE IF NOT EXISTS above is a no-op against an already-existing
+	// table from before either column existed, so separate idempotent
+	// ALTERs are needed to pick them up on an upgrade rather than just on a
+	// fresh database.
 	if _, err := p.Exec(ctx, `
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS approved BOOLEAN NOT NULL DEFAULT false
 	`); err != nil {
 		return fmt.Errorf("db: ensure users.approved: %w", err)
+	}
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT ''
+	`); err != nil {
+		return fmt.Errorf("db: ensure users.name: %w", err)
 	}
 
 	return nil
@@ -118,24 +125,30 @@ func (p *Pool) SetSetting(ctx context.Context, key, value string) error {
 }
 
 // UpsertUser inserts a new user row keyed by OIDC subject, or updates the
-// existing one's email, role, and last_login_at if the subject was already
-// known. Called once per successful OIDC login (spec section 3.3's JIT
-// provisioning) - there is no separate "create account" step.
+// existing one's email, name, role, and last_login_at if the subject was
+// already known. Called once per successful OIDC login (spec section 3.3's
+// JIT provisioning) - there is no separate "create account" step.
+//
+// name is kept fresh on every login (unlike approved, below) - it exists
+// purely so an admin reviewing approved = false rows can tell who someone
+// is without the email address always making that obvious, so there is no
+// reason to prefer a stale value over whatever the IdP reports now.
 //
 // approved is only ever written on the INSERT branch - deliberately absent
 // from the ON CONFLICT ... DO UPDATE SET clause below, so a later login by
 // an already-known user can never silently reset whatever an admin (or the
 // bootstrap/wizard flow) previously set it to. Callers pass the value they
 // want a brand-new row to start with; for an existing row it is ignored.
-func (p *Pool) UpsertUser(ctx context.Context, subject, email, role string, approved bool) error {
+func (p *Pool) UpsertUser(ctx context.Context, subject, email, name, role string, approved bool) error {
 	_, err := p.Exec(ctx, `
-		INSERT INTO users (id, email, role, approved, created_at, last_login_at)
-		VALUES ($1, $2, $3, $4, now(), now())
+		INSERT INTO users (id, email, name, role, approved, created_at, last_login_at)
+		VALUES ($1, $2, $3, $4, $5, now(), now())
 		ON CONFLICT (id) DO UPDATE SET
 			email = EXCLUDED.email,
+			name = EXCLUDED.name,
 			role = EXCLUDED.role,
 			last_login_at = now()
-	`, subject, email, role, approved)
+	`, subject, email, name, role, approved)
 	if err != nil {
 		return fmt.Errorf("db: upsert user %q: %w", subject, err)
 	}
