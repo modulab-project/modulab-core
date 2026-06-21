@@ -1,13 +1,14 @@
 // Command core is the entry point for the modulab-core backend.
 //
-// This commit adds two admin-only endpoints (internal/auth/admin.go) that
-// replace the manual "UPDATE users SET approved = true" an operator
-// previously had to run by hand: GET /v1/admin/users/pending lists
-// everyone currently held at the /pending screen, POST
-// /v1/admin/users/{id}/approve lets an org-admin/super-admin let one of
-// them in. The Deno subprocess supervisor (spec section 4.7) is still
-// unimplemented - that lands later, as part of the module-pipeline phase
-// of the project roadmap.
+// This commit adds three more admin-only endpoints (internal/auth/admin.go)
+// alongside the existing approve: GET /v1/admin/users now lists every
+// user (not just pending ones), and POST .../lock, POST .../unlock, and
+// DELETE /v1/admin/users/{id} let an org-admin/super-admin revoke or
+// forget someone entirely - previously to revoke access at all
+// short of deleting the row had no API path whatsoever. The Deno
+// subprocess supervisor (spec section 4.7) is still unimplemented - that
+// lands later, as part of the module-pipeline phase of the project
+// roadmap.
 package main
 
 import (
@@ -220,13 +221,16 @@ func main() {
 	mux.HandleFunc("/v1/auth/me", auth.MeHandler(authDeps))
 	mux.HandleFunc("/v1/auth/logout", auth.LogoutHandler(authDeps))
 
-	// Admin-only user management (internal/auth/admin.go): both handlers
-	// gate on role themselves (requireAdmin), so no extra middleware wrapper
-	// is needed here, same as the /v1/auth/... routes above. {id} is the
+	// Admin-only user management (internal/auth/admin.go): every handler
+	// here gates on role itself (requireAdmin), so no extra middleware
+	// wrapper is needed, same as the /v1/auth/... routes above. {id} is the
 	// target user's OIDC subject - Go 1.22+'s ServeMux wildcard syntax,
-	// read back inside the handler via r.PathValue("id").
-	mux.HandleFunc("GET /v1/admin/users/pending", auth.PendingUsersHandler(authDeps))
+	// read back inside each handler via r.PathValue("id").
+	mux.HandleFunc("GET /v1/admin/users", auth.UsersHandler(authDeps))
 	mux.HandleFunc("POST /v1/admin/users/{id}/approve", auth.ApproveUserHandler(authDeps))
+	mux.HandleFunc("POST /v1/admin/users/{id}/lock", auth.LockUserHandler(authDeps))
+	mux.HandleFunc("POST /v1/admin/users/{id}/unlock", auth.UnlockUserHandler(authDeps))
+	mux.HandleFunc("DELETE /v1/admin/users/{id}", auth.DeleteUserHandler(authDeps))
 
 	// The group prefix has no environment fallback anymore (removed
 	// 2026-06-21 alongside OIDC's) - it may legitimately be unconfigured
@@ -249,11 +253,12 @@ func main() {
 // different ports - same-origin browsers never trigger CORS preflights in
 // the first place, so this is a no-op once frontend and backend are served
 // from the same production origin. Allowing exactly one configured origin
-// (rather than "*") keeps this from becoming an accidental open API.
+// (rather than "*") keeps this from becoming an accidental open API. DELETE
+// is allowed alongside GET/POST/OPTIONS for DeleteUserHandler above.
 func corsMiddleware(allowedOrigin string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, "+bootstrap.HeaderName)
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
