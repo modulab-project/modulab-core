@@ -8,11 +8,12 @@
 // certificate issuance). It exists so the wizard's step sequence matches the
 // spec and so the credentials are captured and encrypted at rest from day
 // one, rather than bolting persistence on later once Traefik wiring lands.
-// Local development never needs this step to produce a real certificate, so
-// its absence or incompleteness should never block step 5 onward in a dev
-// environment - only step 7's completeness check (spec section 6.5 step 7)
-// treats it as required, mirroring how the spec lists it as a mandatory
-// step for a production install.
+//
+// It is mandatory, with no skip option in the frontend, even though it has
+// no real effect locally yet: an earlier version of this step was
+// skippable, which just moved the problem to step 7 silently refusing to
+// complete - making it mandatory here means the operator configures and
+// tests it for real during setup, not "eventually, maybe".
 package setup
 
 import (
