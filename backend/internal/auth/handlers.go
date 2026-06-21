@@ -144,17 +144,21 @@ func LoginHandler(d Deps) http.HandlerFunc {
 //     (DeriveRole returns RolePending) is rejected outright with
 //     error=access_denied. No session, no user row, no "pending" screen -
 //     spec section 3.3's hard gate means literally no access for them.
-//  2. Approval: everyone who passes gate 1 still does not get their real
-//     role on a session until db.Pool.UserApproved returns true for their
-//     OIDC subject (false for both "never logged in before" and "logged
-//     in before, still not approved"). Until then they get a session with
-//     Role: RolePending instead, landing on /pending - this exists so an
-//     operator accidentally adding someone to a ModuLab group in the IdP
-//     does not hand them instant access. The one exception is while the
-//     Setup Wizard itself is still incomplete (setup.WizardComplete ==
-//     false): the very first login has to bind the first Super-Admin, and
-//     there is no admin yet who could approve them, so gate 2 is skipped
-//     entirely until the wizard finishes.
+//  2. Approval and lock state: everyone who passes gate 1 still does not
+//     get their real role on a session unless db.Pool.UserApproved returns
+//     true AND db.Pool.UserLocked returns false for their OIDC subject.
+//     Until approved, they get Role: RolePending (landing on /pending) -
+//     this exists so an operator accidentally adding someone to a ModuLab
+//     group in the IdP does not hand them instant access. If locked
+//     instead (an admin revoked access after a previous approval), they
+//     also get Role: RolePending, but with Locked: true on the session as
+//     well, so the frontend's /pending screen can tell the two situations
+//     apart and show the right message for each. The one exception to all
+//     of this is while the Setup Wizard itself is still incomplete
+//     (setup.WizardComplete == false): the very first login has to bind
+//     the first Super-Admin, and there is no admin yet who could have
+//     approved or locked them, so gate 2 is skipped entirely until the
+//     wizard finishes.
 //
 // Every outcome - success or failure - ends in a redirect to
 // d.frontendCallbackURL(), never a JSON body: this handler is only ever
@@ -222,8 +226,9 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 			return
 		}
 
-		// Gate 2: approval, skipped entirely while the wizard itself is
-		// still incomplete (see doc comment above for why).
+		// Gate 2: approval and lock state, skipped entirely while the
+		// wizard itself is still incomplete (see doc comment above for
+		// why).
 		wizardDone, err := setup.WizardComplete(ctx, d.Pool)
 		if err != nil {
 			redirectToFrontend(w, r, target, url.Values{"error": {"server_error"}})
@@ -231,8 +236,14 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 		}
 
 		approved := true
+		locked := false
 		if wizardDone {
 			approved, err = d.Pool.UserApproved(ctx, claims.Subject)
+			if err != nil {
+				redirectToFrontend(w, r, target, url.Values{"error": {"server_error"}})
+				return
+			}
+			locked, err = d.Pool.UserLocked(ctx, claims.Subject)
 			if err != nil {
 				redirectToFrontend(w, r, target, url.Values{"error": {"server_error"}})
 				return
@@ -253,7 +264,18 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 		}
 
 		sessionRole := derivedRole
-		if !approved {
+		sessionLocked := false
+		switch {
+		case locked:
+			// Checked before "not approved": a locked subject was, by
+			// definition, approved at some point - locked takes priority
+			// so the frontend shows "your account was locked", not "your
+			// account is still pending approval", for someone an admin
+			// has deliberately revoked rather than someone still waiting
+			// on their very first review.
+			sessionRole = RolePending
+			sessionLocked = true
+		case !approved:
 			sessionRole = RolePending
 		}
 
@@ -264,6 +286,7 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 			Name:          claims.Name,
 			Picture:       claims.Picture,
 			Role:          sessionRole,
+			Locked:        sessionLocked,
 		})
 		if err != nil {
 			redirectToFrontend(w, r, target, url.Values{"error": {"server_error"}})
