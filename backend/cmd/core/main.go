@@ -34,6 +34,7 @@ type healthStatus struct {
 	PostgresUp     bool   `json:"postgres_reachable"`
 	ValkeyUp       bool   `json:"valkey_reachable"`
 	MasterKeySetUp bool   `json:"master_key_present"`
+	SetupCompleted bool   `json:"setup_completed"`
 }
 
 func main() {
@@ -44,9 +45,11 @@ func main() {
 
 	log.Printf("ModuLab Core %s — %s", version.Version, version.ProjectURL)
 
-	// Generated and logged before the DB connection, so the token is visible
-	// as early as possible after boot even if Postgres takes a moment to
-	// become reachable.
+	// Generates the token now, but does not yet decide whether to print it -
+	// that depends on whether the database already has a fully completed
+	// wizard from a previous run, which we cannot know until after we
+	// connect below. See the bootstrapMgr.LogToken / Complete call further
+	// down for the actual decision.
 	bootstrapMgr, err := bootstrap.New()
 	if err != nil {
 		log.Fatalf("bootstrap: %v", err)
@@ -100,6 +103,24 @@ func main() {
 	}
 	log.Printf("setup wizard progress: master-key=%t oidc=%t dns-challenge=%t group-prefix=%t", masterKeyConfigured, oidcConfigured, dnsChallengeConfigured, groupPrefixConfigured)
 
+	// This is the decision bootstrapMgr.New()'s comment above refers to: a
+	// completed wizard from a previous run means the bootstrap-token gate
+	// should already be disabled, and printing a fresh "FIRST-TIME SETUP
+	// REQUIRED" token would actively mislead an operator who finished setup
+	// long ago. An incomplete wizard means we still need that token, so we
+	// print it now and only now - this is the latest point at which the log
+	// can still scroll, before any HTTP routes start serving traffic.
+	wizardDone, err := setup.WizardComplete(ctx, pool)
+	if err != nil {
+		log.Printf("setup: completion check failed: %v", err)
+	}
+	if wizardDone {
+		bootstrapMgr.Complete()
+		log.Printf("setup: wizard already completed in a previous run - bootstrap-token gate stays disabled, no new token issued")
+	} else {
+		bootstrapMgr.LogToken()
+	}
+
 	mux := http.NewServeMux()
 
 	// /healthz is intentionally exempt from the bootstrap-token gate: it is
@@ -125,6 +146,7 @@ func main() {
 			PostgresUp:     pool.Ping(r.Context()) == nil,
 			ValkeyUp:       valkeyClient.Ping(r.Context()) == nil,
 			MasterKeySetUp: cfg.MasterKey != "" || dbKeyConfigured,
+			SetupCompleted: bootstrapMgr.Completed(),
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(status)
