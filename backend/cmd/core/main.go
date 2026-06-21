@@ -202,15 +202,12 @@ func main() {
 	// these handlers, so changes made through the Setup Wizard take effect
 	// without a Core restart.
 	authDeps := auth.Deps{
-		Pool:                pool,
-		Valkey:              valkeyClient,
-		MasterKeyEnv:        cfg.MasterKey,
-		OIDCIssuerEnv:       cfg.OIDCIssuerURL,
-		OIDCClientIDEnv:     cfg.OIDCClientID,
-		OIDCClientSecretEnv: cfg.OIDCClientSecret,
-		GroupPrefixEnv:      cfg.GroupPrefix,
-		PublicBaseURL:       cfg.PublicBaseURL,
-		FrontendBaseURL:     cfg.FrontendBaseURL,
+		Pool:            pool,
+		Valkey:          valkeyClient,
+		MasterKeyEnv:    cfg.MasterKey,
+		GroupPrefixEnv:  cfg.GroupPrefix,
+		PublicBaseURL:   cfg.PublicBaseURL,
+		FrontendBaseURL: cfg.FrontendBaseURL,
 	}
 	mux.HandleFunc("/v1/auth/login", auth.LoginHandler(authDeps))
 	mux.HandleFunc("/v1/auth/callback", auth.CallbackHandler(authDeps))
