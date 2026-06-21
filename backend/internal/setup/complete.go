@@ -52,10 +52,17 @@ func CompleteHandler(pool *db.Pool, mgr *bootstrap.Manager) http.HandlerFunc {
 	}
 }
 
-// missingSteps reports which of the five prerequisites for completing the
-// wizard (master key, OIDC, group prefix, DNS-challenge provider, a bound
-// Super-Admin) have not actually been persisted yet, using each step's own
-// *Configured helper so this stays in sync with them automatically.
+// missingSteps reports which of the four prerequisites for completing the
+// wizard (master key, OIDC, group prefix, a bound Super-Admin) have not
+// actually been persisted yet, using each step's own *Configured helper so
+// this stays in sync with them automatically.
+//
+// DNS-challenge (step 4) is deliberately not checked here even though it
+// has its own *Configured helper: the wizard's step 4 has a "skip" button
+// precisely because nothing in Core actually talks to a DNS-challenge
+// provider yet (see dnschallenge.go's doc comment), so gating completion on
+// it would make skipping permanently block the wizard. Once Core gains real
+// DNS-challenge usage, revisit whether this should become mandatory.
 func missingSteps(ctx context.Context, pool *db.Pool) ([]string, error) {
 	var missing []string
 
@@ -73,14 +80,6 @@ func missingSteps(ctx context.Context, pool *db.Pool) ([]string, error) {
 	}
 	if !oidcDone {
 		missing = append(missing, "oidc")
-	}
-
-	dnsChallengeDone, err := DNSChallengeConfigured(ctx, pool)
-	if err != nil {
-		return nil, err
-	}
-	if !dnsChallengeDone {
-		missing = append(missing, "dns_challenge")
 	}
 
 	groupPrefixDone, err := GroupPrefixConfigured(ctx, pool)
