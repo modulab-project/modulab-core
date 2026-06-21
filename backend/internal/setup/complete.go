@@ -66,10 +66,16 @@ func WizardComplete(ctx context.Context, pool *db.Pool) (bool, error) {
 	return len(missing) == 0, nil
 }
 
-// missingSteps reports which of the five prerequisites for completing the
-// wizard (master key, OIDC, DNS-challenge provider, group prefix, a bound
-// Super-Admin) have not actually been persisted yet, using each step's own
-// *Configured helper so this stays in sync with them automatically.
+// missingSteps reports which of the four prerequisites for completing the
+// wizard (OIDC, DNS-challenge provider, group prefix, a bound Super-Admin)
+// have not actually been persisted yet, using each step's own *Configured
+// helper so this stays in sync with them automatically.
+//
+// The master key is deliberately NOT checked here anymore: it now comes
+// exclusively from MODULAB_MASTER_KEY, validated by config.Load at startup
+// (Core refuses to even start without it), so by the time this function can
+// run at all, the master key is guaranteed present - there is nothing left
+// to persist or verify for it.
 //
 // DNS-challenge (step 4) is mandatory here on purpose: the frontend no
 // longer offers a "skip" button for it (removed 2026-06-21, after briefly
@@ -78,14 +84,6 @@ func WizardComplete(ctx context.Context, pool *db.Pool) (bool, error) {
 // this handler is expected to have gone through it for real.
 func missingSteps(ctx context.Context, pool *db.Pool) ([]string, error) {
 	var missing []string
-
-	masterKeyDone, err := MasterKeyConfigured(ctx, pool)
-	if err != nil {
-		return nil, err
-	}
-	if !masterKeyDone {
-		missing = append(missing, "master_key")
-	}
 
 	oidcDone, err := OIDCConfigured(ctx, pool)
 	if err != nil {
