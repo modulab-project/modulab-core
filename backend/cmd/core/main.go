@@ -1,13 +1,11 @@
 // Command core is the entry point for the modulab-core backend.
 //
-// This commit improves startup observability: a version/project banner, an
-// explicit Postgres connection confirmation, an active Valkey reachability
-// check (rather than only checking lazily on /healthz), and a one-line
-// summary of how far the Setup Wizard has progressed. None of this changes
-// behavior - it exists so an operator staring at `docker logs` can tell
-// what state the instance is in without reaching for curl. Valkey and the
-// Deno subprocess supervisor (spec section 4.7) are still TCP-reachability
-// stubs - they get their own real clients in follow-up commits.
+// This commit gives Valkey a real client (internal/valkey, go-redis under
+// the hood - Valkey is RESP-compatible with Redis), replacing the
+// TCP-reachability stub previously used both at boot and in /healthz. The
+// Deno subprocess supervisor (spec section 4.7) is still unimplemented -
+// that lands later, as part of the module-pipeline phase of the project
+// roadmap.
 package main
 
 import (
@@ -17,12 +15,12 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"time"
 
 	"github.com/modulab-project/modulab-core/backend/internal/bootstrap"
 	"github.com/modulab-project/modulab-core/backend/internal/config"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
+	"github.com/modulab-project/modulab-core/backend/internal/valkey"
 	"github.com/modulab-project/modulab-core/backend/internal/version"
 )
 
@@ -64,13 +62,19 @@ func main() {
 		log.Fatalf("db: %v", err)
 	}
 
+	valkeyClient := valkey.New(net.JoinHostPort(cfg.ValkeyHost, cfg.ValkeyPort))
+	defer valkeyClient.Close()
+
 	// Checked once, actively, at boot - unlike /healthz's lazy per-request
 	// check below, this gives the operator immediate feedback in the log
-	// without having to curl anything.
-	if tcpReachable(cfg.ValkeyHost, cfg.ValkeyPort) {
-		log.Printf("valkey: reachable at %s:%s", cfg.ValkeyHost, cfg.ValkeyPort)
+	// without having to curl anything. A failure here is not fatal: Valkey
+	// is not required for the Setup Wizard, only for session storage (spec
+	// section 3.2), which has no callers yet - go-redis will simply retry
+	// on the next call.
+	if err := valkeyClient.Ping(ctx); err != nil {
+		log.Printf("valkey: WARNING - not reachable at %s:%s yet (rechecked on every /healthz request): %v", cfg.ValkeyHost, cfg.ValkeyPort, err)
 	} else {
-		log.Printf("valkey: WARNING - not reachable at %s:%s yet (rechecked on every /healthz request)", cfg.ValkeyHost, cfg.ValkeyPort)
+		log.Printf("valkey: reachable at %s:%s", cfg.ValkeyHost, cfg.ValkeyPort)
 	}
 
 	masterKeyConfigured, err := setup.MasterKeyConfigured(ctx, pool)
@@ -107,7 +111,7 @@ func main() {
 		status := healthStatus{
 			Status:         "ok",
 			PostgresUp:     pool.Ping(r.Context()) == nil,
-			ValkeyUp:       tcpReachable(cfg.ValkeyHost, cfg.ValkeyPort),
+			ValkeyUp:       valkeyClient.Ping(r.Context()) == nil,
 			MasterKeySetUp: cfg.MasterKey != "" || dbKeyConfigured,
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -143,15 +147,4 @@ func main() {
 	if err := http.ListenAndServe(cfg.HTTPAddr, mux); err != nil {
 		log.Fatalf("server: %v", err)
 	}
-}
-
-// tcpReachable performs a best-effort TCP dial to confirm a dependency is at
-// least listening on its port. Used for Valkey until a real client lands.
-func tcpReachable(host, port string) bool {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, port), 2*time.Second)
-	if err != nil {
-		return false
-	}
-	_ = conn.Close()
-	return true
 }
