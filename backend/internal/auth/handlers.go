@@ -19,6 +19,7 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/db"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
 	"github.com/modulab-project/modulab-core/backend/internal/valkey"
+	"golang.org/x/oauth2"
 )
 
 // oauthStateTTL is deliberately short: a state value is only ever supposed
@@ -74,8 +75,9 @@ func (d Deps) resolveProvider(ctx context.Context) (*Provider, error) {
 // LoginHandler starts the OIDC authorization-code flow: it resolves the
 // currently configured OIDC provider (returns 412 if the Setup Wizard's
 // steps 2-3 have not been completed yet), generates a CSRF/replay state
-// value, stores it in Valkey for oauthStateTTL, and redirects the browser
-// to the IdP's authorization endpoint.
+// value plus a PKCE code verifier (RFC 7636), stores the verifier in Valkey
+// keyed by state for oauthStateTTL, and redirects the browser to the IdP's
+// authorization endpoint with the verifier's S256 challenge attached.
 func LoginHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
@@ -91,12 +93,16 @@ func LoginHandler(d Deps) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		if err := d.Valkey.SetWithTTL(ctx, oauthStateKeyPrefix+state, "1", oauthStateTTL); err != nil {
+		codeVerifier := oauth2.GenerateVerifier()
+		// The verifier itself is stored, not just a marker - CallbackHandler
+		// needs it back to complete the PKCE exchange. It never leaves Core:
+		// the browser only ever sees the state value and the S256 challenge.
+		if err := d.Valkey.SetWithTTL(ctx, oauthStateKeyPrefix+state, codeVerifier, oauthStateTTL); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		http.Redirect(w, r, provider.AuthCodeURL(state), http.StatusFound)
+		http.Redirect(w, r, provider.AuthCodeURL(state, codeVerifier), http.StatusFound)
 	}
 }
 
@@ -124,14 +130,14 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 			return
 		}
 
-		_, stateValid, err := d.Valkey.Get(ctx, oauthStateKeyPrefix+state)
+		codeVerifier, stateValid, err := d.Valkey.Get(ctx, oauthStateKeyPrefix+state)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		// Consumed immediately, success or not: a given state must never
-		// be replayable, including against a second callback attempt with
-		// the same code.
+		// Consumed immediately, success or not: a given state (and its
+		// PKCE verifier) must never be replayable, including against a
+		// second callback attempt with the same code.
 		_ = d.Valkey.Del(ctx, oauthStateKeyPrefix+state)
 		if !stateValid {
 			http.Error(w, "invalid or expired state", http.StatusBadRequest)
@@ -144,7 +150,7 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 			return
 		}
 
-		claims, err := provider.Exchange(ctx, code)
+		claims, err := provider.Exchange(ctx, code, codeVerifier)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusUnauthorized)
 			return
