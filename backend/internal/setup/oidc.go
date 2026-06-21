@@ -50,19 +50,16 @@ type OIDCRuntimeConfig struct {
 	ClientSecret string
 }
 
-// ResolveOIDCConfig returns the effective OIDC configuration: real
-// MODULAB_OIDC_* env values (all three) always take precedence once set,
-// otherwise the configuration persisted by /v1/setup/oidc/configure (steps
-// 2-3), with ClientSecret decrypted using masterKey (see ResolveMasterKey
-// for how that is itself resolved). Mirrors ResolveMasterKey /
-// ResolveGroupPrefix. Called by the login flow on every /v1/auth/login and
+// ResolveOIDCConfig returns the effective OIDC configuration as persisted by
+// /v1/setup/oidc/configure (steps 2-3), with ClientSecret decrypted using
+// masterKey (see ResolveMasterKey for how that is itself resolved). There is
+// deliberately no environment-variable fallback (removed 2026-06-21 on
+// request): OIDC configuration, like the secret it carries, should only
+// ever live encrypted in the database, never duplicated in plaintext in
+// .env. Called by the login flow on every /v1/auth/login and
 // /v1/auth/callback request, so a provider configured through the wizard
 // works immediately, without a Core restart.
-func ResolveOIDCConfig(ctx context.Context, pool *db.Pool, masterKey, envIssuerURL, envClientID, envClientSecret string) (OIDCRuntimeConfig, error) {
-	if envIssuerURL != "" && envClientID != "" && envClientSecret != "" {
-		return OIDCRuntimeConfig{IssuerURL: envIssuerURL, ClientID: envClientID, ClientSecret: envClientSecret}, nil
-	}
-
+func ResolveOIDCConfig(ctx context.Context, pool *db.Pool, masterKey string) (OIDCRuntimeConfig, error) {
 	issuer, exists, err := pool.GetSetting(ctx, oidcIssuerSettingKey)
 	if err != nil {
 		return OIDCRuntimeConfig{}, err
