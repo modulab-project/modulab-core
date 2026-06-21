@@ -56,9 +56,15 @@ func NewProvider(ctx context.Context, issuerURL, clientID, clientSecret, redirec
 }
 
 // AuthCodeURL returns the URL to redirect the browser to, with state as the
-// CSRF/replay-binding value the callback must see again unchanged.
-func (p *Provider) AuthCodeURL(state string) string {
-	return p.oauth2Config.AuthCodeURL(state)
+// CSRF/replay-binding value the callback must see again unchanged, and
+// codeVerifier as the PKCE (RFC 7636) proof - its S256 hash is sent here as
+// code_challenge; the plain verifier must be presented again in Exchange.
+// PKCE is used even though this is a confidential client (it has a client
+// secret): it is cheap, defends against authorization-code interception,
+// and is the current best practice for every client type, not just public
+// ones.
+func (p *Provider) AuthCodeURL(state, codeVerifier string) string {
+	return p.oauth2Config.AuthCodeURL(state, oauth2.S256ChallengeOption(codeVerifier))
 }
 
 // Claims is the subset of ID token claims the login flow needs.
@@ -69,12 +75,13 @@ type Claims struct {
 }
 
 // Exchange completes the authorization-code flow: it trades code for
-// tokens, then verifies the ID token's signature, issuer, audience, and
-// expiry against the IdP's published JWKS (spec section 3.3: "Core
-// validates JWTs statelessly via the IdP's public key") before trusting
-// any claim inside it.
-func (p *Provider) Exchange(ctx context.Context, code string) (Claims, error) {
-	token, err := p.oauth2Config.Exchange(ctx, code)
+// tokens (presenting codeVerifier so the IdP can validate it against the
+// code_challenge sent in AuthCodeURL), then verifies the ID token's
+// signature, issuer, audience, and expiry against the IdP's published JWKS
+// (spec section 3.3: "Core validates JWTs statelessly via the IdP's public
+// key") before trusting any claim inside it.
+func (p *Provider) Exchange(ctx context.Context, code, codeVerifier string) (Claims, error) {
+	token, err := p.oauth2Config.Exchange(ctx, code, oauth2.VerifierOption(codeVerifier))
 	if err != nil {
 		return Claims{}, fmt.Errorf("auth: exchange code: %w", err)
 	}
