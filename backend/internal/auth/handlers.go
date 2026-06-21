@@ -30,22 +30,21 @@ const oauthStateTTL = 5 * time.Minute
 
 const oauthStateKeyPrefix = "oauthstate:"
 
-// Deps bundles what the login/callback/logout/me handlers need. The
-// MasterKeyEnv/OIDC*Env/GroupPrefixEnv fields are the raw environment
-// values (config.Config's MasterKey, OIDCIssuerURL, OIDCClientID,
-// OIDCClientSecret, GroupPrefix) - resolution against what the Setup
-// Wizard may have persisted instead happens fresh on every request (see
-// setup.ResolveMasterKey / ResolveOIDCConfig / ResolveGroupPrefix), so a
-// wizard change takes effect immediately without a Core restart.
+// Deps bundles what the login/callback/logout/me handlers need.
+// MasterKeyEnv/GroupPrefixEnv are the raw environment values (config.Config's
+// MasterKey, GroupPrefix) - resolution against what the Setup Wizard may
+// have persisted instead happens fresh on every request (see
+// setup.ResolveMasterKey / ResolveGroupPrefix), so a wizard change takes
+// effect immediately without a Core restart. OIDC configuration has no
+// environment-variable field at all (removed 2026-06-21 on request): it
+// only ever comes from what the wizard persisted, encrypted, to the
+// database - see setup.ResolveOIDCConfig.
 type Deps struct {
 	Pool   *db.Pool
 	Valkey *valkey.Client
 
-	MasterKeyEnv        string
-	OIDCIssuerEnv       string
-	OIDCClientIDEnv     string
-	OIDCClientSecretEnv string
-	GroupPrefixEnv      string
+	MasterKeyEnv   string
+	GroupPrefixEnv string
 
 	// PublicBaseURL is Core's externally reachable base URL (e.g.
 	// "https://modulab.example.com"), used to build the OIDC redirect_uri.
@@ -86,15 +85,15 @@ func redirectToFrontend(w http.ResponseWriter, r *http.Request, target string, f
 }
 
 // resolveProvider resolves the master key, then the OIDC configuration
-// (env, or Setup-Wizard-persisted-and-decrypted), then builds a fresh
-// Provider via OIDC discovery. Shared by LoginHandler and CallbackHandler
-// so both see the same configuration within a given request.
+// (Setup-Wizard-persisted-and-decrypted), then builds a fresh Provider via
+// OIDC discovery. Shared by LoginHandler and CallbackHandler so both see the
+// same configuration within a given request.
 func (d Deps) resolveProvider(ctx context.Context) (*Provider, error) {
 	masterKey, err := setup.ResolveMasterKey(ctx, d.Pool, d.MasterKeyEnv)
 	if err != nil {
 		return nil, err
 	}
-	oidcCfg, err := setup.ResolveOIDCConfig(ctx, d.Pool, masterKey, d.OIDCIssuerEnv, d.OIDCClientIDEnv, d.OIDCClientSecretEnv)
+	oidcCfg, err := setup.ResolveOIDCConfig(ctx, d.Pool, masterKey)
 	if err != nil {
 		return nil, err
 	}
