@@ -73,6 +73,7 @@ func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
 			name TEXT NOT NULL DEFAULT '',
 			role TEXT NOT NULL CHECK (role IN ('super-admin', 'org-admin', 'user', 'pending')),
 			approved BOOLEAN NOT NULL DEFAULT false,
+			locked BOOLEAN NOT NULL DEFAULT false,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 			last_login_at TIMESTAMPTZ NOT NULL DEFAULT now()
 		)
@@ -80,11 +81,11 @@ func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
 		return fmt.Errorf("db: ensure users: %w", err)
 	}
 
-	// approved and name were both added after the table itself - CREATE
-	// TABLE IF NOT EXISTS above is a no-op against an already-existing
-	// table from before either column existed, so separate idempotent
-	// ALTERs are needed to pick them up on an upgrade rather than just on a
-	// fresh database.
+	// approved, name, and locked were all added after the table itself -
+	// CREATE TABLE IF NOT EXISTS above is a no-op against an
+	// already-existing table from before any of them existed, so separate
+	// idempotent ALTERs are needed to pick them up on an upgrade rather than
+	// just on a fresh database.
 	if _, err := p.Exec(ctx, `
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS approved BOOLEAN NOT NULL DEFAULT false
 	`); err != nil {
@@ -94,6 +95,17 @@ func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT ''
 	`); err != nil {
 		return fmt.Errorf("db: ensure users.name: %w", err)
+	}
+	// locked is independent of approved: approved = false means "never let
+	// in yet" (CallbackHandler's gate 2, /pending screen); locked = true
+	// means "was let in before, an admin has since revoked that" - kept as
+	// its own column rather than reusing approved so a deliberately locked
+	// user does not get visually indistinguishable from a brand-new
+	// pending signup in the admin user list.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE users ADD COLUMN IF NOT EXISTS locked BOOLEAN NOT NULL DEFAULT false
+	`); err != nil {
+		return fmt.Errorf("db: ensure users.locked: %w", err)
 	}
 
 	return nil
@@ -140,6 +152,10 @@ func (p *Pool) SetSetting(ctx context.Context, key, value string) error {
 // an already-known user can never silently reset whatever an admin (or the
 // bootstrap/wizard flow) previously set it to. Callers pass the value they
 // want a brand-new row to start with; for an existing row it is ignored.
+// locked has no equivalent parameter here: a brand-new row is never
+// locked (the column's own DEFAULT false covers it), and like approved it
+// must never be reset by a later login either - LockUser/UnlockUser below
+// are the only things that ever change it after creation.
 func (p *Pool) UpsertUser(ctx context.Context, subject, email, name, role string, approved bool) error {
 	_, err := p.Exec(ctx, `
 		INSERT INTO users (id, email, name, role, approved, created_at, last_login_at)
@@ -173,6 +189,37 @@ func (p *Pool) UserApproved(ctx context.Context, subject string) (bool, error) {
 	return approved, nil
 }
 
+// UserLocked reports whether subject's user row has locked = true. Like
+// UserApproved, a subject with no row at all reports false rather than an
+// error - someone who has never logged in cannot be locked.
+func (p *Pool) UserLocked(ctx context.Context, subject string) (bool, error) {
+	var locked bool
+	err := p.QueryRow(ctx, `SELECT locked FROM users WHERE id = $1`, subject).Scan(&locked)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("db: check lock state for %q: %w", subject, err)
+	}
+	return locked, nil
+}
+
+// UserRole returns subject's current role and whether a row exists at all -
+// used by the admin lock/delete handlers to decide whether the target is a
+// super-admin before allowing an action that could otherwise strand the
+// instance with zero super-admins.
+func (p *Pool) UserRole(ctx context.Context, subject string) (string, bool, error) {
+	var role string
+	err := p.QueryRow(ctx, `SELECT role FROM users WHERE id = $1`, subject).Scan(&role)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("db: get role for %q: %w", subject, err)
+	}
+	return role, true, nil
+}
+
 // HasSuperAdmin reports whether at least one user with role 'super-admin'
 // exists. Used by setup.CompleteHandler to verify the wizard's step 6
 // (spec section 6.5: "Super-Admin binden") actually succeeded before
@@ -188,47 +235,61 @@ func (p *Pool) HasSuperAdmin(ctx context.Context) (bool, error) {
 	return exists, nil
 }
 
-// PendingUser is one row from ListPendingUsers - the subset of the users
-// table an admin needs to decide whether to approve someone. Role is
-// included even though approval doesn't gate on it: it tells the admin
-// which of the three configured OIDC groups this person is already
-// correctly a member of (see handlers.go's CallbackHandler gate 1), which
-// is exactly the context "should I approve them" needs.
-type PendingUser struct {
-	Subject   string
-	Email     string
-	Name      string
-	Role      string
-	CreatedAt time.Time
+// SuperAdminCount returns how many user rows currently have role =
+// 'super-admin', regardless of approved/locked state. Used by the admin
+// lock/delete handlers' last-super-admin guard - unlike HasSuperAdmin
+// (a yes/no check used once during setup), this needs the actual count to
+// tell "locking/deleting this one is fine, there are others" apart from
+// "this is the only one left".
+func (p *Pool) SuperAdminCount(ctx context.Context) (int, error) {
+	var count int
+	err := p.QueryRow(ctx, `SELECT COUNT(*) FROM users WHERE role = 'super-admin'`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("db: count super-admins: %w", err)
+	}
+	return count, nil
 }
 
-// ListPendingUsers returns every user row with approved = false, oldest
-// first - the people CallbackHandler's gate 2 is currently holding at the
-// /pending screen. Until now the only way to move someone out of this list
-// was a manual "UPDATE users SET approved = true" - this is the read side
-// of the admin UI that replaces that.
-func (p *Pool) ListPendingUsers(ctx context.Context) ([]PendingUser, error) {
+// UserRow is one row of the full user list (ListUsers) - every column an
+// admin needs to decide what action (approve / lock / unlock / delete)
+// applies to this person.
+type UserRow struct {
+	Subject     string
+	Email       string
+	Name        string
+	Role        string
+	Approved    bool
+	Locked      bool
+	CreatedAt   time.Time
+}
+
+// ListUsers returns every user row, oldest first. Unlike the narrower
+// ListPendingUsers this replaces, this includes already-approved and
+// locked users too - the admin frontend derives a single status (Pending /
+// Active / Locked) per row from Approved+Locked itself, rather than this
+// method pre-filtering, so there is exactly one place an admin needs to
+// look to manage anyone.
+func (p *Pool) ListUsers(ctx context.Context) ([]UserRow, error) {
 	rows, err := p.Query(ctx, `
-		SELECT id, email, name, role, created_at
+		SELECT id, email, name, role, approved, locked, created_at
 		FROM users
-		WHERE approved = false
 		ORDER BY created_at ASC
 	`)
 	if err != nil {
-		return nil, fmt.Errorf("db: list pending users: %w", err)
+		return nil, fmt.Errorf("db: list users: %w", err)
 	}
 	defer rows.Close()
 
-	var out []PendingUser
+	var out []UserRow
 	for rows.Next() {
-		var u PendingUser
-		if err := rows.Scan(&u.Subject, &u.Email, &u.Name, &u.Role, &u.CreatedAt); err != nil {
-			return nil, fmt.Errorf("db: scan pending user: %w", err)
+		var u UserRow
+		if err := rows.Scan(&u.Subject, &u.Email, &u.Name, &u.Role, &u.Approved, &u.Locked, &u.CreatedAt); err != nil {
+			return nil, fmt.Errorf("db: scan user: %w", err)
 		}
 		out = append(out, u)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("db: list pending users: %w", err)
+		return nil, fmt.Errorf("db: list users: %w", err)
 	}
 	return out, nil
 }
@@ -243,6 +304,46 @@ func (p *Pool) ApproveUser(ctx context.Context, subject string) (int64, error) {
 	tag, err := p.Exec(ctx, `UPDATE users SET approved = true WHERE id = $1`, subject)
 	if err != nil {
 		return 0, fmt.Errorf("db: approve user %q: %w", subject, err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// LockUser sets locked = true for subject. Same "takes effect on next
+// login, not retroactively" caveat as ApproveUser - a session already
+// issued before this call stays valid until it naturally expires or the
+// person signs out; only their *next* login is forced onto /pending (with
+// Session.Locked = true - see handlers.go's CallbackHandler).
+func (p *Pool) LockUser(ctx context.Context, subject string) (int64, error) {
+	tag, err := p.Exec(ctx, `UPDATE users SET locked = true WHERE id = $1`, subject)
+	if err != nil {
+		return 0, fmt.Errorf("db: lock user %q: %w", subject, err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// UnlockUser sets locked = false for subject, restoring whatever role/
+// approved state they already had - unlike approving a brand-new pending
+// user, unlocking does not need a separate "what role should they get"
+// decision, since locking never touched role or approved in the first
+// place.
+func (p *Pool) UnlockUser(ctx context.Context, subject string) (int64, error) {
+	tag, err := p.Exec(ctx, `UPDATE users SET locked = false WHERE id = $1`, subject)
+	if err != nil {
+		return 0, fmt.Errorf("db: unlock user %q: %w", subject, err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// DeleteUser removes subject's row entirely. There is no soft-delete flag
+// to check elsewhere afterwards: if this person logs in again later, JIT
+// provisioning (UpsertUser) just creates a brand-new row for them, exactly
+// like someone who has never logged in before - deleting does not
+// blocklist the OIDC subject itself, it only forgets Core's own approval/
+// lock history for them.
+func (p *Pool) DeleteUser(ctx context.Context, subject string) (int64, error) {
+	tag, err := p.Exec(ctx, `DELETE FROM users WHERE id = $1`, subject)
+	if err != nil {
+		return 0, fmt.Errorf("db: delete user %q: %w", subject, err)
 	}
 	return tag.RowsAffected(), nil
 }
