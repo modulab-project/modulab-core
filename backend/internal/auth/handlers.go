@@ -31,20 +31,19 @@ const oauthStateTTL = 5 * time.Minute
 const oauthStateKeyPrefix = "oauthstate:"
 
 // Deps bundles what the login/callback/logout/me handlers need.
-// MasterKeyEnv/GroupPrefixEnv are the raw environment values (config.Config's
-// MasterKey, GroupPrefix) - resolution against what the Setup Wizard may
-// have persisted instead happens fresh on every request (see
-// setup.ResolveMasterKey / ResolveGroupPrefix), so a wizard change takes
-// effect immediately without a Core restart. OIDC configuration has no
-// environment-variable field at all (removed 2026-06-21 on request): it
-// only ever comes from what the wizard persisted, encrypted, to the
-// database - see setup.ResolveOIDCConfig.
+// MasterKeyEnv is the one remaining raw environment value (config.Config's
+// MasterKey) - resolution against what the Setup Wizard may have persisted
+// instead happens fresh on every request (see setup.ResolveMasterKey), so a
+// wizard change takes effect immediately without a Core restart. Neither
+// OIDC configuration nor the group prefix have an environment-variable
+// field anymore (group prefix removed 2026-06-21 alongside OIDC, on
+// request): both only ever come from what the wizard persisted to the
+// database - see setup.ResolveOIDCConfig / ResolveGroupPrefix.
 type Deps struct {
 	Pool   *db.Pool
 	Valkey *valkey.Client
 
-	MasterKeyEnv   string
-	GroupPrefixEnv string
+	MasterKeyEnv string
 
 	// PublicBaseURL is Core's externally reachable base URL (e.g.
 	// "https://modulab.example.com"), used to build the OIDC redirect_uri.
@@ -193,7 +192,7 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 			return
 		}
 
-		prefix, err := setup.ResolveGroupPrefix(ctx, d.Pool, d.GroupPrefixEnv)
+		prefix, err := setup.ResolveGroupPrefix(ctx, d.Pool)
 		if err != nil {
 			redirectToFrontend(w, r, target, url.Values{"error": {"group_prefix_unavailable"}})
 			return
