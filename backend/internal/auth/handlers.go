@@ -13,6 +13,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -50,10 +51,38 @@ type Deps struct {
 	// "https://modulab.example.com"), used to build the OIDC redirect_uri.
 	// It must match what is registered with the IdP exactly.
 	PublicBaseURL string
+
+	// FrontendBaseURL is where the SPA is served from - CallbackHandler
+	// sends the browser here once the OIDC round-trip is done, success or
+	// not. In production this is typically the same origin as
+	// PublicBaseURL (Core serves the built frontend itself); in local dev
+	// it points at the Vite dev server instead (e.g. "http://localhost:5173"),
+	// which is why this is a separate field rather than reusing PublicBaseURL.
+	FrontendBaseURL string
 }
 
 func (d Deps) redirectURL() string {
 	return strings.TrimRight(d.PublicBaseURL, "/") + "/v1/auth/callback"
+}
+
+// frontendCallbackURL is where CallbackHandler sends the browser once the
+// OIDC round-trip is done. The SPA route at this path (spec section 6.5
+// step 6 / section 6.4's planned routes) reads the outcome from
+// window.location.hash - see redirectToFrontend for why a fragment, not a
+// query string.
+func (d Deps) frontendCallbackURL() string {
+	return strings.TrimRight(d.FrontendBaseURL, "/") + "/auth/complete"
+}
+
+// redirectToFrontend sends the browser to target with fragment encoded
+// after "#", never as a query string: a URL fragment is never transmitted
+// to any server - not Core's access log, not an intermediate proxy - which
+// is what makes it an acceptable place to carry a one-time bearer token.
+// The SPA reads window.location.hash on load and then clears it from
+// history immediately, so the token does not linger in browser history
+// either.
+func redirectToFrontend(w http.ResponseWriter, r *http.Request, target string, fragment url.Values) {
+	http.Redirect(w, r, target+"#"+fragment.Encode(), http.StatusFound)
 }
 
 // resolveProvider resolves the master key, then the OIDC configuration
@@ -113,26 +142,35 @@ func LoginHandler(d Deps) http.HandlerFunc {
 // Dynamic Prefix Hard Gate - returns 412 if the wizard's step 5 has not
 // been completed yet), JIT-provisions the user row, and issues a session.
 //
-// There is no frontend yet to hand the session token to via a redirect, so
-// this returns it directly as JSON - sufficient to exercise the whole flow
-// with curl. Revisit once Phase 2's login screen exists (the usual pattern
-// then is a short-lived one-time code in the redirect, exchanged by the
-// SPA in a separate request, so the long-lived bearer token never appears
-// in a URL or server log).
+// Every outcome - success or failure - ends in a redirect to
+// d.frontendCallbackURL(), never a JSON body: this handler is only ever
+// reached via the IdP's own browser redirect, so there is no API caller
+// to return JSON to, only a browser tab to send somewhere useful. On
+// success the bearer token, email, and role are carried in the URL
+// fragment (see redirectToFrontend's doc comment for why a fragment and
+// not a query string); on failure a machine-readable error code is sent
+// the same way so the SPA can show a message without parsing a plaintext
+// HTTP error body. The SPA route handling this path is responsible for
+// spec section 6.5 step 6's specific UX: if role is not "super-admin"
+// during initial setup, show the "not a member of {prefix}super_admin"
+// message and offer to retry login, rather than treating RolePending as a
+// hard failure (ordinary end users legitimately land here as RolePending
+// too, outside the wizard).
 func CallbackHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+		target := d.frontendCallbackURL()
 
 		state := r.URL.Query().Get("state")
 		code := r.URL.Query().Get("code")
 		if state == "" || code == "" {
-			http.Error(w, "missing state or code", http.StatusBadRequest)
+			redirectToFrontend(w, r, target, url.Values{"error": {"missing_state_or_code"}})
 			return
 		}
 
 		codeVerifier, stateValid, err := d.Valkey.Get(ctx, oauthStateKeyPrefix+state)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			redirectToFrontend(w, r, target, url.Values{"error": {"server_error"}})
 			return
 		}
 		// Consumed immediately, success or not: a given state (and its
@@ -140,44 +178,44 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 		// second callback attempt with the same code.
 		_ = d.Valkey.Del(ctx, oauthStateKeyPrefix+state)
 		if !stateValid {
-			http.Error(w, "invalid or expired state", http.StatusBadRequest)
+			redirectToFrontend(w, r, target, url.Values{"error": {"invalid_or_expired_state"}})
 			return
 		}
 
 		provider, err := d.resolveProvider(ctx)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusPreconditionFailed)
+			redirectToFrontend(w, r, target, url.Values{"error": {"provider_unavailable"}})
 			return
 		}
 
 		claims, err := provider.Exchange(ctx, code, codeVerifier)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusUnauthorized)
+			redirectToFrontend(w, r, target, url.Values{"error": {"exchange_failed"}})
 			return
 		}
 
 		prefix, err := setup.ResolveGroupPrefix(ctx, d.Pool, d.GroupPrefixEnv)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusPreconditionFailed)
+			redirectToFrontend(w, r, target, url.Values{"error": {"group_prefix_unavailable"}})
 			return
 		}
 		role := DeriveRole(claims.Groups, prefix)
 
 		if err := d.Pool.UpsertUser(ctx, claims.Subject, claims.Email, role); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			redirectToFrontend(w, r, target, url.Values{"error": {"server_error"}})
 			return
 		}
 
 		token, err := CreateSession(ctx, d.Valkey, Session{UserID: claims.Subject, Email: claims.Email, Role: role})
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			redirectToFrontend(w, r, target, url.Values{"error": {"server_error"}})
 			return
 		}
 
-		writeJSON(w, http.StatusOK, map[string]string{
-			"token": token,
-			"email": claims.Email,
-			"role":  role,
+		redirectToFrontend(w, r, target, url.Values{
+			"token": {token},
+			"email": {claims.Email},
+			"role":  {role},
 		})
 	}
 }
