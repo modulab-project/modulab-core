@@ -40,6 +40,51 @@ type OIDCStatusResponse struct {
 	ClientID   string `json:"client_id,omitempty"`
 }
 
+// OIDCRuntimeConfig is the fully resolved OIDC configuration the login flow
+// (internal/auth) needs to talk to the IdP. Unlike OIDCStatusResponse, this
+// is never serialized to an HTTP response: ClientSecret has already been
+// decrypted, so callers must not log it.
+type OIDCRuntimeConfig struct {
+	IssuerURL    string
+	ClientID     string
+	ClientSecret string
+}
+
+// ResolveOIDCConfig returns the effective OIDC configuration: real
+// MODULAB_OIDC_* env values (all three) always take precedence once set,
+// otherwise the configuration persisted by /v1/setup/oidc/configure (steps
+// 2-3), with ClientSecret decrypted using masterKey (see ResolveMasterKey
+// for how that is itself resolved). Mirrors ResolveMasterKey /
+// ResolveGroupPrefix. Called by the login flow on every /v1/auth/login and
+// /v1/auth/callback request, so a provider configured through the wizard
+// works immediately, without a Core restart.
+func ResolveOIDCConfig(ctx context.Context, pool *db.Pool, masterKey, envIssuerURL, envClientID, envClientSecret string) (OIDCRuntimeConfig, error) {
+	if envIssuerURL != "" && envClientID != "" && envClientSecret != "" {
+		return OIDCRuntimeConfig{IssuerURL: envIssuerURL, ClientID: envClientID, ClientSecret: envClientSecret}, nil
+	}
+
+	issuer, exists, err := pool.GetSetting(ctx, oidcIssuerSettingKey)
+	if err != nil {
+		return OIDCRuntimeConfig{}, err
+	}
+	if !exists {
+		return OIDCRuntimeConfig{}, fmt.Errorf("setup: oidc has not been configured yet (call /v1/setup/oidc/configure first)")
+	}
+	clientID, _, err := pool.GetSetting(ctx, oidcClientIDSettingKey)
+	if err != nil {
+		return OIDCRuntimeConfig{}, err
+	}
+	encryptedSecret, _, err := pool.GetSetting(ctx, oidcClientSecretSettingKey)
+	if err != nil {
+		return OIDCRuntimeConfig{}, err
+	}
+	secret, err := crypto.Decrypt(masterKey, encryptedSecret)
+	if err != nil {
+		return OIDCRuntimeConfig{}, fmt.Errorf("setup: decrypt oidc client secret: %w", err)
+	}
+	return OIDCRuntimeConfig{IssuerURL: issuer, ClientID: clientID, ClientSecret: secret}, nil
+}
+
 // OIDCConfigured reports whether the OIDC provider has already been
 // configured, without exposing the underlying setting key to callers
 // outside this package. Used by main.go's startup log to summarize Setup
