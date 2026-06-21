@@ -4,6 +4,8 @@
 package config
 
 import (
+	"encoding/hex"
+	"fmt"
 	"os"
 	"strings"
 )
@@ -11,6 +13,17 @@ import (
 // Config holds all environment-derived settings for a single Core process.
 // Fields mirror .env.example one-to-one so the mapping stays obvious.
 type Config struct {
+	// MasterKey (MODULAB_MASTER_KEY) is the AES-256 key (64 hex chars, 32
+	// raw bytes) used to encrypt the OIDC client secret and DNS-challenge
+	// provider credentials before they touch Postgres (internal/crypto).
+	// It must come from the environment - Load fails outright if it is
+	// missing or the wrong shape (see validateMasterKey) rather than
+	// generating one and falling back to a copy persisted in core_settings,
+	// which earlier versions of Core did. That fallback meant the key
+	// protecting the encrypted columns sat in plaintext in the same
+	// database, right next to what it protects - removed 2026-06-21 on
+	// request, once that was pointed out as the actual security boundary
+	// it undermines. Generate one with `openssl rand -hex 32`.
 	MasterKey         string
 	BootstrapTokenTTL string
 
@@ -71,12 +84,20 @@ type Config struct {
 // Load does not validate cross-field invariants (e.g. OIDC or group-prefix
 // completeness) - an empty value for those is a valid pre-setup state, with
 // the corresponding setup.Resolve* helper falling back to whatever the
-// Setup Wizard has persisted to core_settings instead.
+// Setup Wizard has persisted to core_settings instead. MODULAB_MASTER_KEY is
+// the one exception: it is validated here and Load fails outright if it is
+// missing or malformed, rather than letting Core start with no way to
+// encrypt secrets - see the MasterKey field's doc comment for why.
 func Load() (Config, error) {
 	loadDotEnvFiles()
 
+	masterKey := os.Getenv("MODULAB_MASTER_KEY")
+	if err := validateMasterKey(masterKey); err != nil {
+		return Config{}, err
+	}
+
 	cfg := Config{
-		MasterKey:         os.Getenv("MODULAB_MASTER_KEY"),
+		MasterKey:         masterKey,
 		BootstrapTokenTTL: getEnvDefault("MODULAB_BOOTSTRAP_TOKEN_TTL", "24h"),
 
 		DBHost:     getEnvDefault("MODULAB_DB_HOST", "localhost"),
@@ -109,6 +130,26 @@ func Load() (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// validateMasterKey fails fast and specifically: an operator who forgot to
+// set MODULAB_MASTER_KEY, or pasted a truncated/non-hex value, gets a clear
+// startup error pointing at the exact env var rather than either a generic
+// crypto error much later (the first time something tries to encrypt or
+// decrypt) or - the behavior this replaces - Core silently generating and
+// persisting a key on its own.
+func validateMasterKey(key string) error {
+	if key == "" {
+		return fmt.Errorf("config: MODULAB_MASTER_KEY is required and must be set in the environment or .env - generate one with `openssl rand -hex 32`; Core no longer generates or persists a fallback key to the database")
+	}
+	raw, err := hex.DecodeString(key)
+	if err != nil {
+		return fmt.Errorf("config: MODULAB_MASTER_KEY must be a hex string: %w", err)
+	}
+	if len(raw) != 32 {
+		return fmt.Errorf("config: MODULAB_MASTER_KEY must decode to 32 bytes (64 hex characters), got %d bytes", len(raw))
+	}
+	return nil
 }
 
 func getEnvDefault(key, fallback string) string {
