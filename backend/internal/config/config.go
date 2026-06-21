@@ -39,10 +39,6 @@ type Config struct {
 	DenoSocketPath string
 	DenoBinaryPath string
 
-	OIDCIssuerURL    string
-	OIDCClientID     string
-	OIDCClientSecret string
-
 	// GroupPrefix has no implicit default (unlike before the Setup Wizard's
 	// group-prefix step existed): an empty value here just means "resolve
 	// from core_settings instead" (see setup.ResolveGroupPrefix), mirroring
@@ -81,13 +77,16 @@ type Config struct {
 // this is meant for local development convenience only; production deploys
 // set real environment variables via docker-compose's env_file directive.
 //
-// Load does not validate cross-field invariants (e.g. OIDC or group-prefix
-// completeness) - an empty value for those is a valid pre-setup state, with
-// the corresponding setup.Resolve* helper falling back to whatever the
-// Setup Wizard has persisted to core_settings instead. MODULAB_MASTER_KEY is
-// the one exception: it is validated here and Load fails outright if it is
-// missing or malformed, rather than letting Core start with no way to
-// encrypt secrets - see the MasterKey field's doc comment for why.
+// Load does not validate cross-field invariants (e.g. group-prefix
+// completeness) - an empty GroupPrefix is a valid pre-setup state, with
+// setup.ResolveGroupPrefix falling back to whatever the Setup Wizard has
+// persisted to core_settings instead. MODULAB_MASTER_KEY is the one
+// exception: it is validated here and Load fails outright if it is missing
+// or malformed, rather than letting Core start with no way to encrypt
+// secrets - see the MasterKey field's doc comment for why. OIDC
+// configuration has no environment-variable path at all anymore (removed
+// 2026-06-21 on request): it only ever comes from what the Setup Wizard
+// persisted, encrypted, to the database - see setup.ResolveOIDCConfig.
 func Load() (Config, error) {
 	loadDotEnvFiles()
 
@@ -111,10 +110,6 @@ func Load() (Config, error) {
 
 		DenoSocketPath: getEnvDefault("MODULAB_DENO_SOCKET_PATH", "/tmp/modulab-deno.sock"),
 		DenoBinaryPath: getEnvDefault("MODULAB_DENO_BINARY_PATH", "/usr/local/bin/deno"),
-
-		OIDCIssuerURL:    os.Getenv("MODULAB_OIDC_ISSUER_URL"),
-		OIDCClientID:     os.Getenv("MODULAB_OIDC_CLIENT_ID"),
-		OIDCClientSecret: os.Getenv("MODULAB_OIDC_CLIENT_SECRET"),
 
 		GroupPrefix: os.Getenv("MODULAB_GROUP_PREFIX"),
 
