@@ -89,11 +89,15 @@ func main() {
 	if err != nil {
 		log.Printf("setup: oidc check failed: %v", err)
 	}
+	dnsChallengeConfigured, err := setup.DNSChallengeConfigured(ctx, pool)
+	if err != nil {
+		log.Printf("setup: dns-challenge check failed: %v", err)
+	}
 	groupPrefixConfigured, err := setup.GroupPrefixConfigured(ctx, pool)
 	if err != nil {
 		log.Printf("setup: group prefix check failed: %v", err)
 	}
-	log.Printf("setup wizard progress: master-key=%t oidc=%t group-prefix=%t", masterKeyConfigured, oidcConfigured, groupPrefixConfigured)
+	log.Printf("setup wizard progress: master-key=%t oidc=%t dns-challenge=%t group-prefix=%t", masterKeyConfigured, oidcConfigured, dnsChallengeConfigured, groupPrefixConfigured)
 
 	mux := http.NewServeMux()
 
@@ -144,8 +148,28 @@ func main() {
 		setup.OIDCConfigureHandler(pool, masterKey)(w, r)
 	})))
 
+	mux.Handle("/v1/setup/dns-challenge/status", bootstrapMgr.Middleware(setup.DNSChallengeStatusHandler(pool)))
+	mux.Handle("/v1/setup/dns-challenge/configure", bootstrapMgr.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Same master-key dependency as the OIDC step above, for the same
+		// reason: the DNS-challenge provider's credentials are encrypted
+		// with it before being persisted.
+		masterKey, err := setup.ResolveMasterKey(r.Context(), pool, cfg.MasterKey)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusPreconditionFailed)
+			return
+		}
+		setup.DNSChallengeConfigureHandler(pool, masterKey)(w, r)
+	})))
+
 	mux.Handle("/v1/setup/group-prefix/status", bootstrapMgr.Middleware(setup.GroupPrefixStatusHandler(pool)))
 	mux.Handle("/v1/setup/group-prefix/configure", bootstrapMgr.Middleware(setup.GroupPrefixConfigureHandler(pool)))
+
+	// Wizard step 7 (spec section 6.5): only flips bootstrapMgr's gate once
+	// every prior step's persisted state actually checks out - see
+	// setup.CompleteHandler / missingSteps for what "actually checks out"
+	// means, in particular for step 6 (a bound Super-Admin, not just an
+	// attempted login).
+	mux.Handle("/v1/setup/complete", bootstrapMgr.Middleware(setup.CompleteHandler(pool, bootstrapMgr)))
 
 	// The actual end-user login flow (spec section 6.5 wizard step 6 /
 	// section 3.3) - deliberately NOT wrapped in bootstrapMgr.Middleware,
@@ -164,6 +188,7 @@ func main() {
 		OIDCClientSecretEnv: cfg.OIDCClientSecret,
 		GroupPrefixEnv:      cfg.GroupPrefix,
 		PublicBaseURL:       cfg.PublicBaseURL,
+		FrontendBaseURL:     cfg.FrontendBaseURL,
 	}
 	mux.HandleFunc("/v1/auth/login", auth.LoginHandler(authDeps))
 	mux.HandleFunc("/v1/auth/callback", auth.CallbackHandler(authDeps))
@@ -179,8 +204,28 @@ func main() {
 	if err != nil {
 		effectiveGroupPrefix = "(not yet configured)"
 	}
-	log.Printf("modulab-core listening on %s (group prefix %q)", cfg.HTTPAddr, effectiveGroupPrefix)
-	if err := http.ListenAndServe(cfg.HTTPAddr, mux); err != nil {
+	log.Printf("modulab-core listening on %s (group prefix %q, frontend origin %q)", cfg.HTTPAddr, effectiveGroupPrefix, cfg.FrontendBaseURL)
+	if err := http.ListenAndServe(cfg.HTTPAddr, corsMiddleware(cfg.FrontendBaseURL, mux)); err != nil {
 		log.Fatalf("server: %v", err)
 	}
+}
+
+// corsMiddleware allows cfg.FrontendBaseURL's origin to call every route on
+// mux from a different origin than Core's own. This only matters in local
+// dev, where Vite's dev server (FrontendBaseURL) and Core (HTTPAddr) run on
+// different ports - same-origin browsers never trigger CORS preflights in
+// the first place, so this is a no-op once frontend and backend are served
+// from the same production origin. Allowing exactly one configured origin
+// (rather than "*") keeps this from becoming an accidental open API.
+func corsMiddleware(allowedOrigin string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, "+bootstrap.HeaderName)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
