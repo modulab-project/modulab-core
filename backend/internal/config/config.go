@@ -4,7 +4,6 @@
 package config
 
 import (
-	"fmt"
 	"os"
 	"strings"
 )
@@ -31,7 +30,19 @@ type Config struct {
 	OIDCClientID     string
 	OIDCClientSecret string
 
+	// GroupPrefix has no implicit default (unlike before the Setup Wizard's
+	// group-prefix step existed): an empty value here just means "resolve
+	// from core_settings instead" (see setup.ResolveGroupPrefix), mirroring
+	// how MasterKey and the OIDC fields already work. Only a real
+	// MODULAB_GROUP_PREFIX env value should win over the Setup Wizard's
+	// persisted choice.
 	GroupPrefix string
+
+	// PublicBaseURL is what Core tells the OIDC provider to redirect back
+	// to after login (".../v1/auth/callback") - it has to be the externally
+	// reachable URL, not HTTPAddr, since those differ behind a reverse
+	// proxy (Traefik, in production).
+	PublicBaseURL string
 
 	// HTTPAddr is not part of .env.example yet; it defaults to :8080 and can
 	// be overridden for local development without touching the documented
@@ -47,9 +58,10 @@ type Config struct {
 // this is meant for local development convenience only; production deploys
 // set real environment variables via docker-compose's env_file directive.
 //
-// Load does not validate cross-field invariants (e.g. OIDC completeness) -
-// that happens once the Setup Wizard is implemented, since an empty OIDC
-// config is a valid pre-setup state.
+// Load does not validate cross-field invariants (e.g. OIDC or group-prefix
+// completeness) - an empty value for those is a valid pre-setup state, with
+// the corresponding setup.Resolve* helper falling back to whatever the
+// Setup Wizard has persisted to core_settings instead.
 func Load() (Config, error) {
 	loadDotEnvFiles()
 
@@ -73,13 +85,11 @@ func Load() (Config, error) {
 		OIDCClientID:     os.Getenv("MODULAB_OIDC_CLIENT_ID"),
 		OIDCClientSecret: os.Getenv("MODULAB_OIDC_CLIENT_SECRET"),
 
-		GroupPrefix: getEnvDefault("MODULAB_GROUP_PREFIX", "modulab_"),
+		GroupPrefix: os.Getenv("MODULAB_GROUP_PREFIX"),
+
+		PublicBaseURL: getEnvDefault("MODULAB_PUBLIC_BASE_URL", "http://localhost:8080"),
 
 		HTTPAddr: getEnvDefault("MODULAB_HTTP_ADDR", ":8080"),
-	}
-
-	if cfg.GroupPrefix == "" {
-		return Config{}, fmt.Errorf("MODULAB_GROUP_PREFIX must not be empty (spec section 3.3 hard gate)")
 	}
 
 	return cfg, nil
