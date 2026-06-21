@@ -205,7 +205,6 @@ func main() {
 		Pool:            pool,
 		Valkey:          valkeyClient,
 		MasterKeyEnv:    cfg.MasterKey,
-		GroupPrefixEnv:  cfg.GroupPrefix,
 		PublicBaseURL:   cfg.PublicBaseURL,
 		FrontendBaseURL: cfg.FrontendBaseURL,
 	}
@@ -214,12 +213,12 @@ func main() {
 	mux.HandleFunc("/v1/auth/me", auth.MeHandler(authDeps))
 	mux.HandleFunc("/v1/auth/logout", auth.LogoutHandler(authDeps))
 
-	// GroupPrefix no longer has an implicit default (see config.go) - it
-	// may legitimately be empty here if the operator hasn't run the Setup
-	// Wizard's group-prefix step (6.5 step 5) yet, so this resolves the
-	// same way the login flow itself does rather than printing an empty
-	// string.
-	effectiveGroupPrefix, err := setup.ResolveGroupPrefix(ctx, pool, cfg.GroupPrefix)
+	// The group prefix has no environment fallback anymore (removed
+	// 2026-06-21 alongside OIDC's) - it may legitimately be unconfigured
+	// here if the operator hasn't run the Setup Wizard's group-prefix step
+	// (6.5 step 5) yet, so this resolves the same way the login flow itself
+	// does rather than printing an empty string.
+	effectiveGroupPrefix, err := setup.ResolveGroupPrefix(ctx, pool)
 	if err != nil {
 		effectiveGroupPrefix = "(not yet configured)"
 	}
