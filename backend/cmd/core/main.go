@@ -1,12 +1,11 @@
 // Command core is the entry point for the modulab-core backend.
 //
-// This commit adds the actual OIDC login flow (internal/auth, spec section
-// 6.5 wizard step 6 and the runtime side of section 3.3's Dynamic Prefix
-// Hard Gate): /v1/auth/login redirects to the configured IdP,
-// /v1/auth/callback verifies the ID token, derives a role from the groups
-// claim, JIT-provisions the user, and issues a Core-managed session;
-// /v1/auth/me and /v1/auth/logout round out the flow for testing without a
-// frontend. The Deno subprocess supervisor (spec section 4.7) is still
+// This commit adds two admin-only endpoints (internal/auth/admin.go) that
+// replace the manual "UPDATE users SET approved = true" an operator
+// previously had to run by hand: GET /v1/admin/users/pending lists
+// everyone currently held at the /pending screen, POST
+// /v1/admin/users/{id}/approve lets an org-admin/super-admin let one of
+// them in. The Deno subprocess supervisor (spec section 4.7) is still
 // unimplemented - that lands later, as part of the module-pipeline phase
 // of the project roadmap.
 package main
@@ -220,6 +219,14 @@ func main() {
 	mux.HandleFunc("/v1/auth/callback", auth.CallbackHandler(authDeps))
 	mux.HandleFunc("/v1/auth/me", auth.MeHandler(authDeps))
 	mux.HandleFunc("/v1/auth/logout", auth.LogoutHandler(authDeps))
+
+	// Admin-only user management (internal/auth/admin.go): both handlers
+	// gate on role themselves (requireAdmin), so no extra middleware wrapper
+	// is needed here, same as the /v1/auth/... routes above. {id} is the
+	// target user's OIDC subject - Go 1.22+'s ServeMux wildcard syntax,
+	// read back inside the handler via r.PathValue("id").
+	mux.HandleFunc("GET /v1/admin/users/pending", auth.PendingUsersHandler(authDeps))
+	mux.HandleFunc("POST /v1/admin/users/{id}/approve", auth.ApproveUserHandler(authDeps))
 
 	// The group prefix has no environment fallback anymore (removed
 	// 2026-06-21 alongside OIDC's) - it may legitimately be unconfigured
