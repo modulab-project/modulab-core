@@ -82,6 +82,18 @@ func ResolveOIDCConfig(ctx context.Context, pool *db.Pool, masterKey string) (OI
 	return OIDCRuntimeConfig{IssuerURL: issuer, ClientID: clientID, ClientSecret: secret}, nil
 }
 
+// IssuerURL returns just the configured OIDC issuer URL, without resolving
+// the rest of the runtime config - in particular, without needing the
+// master key at all, since the issuer URL itself was never encrypted (only
+// ClientSecret is). For callers that only need to build a link to the IdP
+// (e.g. MeHandler's account_settings_url, in handlers.go) and have no use
+// for ClientID/ClientSecret, this avoids both the master-key resolution and
+// the AES-GCM decrypt that ResolveOIDCConfig would otherwise do for no
+// reason. ok is false if OIDC has not been configured yet.
+func IssuerURL(ctx context.Context, pool *db.Pool) (string, bool, error) {
+	return pool.GetSetting(ctx, oidcIssuerSettingKey)
+}
+
 // OIDCConfigured reports whether the OIDC provider has already been
 // configured, without exposing the underlying setting key to callers
 // outside this package. Used by main.go's startup log to summarize Setup
