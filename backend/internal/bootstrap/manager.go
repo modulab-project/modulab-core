@@ -1,9 +1,13 @@
 // Package bootstrap implements the Setup Wizard's bootstrap-token gate
 // (spec section 6.5): until the wizard has been completed, every request to
 // the Setup Wizard's API must present a one-time token that ModuLab Core
-// generates at startup and prints to its own log exactly once. The token
-// lives only in process memory - it is never written to the database - so
-// a restart before the wizard finishes always produces a fresh one.
+// generates at startup. The token lives only in process memory - it is
+// never written to the database - so a restart before the wizard finishes
+// always produces a fresh one. Once the wizard HAS finished, main.go derives
+// that fact from the database (via setup.WizardComplete) on every startup
+// and calls Complete instead of LogToken, so a completed instance never
+// prints a fresh token or re-locks the Setup Wizard API again - see
+// LogToken and Complete's doc comments for the mechanics.
 package bootstrap
 
 import (
@@ -51,13 +55,11 @@ type attemptState struct {
 	blockedUntil time.Time
 }
 
-// New generates a fresh bootstrap token and logs it exactly once, in the
-// format spec section 6.5 shows operators to look for. Call it once at
-// startup, before wiring up the Setup Wizard's routes.
-//
-// Manager always starts in the "not completed" state on every restart, even
-// after a real install has finished the wizard once - see Complete's doc
-// comment for why that is an acceptable trade-off rather than a bug.
+// New generates a fresh bootstrap token. Call it once at startup, before
+// wiring up the Setup Wizard's routes - it does not log or otherwise expose
+// the token itself; the caller decides whether to via LogToken or Complete
+// once it knows (from the database) whether a previous run already
+// finished the wizard.
 func New() (*Manager, error) {
 	token, err := generateToken()
 	if err != nil {
@@ -67,8 +69,21 @@ func New() (*Manager, error) {
 		token:    token,
 		attempts: make(map[string]*attemptState),
 	}
-	logToken(token)
 	return m, nil
+}
+
+// LogToken prints the bootstrap token to the log in the boxed
+// "FIRST-TIME SETUP REQUIRED" format spec section 6.5 shows operators to
+// look for. Call this only when the wizard has not already been completed
+// in a previous run - main.go checks setup.WizardComplete against the
+// database before deciding between this and Complete, since printing a
+// fresh token and claiming setup is still required would be actively
+// misleading for an instance that already finished it.
+func (m *Manager) LogToken() {
+	m.mu.Lock()
+	token := m.token
+	m.mu.Unlock()
+	logToken(token)
 }
 
 // Middleware wraps next so that every request must present the correct
@@ -123,14 +138,15 @@ func (m *Manager) Middleware(next http.Handler) http.Handler {
 // DNS-challenge provider, and a bound Super-Admin) is actually persisted -
 // Manager itself does not re-check those, it only flips the gate.
 //
-// This flag lives in memory only, exactly like the token itself: a restart
-// after a real install has already completed the wizard once will print a
-// fresh token and re-lock /v1/setup/* until CompleteHandler is called again.
-// That is intentional rather than an oversight - every check CompleteHandler
-// performs reads already-persisted state, so calling it again after a
-// restart is a harmless no-op (idempotent), and re-locking the operator-only
-// setup API on every restart is the conservative default until there is a
-// concrete reason to persist completion to the database instead.
+// This flag lives in memory only and starts false on every process start,
+// but main.go also calls Complete unconditionally at startup whenever
+// setup.WizardComplete reports the database already has everything a
+// finished wizard would have persisted - so a restart of an
+// already-completed instance re-derives "completed" from real persisted
+// state rather than losing it, without needing a redundant "completed" flag
+// of its own in the database. Calling Complete twice (here and later via
+// CompleteHandler, if the wizard somehow runs again) is harmless: it is
+// just a flag flip.
 func (m *Manager) Complete() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
