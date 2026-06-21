@@ -53,17 +53,15 @@ func GroupPrefixConfigured(ctx context.Context, pool *db.Pool) (bool, error) {
 	return exists, nil
 }
 
-// ResolveGroupPrefix returns the effective group prefix: a real
-// MODULAB_GROUP_PREFIX (env/.env) always takes precedence once set,
-// otherwise the prefix persisted by the Setup Wizard's
-// /v1/setup/group-prefix/configure (step 5). Mirrors ResolveMasterKey in
-// wizard.go. Called by the login flow (internal/auth) on every
+// ResolveGroupPrefix returns the group prefix persisted by the Setup
+// Wizard's /v1/setup/group-prefix/configure (step 5). There is deliberately
+// no environment-variable fallback (removed 2026-06-21 on request,
+// alongside OIDC's: the prefix is not a secret, but it is still a value the
+// wizard already owns, so a parallel .env path was redundant surface, not
+// a real requirement). Called by the login flow (internal/auth) on every
 // /v1/auth/login and /v1/auth/callback request, so a prefix chosen through
 // the wizard takes effect immediately, without a Core restart.
-func ResolveGroupPrefix(ctx context.Context, pool *db.Pool, envValue string) (string, error) {
-	if envValue != "" {
-		return envValue, nil
-	}
+func ResolveGroupPrefix(ctx context.Context, pool *db.Pool) (string, error) {
 	value, exists, err := pool.GetSetting(ctx, groupPrefixSettingKey)
 	if err != nil {
 		return "", err
