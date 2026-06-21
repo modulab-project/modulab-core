@@ -21,8 +21,8 @@ const groupPrefixSettingKey = "group_prefix"
 // validGroupPrefix matches the conservative charset spec section 3.3's
 // examples use for OIDC groups-claim values: letters, digits, underscore,
 // and hyphen. This is deliberately stricter than "anything non-empty" since
-// the prefix is concatenated directly onto "Super-Admin", "Org-Admin", and
-// "User" to form the literal group names operators must create in their
+// the prefix is concatenated directly onto "super_admin", "org_admin", and
+// "user" to form the literal group names operators must create in their
 // OIDC provider - a stray space or control character would silently break
 // that match at login time.
 var validGroupPrefix = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
@@ -139,10 +139,14 @@ func GroupPrefixConfigureHandler(pool *db.Pool) http.HandlerFunc {
 
 // groupNames derives the three group names operators must create in their
 // OIDC provider (spec section 6.5 step 5 / section 3.3's example table).
+// Lowercase snake_case suffixes (changed from the spec's original
+// Title-Case-with-hyphen form on the user's request, to match their IdP's
+// naming convention) - see the matching change in internal/auth/role.go's
+// DeriveRole, which must stay in sync with this.
 func groupNames(prefix string) []string {
 	return []string{
-		prefix + "Super-Admin",
-		prefix + "Org-Admin",
-		prefix + "User",
+		prefix + "super_admin",
+		prefix + "org_admin",
+		prefix + "user",
 	}
 }
