@@ -137,23 +137,39 @@ func LoginHandler(d Deps) http.HandlerFunc {
 // the state value (consuming it so it cannot be replayed), exchanges the
 // authorization code for a verified ID token, derives a role from the
 // groups claim against the configured group prefix (spec section 3.3's
-// Dynamic Prefix Hard Gate - returns 412 if the wizard's step 5 has not
-// been completed yet), JIT-provisions the user row, and issues a session.
+// Dynamic Prefix Hard Gate), JIT-provisions the user row, and issues a
+// session - subject to two access gates, checked in order:
+//
+//  1. Group membership: anyone not in any of the three configured groups
+//     (DeriveRole returns RolePending) is rejected outright with
+//     error=access_denied. No session, no user row, no "pending" screen -
+//     spec section 3.3's hard gate means literally no access for them.
+//  2. Approval: everyone who passes gate 1 still does not get their real
+//     role on a session until db.Pool.UserApproved returns true for their
+//     OIDC subject (false for both "never logged in before" and "logged
+//     in before, still not approved"). Until then they get a session with
+//     Role: RolePending instead, landing on /pending - this exists so an
+//     operator accidentally adding someone to a ModuLab group in the IdP
+//     does not hand them instant access. The one exception is while the
+//     Setup Wizard itself is still incomplete (setup.WizardComplete ==
+//     false): the very first login has to bind the first Super-Admin, and
+//     there is no admin yet who could approve them, so gate 2 is skipped
+//     entirely until the wizard finishes.
 //
 // Every outcome - success or failure - ends in a redirect to
 // d.frontendCallbackURL(), never a JSON body: this handler is only ever
 // reached via the IdP's own browser redirect, so there is no API caller
 // to return JSON to, only a browser tab to send somewhere useful. On
-// success the bearer token, email, and role are carried in the URL
-// fragment (see redirectToFrontend's doc comment for why a fragment and
-// not a query string); on failure a machine-readable error code is sent
-// the same way so the SPA can show a message without parsing a plaintext
-// HTTP error body. The SPA route handling this path is responsible for
-// spec section 6.5 step 6's specific UX: if role is not "super-admin"
-// during initial setup, show the "not a member of {prefix}super_admin"
-// message and offer to retry login, rather than treating RolePending as a
-// hard failure (ordinary end users legitimately land here as RolePending
-// too, outside the wizard).
+// success the bearer token, email, and (possibly gate-2-overridden) role
+// are carried in the URL fragment (see redirectToFrontend's doc comment
+// for why a fragment and not a query string); on failure a
+// machine-readable error code is sent the same way so the SPA can show a
+// message without parsing a plaintext HTTP error body. The SPA route
+// handling this path is responsible for spec section 6.5 step 6's
+// specific UX: if role is not "super-admin" during initial setup, show
+// the "not a member of {prefix}super_admin" message and offer to retry
+// login, rather than treating RolePending as a hard failure (ordinary end
+// users legitimately land here as RolePending too, outside the wizard).
 func CallbackHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
@@ -197,11 +213,46 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 			redirectToFrontend(w, r, target, url.Values{"error": {"group_prefix_unavailable"}})
 			return
 		}
-		role := DeriveRole(claims.Groups, prefix)
+		derivedRole := DeriveRole(claims.Groups, prefix)
 
-		if err := d.Pool.UpsertUser(ctx, claims.Subject, claims.Email, role); err != nil {
+		// Gate 1: not in any of the three configured groups at all - no
+		// access whatsoever, not even a pending session.
+		if derivedRole == RolePending {
+			redirectToFrontend(w, r, target, url.Values{"error": {"access_denied"}})
+			return
+		}
+
+		// Gate 2: approval, skipped entirely while the wizard itself is
+		// still incomplete (see doc comment above for why).
+		wizardDone, err := setup.WizardComplete(ctx, d.Pool)
+		if err != nil {
 			redirectToFrontend(w, r, target, url.Values{"error": {"server_error"}})
 			return
+		}
+
+		approved := true
+		if wizardDone {
+			approved, err = d.Pool.UserApproved(ctx, claims.Subject)
+			if err != nil {
+				redirectToFrontend(w, r, target, url.Values{"error": {"server_error"}})
+				return
+			}
+		}
+
+		// The row always stores the live derived role, even on a login
+		// that ends up with a RolePending session below - so the moment an
+		// admin approves this subject, their very next login immediately
+		// grants whichever role the IdP's groups claim calls for right
+		// then, not whatever was true back when this row was first
+		// created.
+		if err := d.Pool.UpsertUser(ctx, claims.Subject, claims.Email, derivedRole, approved); err != nil {
+			redirectToFrontend(w, r, target, url.Values{"error": {"server_error"}})
+			return
+		}
+
+		sessionRole := derivedRole
+		if !approved {
+			sessionRole = RolePending
 		}
 
 		token, err := CreateSession(ctx, d.Valkey, Session{
@@ -209,7 +260,7 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 			Email:   claims.Email,
 			Name:    claims.Name,
 			Picture: claims.Picture,
-			Role:    role,
+			Role:    sessionRole,
 		})
 		if err != nil {
 			redirectToFrontend(w, r, target, url.Values{"error": {"server_error"}})
@@ -219,7 +270,7 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 		redirectToFrontend(w, r, target, url.Values{
 			"token": {token},
 			"email": {claims.Email},
-			"role":  {role},
+			"role":  {sessionRole},
 		})
 	}
 }
