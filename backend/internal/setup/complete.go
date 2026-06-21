@@ -52,6 +52,20 @@ func CompleteHandler(pool *db.Pool, mgr *bootstrap.Manager) http.HandlerFunc {
 	}
 }
 
+// WizardComplete reports whether the wizard has already been fully
+// completed, purely by checking persisted state - the same check
+// CompleteHandler runs, exposed for main.go to call at startup so it can
+// decide between bootstrap.Manager.LogToken (still needs setting up) and
+// bootstrap.Manager.Complete (already done in a previous run, do not print
+// a fresh token or re-lock the Setup Wizard API).
+func WizardComplete(ctx context.Context, pool *db.Pool) (bool, error) {
+	missing, err := missingSteps(ctx, pool)
+	if err != nil {
+		return false, err
+	}
+	return len(missing) == 0, nil
+}
+
 // missingSteps reports which of the five prerequisites for completing the
 // wizard (master key, OIDC, DNS-challenge provider, group prefix, a bound
 // Super-Admin) have not actually been persisted yet, using each step's own
