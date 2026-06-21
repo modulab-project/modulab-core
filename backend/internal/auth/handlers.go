@@ -204,7 +204,13 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 			return
 		}
 
-		token, err := CreateSession(ctx, d.Valkey, Session{UserID: claims.Subject, Email: claims.Email, Role: role})
+		token, err := CreateSession(ctx, d.Valkey, Session{
+			UserID:  claims.Subject,
+			Email:   claims.Email,
+			Name:    claims.Name,
+			Picture: claims.Picture,
+			Role:    role,
+		})
 		if err != nil {
 			redirectToFrontend(w, r, target, url.Values{"error": {"server_error"}})
 			return
