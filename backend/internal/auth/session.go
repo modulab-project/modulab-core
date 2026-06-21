@@ -33,10 +33,19 @@ const sessionKeyPrefix = "session:"
 // if a future requirement needs the session token to be independently
 // verifiable without a Valkey round trip (e.g. multiple Core instances
 // without a shared Valkey).
+//
+// Name and Picture are copied from the OIDC ID token's claims at login time
+// (see oidcclient.go's Claims) and are NOT re-fetched from the IdP for the
+// life of the session - if the user changes their display name/photo at
+// the IdP, it only shows up here after their next login. That is an
+// acceptable staleness window given SessionTTL is only 24h and there is no
+// refresh-token flow yet to silently re-pull claims anyway.
 type Session struct {
-	UserID string `json:"user_id"`
-	Email  string `json:"email"`
-	Role   string `json:"role"`
+	UserID  string `json:"user_id"`
+	Email   string `json:"email"`
+	Name    string `json:"name"`
+	Picture string `json:"picture"`
+	Role    string `json:"role"`
 }
 
 // CreateSession mints a new opaque bearer token for sess and stores it in
