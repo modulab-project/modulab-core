@@ -258,11 +258,12 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 		}
 
 		token, err := CreateSession(ctx, d.Valkey, Session{
-			UserID:  claims.Subject,
-			Email:   claims.Email,
-			Name:    claims.Name,
-			Picture: claims.Picture,
-			Role:    sessionRole,
+			UserID:        claims.Subject,
+			Email:         claims.Email,
+			EmailVerified: claims.EmailVerified,
+			Name:          claims.Name,
+			Picture:       claims.Picture,
+			Role:          sessionRole,
 		})
 		if err != nil {
 			redirectToFrontend(w, r, target, url.Values{"error": {"server_error"}})
@@ -277,9 +278,27 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 	}
 }
 
-// MeHandler returns the session bound to the request's Bearer token.
-// Mainly useful for testing the flow end-to-end without a frontend yet -
-// there is no other consumer of a session today.
+// MeResponse is the body of GET /v1/auth/me: every Session field
+// (embedded, so they appear flat in the JSON - no nested "session" key),
+// plus AccountSettingsURL, computed fresh on every request rather than
+// baked into the session at login time, since it depends only on the
+// currently configured OIDC issuer, not on anything about this particular
+// user.
+type MeResponse struct {
+	Session
+	// AccountSettingsURL points at the IdP's own account-management page
+	// (Pocket ID's /settings/account) so the frontend's profile page
+	// (spec section 6.4) can link out to it - Core has no UI of its own
+	// for editing profile fields, since it does not own them; the IdP
+	// does. Empty if OIDC's issuer URL cannot be resolved for some reason
+	// (should not happen by the time a session exists, but resolved
+	// defensively rather than assumed) - the frontend treats an empty
+	// value as "no link to show", not an error.
+	AccountSettingsURL string `json:"account_settings_url,omitempty"`
+}
+
+// MeHandler returns the session bound to the request's Bearer token, plus
+// AccountSettingsURL (see MeResponse).
 func MeHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := bearerToken(r)
@@ -288,7 +307,8 @@ func MeHandler(d Deps) http.HandlerFunc {
 			return
 		}
 
-		sess, ok, err := ValidateSession(r.Context(), d.Valkey, token)
+		ctx := r.Context()
+		sess, ok, err := ValidateSession(ctx, d.Valkey, token)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -297,7 +317,12 @@ func MeHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "invalid or expired session", http.StatusUnauthorized)
 			return
 		}
-		writeJSON(w, http.StatusOK, sess)
+
+		resp := MeResponse{Session: sess}
+		if issuer, exists, err := setup.IssuerURL(ctx, d.Pool); err == nil && exists {
+			resp.AccountSettingsURL = strings.TrimRight(issuer, "/") + "/settings/account"
+		}
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 
