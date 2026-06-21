@@ -48,7 +48,9 @@ func NewProvider(ctx context.Context, issuerURL, clientID, clientSecret, redirec
 			// only populate it in the ID token when explicitly scoped.
 			// An IdP that does not recognize the scope just omits the
 			// claim - handled in handlers.go as an empty groups list
-			// (-> RolePending), not an error.
+			// (-> RolePending), not an error. "profile" is also requested
+			// so Name/Picture below are populated whenever the IdP has
+			// them.
 			Scopes: []string{oidc.ScopeOpenID, "profile", "email", "groups"},
 		},
 		verifier: p.Verifier(&oidc.Config{ClientID: clientID}),
@@ -67,10 +69,18 @@ func (p *Provider) AuthCodeURL(state, codeVerifier string) string {
 	return p.oauth2Config.AuthCodeURL(state, oauth2.S256ChallengeOption(codeVerifier))
 }
 
-// Claims is the subset of ID token claims the login flow needs.
+// Claims is the subset of ID token claims the login flow needs. Name and
+// Picture come from the standard OIDC "profile" claims (already in the
+// requested scope above) - PocketID and most other IdPs populate Name from
+// whatever display name is configured there; Picture is the URL to a
+// profile photo, or empty if the IdP/account has none. Both are optional by
+// nature: callers (handlers.go, the frontend) must treat an empty value as
+// "no display name/picture available", never as an error.
 type Claims struct {
 	Subject string   `json:"sub"`
 	Email   string   `json:"email"`
+	Name    string   `json:"name"`
+	Picture string   `json:"picture"`
 	Groups  []string `json:"groups"`
 }
 
