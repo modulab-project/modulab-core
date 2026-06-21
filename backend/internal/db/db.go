@@ -1,7 +1,9 @@
 // Package db wraps a Postgres connection pool (pgx) and provides the
 // minimal key/value access Core needs for its own bootstrap state
-// (core_settings). Module-specific schemas and roles (spec section 4.3) are
-// handled elsewhere, once the module installation pipeline lands.
+// (core_settings), the users table populated by OIDC JIT provisioning
+// (spec section 3.3), and module bookkeeping (installed_modules). Module
+// schemas and per-module roles (spec section 4.3) are handled elsewhere,
+// once the module installation pipeline lands.
 package db
 
 import (
@@ -33,11 +35,12 @@ func Connect(ctx context.Context, dsn string) (*Pool, error) {
 }
 
 // EnsureCoreSchema creates Core's bootstrap tables if they do not exist yet.
-// This mirrors migrations/0001_init_core_schema.up.sql and lets a fresh Core
-// instance boot without a separate migration step having been run first.
-// Once a real golang-migrate runner is wired in, this becomes redundant and
-// can be removed - tracked as a follow-up, not done here to keep this
-// commit reviewable.
+// This mirrors migrations/0001_init_core_schema.up.sql and
+// migrations/0002_add_users.up.sql, and lets a fresh Core instance boot
+// without a separate migration step having been run first. Once a real
+// golang-migrate runner is wired in, this becomes redundant and can be
+// removed - tracked as a follow-up, not done here to keep this commit
+// reviewable.
 func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
 	if _, err := p.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS core_settings (
@@ -60,6 +63,18 @@ func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
 		)
 	`); err != nil {
 		return fmt.Errorf("db: ensure installed_modules: %w", err)
+	}
+
+	if _, err := p.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS users (
+			id            TEXT PRIMARY KEY,
+			email         TEXT NOT NULL,
+			role          TEXT NOT NULL CHECK (role IN ('super-admin', 'org-admin', 'user', 'pending')),
+			created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+			last_login_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		)
+	`); err != nil {
+		return fmt.Errorf("db: ensure users: %w", err)
 	}
 
 	return nil
@@ -87,6 +102,25 @@ func (p *Pool) SetSetting(ctx context.Context, key, value string) error {
 	`, key, value)
 	if err != nil {
 		return fmt.Errorf("db: set setting %q: %w", key, err)
+	}
+	return nil
+}
+
+// UpsertUser inserts a new user row keyed by OIDC subject, or updates the
+// existing one's email, role, and last_login_at if the subject was already
+// known. Called once per successful OIDC login (spec section 3.3's JIT
+// provisioning) - there is no separate "create account" step.
+func (p *Pool) UpsertUser(ctx context.Context, subject, email, role string) error {
+	_, err := p.Exec(ctx, `
+		INSERT INTO users (id, email, role, created_at, last_login_at)
+		VALUES ($1, $2, $3, now(), now())
+		ON CONFLICT (id) DO UPDATE SET
+			email = EXCLUDED.email,
+			role = EXCLUDED.role,
+			last_login_at = now()
+	`, subject, email, role)
+	if err != nil {
+		return fmt.Errorf("db: upsert user %q: %w", subject, err)
 	}
 	return nil
 }
