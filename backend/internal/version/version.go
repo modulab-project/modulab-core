@@ -5,7 +5,10 @@
 package version
 
 // Version is the current modulab-core version. Bump it by hand for now.
-const Version = "v0.1.0-dev"
+// No leading "v" - the frontend's package.json version has never had one
+// either, and showing both with/without "v" side by side (e.g. footer:
+// "Core v0.1.0-dev . Frontend 0.1.0") read as inconsistent.
+const Version = "0.1.0-dev"
 
 // ProjectURL points operators at the project's homepage for docs and
 // updates.
