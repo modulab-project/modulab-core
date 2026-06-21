@@ -1,11 +1,8 @@
 // This file implements the Setup Wizard's group-prefix step (spec section
 // 6.5 step 5): the operator defines the global prefix used to gate OIDC
 // groups-claim membership (spec section 3.3's "Dynamic Prefix Hard Gate").
-// Persisting it here does not yet change runtime authorization - the login
-// / JIT-provisioning flow that actually checks a user's groups claim
-// against this prefix (spec section 3.3) has not been implemented - but the
-// value needs somewhere to live once the operator chooses it, and this is
-// that place.
+// ResolveGroupPrefix is what the actual login flow (internal/auth) reads at
+// request time to enforce that gate.
 package setup
 
 import (
@@ -54,6 +51,27 @@ func GroupPrefixConfigured(ctx context.Context, pool *db.Pool) (bool, error) {
 		return false, err
 	}
 	return exists, nil
+}
+
+// ResolveGroupPrefix returns the effective group prefix: a real
+// MODULAB_GROUP_PREFIX (env/.env) always takes precedence once set,
+// otherwise the prefix persisted by the Setup Wizard's
+// /v1/setup/group-prefix/configure (step 5). Mirrors ResolveMasterKey in
+// wizard.go. Called by the login flow (internal/auth) on every
+// /v1/auth/login and /v1/auth/callback request, so a prefix chosen through
+// the wizard takes effect immediately, without a Core restart.
+func ResolveGroupPrefix(ctx context.Context, pool *db.Pool, envValue string) (string, error) {
+	if envValue != "" {
+		return envValue, nil
+	}
+	value, exists, err := pool.GetSetting(ctx, groupPrefixSettingKey)
+	if err != nil {
+		return "", err
+	}
+	if !exists {
+		return "", fmt.Errorf("setup: group prefix has not been configured yet (call /v1/setup/group-prefix/configure first)")
+	}
+	return value, nil
 }
 
 // GroupPrefixStatusHandler reports the currently persisted group prefix, if
