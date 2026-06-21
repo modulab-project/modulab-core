@@ -50,7 +50,7 @@ func NewProvider(ctx context.Context, issuerURL, clientID, clientSecret, redirec
 			// claim - handled in handlers.go as an empty groups list
 			// (-> RolePending), not an error. "profile" is also requested
 			// so Name/Picture below are populated whenever the IdP has
-			// them.
+			// them; "email" additionally brings EmailVerified.
 			Scopes: []string{oidc.ScopeOpenID, "profile", "email", "groups"},
 		},
 		verifier: p.Verifier(&oidc.Config{ClientID: clientID}),
@@ -75,13 +75,17 @@ func (p *Provider) AuthCodeURL(state, codeVerifier string) string {
 // whatever display name is configured there; Picture is the URL to a
 // profile photo, or empty if the IdP/account has none. Both are optional by
 // nature: callers (handlers.go, the frontend) must treat an empty value as
-// "no display name/picture available", never as an error.
+// "no display name/picture available", never as an error. EmailVerified
+// comes from the "email" scope alongside Email itself - the frontend's
+// profile page (spec section 6.4) shows it as-is, Core does not gate
+// anything on it.
 type Claims struct {
-	Subject string   `json:"sub"`
-	Email   string   `json:"email"`
-	Name    string   `json:"name"`
-	Picture string   `json:"picture"`
-	Groups  []string `json:"groups"`
+	Subject       string   `json:"sub"`
+	Email         string   `json:"email"`
+	EmailVerified bool     `json:"email_verified"`
+	Name          string   `json:"name"`
+	Picture       string   `json:"picture"`
+	Groups        []string `json:"groups"`
 }
 
 // Exchange completes the authorization-code flow: it trades code for
