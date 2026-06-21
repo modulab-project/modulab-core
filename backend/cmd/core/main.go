@@ -85,10 +85,11 @@ func main() {
 		log.Printf("valkey: reachable at %s:%s", cfg.ValkeyHost, cfg.ValkeyPort)
 	}
 
-	masterKeyConfigured, err := setup.MasterKeyConfigured(ctx, pool)
-	if err != nil {
-		log.Printf("setup: master key check failed: %v", err)
-	}
+	// No master-key check here anymore: MODULAB_MASTER_KEY is mandatory and
+	// already validated by config.Load above, so by this point it is
+	// guaranteed present - see validateMasterKey in config.go and
+	// wizard.go's doc comments for why the old DB-fallback check that used
+	// to live here was removed.
 	oidcConfigured, err := setup.OIDCConfigured(ctx, pool)
 	if err != nil {
 		log.Printf("setup: oidc check failed: %v", err)
@@ -101,7 +102,7 @@ func main() {
 	if err != nil {
 		log.Printf("setup: group prefix check failed: %v", err)
 	}
-	log.Printf("setup wizard progress: master-key=%t oidc=%t dns-challenge=%t group-prefix=%t", masterKeyConfigured, oidcConfigured, dnsChallengeConfigured, groupPrefixConfigured)
+	log.Printf("setup wizard progress: oidc=%t dns-challenge=%t group-prefix=%t", oidcConfigured, dnsChallengeConfigured, groupPrefixConfigured)
 
 	// This is the decision bootstrapMgr.New()'s comment above refers to: a
 	// completed wizard from a previous run means the bootstrap-token gate
@@ -129,23 +130,18 @@ func main() {
 	// the build version - which the frontend's footer also reads from here
 	// rather than duplicating the version string on the client side.
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		// master_key_present reflects either source of truth: a real
-		// MODULAB_MASTER_KEY (env/.env) or a key already persisted to
-		// core_settings by the Setup Wizard's /v1/setup/init. Without the
-		// second check, this would falsely report false right after a
-		// fresh install bootstraps its key but before the operator copies
-		// it into .env.
-		dbKeyConfigured, err := setup.MasterKeyConfigured(r.Context(), pool)
-		if err != nil {
-			log.Printf("healthz: master key lookup failed: %v", err)
-		}
-
+		// master_key_present is now always true while Core is running at
+		// all: MODULAB_MASTER_KEY has no database fallback anymore and
+		// config.Load already refused to start Core without it. Kept as a
+		// field (rather than removed) so existing /healthz consumers don't
+		// break, and because "always true" is itself useful confirmation
+		// that this build's startup validation actually ran.
 		status := healthStatus{
 			Status:         "ok",
 			Version:        version.Version,
 			PostgresUp:     pool.Ping(r.Context()) == nil,
 			ValkeyUp:       valkeyClient.Ping(r.Context()) == nil,
-			MasterKeySetUp: cfg.MasterKey != "" || dbKeyConfigured,
+			MasterKeySetUp: cfg.MasterKey != "",
 			SetupCompleted: bootstrapMgr.Completed(),
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -161,11 +157,11 @@ func main() {
 
 	mux.Handle("/v1/setup/oidc/status", bootstrapMgr.Middleware(setup.OIDCStatusHandler(pool)))
 	mux.Handle("/v1/setup/oidc/configure", bootstrapMgr.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// The OIDC step needs the master key to encrypt the client secret,
-		// so it can only run after step 1 (master-key bootstrap) has
-		// completed. Resolving it per-request (rather than once at startup)
-		// means a key generated via /v1/setup/init works immediately,
-		// without requiring a process restart.
+		// The OIDC step needs the master key to encrypt the client secret.
+		// ResolveMasterKey only ever returns cfg.MasterKey now (no database
+		// fallback), so this can't actually fail in practice - it's called
+		// per-request rather than once at startup purely to keep this
+		// handler's shape consistent with DNS-challenge configure below.
 		masterKey, err := setup.ResolveMasterKey(r.Context(), pool, cfg.MasterKey)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusPreconditionFailed)
