@@ -30,6 +30,7 @@ import (
 
 type healthStatus struct {
 	Status         string `json:"status"`
+	Version        string `json:"version"`
 	PostgresUp     bool   `json:"postgres_reachable"`
 	ValkeyUp       bool   `json:"valkey_reachable"`
 	MasterKeySetUp bool   `json:"master_key_present"`
@@ -103,7 +104,9 @@ func main() {
 
 	// /healthz is intentionally exempt from the bootstrap-token gate: it is
 	// meant for unauthenticated monitoring (e.g. Docker healthchecks,
-	// Traefik) and never reveals anything more sensitive than booleans.
+	// Traefik) and never reveals anything more sensitive than booleans, plus
+	// the build version - which the frontend's footer also reads from here
+	// rather than duplicating the version string on the client side.
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		// master_key_present reflects either source of truth: a real
 		// MODULAB_MASTER_KEY (env/.env) or a key already persisted to
@@ -118,6 +121,7 @@ func main() {
 
 		status := healthStatus{
 			Status:         "ok",
+			Version:        version.Version,
 			PostgresUp:     pool.Ping(r.Context()) == nil,
 			ValkeyUp:       valkeyClient.Ping(r.Context()) == nil,
 			MasterKeySetUp: cfg.MasterKey != "" || dbKeyConfigured,
