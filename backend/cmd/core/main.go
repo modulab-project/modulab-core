@@ -1,11 +1,14 @@
 // Command core is the entry point for the modulab-core backend.
 //
-// This commit gives Valkey a real client (internal/valkey, go-redis under
-// the hood - Valkey is RESP-compatible with Redis), replacing the
-// TCP-reachability stub previously used both at boot and in /healthz. The
-// Deno subprocess supervisor (spec section 4.7) is still unimplemented -
-// that lands later, as part of the module-pipeline phase of the project
-// roadmap.
+// This commit adds the actual OIDC login flow (internal/auth, spec section
+// 6.5 wizard step 6 and the runtime side of section 3.3's Dynamic Prefix
+// Hard Gate): /v1/auth/login redirects to the configured IdP,
+// /v1/auth/callback verifies the ID token, derives a role from the groups
+// claim, JIT-provisions the user, and issues a Core-managed session;
+// /v1/auth/me and /v1/auth/logout round out the flow for testing without a
+// frontend. The Deno subprocess supervisor (spec section 4.7) is still
+// unimplemented - that lands later, as part of the module-pipeline phase
+// of the project roadmap.
 package main
 
 import (
@@ -16,6 +19,7 @@ import (
 	"net"
 	"net/http"
 
+	"github.com/modulab-project/modulab-core/backend/internal/auth"
 	"github.com/modulab-project/modulab-core/backend/internal/bootstrap"
 	"github.com/modulab-project/modulab-core/backend/internal/config"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
@@ -143,7 +147,39 @@ func main() {
 	mux.Handle("/v1/setup/group-prefix/status", bootstrapMgr.Middleware(setup.GroupPrefixStatusHandler(pool)))
 	mux.Handle("/v1/setup/group-prefix/configure", bootstrapMgr.Middleware(setup.GroupPrefixConfigureHandler(pool)))
 
-	log.Printf("modulab-core listening on %s (group prefix %q)", cfg.HTTPAddr, cfg.GroupPrefix)
+	// The actual end-user login flow (spec section 6.5 wizard step 6 /
+	// section 3.3) - deliberately NOT wrapped in bootstrapMgr.Middleware,
+	// since that gate is for the operator-only Setup Wizard API, not for
+	// end users authenticating against their own IdP account. All
+	// configuration (OIDC provider, group prefix, master key for
+	// decrypting the client secret) is re-resolved on every request inside
+	// these handlers, so changes made through the Setup Wizard take effect
+	// without a Core restart.
+	authDeps := auth.Deps{
+		Pool:                pool,
+		Valkey:              valkeyClient,
+		MasterKeyEnv:        cfg.MasterKey,
+		OIDCIssuerEnv:       cfg.OIDCIssuerURL,
+		OIDCClientIDEnv:     cfg.OIDCClientID,
+		OIDCClientSecretEnv: cfg.OIDCClientSecret,
+		GroupPrefixEnv:      cfg.GroupPrefix,
+		PublicBaseURL:       cfg.PublicBaseURL,
+	}
+	mux.HandleFunc("/v1/auth/login", auth.LoginHandler(authDeps))
+	mux.HandleFunc("/v1/auth/callback", auth.CallbackHandler(authDeps))
+	mux.HandleFunc("/v1/auth/me", auth.MeHandler(authDeps))
+	mux.HandleFunc("/v1/auth/logout", auth.LogoutHandler(authDeps))
+
+	// GroupPrefix no longer has an implicit default (see config.go) - it
+	// may legitimately be empty here if the operator hasn't run the Setup
+	// Wizard's group-prefix step (6.5 step 5) yet, so this resolves the
+	// same way the login flow itself does rather than printing an empty
+	// string.
+	effectiveGroupPrefix, err := setup.ResolveGroupPrefix(ctx, pool, cfg.GroupPrefix)
+	if err != nil {
+		effectiveGroupPrefix = "(not yet configured)"
+	}
+	log.Printf("modulab-core listening on %s (group prefix %q)", cfg.HTTPAddr, effectiveGroupPrefix)
 	if err := http.ListenAndServe(cfg.HTTPAddr, mux); err != nil {
 		log.Fatalf("server: %v", err)
 	}
