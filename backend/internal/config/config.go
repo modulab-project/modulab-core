@@ -44,6 +44,16 @@ type Config struct {
 	// proxy (Traefik, in production).
 	PublicBaseURL string
 
+	// FrontendBaseURL is where the SPA is served from. In production this
+	// is typically the same as PublicBaseURL (Core serves the built
+	// frontend itself, so there is only one origin) - it exists as its own
+	// variable rather than always reusing PublicBaseURL because local dev
+	// runs the frontend on Vite's own dev server (a different port,
+	// typically :5173) so its hot-reload/HMR keeps working, and
+	// auth.CallbackHandler needs to know that's where to send the browser
+	// back to instead.
+	FrontendBaseURL string
+
 	// HTTPAddr is not part of .env.example yet; it defaults to :8080 and can
 	// be overridden for local development without touching the documented
 	// env surface.
@@ -88,6 +98,12 @@ func Load() (Config, error) {
 		GroupPrefix: os.Getenv("MODULAB_GROUP_PREFIX"),
 
 		PublicBaseURL: getEnvDefault("MODULAB_PUBLIC_BASE_URL", "http://localhost:8080"),
+
+		// Defaults to Vite's standard dev-server port, not PublicBaseURL's
+		// default - the two are deliberately different out of the box so a
+		// fresh `npm run dev` + `go run ./cmd/core` pairing works without
+		// any .env edits.
+		FrontendBaseURL: getEnvDefault("MODULAB_FRONTEND_BASE_URL", "http://localhost:5173"),
 
 		HTTPAddr: getEnvDefault("MODULAB_HTTP_ADDR", ":8080"),
 	}
