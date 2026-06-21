@@ -44,8 +44,8 @@ func Connect(ctx context.Context, dsn string) (*Pool, error) {
 func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
 	if _, err := p.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS core_settings (
-			key        TEXT PRIMARY KEY,
-			value      TEXT NOT NULL,
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL,
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 		)
 	`); err != nil {
@@ -54,11 +54,11 @@ func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
 
 	if _, err := p.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS installed_modules (
-			name         TEXT PRIMARY KEY,
-			version      TEXT NOT NULL,
-			tier         SMALLINT NOT NULL CHECK (tier IN (1, 2, 3)),
-			scope        TEXT NOT NULL CHECK (scope IN ('per-location', 'cross-location')),
-			status       TEXT NOT NULL DEFAULT 'installing',
+			name TEXT PRIMARY KEY,
+			version TEXT NOT NULL,
+			tier SMALLINT NOT NULL CHECK (tier IN (1, 2, 3)),
+			scope TEXT NOT NULL CHECK (scope IN ('per-location', 'cross-location')),
+			status TEXT NOT NULL DEFAULT 'installing',
 			installed_at TIMESTAMPTZ NOT NULL DEFAULT now()
 		)
 	`); err != nil {
@@ -67,14 +67,25 @@ func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
 
 	if _, err := p.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS users (
-			id            TEXT PRIMARY KEY,
-			email         TEXT NOT NULL,
-			role          TEXT NOT NULL CHECK (role IN ('super-admin', 'org-admin', 'user', 'pending')),
-			created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+			id TEXT PRIMARY KEY,
+			email TEXT NOT NULL,
+			role TEXT NOT NULL CHECK (role IN ('super-admin', 'org-admin', 'user', 'pending')),
+			approved BOOLEAN NOT NULL DEFAULT false,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 			last_login_at TIMESTAMPTZ NOT NULL DEFAULT now()
 		)
 	`); err != nil {
 		return fmt.Errorf("db: ensure users: %w", err)
+	}
+
+	// users.approved was added after the table itself - CREATE TABLE IF NOT
+	// EXISTS above is a no-op against an already-existing table from before
+	// this column existed, so a separate idempotent ALTER is needed to pick
+	// up the new column on an upgrade rather than just on a fresh database.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE users ADD COLUMN IF NOT EXISTS approved BOOLEAN NOT NULL DEFAULT false
+	`); err != nil {
+		return fmt.Errorf("db: ensure users.approved: %w", err)
 	}
 
 	return nil
@@ -110,19 +121,42 @@ func (p *Pool) SetSetting(ctx context.Context, key, value string) error {
 // existing one's email, role, and last_login_at if the subject was already
 // known. Called once per successful OIDC login (spec section 3.3's JIT
 // provisioning) - there is no separate "create account" step.
-func (p *Pool) UpsertUser(ctx context.Context, subject, email, role string) error {
+//
+// approved is only ever written on the INSERT branch - deliberately absent
+// from the ON CONFLICT ... DO UPDATE SET clause below, so a later login by
+// an already-known user can never silently reset whatever an admin (or the
+// bootstrap/wizard flow) previously set it to. Callers pass the value they
+// want a brand-new row to start with; for an existing row it is ignored.
+func (p *Pool) UpsertUser(ctx context.Context, subject, email, role string, approved bool) error {
 	_, err := p.Exec(ctx, `
-		INSERT INTO users (id, email, role, created_at, last_login_at)
-		VALUES ($1, $2, $3, now(), now())
+		INSERT INTO users (id, email, role, approved, created_at, last_login_at)
+		VALUES ($1, $2, $3, $4, now(), now())
 		ON CONFLICT (id) DO UPDATE SET
 			email = EXCLUDED.email,
 			role = EXCLUDED.role,
 			last_login_at = now()
-	`, subject, email, role)
+	`, subject, email, role, approved)
 	if err != nil {
 		return fmt.Errorf("db: upsert user %q: %w", subject, err)
 	}
 	return nil
+}
+
+// UserApproved reports whether subject's user row has approved = true. A
+// subject with no row at all (never logged in before) reports false, not
+// an error - from CallbackHandler's perspective "unknown" and "known but
+// not yet approved" require exactly the same response (RolePending), so
+// there is no need for callers to distinguish the two.
+func (p *Pool) UserApproved(ctx context.Context, subject string) (bool, error) {
+	var approved bool
+	err := p.QueryRow(ctx, `SELECT approved FROM users WHERE id = $1`, subject).Scan(&approved)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("db: check approval for %q: %w", subject, err)
+	}
+	return approved, nil
 }
 
 // HasSuperAdmin reports whether at least one user with role 'super-admin'
