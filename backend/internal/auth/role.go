@@ -20,11 +20,18 @@ const (
 )
 
 // DeriveRole implements spec section 3.3's Dynamic Prefix Hard Gate: a
-// user's role is whichever of prefix+"Super-Admin", prefix+"Org-Admin", or
-// prefix+"User" appears in their groups claim, checked in that priority
+// user's role is whichever of prefix+"super_admin", prefix+"org_admin", or
+// prefix+"user" appears in their groups claim, checked in that priority
 // order so membership in multiple groups resolves to the most privileged
 // role rather than an arbitrary one. A user in none of the three groups
 // gets RolePending.
+//
+// The group-name suffixes are lowercase snake_case rather than the
+// Title-Case-with-hyphen form spec section 3.3's examples use - changed on
+// the user's request to match how they actually name groups in their IdP
+// (Pocket ID). RoleSuperAdmin/RoleOrgAdmin/RoleUser (the role *values*
+// stored on the user and returned from the API) are unaffected; only the
+// group-claim names this function matches against changed.
 func DeriveRole(groups []string, prefix string) string {
 	set := make(map[string]bool, len(groups))
 	for _, g := range groups {
@@ -32,11 +39,11 @@ func DeriveRole(groups []string, prefix string) string {
 	}
 
 	switch {
-	case set[prefix+"Super-Admin"]:
+	case set[prefix+"super_admin"]:
 		return RoleSuperAdmin
-	case set[prefix+"Org-Admin"]:
+	case set[prefix+"org_admin"]:
 		return RoleOrgAdmin
-	case set[prefix+"User"]:
+	case set[prefix+"user"]:
 		return RoleUser
 	default:
 		return RolePending
