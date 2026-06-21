@@ -1,12 +1,10 @@
 // Package setup implements the first-boot Setup Wizard's backend endpoints:
-// master-key bootstrap (spec section 2.4, this file) and OIDC provider
-// configuration (spec section 6.5, oidc.go).
+// the bootstrap-token handshake (spec section 2.4, this file) and OIDC
+// provider configuration (spec section 6.5, oidc.go).
 package setup
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,107 +12,69 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/db"
 )
 
-const masterKeySettingKey = "master_key"
-
-// StatusResponse reports whether Core has completed its master-key bootstrap.
+// StatusResponse reports whether Core's master key is configured. Always
+// true once Core is actually running - see InitHandler's doc comment.
 type StatusResponse struct {
 	Configured bool `json:"configured"`
 }
 
-// InitResponse is returned once after the master key is generated (or
-// echoes the existing one if init is called again - it is intentionally
-// idempotent so retrying a failed setup step is safe).
+// InitResponse confirms the bootstrap token presented to /v1/setup/init was
+// valid. It used to also carry the freshly generated master key (see
+// InitHandler's doc comment for why that no longer happens) - Ready is all
+// that's left once that's gone, but the endpoint stays: it's still the
+// frontend's signal that the token round-tripped successfully through
+// bootstrapMgr.Middleware before persisting it client-side for the rest of
+// the wizard.
 type InitResponse struct {
-	MasterKey string `json:"master_key"`
-	Generated bool   `json:"generated"`
+	Ready bool `json:"ready"`
 }
 
-// MasterKeyConfigured reports whether a master key has already been
-// bootstrapped via core_settings (set by InitHandler below). This only
-// covers the database half of the picture; callers such as /healthz are
-// expected to also check cfg.MasterKey (the env/.env value) themselves and
-// OR the two together, since config.Config is intentionally not imported
-// here to avoid a setup -> config -> setup dependency tangle.
-func MasterKeyConfigured(ctx context.Context, pool *db.Pool) (bool, error) {
-	_, exists, err := pool.GetSetting(ctx, masterKeySettingKey)
-	if err != nil {
-		return false, err
-	}
-	return exists, nil
-}
-
-// StatusHandler reports whether the master key has already been bootstrapped.
+// StatusHandler reports whether the master key is configured. This is now
+// always true if Core is running at all - config.Load refuses to start
+// without a valid MODULAB_MASTER_KEY - but the endpoint is kept for
+// anything that still polls it rather than checking /healthz.
 func StatusHandler(pool *db.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		_, exists, err := pool.GetSetting(r.Context(), masterKeySettingKey)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		writeJSON(w, http.StatusOK, StatusResponse{Configured: exists})
+		writeJSON(w, http.StatusOK, StatusResponse{Configured: true})
 	}
 }
 
-// InitHandler generates and persists MODULAB_MASTER_KEY if it does not exist
-// yet (spec section 2.4). The generated key is returned in the response body
-// exactly once so the operator can copy it into their .env; Core also keeps
-// a copy in core_settings as a fallback so a missing .env value does not
-// strand the instance, but config.Load's MODULAB_MASTER_KEY env value always
-// takes precedence once set.
+// InitHandler used to generate a master key on first call and persist a
+// copy to core_settings as a fallback for a missing .env value - removed
+// 2026-06-21 on request: that fallback meant the key protecting every
+// encrypted column sat in plaintext in the very database it was protecting,
+// right next to what it decrypts. The master key now comes exclusively from
+// MODULAB_MASTER_KEY, validated by config.Load at startup (Core refuses to
+// start at all without it - see validateMasterKey there), so there is
+// nothing left for this handler to generate or store. It still exists as
+// the wizard's step 1 network round-trip: submitting the bootstrap token
+// here is what proves to the frontend that the token is valid (a non-200
+// response means bootstrapMgr.Middleware rejected it) before the wizard
+// persists it client-side and moves to step 2.
 func InitHandler(pool *db.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-
-		existing, exists, err := pool.GetSetting(ctx, masterKeySettingKey)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if exists {
-			writeJSON(w, http.StatusOK, InitResponse{MasterKey: existing, Generated: false})
-			return
-		}
-
-		key, err := generateMasterKey()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if err := pool.SetSetting(ctx, masterKeySettingKey, key); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		writeJSON(w, http.StatusCreated, InitResponse{MasterKey: key, Generated: true})
+		writeJSON(w, http.StatusOK, InitResponse{Ready: true})
 	}
 }
 
-// ResolveMasterKey returns the currently active master key: envValue (the
-// real MODULAB_MASTER_KEY from env/.env, as loaded by config.Load) if it is
-// set, otherwise the value InitHandler persisted to core_settings. Later
-// setup steps that need to encrypt something (e.g. the OIDC client secret
-// in oidc.go) call this rather than reading core_settings directly, so
-// there is a single place that encodes "env always wins" precedence.
+// ResolveMasterKey returns the active master key. It only ever returns
+// envValue (the real MODULAB_MASTER_KEY from env/.env, as loaded by
+// config.Load) - there is no database fallback to fall back to anymore.
+// The error path below should be unreachable in practice, since
+// config.Load already refuses to start Core at all with an empty or
+// malformed key; it stays as a defensive check rather than a trust
+// assumption, in case ResolveMasterKey is ever called from a path that
+// bypassed config.Load (e.g. a future test harness).
+//
+// Kept as a function with this exact signature, rather than callers just
+// reading cfg.MasterKey directly, because internal/auth's resolveProvider
+// and main.go's OIDC/DNS-challenge configure handlers all call it - this
+// way the database-fallback removal only had to happen in one place.
 func ResolveMasterKey(ctx context.Context, pool *db.Pool, envValue string) (string, error) {
-	if envValue != "" {
-		return envValue, nil
+	if envValue == "" {
+		return "", fmt.Errorf("setup: MODULAB_MASTER_KEY is not set - this should be unreachable, since config.Load refuses to start Core without it")
 	}
-	value, exists, err := pool.GetSetting(ctx, masterKeySettingKey)
-	if err != nil {
-		return "", err
-	}
-	if !exists {
-		return "", fmt.Errorf("setup: master key has not been bootstrapped yet (call /v1/setup/init first)")
-	}
-	return value, nil
-}
-
-// generateMasterKey produces a 256-bit random key, hex-encoded.
-func generateMasterKey() (string, error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(buf), nil
+	return envValue, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
