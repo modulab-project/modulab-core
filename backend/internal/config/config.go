@@ -39,14 +39,6 @@ type Config struct {
 	DenoSocketPath string
 	DenoBinaryPath string
 
-	// GroupPrefix has no implicit default (unlike before the Setup Wizard's
-	// group-prefix step existed): an empty value here just means "resolve
-	// from core_settings instead" (see setup.ResolveGroupPrefix), mirroring
-	// how MasterKey and the OIDC fields already work. Only a real
-	// MODULAB_GROUP_PREFIX env value should win over the Setup Wizard's
-	// persisted choice.
-	GroupPrefix string
-
 	// PublicBaseURL is what Core tells the OIDC provider to redirect back
 	// to after login (".../v1/auth/callback") - it has to be the externally
 	// reachable URL, not HTTPAddr, since those differ behind a reverse
@@ -77,16 +69,16 @@ type Config struct {
 // this is meant for local development convenience only; production deploys
 // set real environment variables via docker-compose's env_file directive.
 //
-// Load does not validate cross-field invariants (e.g. group-prefix
-// completeness) - an empty GroupPrefix is a valid pre-setup state, with
-// setup.ResolveGroupPrefix falling back to whatever the Setup Wizard has
-// persisted to core_settings instead. MODULAB_MASTER_KEY is the one
-// exception: it is validated here and Load fails outright if it is missing
-// or malformed, rather than letting Core start with no way to encrypt
-// secrets - see the MasterKey field's doc comment for why. OIDC
-// configuration has no environment-variable path at all anymore (removed
-// 2026-06-21 on request): it only ever comes from what the Setup Wizard
-// persisted, encrypted, to the database - see setup.ResolveOIDCConfig.
+// MODULAB_MASTER_KEY is the one variable Load validates and fails outright
+// on if missing or malformed, rather than letting Core start with no way to
+// encrypt secrets - see the MasterKey field's doc comment for why. Neither
+// OIDC configuration nor the group prefix have an environment-variable path
+// at all anymore (group prefix removed 2026-06-21 alongside OIDC, on
+// request: "keine Daten außer wirklich benötigte in der .env" - both are
+// non-secret values the Setup Wizard already persists, so duplicating them
+// in .env was redundant surface, not a real requirement like the master
+// key or the DB/Valkey connection settings are). See
+// setup.ResolveOIDCConfig and setup.ResolveGroupPrefix, both DB-only now.
 func Load() (Config, error) {
 	loadDotEnvFiles()
 
@@ -110,8 +102,6 @@ func Load() (Config, error) {
 
 		DenoSocketPath: getEnvDefault("MODULAB_DENO_SOCKET_PATH", "/tmp/modulab-deno.sock"),
 		DenoBinaryPath: getEnvDefault("MODULAB_DENO_BINARY_PATH", "/usr/local/bin/deno"),
-
-		GroupPrefix: os.Getenv("MODULAB_GROUP_PREFIX"),
 
 		PublicBaseURL: getEnvDefault("MODULAB_PUBLIC_BASE_URL", "http://localhost:8080"),
 
