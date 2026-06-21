@@ -18,6 +18,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
 	"github.com/modulab-project/modulab-core/backend/internal/bootstrap"
@@ -31,6 +32,7 @@ import (
 type healthStatus struct {
 	Status         string `json:"status"`
 	Version        string `json:"version"`
+	UptimeSeconds  int64  `json:"uptime_seconds"`
 	PostgresUp     bool   `json:"postgres_reachable"`
 	ValkeyUp       bool   `json:"valkey_reachable"`
 	MasterKeySetUp bool   `json:"master_key_present"`
@@ -38,6 +40,11 @@ type healthStatus struct {
 }
 
 func main() {
+	// Captured before anything else so /healthz's uptime_seconds reflects
+	// the process's actual age, not just the time since the last dependency
+	// finished connecting.
+	startTime := time.Now()
+
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("config: %v", err)
@@ -139,6 +146,7 @@ func main() {
 		status := healthStatus{
 			Status:         "ok",
 			Version:        version.Version,
+			UptimeSeconds:  int64(time.Since(startTime).Seconds()),
 			PostgresUp:     pool.Ping(r.Context()) == nil,
 			ValkeyUp:       valkeyClient.Ping(r.Context()) == nil,
 			MasterKeySetUp: cfg.MasterKey != "",
