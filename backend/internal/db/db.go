@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -185,4 +186,63 @@ func (p *Pool) HasSuperAdmin(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("db: check super-admin existence: %w", err)
 	}
 	return exists, nil
+}
+
+// PendingUser is one row from ListPendingUsers - the subset of the users
+// table an admin needs to decide whether to approve someone. Role is
+// included even though approval doesn't gate on it: it tells the admin
+// which of the three configured OIDC groups this person is already
+// correctly a member of (see handlers.go's CallbackHandler gate 1), which
+// is exactly the context "should I approve them" needs.
+type PendingUser struct {
+	Subject   string
+	Email     string
+	Name      string
+	Role      string
+	CreatedAt time.Time
+}
+
+// ListPendingUsers returns every user row with approved = false, oldest
+// first - the people CallbackHandler's gate 2 is currently holding at the
+// /pending screen. Until now the only way to move someone out of this list
+// was a manual "UPDATE users SET approved = true" - this is the read side
+// of the admin UI that replaces that.
+func (p *Pool) ListPendingUsers(ctx context.Context) ([]PendingUser, error) {
+	rows, err := p.Query(ctx, `
+		SELECT id, email, name, role, created_at
+		FROM users
+		WHERE approved = false
+		ORDER BY created_at ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("db: list pending users: %w", err)
+	}
+	defer rows.Close()
+
+	var out []PendingUser
+	for rows.Next() {
+		var u PendingUser
+		if err := rows.Scan(&u.Subject, &u.Email, &u.Name, &u.Role, &u.CreatedAt); err != nil {
+			return nil, fmt.Errorf("db: scan pending user: %w", err)
+		}
+		out = append(out, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("db: list pending users: %w", err)
+	}
+	return out, nil
+}
+
+// ApproveUser sets approved = true for subject and reports how many rows
+// were affected, so the caller (ApproveUserHandler) can tell "approved"
+// apart from "no such user" (0 rows) without a separate existence check.
+// Takes effect on that user's next login, not retroactively on any session
+// they may already be holding - see role.go's doc comment on RolePending
+// for why CallbackHandler never revisits an already-issued session.
+func (p *Pool) ApproveUser(ctx context.Context, subject string) (int64, error) {
+	tag, err := p.Exec(ctx, `UPDATE users SET approved = true WHERE id = $1`, subject)
+	if err != nil {
+		return 0, fmt.Errorf("db: approve user %q: %w", subject, err)
+	}
+	return tag.RowsAffected(), nil
 }
