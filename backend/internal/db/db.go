@@ -124,3 +124,18 @@ func (p *Pool) UpsertUser(ctx context.Context, subject, email, role string) erro
 	}
 	return nil
 }
+
+// HasSuperAdmin reports whether at least one user with role 'super-admin'
+// exists. Used by setup.CompleteHandler to verify the wizard's step 6
+// (spec section 6.5: "Super-Admin binden") actually succeeded before
+// allowing step 7 to invalidate the bootstrap token - a user merely
+// attempting login is not enough, since spec section 3.3's Dynamic Prefix
+// Hard Gate can still leave them as RolePending.
+func (p *Pool) HasSuperAdmin(ctx context.Context) (bool, error) {
+	var exists bool
+	err := p.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE role = 'super-admin')`).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("db: check super-admin existence: %w", err)
+	}
+	return exists, nil
+}
