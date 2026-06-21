@@ -41,6 +41,15 @@ const sessionKeyPrefix = "session:"
 // next login. That is an acceptable staleness window given SessionTTL is
 // only 24h and there is no refresh-token flow yet to silently re-pull
 // claims anyway.
+//
+// Locked is the one field NOT copied from the IdP - it reflects Core's own
+// users.locked column at the moment CallbackHandler issued this session
+// (see that doc comment for the full gate 2 logic). It is only ever true
+// alongside Role == RolePending, distinguishing "locked by an admin" from
+// the more common "never approved yet" case so the frontend's /pending
+// screen can show the right message for each. omitempty keeps it out of
+// the JSON entirely for the (overwhelming majority) of sessions where it's
+// false, rather than spelling out "locked": false on every response.
 type Session struct {
 	UserID        string `json:"user_id"`
 	Email         string `json:"email"`
@@ -48,6 +57,7 @@ type Session struct {
 	Name          string `json:"name"`
 	Picture       string `json:"picture"`
 	Role          string `json:"role"`
+	Locked        bool   `json:"locked,omitempty"`
 }
 
 // CreateSession mints a new opaque bearer token for sess and stores it in
