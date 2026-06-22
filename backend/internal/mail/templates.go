@@ -33,17 +33,22 @@ import (
 
 const signature = "\nBest regards,\nThe ModuLab Team\n"
 
-// greeting renders "Hello {name}," when name is known, or a plain
+// greeting renders "Hello {given name}," when name is known, or a plain
 // "Hello," when it is not (an IdP that never populated a display name -
 // see oidcclient.go's Claims doc comment on Name being optional by
-// nature). Never falls back to the email address here: "Hello
-// jane@example.com," reads like a templating bug, not a greeting.
+// nature). Only the first word of name is used - "Hello Max," not "Hello
+// Max Mustermann," - on the assumption that Name is "given family" order,
+// which holds for every IdP this codebase currently documents support for
+// (Pocket ID, Authentik, Keycloak, Authelia all populate the standard
+// OIDC "name" claim this way). Never falls back to the email address
+// here: "Hello jane@example.com," reads like a templating bug, not a
+// greeting.
 func greeting(name string) string {
-	name = strings.TrimSpace(name)
-	if name == "" {
+	fields := strings.Fields(name)
+	if len(fields) == 0 {
 		return "Hello,"
 	}
-	return fmt.Sprintf("Hello %s,", name)
+	return fmt.Sprintf("Hello %s,", fields[0])
 }
 
 // ApprovedMessage is sent once admin.ApproveUserHandler succeeds. name is
@@ -53,7 +58,7 @@ func ApprovedMessage(to, name, frontendBaseURL string) Message {
 		To:      to,
 		Subject: "Your ModuLab account is ready",
 		Body: fmt.Sprintf(
-			"%s\n\nGood news - an administrator has approved your ModuLab account. You can sign in right away:\n\n%s\n\nIf you have any questions, please reach out to your administrator.\n%s",
+			"%s\n\nGood news - an administrator has approved your ModuLab account. You can sign in right away:\n\n%s\n%s",
 			greeting(name), frontendBaseURL, signature,
 		),
 	}
