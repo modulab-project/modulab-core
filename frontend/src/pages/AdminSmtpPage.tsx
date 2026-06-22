@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { configureSmtp, deleteSmtpConfig, smtpStatus, type SMTPStatus } from "../lib/api";
 import { getSessionToken } from "../lib/session";
@@ -38,6 +38,18 @@ export default function AdminSmtpPage() {
   const [fromAddress, setFromAddress] = useState("");
   const [encryption, setEncryption] = useState("starttls");
 
+  // useAuthenticatedSession polls /v1/auth/me every 15s and hands back a
+  // brand-new Session object each time (see its own doc comment on why -
+  // catching a lock/delete that revoked this tab's session). Without this
+  // guard, that 15s re-render re-ran the fetch below on every poll and
+  // overwrote whatever the admin had typed but not yet saved - any
+  // unsaved field, not just Encryption, would silently snap back to
+  // the persisted value a few seconds after being changed. The fetch
+  // itself should only ever happen once, right after the session first
+  // resolves to a super-admin - not every time that object's identity
+  // changes.
+  const hasFetchedStatus = useRef(false);
+
   useEffect(() => {
     if (!session) {
       return;
@@ -51,6 +63,10 @@ export default function AdminSmtpPage() {
       navigate("/", { replace: true });
       return;
     }
+    if (hasFetchedStatus.current) {
+      return;
+    }
+    hasFetchedStatus.current = true;
     const token = getSessionToken();
     if (!token) {
       return;
