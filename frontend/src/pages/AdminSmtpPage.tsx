@@ -36,7 +36,7 @@ export default function AdminSmtpPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [fromAddress, setFromAddress] = useState("");
-  const [useTLS, setUseTLS] = useState(true);
+  const [encryption, setEncryption] = useState("starttls");
 
   useEffect(() => {
     if (!session) {
@@ -63,7 +63,7 @@ export default function AdminSmtpPage() {
           setPort(String(s.port ?? 587));
           setUsername(s.username ?? "");
           setFromAddress(s.from_address ?? "");
-          setUseTLS(s.use_tls ?? false);
+          setEncryption(s.encryption ?? "starttls");
         }
       })
       .catch(() => setError("Could not load SMTP settings."));
@@ -93,7 +93,7 @@ export default function AdminSmtpPage() {
         username: username.trim(),
         password,
         from_address: fromAddress.trim(),
-        use_tls: useTLS,
+        encryption,
       });
       setStatus(result);
       setPassword("");
@@ -124,7 +124,7 @@ export default function AdminSmtpPage() {
       setUsername("");
       setPassword("");
       setFromAddress("");
-      setUseTLS(true);
+      setEncryption("starttls");
       setSavedAt(null);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Removing the configuration failed.";
@@ -198,15 +198,17 @@ export default function AdminSmtpPage() {
               className={inputClass}
             />
           </Field>
-          <label className="flex items-center gap-2.5 text-sm">
-            <input
-              type="checkbox"
-              checked={useTLS}
-              onChange={(e) => setUseTLS(e.target.checked)}
-              className="h-4 w-4 rounded border-gray-300 text-teal-600 focus:ring-teal-500 dark:border-gray-700"
-            />
-            Use STARTTLS
-          </label>
+          <Field label="Encryption">
+            <select
+              value={encryption}
+              onChange={(e) => setEncryption(e.target.value)}
+              className={inputClass}
+            >
+              <option value="none">None</option>
+              <option value="starttls">STARTTLS (e.g. port 587)</option>
+              <option value="tls">SSL/TLS (e.g. port 465)</option>
+            </select>
+          </Field>
 
           <button
             type="submit"

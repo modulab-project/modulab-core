@@ -11,8 +11,8 @@ import (
 // send delivers msg over cfg. Plain net/smtp - no third-party mail
 // library - since spec section 3.5 only asks for compatibility with
 // self-hosted SMTP relays (Postfix, Mailcow, Stalwart), all of which speak
-// plain SMTP with optional STARTTLS and PLAIN auth; nothing here needs
-// HTML rendering, attachments, or provider-specific APIs.
+// plain SMTP with optional STARTTLS/implicit-TLS and PLAIN auth; nothing
+// here needs HTML rendering, attachments, or provider-specific APIs.
 func send(cfg setup.SMTPRuntimeConfig, msg Message) error {
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	body := buildMessage(cfg.FromAddress, msg)
@@ -22,28 +22,51 @@ func send(cfg setup.SMTPRuntimeConfig, msg Message) error {
 		auth = smtp.PlainAuth("", cfg.Username, cfg.Password, cfg.Host)
 	}
 
-	if !cfg.UseTLS {
-		// No STARTTLS requested - smtp.SendMail covers dial, optional auth,
-		// and the full MAIL/RCPT/DATA sequence in one call. Fine for a
-		// same-LAN relay that never needed an encrypted hop in the first
-		// place (the common case spec section 3.5 describes - Core and a
-		// self-hosted Postfix/Mailcow on the same trusted network).
+	if cfg.Encryption == setup.SMTPEncryptionNone {
+		// smtp.SendMail covers dial, optional auth, and the full
+		// MAIL/RCPT/DATA sequence in one call. Fine for a same-LAN relay
+		// that never needed an encrypted hop in the first place (the
+		// common case spec section 3.5 describes - Core and a self-hosted
+		// Postfix/Mailcow on the same trusted network).
 		return smtp.SendMail(addr, auth, cfg.FromAddress, []string{msg.To}, body)
 	}
 
-	// STARTTLS path: net/smtp's SendMail has no option to upgrade the
-	// connection, so the handshake is driven manually here - dial in
-	// plaintext, upgrade, authenticate, then the same MAIL/RCPT/DATA
-	// sequence SendMail would otherwise do internally.
-	conn, err := smtp.Dial(addr)
-	if err != nil {
-		return fmt.Errorf("dial %s: %w", addr, err)
+	var conn *smtp.Client
+	if cfg.Encryption == setup.SMTPEncryptionTLS {
+		// Implicit TLS ("SSL", commonly port 465): the relay expects TLS
+		// from the very first byte, unlike STARTTLS below which starts
+		// plaintext and upgrades mid-conversation. tls.Dial does the full
+		// handshake before smtp.NewClient ever speaks the SMTP protocol
+		// over it.
+		tlsConn, err := tls.Dial("tcp", addr, &tls.Config{ServerName: cfg.Host})
+		if err != nil {
+			return fmt.Errorf("tls dial %s: %w", addr, err)
+		}
+		conn, err = smtp.NewClient(tlsConn, cfg.Host)
+		if err != nil {
+			tlsConn.Close()
+			return fmt.Errorf("smtp client: %w", err)
+		}
+	} else {
+		// STARTTLS path (commonly port 587): net/smtp's SendMail has no
+		// option to upgrade the connection, so the handshake is driven
+		// manually here - dial in plaintext, then upgrade before
+		// authenticating.
+		var err error
+		conn, err = smtp.Dial(addr)
+		if err != nil {
+			return fmt.Errorf("dial %s: %w", addr, err)
+		}
+		if err := conn.StartTLS(&tls.Config{ServerName: cfg.Host}); err != nil {
+			conn.Close()
+			return fmt.Errorf("starttls: %w", err)
+		}
 	}
 	defer conn.Close()
 
-	if err := conn.StartTLS(&tls.Config{ServerName: cfg.Host}); err != nil {
-		return fmt.Errorf("starttls: %w", err)
-	}
+	// Shared by both the implicit-TLS and STARTTLS paths from here on -
+	// once the connection is encrypted, auth and the MAIL/RCPT/DATA
+	// sequence are identical either way.
 	if auth != nil {
 		if err := conn.Auth(auth); err != nil {
 			return fmt.Errorf("auth: %w", err)

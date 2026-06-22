@@ -490,7 +490,7 @@ function StepSMTP({ onDone }: { onDone: () => void }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [fromAddress, setFromAddress] = useState("");
-  const [useTLS, setUseTLS] = useState(true);
+  const [encryption, setEncryption] = useState("starttls");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -518,7 +518,7 @@ function StepSMTP({ onDone }: { onDone: () => void }) {
         username: username.trim(),
         password,
         from_address: fromAddress.trim(),
-        use_tls: useTLS,
+        encryption,
       });
       onDone();
     } catch (err) {
@@ -558,15 +558,21 @@ function StepSMTP({ onDone }: { onDone: () => void }) {
         type="email"
         placeholder="modulab@example.com"
       />
-      <label className="flex items-center gap-2.5 text-sm text-gray-700 dark:text-gray-300">
-        <input
-          type="checkbox"
-          checked={useTLS}
-          onChange={(e) => setUseTLS(e.target.checked)}
-          className="h-4 w-4 rounded border-gray-300 text-teal-600 focus:ring-teal-500 dark:border-gray-700"
-        />
-        Use STARTTLS
-      </label>
+      <div>
+        <label htmlFor="smtp-encryption" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+          Encryption
+        </label>
+        <select
+          id="smtp-encryption"
+          value={encryption}
+          onChange={(e) => setEncryption(e.target.value)}
+          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+        >
+          <option value="none">None</option>
+          <option value="starttls">STARTTLS (e.g. port 587)</option>
+          <option value="tls">SSL/TLS (e.g. port 465)</option>
+        </select>
+      </div>
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       <div className="flex gap-2">
         <AuthSecondaryButton onClick={onDone} type="button" disabled={busy} className="flex-1">

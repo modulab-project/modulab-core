@@ -47,7 +47,27 @@ const (
 	smtpUsernameSettingKey    = "smtp_username"
 	smtpPasswordSettingKey    = "smtp_password_enc"
 	smtpFromAddressSettingKey = "smtp_from_address"
-	smtpUseTLSSettingKey      = "smtp_use_tls"
+	smtpEncryptionSettingKey  = "smtp_encryption"
+
+	// smtpUseTLSSettingKeyLegacy is the boolean field this replaced
+	// (pre-implicit-TLS support: "true" meant STARTTLS, "false" meant
+	// none - there was no third option). No longer written by
+	// SMTPConfigureHandler, but still read as a fallback by
+	// ResolveSMTPConfig/SMTPStatusHandler for any instance that
+	// configured SMTP before smtpEncryptionSettingKey existed, so an
+	// upgrade does not silently revert a working STARTTLS relay to
+	// unencrypted. SMTPDeleteHandler still clears it too, so a fresh
+	// instance has no trace of it either way.
+	smtpUseTLSSettingKeyLegacy = "smtp_use_tls"
+)
+
+// Encryption mode values for SMTPConfigRequest.Encryption /
+// SMTPRuntimeConfig.Encryption - see mail/smtp.go's send for what each one
+// actually does on the wire.
+const (
+	SMTPEncryptionNone     = "none"     // Plaintext - same-LAN relay, no TLS at any point.
+	SMTPEncryptionSTARTTLS = "starttls" // Connect plaintext, then upgrade (commonly port 587).
+	SMTPEncryptionTLS      = "tls"      // TLS from the very first byte, a.k.a. "SSL" (commonly port 465).
 )
 
 // SMTPConfigRequest is the body of POST /v1/admin/smtp/configure.
@@ -61,7 +81,11 @@ type SMTPConfigRequest struct {
 	Username    string `json:"username"`
 	Password    string `json:"password"`
 	FromAddress string `json:"from_address"`
-	UseTLS      bool   `json:"use_tls"`
+	// Encryption is one of SMTPEncryptionNone/STARTTLS/TLS. Empty is
+	// treated as SMTPEncryptionSTARTTLS (the most common relay setup, and
+	// what the previous boolean-only field defaulted its checkbox to) -
+	// see SMTPConfigureHandler.
+	Encryption string `json:"encryption"`
 }
 
 // SMTPStatusResponse reports the non-secret half of the configuration.
@@ -75,7 +99,7 @@ type SMTPStatusResponse struct {
 	Port        int    `json:"port,omitempty"`
 	Username    string `json:"username,omitempty"`
 	FromAddress string `json:"from_address,omitempty"`
-	UseTLS      bool   `json:"use_tls,omitempty"`
+	Encryption  string `json:"encryption,omitempty"`
 }
 
 // SMTPRuntimeConfig is the fully resolved SMTP configuration the mail
@@ -88,7 +112,7 @@ type SMTPRuntimeConfig struct {
 	Username    string
 	Password    string
 	FromAddress string
-	UseTLS      bool
+	Encryption  string
 }
 
 // SMTPConfigured reports whether SMTP has already been configured. Used
@@ -133,7 +157,7 @@ func ResolveSMTPConfig(ctx context.Context, pool *db.Pool, masterKey string) (SM
 	if err != nil {
 		return SMTPRuntimeConfig{}, err
 	}
-	useTLSStr, _, err := pool.GetSetting(ctx, smtpUseTLSSettingKey)
+	encryption, err := resolveSMTPEncryption(ctx, pool)
 	if err != nil {
 		return SMTPRuntimeConfig{}, err
 	}
@@ -158,8 +182,32 @@ func ResolveSMTPConfig(ctx context.Context, pool *db.Pool, masterKey string) (SM
 		Username:    username,
 		Password:    password,
 		FromAddress: fromAddress,
-		UseTLS:      useTLSStr == "true",
+		Encryption:  encryption,
 	}, nil
+}
+
+// resolveSMTPEncryption reads smtpEncryptionSettingKey, falling back to
+// the legacy boolean (smtpUseTLSSettingKeyLegacy) for any instance
+// configured before the three-way encryption setting existed - "true"
+// becomes SMTPEncryptionSTARTTLS (the only kind of TLS the old boolean
+// could mean), "false" or unset becomes SMTPEncryptionNone. Shared by
+// ResolveSMTPConfig and SMTPStatusHandler so both fall back identically.
+func resolveSMTPEncryption(ctx context.Context, pool *db.Pool) (string, error) {
+	encryption, exists, err := pool.GetSetting(ctx, smtpEncryptionSettingKey)
+	if err != nil {
+		return "", err
+	}
+	if exists && encryption != "" {
+		return encryption, nil
+	}
+	legacy, _, err := pool.GetSetting(ctx, smtpUseTLSSettingKeyLegacy)
+	if err != nil {
+		return "", err
+	}
+	if legacy == "true" {
+		return SMTPEncryptionSTARTTLS, nil
+	}
+	return SMTPEncryptionNone, nil
 }
 
 // SMTPStatusHandler reports whether SMTP has been configured, and if so,
@@ -194,7 +242,7 @@ func SMTPStatusHandler(pool *db.Pool) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		useTLSStr, _, err := pool.GetSetting(ctx, smtpUseTLSSettingKey)
+		encryption, err := resolveSMTPEncryption(ctx, pool)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -206,7 +254,7 @@ func SMTPStatusHandler(pool *db.Pool) http.HandlerFunc {
 			Port:        port,
 			Username:    username,
 			FromAddress: fromAddress,
-			UseTLS:      useTLSStr == "true",
+			Encryption:  encryption,
 		})
 	}
 }
@@ -231,9 +279,23 @@ func SMTPConfigureHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 		req.Host = strings.TrimSpace(req.Host)
 		req.Username = strings.TrimSpace(req.Username)
 		req.FromAddress = strings.TrimSpace(req.FromAddress)
+		req.Encryption = strings.TrimSpace(req.Encryption)
 
 		if req.Host == "" || req.Port <= 0 || req.FromAddress == "" {
 			http.Error(w, "host, port, and from_address are all required", http.StatusBadRequest)
+			return
+		}
+
+		// Empty defaults to STARTTLS (see SMTPConfigRequest's doc comment);
+		// anything else has to be one of the three known modes.
+		if req.Encryption == "" {
+			req.Encryption = SMTPEncryptionSTARTTLS
+		}
+		switch req.Encryption {
+		case SMTPEncryptionNone, SMTPEncryptionSTARTTLS, SMTPEncryptionTLS:
+			// ok
+		default:
+			http.Error(w, fmt.Sprintf("encryption must be one of %q, %q, %q", SMTPEncryptionNone, SMTPEncryptionSTARTTLS, SMTPEncryptionTLS), http.StatusBadRequest)
 			return
 		}
 
@@ -254,13 +316,22 @@ func SMTPConfigureHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 			smtpUsernameSettingKey:    req.Username,
 			smtpPasswordSettingKey:    encryptedPassword,
 			smtpFromAddressSettingKey: req.FromAddress,
-			smtpUseTLSSettingKey:      strconv.FormatBool(req.UseTLS),
+			smtpEncryptionSettingKey:  req.Encryption,
 		}
 		for key, value := range settings {
 			if err := pool.SetSetting(ctx, key, value); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
+		}
+		// The legacy boolean is never written again, but actively cleared
+		// here so a later edit through this same handler does not leave a
+		// stale, now-contradicting value behind for resolveSMTPEncryption
+		// to fall back to (it only matters if smtpEncryptionSettingKey is
+		// ever deleted independently, but cheap to keep both in sync).
+		if err := pool.DeleteSetting(ctx, smtpUseTLSSettingKeyLegacy); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
 
 		writeJSON(w, http.StatusOK, SMTPStatusResponse{
@@ -269,7 +340,7 @@ func SMTPConfigureHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 			Port:        req.Port,
 			Username:    req.Username,
 			FromAddress: req.FromAddress,
-			UseTLS:      req.UseTLS,
+			Encryption:  req.Encryption,
 		})
 	}
 }
@@ -295,7 +366,8 @@ func SMTPDeleteHandler(pool *db.Pool) http.HandlerFunc {
 			smtpUsernameSettingKey,
 			smtpPasswordSettingKey,
 			smtpFromAddressSettingKey,
-			smtpUseTLSSettingKey,
+			smtpEncryptionSettingKey,
+			smtpUseTLSSettingKeyLegacy,
 		} {
 			if err := pool.DeleteSetting(ctx, key); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)

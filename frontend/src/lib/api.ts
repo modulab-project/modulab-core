@@ -269,7 +269,9 @@ export interface SMTPStatus {
   port?: number;
   username?: string;
   from_address?: string;
-  use_tls?: boolean;
+  // One of "none" | "starttls" | "tls" - mirrors
+  // backend/internal/setup.SMTPEncryptionNone/STARTTLS/TLS exactly.
+  encryption?: string;
 }
 
 // Body of POST /v1/admin/smtp/configure - mirrors
@@ -284,7 +286,9 @@ export interface SMTPConfigRequest {
   username: string;
   password: string;
   from_address: string;
-  use_tls: boolean;
+  // One of "none" | "starttls" | "tls" - empty defaults server-side to
+  // "starttls" (see SMTPConfigRequest's Go doc comment).
+  encryption: string;
 }
 
 // GET /v1/admin/smtp/status - super-admin only (enforced server-side by
