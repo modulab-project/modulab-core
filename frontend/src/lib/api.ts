@@ -122,6 +122,7 @@ export function loginRedirectUrl(): string {
 export interface HealthResponse {
   status: string;
   version: string;
+  uptime_seconds: number;
   postgres_reachable: boolean;
   valkey_reachable: boolean;
   master_key_present: boolean;
@@ -133,4 +134,111 @@ export interface HealthResponse {
 // rather than a dedicated authenticated endpoint.
 export function getHealth(): Promise<HealthResponse> {
   return request<HealthResponse>("/healthz");
+}
+
+// Mirrors backend/internal/auth.MeResponse's JSON shape exactly (the
+// embedded Session's UserID/Email/EmailVerified/Name/Picture/Role/Locked
+// fields plus the sibling AccountSettingsURL, all with those exact json
+// tags) - keep both in sync. Name and Picture come from the OIDC "profile"
+// claims at login time and are optional by nature (PocketID or any other
+// IdP may have neither set) - callers must treat "" as "not available",
+// never as an error. AccountSettingsURL is computed fresh per-request by
+// the backend (not stored on the session) and is "" if OIDC's issuer URL
+// could not be resolved - same "not available" treatment applies. locked
+// is only ever present (and true) alongside role === "pending" - it
+// distinguishes "an admin revoked your access" from the far more common
+// "never approved yet" case; absent (undefined) for every other session.
+export interface Session {
+  user_id: string;
+  email: string;
+  email_verified: boolean;
+  name: string;
+  picture: string;
+  role: string;
+  account_settings_url?: string;
+  locked?: boolean;
+}
+
+function bearerHeaders(token: string): HeadersInit {
+  return { Authorization: `Bearer ${token}` };
+}
+
+// GET /v1/auth/me - the one endpoint every page that needs to know "who is
+// this and what role do they have" calls, whether that's to render a
+// dashboard or just to decide whether to bounce to /pending or /login.
+export function getMe(token: string): Promise<Session> {
+  return request<Session>("/v1/auth/me", { headers: bearerHeaders(token) });
+}
+
+// POST /v1/auth/logout - invalidates the token server-side immediately.
+// Callers should clear the locally stored token (lib/session.ts) regardless
+// of whether this call succeeds; a token that is already invalid (expired,
+// already logged out elsewhere) still needs to fail closed on the client.
+export function logoutRequest(token: string): Promise<void> {
+  return request<void>("/v1/auth/logout", { method: "POST", headers: bearerHeaders(token) });
+}
+
+// Mirrors backend/internal/auth.UserResponse's JSON shape exactly. One
+// entry per user row, covering all three states an admin can act on:
+// Approved === false -> "Pending" (Approve button); Approved && Locked ->
+// "Locked" (Unlock + Delete); Approved && !Locked -> "Active" (Lock +
+// Delete). Role reflects what they're already correctly a member of in
+// the IdP, not anything approval/lock/delete would change.
+export interface AdminUser {
+  subject: string;
+  email: string;
+  name: string;
+  role: string;
+  approved: boolean;
+  locked: boolean;
+  created_at: string;
+}
+
+// GET /v1/admin/users - every user, org-admin/super-admin only (enforced
+// server-side by requireAdmin in backend/internal/auth/admin.go; a
+// non-admin caller gets a 403, surfaced here as an ApiError).
+export function listUsers(token: string): Promise<AdminUser[]> {
+  return request<AdminUser[]>("/v1/admin/users", { headers: bearerHeaders(token) });
+}
+
+// POST /v1/admin/users/{subject}/approve - flips that user's approved flag
+// to true. Takes effect on their *next* login, not retroactively - see
+// ApproveUserHandler's doc comment in admin.go for why.
+export function approveUser(token: string, subject: string): Promise<void> {
+  return request<void>(`/v1/admin/users/${encodeURIComponent(subject)}/approve`, {
+    method: "POST",
+    headers: bearerHeaders(token),
+  });
+}
+
+// POST /v1/admin/users/{subject}/lock - revokes an already-approved user's
+// access without forgetting who they are. The backend refuses this for
+// your own account or the last remaining super-admin (400) - surfaced here
+// as an ApiError with that message in .message.
+export function lockUser(token: string, subject: string): Promise<void> {
+  return request<void>(`/v1/admin/users/${encodeURIComponent(subject)}/lock`, {
+    method: "POST",
+    headers: bearerHeaders(token),
+  });
+}
+
+// POST /v1/admin/users/{subject}/unlock - restores access for a locked
+// user. No self/last-super-admin restriction (unlocking can't strand the
+// instance the way locking or deleting could).
+export function unlockUser(token: string, subject: string): Promise<void> {
+  return request<void>(`/v1/admin/users/${encodeURIComponent(subject)}/unlock`, {
+    method: "POST",
+    headers: bearerHeaders(token),
+  });
+}
+
+// DELETE /v1/admin/users/{subject} - forgets the user row entirely. Same
+// self/last-super-admin guard as lockUser. If this person logs in again
+// later, they are JIT-provisioned as a brand-new pending user, exactly as
+// if they had never logged in before.
+export function deleteUser(token: string, subject: string): Promise<void> {
+  return request<void>(`/v1/admin/users/${encodeURIComponent(subject)}`, {
+    method: "DELETE",
+    headers: bearerHeaders(token),
+  });
 }

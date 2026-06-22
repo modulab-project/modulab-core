@@ -3,7 +3,36 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ModuLab Core – Setup</title>
+    <title>ModuLab Core</title>
+    <!-- Applies the "dark" class before React mounts (and before first
+         paint), reading the same localStorage key Home.tsx writes to
+         (THEME_KEY = "modulab_theme"). Without this, /login, /setup and
+         /pending - which never run Home.tsx's own theme effect - would
+         flash light mode for a frame on every load whenever the user has
+         dark mode on, then snap to dark once React mounts. Wrapped in
+         try/catch because localStorage can throw in locked-down contexts
+         (e.g. some private browsing modes) and a theme flash is not worth
+         a blank page over. -->
+    <script>
+      (function () {
+        try {
+          if (localStorage.getItem("modulab_theme") === "dark") {
+            document.documentElement.classList.add("dark");
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 130 120'%3E%3Cpolygon points='35,8 64,24 64,57 35,73 6,57 6,24' fill='%231f2d3d'/%3E%3Cpolygon points='65,40 94,56 94,89 65,105 36,89 36,56' fill='%230084a8'/%3E%3Cpath d='M57,58 L73,58 L73,70 C73,76 65,80 65,80 C65,80 57,76 57,70 Z' fill='none' stroke='%23ffffff' stroke-width='2' stroke-linejoin='round'/%3E%3Cpath d='M65,74 L65,63 M61,67 L65,63 L69,67' fill='none' stroke='%23ffffff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+    <!-- Used only by Home.tsx's header/profile-panel icons. Loaded globally
+         here rather than per-component since it is a single small
+         stylesheet, not a JS bundle - see dashboard-demo/index.html for
+         where this exact version was already verified to load correctly
+         (an earlier 2.47.0/iconfont/ path silently 404'd; this one does
+         not). -->
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/3.35.0/tabler-icons-outline.min.css"
+    />
   </head>
   <body>
     <div id="root"></div>

@@ -1,34 +1,24 @@
-import { useEffect, useState } from "react";
-import { getHealth } from "../lib/api";
-
 const PROJECT_URL = "https://modulab.app";
 const GITHUB_URL = "https://github.com/modulab-project/modulab-core";
 
-// Reads the running backend's version from /healthz on mount rather than
-// hardcoding it here - the frontend and backend are built independently and
-// can drift, so this always shows what's actually running, not what was
-// true when this file was last edited. Failure is silent (just omits the
-// version) since a footer is not worth showing an error state for.
+// No longer shows the running backend version (dropped 2026-06-21 on user
+// request) - it used to fetch /healthz just for this, which also meant a
+// network round trip on every auth-flow page just to render a footer.
+// version.go / the /healthz field themselves are untouched - the system
+// status panel on the real Home.tsx page is still the place to check the
+// running version.
 export default function Footer() {
-  const [version, setVersion] = useState<string | null>(null);
-
-  useEffect(() => {
-    getHealth()
-      .then((health) => setVersion(health.version))
-      .catch(() => setVersion(null));
-  }, []);
-
   const year = new Date().getFullYear();
 
   return (
-    <footer className="mx-auto max-w-xl px-4 py-6 text-center text-xs text-gray-400">
+    <footer className="mx-auto max-w-xl px-4 py-6 text-center text-xs text-gray-400 dark:text-gray-500">
       <p>
-        © {year} ModuLab{version ? ` · ${version}` : ""} ·{" "}
-        <a href={PROJECT_URL} className="hover:text-gray-600">
+        © {year} ModuLab ·{" "}
+        <a href={PROJECT_URL} className="hover:text-gray-600 dark:hover:text-gray-300">
           modulab.app
         </a>{" "}
         ·{" "}
-        <a href={GITHUB_URL} className="hover:text-gray-600">
+        <a href={GITHUB_URL} className="hover:text-gray-600 dark:hover:text-gray-300">
           GitHub
         </a>
       </p>
