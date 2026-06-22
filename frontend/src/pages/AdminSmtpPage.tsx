@@ -153,10 +153,17 @@ export default function AdminSmtpPage() {
   return (
     <AppShell session={session}>
       <div className="mx-auto w-full max-w-md py-10">
-        <h1 className="mb-1 text-xl font-semibold">SMTP</h1>
+        <div className="mb-1 flex items-center gap-2">
+          <h1 className="text-xl font-semibold">SMTP</h1>
+          {status && (
+            <span className="flex items-center gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+              <span className={`h-2 w-2 rounded-full ${status.configured ? "bg-green-600" : "bg-red-600"}`} />
+              {status.configured ? "Configured" : "Not configured"}
+            </span>
+          )}
+        </div>
         <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">
-          Outbound mail for account notifications (approved, locked, unlocked). Compatible with any
-          self-hosted relay - Postfix, Mailcow, Stalwart, or similar.
+          Outbound mail for account notifications.
         </p>
 
         {status && !status.configured && (

@@ -179,7 +179,7 @@ export function AppShell({ session, children }: { session: Session; children: Re
           onClick={() => setOpenPanel(null)}
         />
       )}
-      <SlidePanel open={openPanel === "profile"} onClose={() => setOpenPanel(null)}>
+      <SlidePanel open={openPanel === "profile"} onClose={() => setOpenPanel(null)} title="Profile">
         <ProfilePanelContent
           session={session}
           isAdmin={isAdmin}
