@@ -12,12 +12,14 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/notify"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
 	"github.com/modulab-project/modulab-core/backend/internal/valkey"
 	"golang.org/x/oauth2"
@@ -258,7 +260,8 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 		// back when this row was first created. name is included so an
 		// admin reviewing approved = false rows in the database can tell
 		// who someone actually is, not just their email address.
-		if err := d.Pool.UpsertUser(ctx, claims.Subject, claims.Email, claims.Name, derivedRole, approved); err != nil {
+		wasNew, err := d.Pool.UpsertUser(ctx, claims.Subject, claims.Email, claims.Name, derivedRole, approved)
+		if err != nil {
 			redirectToFrontend(w, r, target, url.Values{"error": {"server_error"}})
 			return
 		}
@@ -277,6 +280,28 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 			sessionLocked = true
 		case !approved:
 			sessionRole = RolePending
+		}
+
+		// Spec section 3.5's "Neuer Pending-User" notification: fired only
+		// for a genuinely brand-new row landing in pending state (wasNew
+		// && !approved), not on every subsequent login attempt by someone
+		// still waiting on review - see UpsertUser's doc comment on wasNew
+		// for why that distinction needs a row-existence check at all.
+		// Best-effort: a Valkey hiccup here must not turn an otherwise-
+		// successful login into a failed one, so it is logged and ignored,
+		// the same tradeoff LockUserHandler/DeleteUserHandler make for
+		// RevokeUserSessions (admin.go).
+		if wasNew && !approved {
+			if err := notify.Publish(ctx, d.Valkey, notify.AdminChannel(), notify.Event{
+				Type: "user.pending",
+				Data: map[string]string{
+					"subject": claims.Subject,
+					"email":   claims.Email,
+					"name":    claims.Name,
+				},
+			}); err != nil {
+				log.Printf("auth: failed to publish user.pending notification for %s: %v", claims.Subject, err)
+			}
 		}
 
 		token, err := CreateSession(ctx, d.Valkey, Session{

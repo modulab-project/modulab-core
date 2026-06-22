@@ -2,6 +2,8 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { getHealth, logoutRequest, type HealthResponse, type Session } from "../lib/api";
 import { clearSessionToken, getSessionToken } from "../lib/session";
+import { useNotificationEvents, type ServerEvent } from "../lib/useEvents";
+import { useToasts, ToastStack } from "./Toast";
 import { Logo } from "./AuthShell";
 import packageJson from "../../package.json";
 
@@ -64,6 +66,27 @@ export function AppShell({ session, children }: { session: Session; children: Re
 
   const isAdmin = isAdminRole(session.role);
 
+  // Spec section 3.5's real-time notifications: every authenticated page
+  // using AppShell gets one SSE connection (lib/useEvents.ts), but only
+  // org-admin/super-admin sessions ever actually receive anything on
+  // it today - "user.pending" is published exclusively to
+  // notify.AdminChannel() (backend/internal/auth/handlers.go), so a plain
+  // "user" session's connection just sits idle, costing one open
+  // connection for symmetry/future events rather than anything it
+  // currently uses.
+  const { toasts, push } = useToasts();
+  useNotificationEvents(getSessionToken(), (event: ServerEvent) => {
+    if (event.type === "user.pending" && isAdmin) {
+      const data = (event.data ?? {}) as { email?: string; name?: string };
+      const who = data.name?.trim() || data.email || "Someone";
+      push({
+        message: `${who} is waiting for approval.`,
+        actionLabel: "Review",
+        onAction: () => navigate("/admin/users"),
+      });
+    }
+  });
+
   return (
     <div className="flex h-screen flex-col bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100">
       <Header session={session} openPanel={openPanel} setOpenPanel={setOpenPanel} />
@@ -71,6 +94,7 @@ export function AppShell({ session, children }: { session: Session; children: Re
       <main className="flex-1 overflow-y-auto px-3 sm:px-6">{children}</main>
 
       <FooterBar isAdmin={isAdmin} health={health} openPanel={openPanel} setOpenPanel={setOpenPanel} />
+      <ToastStack toasts={toasts} />
 
       {openPanel && (
         <div
@@ -260,6 +284,14 @@ function ProfilePanelContent({
           >
             <i className="ti ti-users text-[15px] text-gray-500" /> Users
           </Link>
+          {session.role === "super-admin" && (
+            <Link
+              to="/admin/smtp"
+              className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
+            >
+              <i className="ti ti-mail text-[15px] text-gray-500" /> SMTP
+            </Link>
+          )}
         </>
       )}
       <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />

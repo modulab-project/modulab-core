@@ -7,6 +7,7 @@ import Pending from "./pages/Pending";
 import Home from "./pages/Home";
 import ProfilePage from "./pages/ProfilePage";
 import AdminUsersPage from "./pages/AdminUsersPage";
+import AdminSmtpPage from "./pages/AdminSmtpPage";
 import Footer from "./components/Footer";
 
 // Two different page shapes share this router:
@@ -33,6 +34,7 @@ export default function App() {
       {/* Like Home, owns its own full-viewport header - no WithFooter here. */}
       <Route path="/profile" element={<ProfilePage />} />
       <Route path="/admin/users" element={<AdminUsersPage />} />
+      <Route path="/admin/smtp" element={<AdminSmtpPage />} />
       <Route
         path="/setup"
         element={

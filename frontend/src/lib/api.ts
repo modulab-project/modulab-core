@@ -175,6 +175,16 @@ export function getMe(token: string): Promise<Session> {
   return request<Session>("/v1/auth/me", { headers: bearerHeaders(token) });
 }
 
+// eventsUrl builds the GET /v1/events URL (backend/internal/auth/
+// events.go) for token. Not a fetch()-based call like everything else in
+// this file - the caller opens this directly as `new EventSource(...)`
+// (see lib/useEvents.ts) - which is also why token travels as a query
+// parameter instead of going through bearerHeaders() below: EventSource
+// cannot set custom request headers at all.
+export function eventsUrl(token: string): string {
+  return `${API_BASE_URL}/v1/events?token=${encodeURIComponent(token)}`;
+}
+
 // POST /v1/auth/logout - invalidates the token server-side immediately.
 // Callers should clear the locally stored token (lib/session.ts) regardless
 // of whether this call succeeds; a token that is already invalid (expired,
@@ -246,4 +256,60 @@ export function deleteUser(token: string, subject: string): Promise<void> {
     method: "DELETE",
     headers: bearerHeaders(token),
   });
+}
+
+// Mirrors backend/internal/setup.SMTPStatusResponse's JSON shape exactly.
+// password is never part of this type at all (mirroring how
+// OIDCStatusResponse never carries the OIDC client secret either) - there
+// is no "show the current password" affordance anywhere in the admin UI,
+// only "set a new one".
+export interface SMTPStatus {
+  configured: boolean;
+  host?: string;
+  port?: number;
+  username?: string;
+  from_address?: string;
+  use_tls?: boolean;
+}
+
+// Body of POST /v1/admin/smtp/configure - mirrors
+// backend/internal/setup.SMTPConfigRequest. password may be sent empty to
+// mean "unauthenticated relay", same as the backend's own treatment (see
+// that struct's doc comment) - it is never "leave the existing password
+// unchanged", since the backend has no way to tell those two cases apart
+// once a password is already encrypted at rest.
+export interface SMTPConfigRequest {
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  from_address: string;
+  use_tls: boolean;
+}
+
+// GET /v1/admin/smtp/status - super-admin only (enforced server-side by
+// auth.RequireSuperAdminMiddleware; an org-admin or below gets a 403,
+// surfaced here as an ApiError).
+export function smtpStatus(token: string): Promise<SMTPStatus> {
+  return request<SMTPStatus>("/v1/admin/smtp/status", { headers: bearerHeaders(token) });
+}
+
+// POST /v1/admin/smtp/configure - super-admin only, same gate as
+// smtpStatus above.
+export function configureSmtp(token: string, body: SMTPConfigRequest): Promise<SMTPStatus> {
+  return request<SMTPStatus>("/v1/admin/smtp/configure", {
+    method: "POST",
+    headers: bearerHeaders(token),
+    body: JSON.stringify(body),
+  });
+}
+
+// DELETE /v1/admin/smtp - clears the configuration entirely (all fields,
+// including the encrypted password), returning the instance to "not
+// configured" - same gate as smtpStatus/configureSmtp above. Distinct
+// from configureSmtp with empty fields: that would still write an empty
+// host/from_address and get rejected as invalid, this actually removes
+// the underlying settings rows.
+export function deleteSmtpConfig(token: string): Promise<void> {
+  return request<void>("/v1/admin/smtp", { method: "DELETE", headers: bearerHeaders(token) });
 }

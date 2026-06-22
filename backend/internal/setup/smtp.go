@@ -1,0 +1,307 @@
+// This file implements SMTP configuration for spec section 3.5's
+// Mail-Queue ("SMTP-Konfiguration im Admin-Panel. Kompatibel mit
+// self-hosted Lösungen (Postfix, Mailcow, Stalwart) – kein externer
+// Mail-Service erforderlich."). Unlike OIDC/DNS-challenge (oidc.go,
+// dnschallenge.go), this is deliberately NOT part of the Setup Wizard's
+// fixed 6-step sequence or its bootstrap-token gate: the spec places it in
+// the ongoing Admin Panel, not first-run setup, since a fresh install is
+// perfectly usable without outbound mail (SSE notifications alone already
+// cover the same events in real time for anyone currently connected - see
+// internal/notify). main.go wires this behind a super-admin session check
+// instead of bootstrap.Manager's middleware.
+//
+// Same encrypted-at-rest treatment as the OIDC client secret and
+// DNS-challenge credentials: the password is the one field spec section
+// 2.4's data-category table would classify 🔴 Kritisch (OAuth-Secrets/
+// API-Tokens tier, Class B/AES-GCM), so it goes through crypto.Encrypt
+// before ever reaching core_settings, exactly like oidc.go's ClientSecret.
+//
+// Host/Port/Username/FromAddress are stored as plain TEXT, same as
+// oidc.go's IssuerURL/ClientID and dnschallenge.go's Provider - none of
+// this codebase's existing settings follow section 2.4's full "encrypt
+// everything" principle (which calls for Class A/SIV on Username too, and
+// Class B/GCM on everything else down to 🟡 Standard) - only the small set
+// of fields explicitly called out as 🔴 Kritisch secrets are encrypted
+// anywhere in this codebase today. Implementing the full two-class
+// (SIV/GCM) ORM-level encryption layer section 2.4 describes is a
+// pre-existing gap across the whole project (the `users` table's
+// email/name columns are equally unencrypted), not something specific to
+// SMTP - tracked as a follow-up rather than solved piecemeal here.
+package setup
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/modulab-project/modulab-core/backend/internal/crypto"
+	"github.com/modulab-project/modulab-core/backend/internal/db"
+)
+
+const (
+	smtpHostSettingKey        = "smtp_host"
+	smtpPortSettingKey        = "smtp_port"
+	smtpUsernameSettingKey    = "smtp_username"
+	smtpPasswordSettingKey    = "smtp_password_enc"
+	smtpFromAddressSettingKey = "smtp_from_address"
+	smtpUseTLSSettingKey      = "smtp_use_tls"
+)
+
+// SMTPConfigRequest is the body of POST /v1/admin/smtp/configure.
+// Username/Password may both be empty for a relay that allows
+// unauthenticated submission from Core's own network (common for a
+// same-LAN Postfix/Mailcow instance) - unlike OIDC's ClientSecret, an
+// empty password is not rejected as a missing required field.
+type SMTPConfigRequest struct {
+	Host        string `json:"host"`
+	Port        int    `json:"port"`
+	Username    string `json:"username"`
+	Password    string `json:"password"`
+	FromAddress string `json:"from_address"`
+	UseTLS      bool   `json:"use_tls"`
+}
+
+// SMTPStatusResponse reports the non-secret half of the configuration.
+// Password is never included, mirroring OIDCStatusResponse's treatment of
+// the client secret - Username is shown (an admin needs to recognize
+// which account this is, the same way OIDCStatusResponse shows ClientID
+// but not ClientSecret).
+type SMTPStatusResponse struct {
+	Configured  bool   `json:"configured"`
+	Host        string `json:"host,omitempty"`
+	Port        int    `json:"port,omitempty"`
+	Username    string `json:"username,omitempty"`
+	FromAddress string `json:"from_address,omitempty"`
+	UseTLS      bool   `json:"use_tls,omitempty"`
+}
+
+// SMTPRuntimeConfig is the fully resolved SMTP configuration the mail
+// worker (internal/mail) needs to actually send a message. Like
+// OIDCRuntimeConfig, never serialized to an HTTP response - Password has
+// already been decrypted, so callers must not log it.
+type SMTPRuntimeConfig struct {
+	Host        string
+	Port        int
+	Username    string
+	Password    string
+	FromAddress string
+	UseTLS      bool
+}
+
+// SMTPConfigured reports whether SMTP has already been configured. Used
+// by the mail worker to decide whether there is anything to do at all -
+// an instance that never configured SMTP simply leaves queued mail
+// unsent rather than erroring, see internal/mail's worker loop.
+func SMTPConfigured(ctx context.Context, pool *db.Pool) (bool, error) {
+	_, exists, err := pool.GetSetting(ctx, smtpHostSettingKey)
+	if err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
+// ResolveSMTPConfig returns the effective SMTP configuration as persisted
+// by /v1/admin/smtp/configure, with Password decrypted using masterKey.
+// Re-resolved on every send attempt by the mail worker (not cached), so a
+// configuration change in the admin panel takes effect on the very next
+// queued message without a Core restart - same pattern as
+// ResolveOIDCConfig.
+func ResolveSMTPConfig(ctx context.Context, pool *db.Pool, masterKey string) (SMTPRuntimeConfig, error) {
+	host, exists, err := pool.GetSetting(ctx, smtpHostSettingKey)
+	if err != nil {
+		return SMTPRuntimeConfig{}, err
+	}
+	if !exists {
+		return SMTPRuntimeConfig{}, fmt.Errorf("setup: smtp has not been configured yet (call /v1/admin/smtp/configure first)")
+	}
+	portStr, _, err := pool.GetSetting(ctx, smtpPortSettingKey)
+	if err != nil {
+		return SMTPRuntimeConfig{}, err
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return SMTPRuntimeConfig{}, fmt.Errorf("setup: stored smtp port %q is not a number: %w", portStr, err)
+	}
+	username, _, err := pool.GetSetting(ctx, smtpUsernameSettingKey)
+	if err != nil {
+		return SMTPRuntimeConfig{}, err
+	}
+	fromAddress, _, err := pool.GetSetting(ctx, smtpFromAddressSettingKey)
+	if err != nil {
+		return SMTPRuntimeConfig{}, err
+	}
+	useTLSStr, _, err := pool.GetSetting(ctx, smtpUseTLSSettingKey)
+	if err != nil {
+		return SMTPRuntimeConfig{}, err
+	}
+
+	var password string
+	if encryptedPassword, exists, err := pool.GetSetting(ctx, smtpPasswordSettingKey); err != nil {
+		return SMTPRuntimeConfig{}, err
+	} else if exists && encryptedPassword != "" {
+		// Decrypting an empty string back to an empty string would still
+		// work, but skipped anyway - an unauthenticated relay (see
+		// SMTPConfigRequest's doc comment) never had anything encrypted
+		// for it in the first place, so there is nothing to decrypt.
+		password, err = crypto.Decrypt(masterKey, encryptedPassword)
+		if err != nil {
+			return SMTPRuntimeConfig{}, fmt.Errorf("setup: decrypt smtp password: %w", err)
+		}
+	}
+
+	return SMTPRuntimeConfig{
+		Host:        host,
+		Port:        port,
+		Username:    username,
+		Password:    password,
+		FromAddress: fromAddress,
+		UseTLS:      useTLSStr == "true",
+	}, nil
+}
+
+// SMTPStatusHandler reports whether SMTP has been configured, and if so,
+// every field except the password.
+func SMTPStatusHandler(pool *db.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
+		host, exists, err := pool.GetSetting(ctx, smtpHostSettingKey)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if !exists {
+			writeJSON(w, http.StatusOK, SMTPStatusResponse{Configured: false})
+			return
+		}
+
+		portStr, _, err := pool.GetSetting(ctx, smtpPortSettingKey)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		port, _ := strconv.Atoi(portStr)
+		username, _, err := pool.GetSetting(ctx, smtpUsernameSettingKey)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		fromAddress, _, err := pool.GetSetting(ctx, smtpFromAddressSettingKey)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		useTLSStr, _, err := pool.GetSetting(ctx, smtpUseTLSSettingKey)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, SMTPStatusResponse{
+			Configured:  true,
+			Host:        host,
+			Port:        port,
+			Username:    username,
+			FromAddress: fromAddress,
+			UseTLS:      useTLSStr == "true",
+		})
+	}
+}
+
+// SMTPConfigureHandler validates and persists the SMTP configuration.
+// masterKey must already be resolved (see ResolveMasterKey) - Password is
+// encrypted with it before ever touching the database, unless empty (see
+// SMTPConfigRequest's doc comment on unauthenticated relays).
+func SMTPConfigureHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req SMTPConfigRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		req.Host = strings.TrimSpace(req.Host)
+		req.Username = strings.TrimSpace(req.Username)
+		req.FromAddress = strings.TrimSpace(req.FromAddress)
+
+		if req.Host == "" || req.Port <= 0 || req.FromAddress == "" {
+			http.Error(w, "host, port, and from_address are all required", http.StatusBadRequest)
+			return
+		}
+
+		encryptedPassword := ""
+		if req.Password != "" {
+			var err error
+			encryptedPassword, err = crypto.Encrypt(masterKey, req.Password)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		ctx := r.Context()
+		settings := map[string]string{
+			smtpHostSettingKey:        req.Host,
+			smtpPortSettingKey:        strconv.Itoa(req.Port),
+			smtpUsernameSettingKey:    req.Username,
+			smtpPasswordSettingKey:    encryptedPassword,
+			smtpFromAddressSettingKey: req.FromAddress,
+			smtpUseTLSSettingKey:      strconv.FormatBool(req.UseTLS),
+		}
+		for key, value := range settings {
+			if err := pool.SetSetting(ctx, key, value); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		writeJSON(w, http.StatusOK, SMTPStatusResponse{
+			Configured:  true,
+			Host:        req.Host,
+			Port:        req.Port,
+			Username:    req.Username,
+			FromAddress: req.FromAddress,
+			UseTLS:      req.UseTLS,
+		})
+	}
+}
+
+// SMTPDeleteHandler clears the SMTP configuration entirely (all six
+// settings keys), returning the instance to "not configured" - the
+// counterpart to SMTPConfigureHandler an admin needs to actually remove a
+// relay rather than only ever being able to overwrite it with different
+// values. After this, SMTPConfigured reports false again and
+// ResolveSMTPConfig fails the same "has not been configured yet" way it
+// does on a fresh install, so mail.RunWorker's existing "not configured"
+// handling (log and drop) applies without any further changes there.
+func SMTPDeleteHandler(pool *db.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		ctx := r.Context()
+		for _, key := range []string{
+			smtpHostSettingKey,
+			smtpPortSettingKey,
+			smtpUsernameSettingKey,
+			smtpPasswordSettingKey,
+			smtpFromAddressSettingKey,
+			smtpUseTLSSettingKey,
+		} {
+			if err := pool.DeleteSetting(ctx, key); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}

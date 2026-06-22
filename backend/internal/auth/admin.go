@@ -12,6 +12,9 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/modulab-project/modulab-core/backend/internal/mail"
+	"github.com/modulab-project/modulab-core/backend/internal/notify"
 )
 
 // logRevokeError logs a failed RevokeUserSessions call. Pulled out to one
@@ -19,6 +22,40 @@ import (
 // treat it the same way - log and continue, see the call sites for why.
 func logRevokeError(action, subject string, err error) {
 	log.Printf("auth: %s: failed to revoke active sessions for %s: %v", action, subject, err)
+}
+
+// logNotifyError logs a failed notify.Publish call - same "log and
+// continue" treatment as logRevokeError, and for the same reason: the
+// admin action this is attached to already succeeded and is the source of
+// truth, so a missed real-time notification should not surface as an
+// error the admin has to do anything about.
+func logNotifyError(action, subject string, err error) {
+	log.Printf("auth: %s: failed to publish notification for %s: %v", action, subject, err)
+}
+
+// enqueueMail looks up subject's email and queues build(email) for
+// delivery - the extension beyond spec section 3.5's own Mail-Queue table
+// described in notify.go and mail/templates.go's doc comments: an
+// approve/lock/unlock action also reaches a user who is not currently
+// connected to /v1/events. Same best-effort treatment as
+// logRevokeError/logNotifyError throughout this file: called only after
+// the admin action itself already succeeded, so any failure here (no such
+// user - should not happen, this is always called right after a
+// successful DB write for the same subject; no email on file; SMTP not
+// configured; Valkey hiccup) is logged and swallowed rather than turning
+// a successful admin action into a 500.
+func enqueueMail(ctx context.Context, d Deps, action, subject string, build func(email string) mail.Message) {
+	user, exists, err := d.Pool.GetUser(ctx, subject)
+	if err != nil {
+		log.Printf("auth: %s: failed to look up email for %s: %v", action, subject, err)
+		return
+	}
+	if !exists || user.Email == "" {
+		return
+	}
+	if err := mail.Enqueue(ctx, d.Valkey, build(user.Email)); err != nil {
+		log.Printf("auth: %s: failed to enqueue mail for %s: %v", action, subject, err)
+	}
 }
 
 // requireAdmin validates the request's Bearer token and confirms the
@@ -51,6 +88,31 @@ func requireAdmin(d Deps, w http.ResponseWriter, r *http.Request) (Session, bool
 		return Session{}, false
 	}
 	return sess, true
+}
+
+// RequireSuperAdminMiddleware behaves like requireAdmin (above) but as
+// reusable net/http middleware for routes that live outside this file's
+// own handlers and need the stricter super-admin-only gate - today, only
+// SMTP configuration (main.go wires setup.SMTPStatusHandler/
+// SMTPConfigureHandler through this), matching the "Vollzugriff auf
+// Systemebene: Infrastruktur, OIDC-Konfiguration" framing spec section
+// 3.3's role table gives Super-Admin: SMTP credentials are exactly that
+// kind of system-level infrastructure config, not something an org-admin
+// (who only manages users day to day) needs to touch.
+func RequireSuperAdminMiddleware(d Deps) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			sess, ok := requireAdmin(d, w, r)
+			if !ok {
+				return
+			}
+			if sess.Role != RoleSuperAdmin {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // guardAgainstSelfOrLastSuperAdmin blocks an admin action (lock or delete)
@@ -131,7 +193,11 @@ func UsersHandler(d Deps) http.HandlerFunc {
 // be holding - CallbackHandler bakes the role into a session once at login
 // and never revisits it (see role.go's doc comment on RolePending), so an
 // already-issued pending session stays pending until they sign out and
-// back in.
+// back in. The spec section 3.5 "user.approved" notification fires
+// immediately regardless: it tells whoever is sitting on /pending right
+// now (useAuthenticatedSession's poll would also eventually notice, but
+// up to POLL_INTERVAL_MS late) that they are free to sign out and back in
+// to pick up their new role.
 func ApproveUserHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := requireAdmin(d, w, r); !ok {
@@ -151,6 +217,16 @@ func ApproveUserHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "no such user", http.StatusNotFound)
 			return
 		}
+		// Best-effort, same reasoning as LockUserHandler's
+		// RevokeUserSessions call below: the approval itself already
+		// succeeded and is the source of truth, so a Valkey hiccup here
+		// should not turn it into a 500 the admin has to retry.
+		if err := notify.Publish(r.Context(), d.Valkey, notify.UserChannel(subject), notify.Event{Type: "user.approved"}); err != nil {
+			logNotifyError("approve", subject, err)
+		}
+		enqueueMail(r.Context(), d, "approve", subject, func(email string) mail.Message {
+			return mail.ApprovedMessage(email, d.FrontendBaseURL)
+		})
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -203,6 +279,9 @@ func LockUserHandler(d Deps) http.HandlerFunc {
 		if err := RevokeUserSessions(r.Context(), d.Valkey, subject); err != nil {
 			logRevokeError("lock", subject, err)
 		}
+		enqueueMail(r.Context(), d, "lock", subject, func(email string) mail.Message {
+			return mail.LockedMessage(email)
+		})
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -229,6 +308,9 @@ func UnlockUserHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "no such user", http.StatusNotFound)
 			return
 		}
+		enqueueMail(r.Context(), d, "unlock", subject, func(email string) mail.Message {
+			return mail.UnlockedMessage(email, d.FrontendBaseURL)
+		})
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

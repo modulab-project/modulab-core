@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getMe, logoutRequest } from "../lib/api";
 import { clearSessionToken, getSessionToken } from "../lib/session";
+import { useNotificationEvents, type ServerEvent } from "../lib/useEvents";
 import { AuthShell } from "../components/AuthShell";
 
 // 15s strikes a balance between "feels reasonably live" and not hammering
@@ -30,27 +31,18 @@ export default function Pending() {
   const [email, setEmail] = useState<string | null>(null);
   const [locked, setLocked] = useState(false);
 
-  useEffect(() => {
-    const token = getSessionToken();
-    if (!token) {
-      navigate("/login", { replace: true });
-      return;
-    }
-
-    let cancelled = false;
-
-    // Takes the token as a parameter rather than closing over the outer
-    // `token` directly - TypeScript can't carry the `string | null` ->
-    // `string` narrowing from the guard above across into a separately
-    // declared function (even though `token` is a const and provably
-    // still a string by the time this runs), so it would otherwise widen
-    // back to `string | null` here and fail getMe()'s string parameter.
-    async function check(currentToken: string) {
+  // Pulled out of the polling effect below (as a useCallback, so it has a
+  // stable identity across renders) so the SSE handler further down can
+  // trigger the exact same re-check on demand instead of duplicating it.
+  // Takes the token as an explicit parameter rather than reading
+  // getSessionToken() itself - same TypeScript narrowing limitation every
+  // version of this function has had: a `string | null` read needs to be
+  // confirmed non-null at the call site, it does not stay narrowed if
+  // re-derived inside a separately declared function.
+  const check = useCallback(
+    async (currentToken: string) => {
       try {
         const session = await getMe(currentToken);
-        if (cancelled) {
-          return;
-        }
         setEmail(session.email);
         setLocked(session.locked === true);
         if (session.role !== "pending") {
@@ -61,20 +53,51 @@ export default function Pending() {
         }
       } catch {
         // Expired or otherwise invalid token - fail closed, back to login.
-        if (!cancelled) {
-          clearSessionToken();
-          navigate("/login", { replace: true });
-        }
+        clearSessionToken();
+        navigate("/login", { replace: true });
+      }
+    },
+    [navigate],
+  );
+
+  useEffect(() => {
+    const token = getSessionToken();
+    if (!token) {
+      navigate("/login", { replace: true });
+      return;
+    }
+
+    let cancelled = false;
+    function poll(currentToken: string) {
+      if (!cancelled) {
+        check(currentToken);
       }
     }
 
-    check(token);
-    const id = window.setInterval(() => check(token), POLL_INTERVAL_MS);
+    poll(token);
+    const id = window.setInterval(() => poll(token), POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [navigate]);
+  }, [navigate, check]);
+
+  // Spec section 3.5's "user.approved" event: re-checks the instant it
+  // arrives instead of waiting for the next POLL_INTERVAL_MS tick above -
+  // see backend/internal/auth/events.go's doc comment for why a pending
+  // session is allowed onto this SSE endpoint at all (the one deliberate
+  // exception to "pending sessions only get /v1/auth/me and
+  // /v1/auth/logout", specifically so this event can reach the person it
+  // is about while they are still sitting on this very screen).
+  useNotificationEvents(getSessionToken(), (event: ServerEvent) => {
+    if (event.type !== "user.approved") {
+      return;
+    }
+    const token = getSessionToken();
+    if (token) {
+      check(token);
+    }
+  });
 
   async function handleLogout() {
     const token = getSessionToken();

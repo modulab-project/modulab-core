@@ -24,6 +24,7 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/bootstrap"
 	"github.com/modulab-project/modulab-core/backend/internal/config"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/mail"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
 	"github.com/modulab-project/modulab-core/backend/internal/valkey"
 	"github.com/modulab-project/modulab-core/backend/internal/version"
@@ -221,6 +222,16 @@ func main() {
 	mux.HandleFunc("/v1/auth/me", auth.MeHandler(authDeps))
 	mux.HandleFunc("/v1/auth/logout", auth.LogoutHandler(authDeps))
 
+	// Spec section 3.5's real-time notification stream (internal/notify):
+	// authenticates its own bearer token from a query parameter rather
+	// than the Authorization header every other route uses, since the
+	// browser's EventSource API cannot set custom request headers - see
+	// auth.EventsHandler's doc comment. Not wrapped in requireAdmin or any
+	// other middleware here: EventsHandler does its own session validation
+	// and subscribes to admin-only channels only for sessions whose role
+	// warrants it, the same self-contained shape as /v1/auth/me above.
+	mux.HandleFunc("GET /v1/events", auth.EventsHandler(authDeps))
+
 	// Admin-only user management (internal/auth/admin.go): every handler
 	// here gates on role itself (requireAdmin), so no extra middleware
 	// wrapper is needed, same as the /v1/auth/... routes above. {id} is the
@@ -231,6 +242,39 @@ func main() {
 	mux.HandleFunc("POST /v1/admin/users/{id}/lock", auth.LockUserHandler(authDeps))
 	mux.HandleFunc("POST /v1/admin/users/{id}/unlock", auth.UnlockUserHandler(authDeps))
 	mux.HandleFunc("DELETE /v1/admin/users/{id}", auth.DeleteUserHandler(authDeps))
+
+	// SMTP configuration (spec section 3.5's Mail-Queue) lives in the
+	// ongoing Admin Panel, not the Setup Wizard - see setup/smtp.go's doc
+	// comment for why this is deliberately NOT wrapped in
+	// bootstrapMgr.Middleware the way OIDC/DNS-challenge below are.
+	// Super-admin only (auth.RequireSuperAdminMiddleware), same level as
+	// OIDC configuration. The configure handler resolves the master key
+	// per-request, same reasoning as the OIDC/DNS-challenge configure
+	// handlers above: it can't actually fail in practice (no DB fallback
+	// left to resolve), kept this shape purely for consistency.
+	superAdminOnly := auth.RequireSuperAdminMiddleware(authDeps)
+	mux.Handle("GET /v1/admin/smtp/status", superAdminOnly(setup.SMTPStatusHandler(pool)))
+	mux.Handle("POST /v1/admin/smtp/configure", superAdminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		masterKey, err := setup.ResolveMasterKey(r.Context(), pool, cfg.MasterKey)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusPreconditionFailed)
+			return
+		}
+		setup.SMTPConfigureHandler(pool, masterKey)(w, r)
+	})))
+	mux.Handle("DELETE /v1/admin/smtp", superAdminOnly(setup.SMTPDeleteHandler(pool)))
+
+	// The mail worker (internal/mail) runs for Core's entire lifetime as a
+	// single background goroutine, draining whatever
+	// admin.go's enqueueMail calls push onto the queue - started
+	// unconditionally even before SMTP has ever been configured, since
+	// RunWorker itself handles "not configured yet" per message (logged,
+	// dropped) rather than needing to be told to start later once it is.
+	// No graceful-shutdown plumbing exists anywhere else in main.go yet
+	// (ListenAndServe below just blocks until it errors), so this matches
+	// that same level of simplicity rather than introducing
+	// signal.NotifyContext just for this one goroutine.
+	go mail.RunWorker(ctx, valkeyClient, pool, cfg.MasterKey)
 
 	// The group prefix has no environment fallback anymore (removed
 	// 2026-06-21 alongside OIDC's) - it may legitimately be unconfigured

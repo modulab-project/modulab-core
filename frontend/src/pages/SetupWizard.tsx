@@ -5,12 +5,14 @@ import {
   configureOIDC,
   configureDNSChallenge,
   configureGroupPrefix,
+  configureSmtp,
   completeSetup,
   loginRedirectUrl,
   getHealth,
 } from "../lib/api";
 import { describeAuthError } from "../lib/authErrors";
 import { consumeAuthResult } from "./AuthComplete";
+import { getSessionToken } from "../lib/session";
 import { AuthButton, AuthField, AuthSecondaryButton, AuthShell } from "../components/AuthShell";
 
 // Persisted in sessionStorage, not React state alone, because the
@@ -20,12 +22,12 @@ import { AuthButton, AuthField, AuthSecondaryButton, AuthShell } from "../compon
 const TOKEN_KEY = "modulab_bootstrap_token";
 const STEP_KEY = "modulab_wizard_step";
 
-type StepNumber = 1 | 2 | 3 | 4 | 5 | 6;
+type StepNumber = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 function loadStep(): StepNumber {
   const raw = sessionStorage.getItem(STEP_KEY);
   const n = raw ? Number(raw) : 1;
-  return (n >= 1 && n <= 6 ? n : 1) as StepNumber;
+  return (n >= 1 && n <= 7 ? n : 1) as StepNumber;
 }
 
 function saveStep(step: StepNumber) {
@@ -33,12 +35,23 @@ function saveStep(step: StepNumber) {
 }
 
 // Implements the Setup Wizard (spec section 6.5) against the backend's
-// /v1/setup/* and /v1/auth/* endpoints, in 6 steps rather than the spec's 7:
-// the spec's step 2 ("choose your OIDC provider") was dropped on 2026-06-21
-// because it was purely informational - ModuLab Core talks to every
-// standard OIDC provider identically, so the dropdown changed no behavior
-// at all and just added a click. The wizard now goes straight from the
-// bootstrap token into entering OIDC credentials.
+// /v1/setup/*, /v1/auth/*, and /v1/admin/smtp/* endpoints. 7 steps today,
+// same number as the original spec but for a different reason: the spec's
+// own step 2 ("choose your OIDC provider") was dropped on 2026-06-21 -
+// ModuLab Core talks to every standard OIDC provider identically, so the
+// dropdown changed no behavior at all and just added a click - which took
+// the wizard down to 6 steps for a while, until step 6 below (SMTP) was
+// added back on the user's request, landing back at 7.
+// SMTP is deliberately placed *after* step 5's super-admin login rather
+// than alongside OIDC/DNS-challenge/group-prefix: those three are gated by
+// the bootstrap token (bootstrap.Manager's middleware, no session exists
+// yet), but SMTP configuration lives behind auth.RequireSuperAdminMiddleware
+// (see setup/smtp.go's doc comment on why it is admin-panel-only, not
+// wizard-only) - reusing that same endpoint here, instead of adding a
+// second bootstrap-token-gated copy, needs an actual session token, which
+// only exists once step 5's OIDC login has completed. Skippable - and,
+// unlike DNS-challenge, still fully editable afterwards from /admin/smtp
+// (AdminSmtpPage.tsx) any time, by any super-admin, not just during setup.
 //
 // Deliberately a single file: each step is a small, self-contained form,
 // and splitting them across files would mostly add import boilerplate
@@ -113,7 +126,7 @@ export default function SetupWizard() {
   }
 
   return (
-    <AuthShell title="ModuLab Core – Initial Setup" subtitle={`Step ${step} of 6`}>
+    <AuthShell title="ModuLab Core – Initial Setup" subtitle={`Step ${step} of 7`}>
       {step === 1 && (
         <StepBootstrapToken
           initialValue={bootstrapToken}
@@ -155,7 +168,8 @@ export default function SetupWizard() {
           }}
         />
       )}
-      {step === 6 && <StepComplete bootstrapToken={bootstrapToken} />}
+      {step === 6 && <StepSMTP onDone={() => goTo(7)} />}
+      {step === 7 && <StepComplete bootstrapToken={bootstrapToken} />}
     </AuthShell>
   );
 }
@@ -461,7 +475,112 @@ function StepSuperAdminLogin({
   );
 }
 
-// --- Step 6: completion -----------------------------------------------------
+// --- Step 6: SMTP (optional, skippable) -------------------------------------
+
+// Unlike every earlier step, this one authenticates with the session
+// token from step 5's super-admin login (getSessionToken()), not the
+// bootstrap token - see the top-of-file comment for why. It calls the same
+// configureSmtp() the standalone /admin/smtp page (AdminSmtpPage.tsx)
+// uses, so anything saved or skipped here is just as visible and just as
+// editable from there afterwards - this step has no state of its own
+// beyond what that endpoint already persists.
+function StepSMTP({ onDone }: { onDone: () => void }) {
+  const [host, setHost] = useState("");
+  const [port, setPort] = useState("587");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [fromAddress, setFromAddress] = useState("");
+  const [useTLS, setUseTLS] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    const token = getSessionToken();
+    if (!token) {
+      // Should not happen - step 5 always persists one before advancing
+      // here - but skip ahead rather than get the operator stuck on a
+      // step that cannot possibly succeed without one.
+      onDone();
+      return;
+    }
+    const parsedPort = parseInt(port, 10);
+    if (!host.trim() || !fromAddress.trim() || Number.isNaN(parsedPort) || parsedPort <= 0) {
+      setError("Host, port, and from address are all required - or use Skip below.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await configureSmtp(token, {
+        host: host.trim(),
+        port: parsedPort,
+        username: username.trim(),
+        password,
+        from_address: fromAddress.trim(),
+        use_tls: useTLS,
+      });
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <p className="text-sm text-gray-600 dark:text-gray-400">
+        Optional: outbound mail for account notifications (approved, locked, unlocked). Skip this
+        and set it up later from Admin → SMTP any time, or fill it in now.
+      </p>
+      <AuthField label="Host" id="smtp-host" value={host} onChange={setHost} placeholder="mail.example.com" />
+      <AuthField label="Port" id="smtp-port" value={port} onChange={setPort} />
+      <AuthField
+        label="Username"
+        id="smtp-username"
+        value={username}
+        onChange={setUsername}
+        placeholder="leave empty for an unauthenticated relay"
+      />
+      <AuthField
+        label="Password"
+        id="smtp-password"
+        value={password}
+        onChange={setPassword}
+        type="password"
+      />
+      <AuthField
+        label="From address"
+        id="smtp-from"
+        value={fromAddress}
+        onChange={setFromAddress}
+        type="email"
+        placeholder="modulab@example.com"
+      />
+      <label className="flex items-center gap-2.5 text-sm text-gray-700 dark:text-gray-300">
+        <input
+          type="checkbox"
+          checked={useTLS}
+          onChange={(e) => setUseTLS(e.target.checked)}
+          className="h-4 w-4 rounded border-gray-300 text-teal-600 focus:ring-teal-500 dark:border-gray-700"
+        />
+        Use STARTTLS
+      </label>
+      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+      <div className="flex gap-2">
+        <AuthSecondaryButton onClick={onDone} type="button" disabled={busy} className="flex-1">
+          Skip
+        </AuthSecondaryButton>
+        <AuthButton type="submit" disabled={busy} className="flex-1">
+          {busy ? "Saving…" : "Save & continue"}
+        </AuthButton>
+      </div>
+    </form>
+  );
+}
+
+// --- Step 7: completion -----------------------------------------------------
 
 function StepComplete({ bootstrapToken }: { bootstrapToken: string }) {
   const [busy, setBusy] = useState(false);

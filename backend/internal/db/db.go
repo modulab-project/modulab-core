@@ -137,6 +137,21 @@ func (p *Pool) SetSetting(ctx context.Context, key, value string) error {
 	return nil
 }
 
+// DeleteSetting removes key from core_settings, if present. Unlike
+// SetSetting(key, "") - which would leave the row in place with an empty
+// value, so GetSetting/SMTPConfigured-style "exists" checks would still
+// report it as configured - this is a real delete, used by
+// setup.SMTPDeleteHandler so an admin can clear SMTP configuration back
+// to "not configured" rather than only ever being able to overwrite it
+// with different values.
+func (p *Pool) DeleteSetting(ctx context.Context, key string) error {
+	_, err := p.Exec(ctx, `DELETE FROM core_settings WHERE key = $1`, key)
+	if err != nil {
+		return fmt.Errorf("db: delete setting %q: %w", key, err)
+	}
+	return nil
+}
+
 // UpsertUser inserts a new user row keyed by OIDC subject, or updates the
 // existing one's email, name, role, and last_login_at if the subject was
 // already known. Called once per successful OIDC login (spec section 3.3's
@@ -156,8 +171,28 @@ func (p *Pool) SetSetting(ctx context.Context, key, value string) error {
 // locked (the column's own DEFAULT false covers it), and like approved it
 // must never be reset by a later login either - LockUser/UnlockUser below
 // are the only things that ever change it after creation.
-func (p *Pool) UpsertUser(ctx context.Context, subject, email, name, role string, approved bool) error {
-	_, err := p.Exec(ctx, `
+//
+// wasNew reports whether this call created a brand-new row, as opposed to
+// updating an existing one - CallbackHandler (handlers.go) uses this to
+// decide whether to fire spec section 3.5's "new pending user" admin
+// notification: without it, every subsequent login attempt by a user
+// who is still waiting on approval would re-notify admins, not just their
+// very first one. Determined with a separate existence check rather than a
+// single RETURNING-based trick (e.g. "xmax = 0"), to keep this readable
+// for anyone not already fluent in Postgres's MVCC internals - the
+// existence check and the upsert are not wrapped in an explicit
+// transaction, so there is in principle a race between the two queries
+// under concurrent logins by the same brand-new subject, but the
+// consequence of losing it is "admins get notified about this signup
+// twice", never an incorrect approved/locked value - an acceptable risk
+// for a homelab-scale, single-instance deployment.
+func (p *Pool) UpsertUser(ctx context.Context, subject, email, name, role string, approved bool) (wasNew bool, err error) {
+	var existed bool
+	if err := p.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)`, subject).Scan(&existed); err != nil {
+		return false, fmt.Errorf("db: check existing user %q: %w", subject, err)
+	}
+
+	_, err = p.Exec(ctx, `
 		INSERT INTO users (id, email, name, role, approved, created_at, last_login_at)
 		VALUES ($1, $2, $3, $4, $5, now(), now())
 		ON CONFLICT (id) DO UPDATE SET
@@ -167,9 +202,29 @@ func (p *Pool) UpsertUser(ctx context.Context, subject, email, name, role string
 			last_login_at = now()
 	`, subject, email, name, role, approved)
 	if err != nil {
-		return fmt.Errorf("db: upsert user %q: %w", subject, err)
+		return false, fmt.Errorf("db: upsert user %q: %w", subject, err)
 	}
-	return nil
+	return !existed, nil
+}
+
+// GetUser returns the single user row for subject (exists = false, not an
+// error, if no such row). Added alongside the mail-on-approve/lock/unlock
+// notifications (admin.go) - those need the target's email address, which
+// none of the narrower existing lookups (UserApproved/UserLocked/UserRole)
+// expose; reuses UserRow rather than introducing a second per-user struct.
+func (p *Pool) GetUser(ctx context.Context, subject string) (UserRow, bool, error) {
+	var u UserRow
+	err := p.QueryRow(ctx, `
+		SELECT id, email, name, role, approved, locked, created_at
+		FROM users WHERE id = $1
+	`, subject).Scan(&u.Subject, &u.Email, &u.Name, &u.Role, &u.Approved, &u.Locked, &u.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return UserRow{}, false, nil
+		}
+		return UserRow{}, false, fmt.Errorf("db: get user %q: %w", subject, err)
+	}
+	return u, true, nil
 }
 
 // UserApproved reports whether subject's user row has approved = true. A
@@ -308,11 +363,15 @@ func (p *Pool) ApproveUser(ctx context.Context, subject string) (int64, error) {
 	return tag.RowsAffected(), nil
 }
 
-// LockUser sets locked = true for subject. Same "takes effect on next
-// login, not retroactively" caveat as ApproveUser - a session already
-// issued before this call stays valid until it naturally expires or the
-// person signs out; only their *next* login is forced onto /pending (with
-// Session.Locked = true - see handlers.go's CallbackHandler).
+// LockUser sets locked = true for subject. Unlike ApproveUser, this is not
+// the only thing that needs to happen for the lock to take effect right
+// away: LockUserHandler (admin.go) additionally calls
+// auth.RevokeUserSessions after this succeeds, so a session already
+// issued before this call stops working on its very next request instead
+// of staying valid until it naturally expires. This method itself only
+// ever touches the database row - the immediate-effect part lives
+// entirely in the handler, since this package has no reason to know about
+// Valkey sessions at all.
 func (p *Pool) LockUser(ctx context.Context, subject string) (int64, error) {
 	tag, err := p.Exec(ctx, `UPDATE users SET locked = true WHERE id = $1`, subject)
 	if err != nil {
