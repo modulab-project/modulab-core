@@ -38,8 +38,13 @@ export function useAuthenticatedSession(): { session: Session | null; loading: b
 
     let cancelled = false;
 
-    function check() {
-      getMe(token)
+    // Takes the token as a parameter rather than closing over the outer
+    // `token` directly - same TypeScript narrowing limitation already
+    // documented on Pending.tsx's `check`: the `string | null` -> `string`
+    // guard above doesn't carry across into a separately declared nested
+    // function, so it would otherwise widen back to `string | null` here.
+    function check(currentToken: string) {
+      getMe(currentToken)
         .then((s) => {
           if (cancelled) {
             return;
@@ -66,8 +71,8 @@ export function useAuthenticatedSession(): { session: Session | null; loading: b
         });
     }
 
-    check();
-    const id = window.setInterval(check, POLL_INTERVAL_MS);
+    check(token);
+    const id = window.setInterval(() => check(token), POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
       window.clearInterval(id);
