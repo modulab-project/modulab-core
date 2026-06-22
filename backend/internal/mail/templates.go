@@ -104,7 +104,7 @@ func DeletedMessage(to, name string) Message {
 		To:      to,
 		Subject: "Your ModuLab account has been deleted",
 		Body: fmt.Sprintf(
-			"%s\n\nYour ModuLab account has been deleted and your access has been revoked. If you sign in again later, you will need to be approved again, as if this were your first time.\n\nIf you believe this was a mistake, please contact your administrator.\n%s",
+			"%s\n\nYour ModuLab account has been deleted and your access has been revoked. If you sign in again later, you will need to be approved again, as if this were your first time.\n%s",
 			greeting(name), signature,
 		),
 	}
