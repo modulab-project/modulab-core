@@ -220,6 +220,13 @@ func main() {
 	mux.HandleFunc("/v1/auth/login", auth.LoginHandler(authDeps))
 	mux.HandleFunc("/v1/auth/callback", auth.CallbackHandler(authDeps))
 	mux.HandleFunc("/v1/auth/me", auth.MeHandler(authDeps))
+	// Method-specific pattern alongside the bare "/v1/auth/me" above - Go's
+	// ServeMux treats the two as non-conflicting (the method-specific one
+	// is more specific and wins for DELETE requests; GET/etc. still reach
+	// MeHandler). Self-service account deletion: the counterpart to
+	// /v1/admin/users/{id} below, but for the caller's own account, which
+	// that admin-only route explicitly refuses to touch.
+	mux.HandleFunc("DELETE /v1/auth/me", auth.DeleteSelfHandler(authDeps))
 	mux.HandleFunc("/v1/auth/logout", auth.LogoutHandler(authDeps))
 
 	// Spec section 3.5's real-time notification stream (internal/notify):

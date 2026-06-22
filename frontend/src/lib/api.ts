@@ -193,6 +193,19 @@ export function logoutRequest(token: string): Promise<void> {
   return request<void>("/v1/auth/logout", { method: "POST", headers: bearerHeaders(token) });
 }
 
+// DELETE /v1/auth/me - lets the signed-in user remove their own account
+// entirely, the self-service counterpart to deleteUser below (which is
+// admin-only and explicitly refuses to act on the caller's own account -
+// see backend/internal/auth/admin.go's guardAgainstSelfOrLastSuperAdmin).
+// The backend still refuses this for the last remaining super-admin (400,
+// surfaced here as an ApiError with that message in .message) - someone
+// has to be left who can manage the instance. Callers should clear the
+// locally stored token (lib/session.ts) and navigate away on success, same
+// as logoutRequest above.
+export function deleteSelf(token: string): Promise<void> {
+  return request<void>("/v1/auth/me", { method: "DELETE", headers: bearerHeaders(token) });
+}
+
 // Mirrors backend/internal/auth.UserResponse's JSON shape exactly. One
 // entry per user row, covering all three states an admin can act on:
 // Approved === false -> "Pending" (Approve button); Approved && Locked ->

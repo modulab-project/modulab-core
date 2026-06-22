@@ -128,6 +128,17 @@ func guardAgainstSelfOrLastSuperAdmin(ctx context.Context, d Deps, actingSubject
 	if targetSubject == actingSubject {
 		return true, "cannot perform this action on your own account", nil
 	}
+	return guardAgainstLastSuperAdmin(ctx, d, targetSubject)
+}
+
+// guardAgainstLastSuperAdmin is guardAgainstSelfOrLastSuperAdmin's
+// last-remaining-super-admin check on its own, without the self-action
+// block above it - shared with handlers.go's DeleteSelfHandler, which acts
+// on the caller's own account *by definition* (that is the entire point of
+// a self-delete endpoint) but must still not be allowed to delete the
+// instance's only super-admin out from under it, leaving no one able to
+// manage it afterward.
+func guardAgainstLastSuperAdmin(ctx context.Context, d Deps, targetSubject string) (blocked bool, reason string, err error) {
 	role, exists, err := d.Pool.UserRole(ctx, targetSubject)
 	if err != nil {
 		return false, "", err

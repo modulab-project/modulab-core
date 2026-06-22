@@ -1,7 +1,10 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell, Avatar } from "../components/AppShell";
 import { AuthButton } from "../components/AuthShell";
+import { deleteSelf } from "../lib/api";
+import { clearSessionToken, getSessionToken } from "../lib/session";
 
 // "/profile" route, linked from the profile panel AppShell renders on every
 // page (header avatar -> "View profile"). Core has no UI of its own for
@@ -14,20 +17,54 @@ import { AuthButton } from "../components/AuthShell";
 // have nowhere to actually save to, links straight out to the IdP's own
 // account-settings page (session.account_settings_url, built by the
 // backend's MeHandler from the configured issuer URL) for anyone who
-// wants to change something.
+// wants to change something. The one action this page does own outright
+// is account deletion (DELETE /v1/auth/me, lib/api.ts's deleteSelf) - that
+// is specifically about the ModuLab account row, not the IdP-owned profile
+// fields above it, so it does not contradict the read-only framing.
 //
 // Uses AppShell - the same header/footer chrome as Home - rather than a
 // standalone screen with its own "Back" button: this is meant to feel like
 // a second tab of the same app, reachable straight from the avatar menu,
 // not a one-off detour you have to explicitly back out of.
 export default function ProfilePage() {
+  const navigate = useNavigate();
   const { session, loading } = useAuthenticatedSession();
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   if (loading || !session) {
     return null;
   }
 
   const displayName = session.name.trim() || session.email;
+
+  // No isSelf/last-super-admin UI branching needed here the way
+  // AdminUsersPage.tsx has it for its own Delete button: this page only
+  // ever acts on the signed-in user's own account, so there is nothing to
+  // distinguish. The backend still enforces the last-remaining-super-admin
+  // guard (guardAgainstLastSuperAdmin, admin.go) - that 400 surfaces below
+  // as deleteError, same as AdminUsersPage's runAction does for its own
+  // guard violations.
+  async function handleDeleteAccount() {
+    if (!window.confirm("Delete your account? This cannot be undone.")) {
+      return;
+    }
+    const token = getSessionToken();
+    if (!token) {
+      return;
+    }
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteSelf(token);
+      clearSessionToken();
+      navigate("/login", { replace: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Could not delete your account.";
+      setDeleteError(message);
+      setDeleting(false);
+    }
+  }
 
   return (
     <AppShell session={session}>
@@ -83,6 +120,25 @@ export default function ProfilePage() {
             Manage account in OIDC
           </AuthButton>
         )}
+
+        <div className="mt-10 rounded-2xl border border-red-200 p-4 dark:border-red-900">
+          <p className="text-sm font-medium text-red-700 dark:text-red-400">Delete account</p>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Permanently removes your ModuLab account and revokes access. Your identity provider
+            account is not affected.
+          </p>
+          {deleteError && (
+            <p className="mt-2 text-sm text-red-600 dark:text-red-400">{deleteError}</p>
+          )}
+          <button
+            type="button"
+            disabled={deleting}
+            onClick={handleDeleteAccount}
+            className="mt-3 rounded-md border border-red-300 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
+          >
+            {deleting ? "Deleting…" : "Delete my account"}
+          </button>
+        </div>
       </div>
     </AppShell>
   );

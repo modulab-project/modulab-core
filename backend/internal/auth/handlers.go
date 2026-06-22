@@ -398,6 +398,74 @@ func MeHandler(d Deps) http.HandlerFunc {
 	}
 }
 
+// DeleteSelfHandler is DELETE /v1/auth/me: lets an already-authenticated
+// user remove their own account entirely (db.Pool.DeleteUser) - the
+// self-service counterpart to admin.go's DeleteUserHandler, which
+// explicitly refuses to act on the caller's own account
+// (guardAgainstSelfOrLastSuperAdmin) - without this endpoint there was no
+// way at all for someone to remove themselves short of an admin doing it
+// for them, or a manual DELETE FROM users. Still guarded against deleting
+// the instance's last remaining super-admin (guardAgainstLastSuperAdmin,
+// admin.go) - someone has to be left who can manage the instance
+// afterward. Works regardless of the caller's session role (including a
+// RolePending session - a pending user has just as much right to delete
+// their own unfinished signup as an approved one), since the guard checks
+// the stored row's real role via db.Pool.UserRole, not the session's
+// possibly-overridden one. If this person logs in again later, they are
+// JIT-provisioned as a brand-new pending user, exactly as
+// DeleteUserHandler's doc comment describes for the admin-driven case.
+func DeleteSelfHandler(d Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token := bearerToken(r)
+		if token == "" {
+			http.Error(w, "missing bearer token", http.StatusUnauthorized)
+			return
+		}
+
+		ctx := r.Context()
+		sess, ok, err := ValidateSession(ctx, d.Valkey, token)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if !ok {
+			http.Error(w, "invalid or expired session", http.StatusUnauthorized)
+			return
+		}
+
+		blocked, reason, err := guardAgainstLastSuperAdmin(ctx, d, sess.UserID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if blocked {
+			http.Error(w, reason, http.StatusBadRequest)
+			return
+		}
+
+		affected, err := d.Pool.DeleteUser(ctx, sess.UserID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if affected == 0 {
+			http.Error(w, "no such user", http.StatusNotFound)
+			return
+		}
+		// Best-effort, same reasoning as admin.go's DeleteUserHandler:
+		// the deletion itself already succeeded and is the source of
+		// truth - a Valkey hiccup revoking the (now pointless, since the
+		// row is gone) remaining sessions should not turn an otherwise-
+		// successful self-delete into a 500 the user has to retry. This
+		// also invalidates the very token used to make this request,
+		// which is fine: the caller is about to discard it anyway.
+		if err := RevokeUserSessions(ctx, d.Valkey, sess.UserID); err != nil {
+			logRevokeError("delete-self", sess.UserID, err)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
 // LogoutHandler invalidates the request's Bearer token immediately.
 func LogoutHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
