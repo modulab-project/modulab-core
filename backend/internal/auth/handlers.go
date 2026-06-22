@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/mail"
 	"github.com/modulab-project/modulab-core/backend/internal/notify"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
 	"github.com/modulab-project/modulab-core/backend/internal/valkey"
@@ -301,6 +302,28 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 				},
 			}); err != nil {
 				log.Printf("auth: failed to publish user.pending notification for %s: %v", claims.Subject, err)
+			}
+
+			// Mail to every current admin, alongside the SSE event above:
+			// notify.AdminChannel() only reaches whoever happens to have
+			// /v1/events open at this exact moment - an admin who is not
+			// online right now would otherwise have no way to learn about
+			// this signup short of opening /admin/users on a hunch. Same
+			// best-effort treatment as everywhere else in this file: a
+			// lookup or enqueue failure here must not turn an otherwise-
+			// successful login into a failed one.
+			if admins, err := d.Pool.ListAdmins(ctx); err != nil {
+				log.Printf("auth: failed to list admins for pending-approval mail: %v", err)
+			} else {
+				for _, admin := range admins {
+					if admin.Email == "" {
+						continue
+					}
+					msg := mail.PendingApprovalMessage(admin.Email, admin.Name, d.FrontendBaseURL, claims.Name, claims.Email)
+					if err := mail.Enqueue(ctx, d.Valkey, msg); err != nil {
+						log.Printf("auth: failed to enqueue pending-approval mail for %s: %v", admin.Email, err)
+					}
+				}
 			}
 		}
 

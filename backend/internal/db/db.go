@@ -349,6 +349,38 @@ func (p *Pool) ListUsers(ctx context.Context) ([]UserRow, error) {
 	return out, nil
 }
 
+// ListAdmins returns every user row with role org-admin or super-admin,
+// oldest first - used by CallbackHandler (handlers.go) to email every
+// current admin when a brand-new pending signup needs review, alongside
+// the "user.pending" SSE event (notify.AdminChannel) it already
+// publishes: SSE only reaches whoever happens to be connected at that
+// exact moment, mail still reaches everyone else afterwards.
+func (p *Pool) ListAdmins(ctx context.Context) ([]UserRow, error) {
+	rows, err := p.Query(ctx, `
+		SELECT id, email, name, role, approved, locked, created_at
+		FROM users
+		WHERE role IN ('org-admin', 'super-admin')
+		ORDER BY created_at ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("db: list admins: %w", err)
+	}
+	defer rows.Close()
+
+	var out []UserRow
+	for rows.Next() {
+		var u UserRow
+		if err := rows.Scan(&u.Subject, &u.Email, &u.Name, &u.Role, &u.Approved, &u.Locked, &u.CreatedAt); err != nil {
+			return nil, fmt.Errorf("db: scan admin: %w", err)
+		}
+		out = append(out, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("db: list admins: %w", err)
+	}
+	return out, nil
+}
+
 // ApproveUser sets approved = true for subject and reports how many rows
 // were affected, so the caller (ApproveUserHandler) can tell "approved"
 // apart from "no such user" (0 rows) without a separate existence check.

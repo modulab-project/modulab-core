@@ -33,18 +33,20 @@ func logNotifyError(action, subject string, err error) {
 	log.Printf("auth: %s: failed to publish notification for %s: %v", action, subject, err)
 }
 
-// enqueueMail looks up subject's email and queues build(email) for
-// delivery - the extension beyond spec section 3.5's own Mail-Queue table
-// described in notify.go and mail/templates.go's doc comments: an
+// enqueueMail looks up subject's email/name and queues build(email, name)
+// for delivery - the extension beyond spec section 3.5's own Mail-Queue
+// table described in notify.go and mail/templates.go's doc comments: an
 // approve/lock/unlock action also reaches a user who is not currently
-// connected to /v1/events. Same best-effort treatment as
-// logRevokeError/logNotifyError throughout this file: called only after
-// the admin action itself already succeeded, so any failure here (no such
-// user - should not happen, this is always called right after a
-// successful DB write for the same subject; no email on file; SMTP not
-// configured; Valkey hiccup) is logged and swallowed rather than turning
-// a successful admin action into a 500.
-func enqueueMail(ctx context.Context, d Deps, action, subject string, build func(email string) mail.Message) {
+// connected to /v1/events. name is passed through so the template can
+// address the recipient by name (mail.greeting) rather than a bare
+// "Hello," - same best-effort treatment as logRevokeError/logNotifyError
+// throughout this file: called only after the admin action itself
+// already succeeded, so any failure here (no such user - should not
+// happen, this is always called right after a successful DB write for
+// the same subject; no email on file; SMTP not configured; Valkey
+// hiccup) is logged and swallowed rather than turning a successful admin
+// action into a 500.
+func enqueueMail(ctx context.Context, d Deps, action, subject string, build func(email, name string) mail.Message) {
 	user, exists, err := d.Pool.GetUser(ctx, subject)
 	if err != nil {
 		log.Printf("auth: %s: failed to look up email for %s: %v", action, subject, err)
@@ -53,7 +55,7 @@ func enqueueMail(ctx context.Context, d Deps, action, subject string, build func
 	if !exists || user.Email == "" {
 		return
 	}
-	if err := mail.Enqueue(ctx, d.Valkey, build(user.Email)); err != nil {
+	if err := mail.Enqueue(ctx, d.Valkey, build(user.Email, user.Name)); err != nil {
 		log.Printf("auth: %s: failed to enqueue mail for %s: %v", action, subject, err)
 	}
 }
@@ -224,8 +226,8 @@ func ApproveUserHandler(d Deps) http.HandlerFunc {
 		if err := notify.Publish(r.Context(), d.Valkey, notify.UserChannel(subject), notify.Event{Type: "user.approved"}); err != nil {
 			logNotifyError("approve", subject, err)
 		}
-		enqueueMail(r.Context(), d, "approve", subject, func(email string) mail.Message {
-			return mail.ApprovedMessage(email, d.FrontendBaseURL)
+		enqueueMail(r.Context(), d, "approve", subject, func(email, name string) mail.Message {
+			return mail.ApprovedMessage(email, name, d.FrontendBaseURL)
 		})
 		w.WriteHeader(http.StatusNoContent)
 	}
@@ -279,8 +281,8 @@ func LockUserHandler(d Deps) http.HandlerFunc {
 		if err := RevokeUserSessions(r.Context(), d.Valkey, subject); err != nil {
 			logRevokeError("lock", subject, err)
 		}
-		enqueueMail(r.Context(), d, "lock", subject, func(email string) mail.Message {
-			return mail.LockedMessage(email)
+		enqueueMail(r.Context(), d, "lock", subject, func(email, name string) mail.Message {
+			return mail.LockedMessage(email, name)
 		})
 		w.WriteHeader(http.StatusNoContent)
 	}
@@ -308,8 +310,8 @@ func UnlockUserHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "no such user", http.StatusNotFound)
 			return
 		}
-		enqueueMail(r.Context(), d, "unlock", subject, func(email string) mail.Message {
-			return mail.UnlockedMessage(email, d.FrontendBaseURL)
+		enqueueMail(r.Context(), d, "unlock", subject, func(email, name string) mail.Message {
+			return mail.UnlockedMessage(email, name, d.FrontendBaseURL)
 		})
 		w.WriteHeader(http.StatusNoContent)
 	}
