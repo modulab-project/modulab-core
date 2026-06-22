@@ -170,12 +170,7 @@ export function AppShell({ session, children }: { session: Session; children: Re
 
       <main className="flex-1 overflow-y-auto px-3 sm:px-6">{children}</main>
 
-      <FooterBar
-        isAdmin={isAdmin}
-        health={health}
-        openPanel={openPanel}
-        onTogglePanel={togglePanel}
-      />
+      <FooterBar isAdmin={isAdmin} health={health} onTogglePanel={togglePanel} />
       <ToastStack toasts={toasts} />
 
       {openPanel && (
@@ -281,12 +276,10 @@ function Header({
 function FooterBar({
   isAdmin,
   health,
-  openPanel,
   onTogglePanel,
 }: {
   isAdmin: boolean;
   health: HealthResponse | null;
-  openPanel: OpenPanel;
   onTogglePanel: (panel: Exclude<OpenPanel, null>) => void;
 }) {
   const allOk = !!health && health.postgres_reachable && health.valkey_reachable;
