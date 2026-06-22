@@ -73,19 +73,31 @@ func (p *Provider) AuthCodeURL(state, codeVerifier string) string {
 // Picture come from the standard OIDC "profile" claims (already in the
 // requested scope above) - PocketID and most other IdPs populate Name from
 // whatever display name is configured there; Picture is the URL to a
-// profile photo, or empty if the IdP/account has none. Both are optional by
-// nature: callers (handlers.go, the frontend) must treat an empty value as
-// "no display name/picture available", never as an error. EmailVerified
-// comes from the "email" scope alongside Email itself - the frontend's
-// profile page (spec section 6.4) shows it as-is, Core does not gate
-// anything on it.
+// profile photo, or empty if the IdP/account has none. PreferredUsername is
+// also a "profile"-scope claim (the IdP's separate, usually-stable login
+// handle, distinct from Name which is meant to change freely as a display
+// name) - same optionality as Name/Picture, and the same Go zero value
+// ("") when an IdP simply does not populate it, which go-oidc's
+// idToken.Claims(&claims) already gives for free for any claim missing
+// from the token: there is nothing in this struct that requires a claim to
+// be present, including Subject, Email, and Groups - DeriveRole/handlers.go
+// already treat an empty/missing Groups as RolePending, and an empty
+// Email/Name simply renders as "" wherever they're shown. The one
+// exception CallbackHandler enforces itself, not this struct, is Subject -
+// see Exchange's empty-Subject check below; every other field is allowed
+// to come back empty and callers (handlers.go, the frontend) must treat
+// that the same way Name/Picture already are: "not available", never an
+// error. EmailVerified comes from the "email" scope alongside Email itself
+// - the frontend's profile page (spec section 6.4) shows it as-is, Core
+// does not gate anything on it.
 type Claims struct {
-	Subject       string   `json:"sub"`
-	Email         string   `json:"email"`
-	EmailVerified bool     `json:"email_verified"`
-	Name          string   `json:"name"`
-	Picture       string   `json:"picture"`
-	Groups        []string `json:"groups"`
+	Subject           string   `json:"sub"`
+	Email             string   `json:"email"`
+	EmailVerified     bool     `json:"email_verified"`
+	Name              string   `json:"name"`
+	PreferredUsername string   `json:"preferred_username"`
+	Picture           string   `json:"picture"`
+	Groups            []string `json:"groups"`
 }
 
 // Exchange completes the authorization-code flow: it trades code for

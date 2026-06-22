@@ -74,3 +74,34 @@ func (c *Client) Del(ctx context.Context, key string) error {
 	}
 	return nil
 }
+
+// AddSetMember adds member to the set at key and (re)sets the set's TTL to
+// ttl. Used by auth.CreateSession to track which session tokens belong to a
+// given user (key "usersessions:{subject}") so an admin lock/delete action
+// can find and revoke them immediately, instead of only blocking the user's
+// *next* login. Resetting the TTL on every call means the set survives at
+// least ttl past the most recently added member - slightly longer than
+// strictly necessary for any single token, but harmless: a stale token
+// reference left behind once its own session key has expired is cleaned up
+// the next time something iterates the set (deleting an already-absent
+// session key is a no-op), and the set itself disappears on its own once no
+// new session has been added to it for a full ttl.
+func (c *Client) AddSetMember(ctx context.Context, key, member string, ttl time.Duration) error {
+	if err := c.rdb.SAdd(ctx, key, member).Err(); err != nil {
+		return fmt.Errorf("valkey: sadd %q: %w", key, err)
+	}
+	if err := c.rdb.Expire(ctx, key, ttl).Err(); err != nil {
+		return fmt.Errorf("valkey: expire %q: %w", key, err)
+	}
+	return nil
+}
+
+// SetMembers returns every member currently in the set at key (empty, not an
+// error, if key does not exist or has expired).
+func (c *Client) SetMembers(ctx context.Context, key string) ([]string, error) {
+	members, err := c.rdb.SMembers(ctx, key).Result()
+	if err != nil {
+		return nil, fmt.Errorf("valkey: smembers %q: %w", key, err)
+	}
+	return members, nil
+}

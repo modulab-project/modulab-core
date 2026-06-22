@@ -19,6 +19,15 @@ const SessionTTL = 24 * time.Hour
 
 const sessionKeyPrefix = "session:"
 
+// userSessionsKeyPrefix indexes session tokens by the subject they belong
+// to (key: userSessionsKeyPrefix+UserID, value: a Valkey set of tokens) -
+// see CreateSession and RevokeUserSessions. Needed because the session key
+// itself (sessionKeyPrefix+token) is only ever looked up by token, never by
+// user; without this index, an admin lock/delete action would have no way
+// to find and kill an already-issued session, and the user could keep
+// using it normally until it naturally expired (up to SessionTTL later).
+const userSessionsKeyPrefix = "usersessions:"
+
 // Session is what's stored in Valkey for a logged-in user, and handed back
 // by ValidateSession on every authenticated request.
 //
@@ -34,13 +43,13 @@ const sessionKeyPrefix = "session:"
 // verifiable without a Valkey round trip (e.g. multiple Core instances
 // without a shared Valkey).
 //
-// Name, Picture, and EmailVerified are copied from the OIDC ID token's
-// claims at login time (see oidcclient.go's Claims) and are NOT re-fetched
-// from the IdP for the life of the session - if the user changes their
-// display name/photo/email at the IdP, it only shows up here after their
-// next login. That is an acceptable staleness window given SessionTTL is
-// only 24h and there is no refresh-token flow yet to silently re-pull
-// claims anyway.
+// Name, PreferredUsername, Picture, and EmailVerified are copied from the
+// OIDC ID token's claims at login time (see oidcclient.go's Claims) and are
+// NOT re-fetched from the IdP for the life of the session - if the user
+// changes their display name/username/photo/email at the IdP, it only
+// shows up here after their next login. That is an acceptable staleness
+// window given SessionTTL is only 24h and there is no refresh-token flow
+// yet to silently re-pull claims anyway.
 //
 // Locked is the one field NOT copied from the IdP - it reflects Core's own
 // users.locked column at the moment CallbackHandler issued this session
@@ -51,13 +60,14 @@ const sessionKeyPrefix = "session:"
 // the JSON entirely for the (overwhelming majority) of sessions where it's
 // false, rather than spelling out "locked": false on every response.
 type Session struct {
-	UserID        string `json:"user_id"`
-	Email         string `json:"email"`
-	EmailVerified bool   `json:"email_verified"`
-	Name          string `json:"name"`
-	Picture       string `json:"picture"`
-	Role          string `json:"role"`
-	Locked        bool   `json:"locked,omitempty"`
+	UserID            string `json:"user_id"`
+	Email             string `json:"email"`
+	EmailVerified     bool   `json:"email_verified"`
+	Name              string `json:"name"`
+	PreferredUsername string `json:"preferred_username"`
+	Picture           string `json:"picture"`
+	Role              string `json:"role"`
+	Locked            bool   `json:"locked,omitempty"`
 }
 
 // CreateSession mints a new opaque bearer token for sess and stores it in
@@ -76,7 +86,38 @@ func CreateSession(ctx context.Context, vk *valkey.Client, sess Session) (string
 	if err := vk.SetWithTTL(ctx, sessionKeyPrefix+token, string(data), SessionTTL); err != nil {
 		return "", fmt.Errorf("auth: store session: %w", err)
 	}
+	// Indexed by subject too, so RevokeUserSessions can find this token
+	// later if an admin locks or deletes this user before it naturally
+	// expires. Not fatal if this second write fails - the session itself
+	// was already created successfully above - but it does mean a lock
+	// action against this user would not catch this particular session
+	// until it expires on its own, so it is still surfaced as an error
+	// rather than silently swallowed.
+	if err := vk.AddSetMember(ctx, userSessionsKeyPrefix+sess.UserID, token, SessionTTL); err != nil {
+		return "", fmt.Errorf("auth: index session by user: %w", err)
+	}
 	return token, nil
+}
+
+// RevokeUserSessions immediately invalidates every session currently issued
+// to subject, regardless of how much of SessionTTL each one has left. Called
+// by LockUserHandler and DeleteUserHandler (admin.go) so an admin action
+// takes effect right away for anyone already logged in, not just on their
+// next login attempt - locking someone out should mean locking them out,
+// not "they keep their current tab open until tomorrow." Looking up zero
+// tokens (a user who never logged in, or whose sessions already expired) is
+// not an error.
+func RevokeUserSessions(ctx context.Context, vk *valkey.Client, subject string) error {
+	tokens, err := vk.SetMembers(ctx, userSessionsKeyPrefix+subject)
+	if err != nil {
+		return fmt.Errorf("auth: list sessions for revocation: %w", err)
+	}
+	for _, token := range tokens {
+		if err := vk.Del(ctx, sessionKeyPrefix+token); err != nil {
+			return fmt.Errorf("auth: revoke session: %w", err)
+		}
+	}
+	return vk.Del(ctx, userSessionsKeyPrefix+subject)
 }
 
 // ValidateSession looks up token in Valkey and returns the session it maps

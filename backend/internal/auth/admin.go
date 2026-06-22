@@ -9,9 +9,17 @@ package auth
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"time"
 )
+
+// logRevokeError logs a failed RevokeUserSessions call. Pulled out to one
+// line since LockUserHandler and DeleteUserHandler both need it, and both
+// treat it the same way - log and continue, see the call sites for why.
+func logRevokeError(action, subject string, err error) {
+	log.Printf("auth: %s: failed to revoke active sessions for %s: %v", action, subject, err)
+}
 
 // requireAdmin validates the request's Bearer token and confirms the
 // resulting session's role is allowed to manage users - reused by every
@@ -150,9 +158,12 @@ func ApproveUserHandler(d Deps) http.HandlerFunc {
 // LockUserHandler is POST /v1/admin/users/{id}/lock: revokes an
 // already-approved user's access without forgetting who they are (unlike
 // DeleteUserHandler below). Guarded against locking your own account or the
-// last remaining super-admin (guardAgainstSelfOrLastSuperAdmin) - same
-// caveat as approval, this takes effect on the target's *next* login, not
-// retroactively.
+// last remaining super-admin (guardAgainstSelfOrLastSuperAdmin). Unlike
+// approval, this takes effect immediately, not just on the target's next
+// login attempt: RevokeUserSessions (session.go) kills every session token
+// already issued to them, so a tab they currently have open stops working
+// on its very next request instead of staying valid until SessionTTL runs
+// out on its own.
 func LockUserHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := requireAdmin(d, w, r)
@@ -181,6 +192,16 @@ func LockUserHandler(d Deps) http.HandlerFunc {
 		if affected == 0 {
 			http.Error(w, "no such user", http.StatusNotFound)
 			return
+		}
+		// Best-effort beyond this point on purpose: the lock itself already
+		// succeeded and is the source of truth (it also blocks any future
+		// login attempt via CallbackHandler's gate 2) - a Valkey hiccup here
+		// should not turn an otherwise-successful lock into a 500 the admin
+		// has to retry. Worst case, an already-open session survives until
+		// it naturally expires, which is exactly the pre-existing behavior
+		// this change improves on, not a regression.
+		if err := RevokeUserSessions(r.Context(), d.Valkey, subject); err != nil {
+			logRevokeError("lock", subject, err)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}
@@ -215,7 +236,9 @@ func UnlockUserHandler(d Deps) http.HandlerFunc {
 // DeleteUserHandler is DELETE /v1/admin/users/{id}: forgets the user row
 // entirely (db.Pool.DeleteUser) - see that method's doc comment for why
 // this does not blocklist the OIDC subject itself. Same self/last-
-// super-admin guard as LockUserHandler.
+// super-admin guard as LockUserHandler, and same immediate-effect session
+// revocation: deleting someone should not leave their already-open tab
+// working until SessionTTL runs out either.
 func DeleteUserHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := requireAdmin(d, w, r)
@@ -244,6 +267,9 @@ func DeleteUserHandler(d Deps) http.HandlerFunc {
 		if affected == 0 {
 			http.Error(w, "no such user", http.StatusNotFound)
 			return
+		}
+		if err := RevokeUserSessions(r.Context(), d.Valkey, subject); err != nil {
+			logRevokeError("delete", subject, err)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}

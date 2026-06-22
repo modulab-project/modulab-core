@@ -137,22 +137,27 @@ export function getHealth(): Promise<HealthResponse> {
 }
 
 // Mirrors backend/internal/auth.MeResponse's JSON shape exactly (the
-// embedded Session's UserID/Email/EmailVerified/Name/Picture/Role/Locked
-// fields plus the sibling AccountSettingsURL, all with those exact json
-// tags) - keep both in sync. Name and Picture come from the OIDC "profile"
-// claims at login time and are optional by nature (PocketID or any other
-// IdP may have neither set) - callers must treat "" as "not available",
-// never as an error. AccountSettingsURL is computed fresh per-request by
-// the backend (not stored on the session) and is "" if OIDC's issuer URL
-// could not be resolved - same "not available" treatment applies. locked
-// is only ever present (and true) alongside role === "pending" - it
-// distinguishes "an admin revoked your access" from the far more common
-// "never approved yet" case; absent (undefined) for every other session.
+// embedded Session's UserID/Email/EmailVerified/Name/PreferredUsername/
+// Picture/Role/Locked fields plus the sibling AccountSettingsURL, all with
+// those exact json tags) - keep both in sync. Name, PreferredUsername, and
+// Picture come from the OIDC "profile" claims at login time and are
+// optional by nature (PocketID or any other IdP may have any subset unset)
+// - callers must treat "" as "not available", never as an error.
+// user_id is the OIDC "sub" claim - stable for a given IdP account even if
+// every other field above changes, which is exactly why ProfilePage shows
+// it as a separate, more technical row rather than folding it into the
+// display name. AccountSettingsURL is computed fresh per-request by the
+// backend (not stored on the session) and is "" if OIDC's issuer URL could
+// not be resolved - same "not available" treatment applies. locked is only
+// ever present (and true) alongside role === "pending" - it distinguishes
+// "an admin revoked your access" from the far more common "never approved
+// yet" case; absent (undefined) for every other session.
 export interface Session {
   user_id: string;
   email: string;
   email_verified: boolean;
   name: string;
+  preferred_username: string;
   picture: string;
   role: string;
   account_settings_url?: string;

@@ -44,6 +44,7 @@ export default function ProfilePage() {
 
         <div className="rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
           <ProfileRow label="Name" value={displayName} />
+          <ProfileRow label="Username" value={<ClaimValue value={session.preferred_username} />} />
           <ProfileRow label="Email" value={session.email} />
           <ProfileRow
             label="Email verified"
@@ -63,6 +64,10 @@ export default function ProfilePage() {
                 {session.email_verified ? "Verified" : "Not verified"}
               </span>
             }
+          />
+          <ProfileRow
+            label="Subject (sub)"
+            value={<span className="font-mono text-xs">{session.user_id}</span>}
             last
           />
         </div>
@@ -81,6 +86,21 @@ export default function ProfilePage() {
       </div>
     </AppShell>
   );
+}
+
+// Renders an optional OIDC claim (preferred_username today; the same
+// pattern applies to any future one) that may legitimately be "" because
+// the IdP never populated it - same treatment Name/Picture already get
+// elsewhere on this page, just pulled out since this is now the second
+// claim that needs it. Deliberately not an error state or a blank row:
+// an admin reading this page should be able to tell "the IdP doesn't set
+// this claim" apart from "something is broken", which a silently empty
+// cell would not communicate.
+function ClaimValue({ value }: { value: string }) {
+  if (!value) {
+    return <span className="text-gray-400 dark:text-gray-500">Not available</span>;
+  }
+  return <>{value}</>;
 }
 
 function ProfileRow({
