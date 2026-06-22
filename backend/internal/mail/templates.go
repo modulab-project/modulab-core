@@ -90,6 +90,26 @@ func UnlockedMessage(to, name, frontendBaseURL string) Message {
 	}
 }
 
+// DeletedMessage is sent once a user's account is removed, either via
+// admin.DeleteUserHandler or auth.DeleteSelfHandler (the latter for the
+// self-service case, see handlers.go). Like LockedMessage, deliberately
+// carries no link back to the frontend - signing in would just JIT-
+// provision a brand-new pending row, not restore anything, so there is
+// nothing useful to link to. Both call sites must capture to/name *before*
+// the row is deleted (db.Pool.GetUser for the admin case, the caller's own
+// already-loaded Session for the self-delete case) - there is no user row
+// left to look the email up from afterward.
+func DeletedMessage(to, name string) Message {
+	return Message{
+		To:      to,
+		Subject: "Your ModuLab account has been deleted",
+		Body: fmt.Sprintf(
+			"%s\n\nYour ModuLab account has been deleted and your access has been revoked. If you sign in again later, you will need to be approved again, as if this were your first time.\n\nIf you believe this was a mistake, please contact your administrator.\n%s",
+			greeting(name), signature,
+		),
+	}
+}
+
 // PendingApprovalMessage is sent to every current org-admin/super-admin
 // (db.Pool.ListAdmins) once a brand-new pending signup is created -
 // CallbackHandler's wasNew && !approved case in handlers.go, the same

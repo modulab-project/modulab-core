@@ -354,6 +354,19 @@ func DeleteUserHandler(d Deps) http.HandlerFunc {
 			http.Error(w, reason, http.StatusBadRequest)
 			return
 		}
+		// Captured before the delete below, not via enqueueMail's usual
+		// post-action d.Pool.GetUser lookup (ApproveUserHandler/
+		// LockUserHandler/UnlockUserHandler all use that helper): by the
+		// time the row is gone, there is nothing left to look the address
+		// up from. target/targetExists/err are deliberately separate from
+		// the err already in scope above - a failure here should not be
+		// confused with a guard-check failure, even though both map to the
+		// same 500 response.
+		target, targetExists, err := d.Pool.GetUser(r.Context(), subject)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		affected, err := d.Pool.DeleteUser(r.Context(), subject)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -365,6 +378,15 @@ func DeleteUserHandler(d Deps) http.HandlerFunc {
 		}
 		if err := RevokeUserSessions(r.Context(), d.Valkey, subject); err != nil {
 			logRevokeError("delete", subject, err)
+		}
+		// Best-effort, same reasoning as everywhere else in this file: the
+		// deletion itself already succeeded and is the source of truth, so
+		// a missed confirmation email must not turn it into a 500 the
+		// admin has to retry.
+		if targetExists && target.Email != "" {
+			if err := mail.Enqueue(r.Context(), d.Valkey, mail.DeletedMessage(target.Email, target.Name)); err != nil {
+				log.Printf("auth: delete: failed to enqueue mail for %s: %v", subject, err)
+			}
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}

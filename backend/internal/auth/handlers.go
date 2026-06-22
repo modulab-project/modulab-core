@@ -414,6 +414,9 @@ func MeHandler(d Deps) http.HandlerFunc {
 // possibly-overridden one. If this person logs in again later, they are
 // JIT-provisioned as a brand-new pending user, exactly as
 // DeleteUserHandler's doc comment describes for the admin-driven case.
+// Sends mail.DeletedMessage to the caller's own address on success, same
+// as DeleteUserHandler now does for the admin-driven case - a deletion
+// confirmation, not an alert the recipient needs to act on.
 func DeleteSelfHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := bearerToken(r)
@@ -461,6 +464,19 @@ func DeleteSelfHandler(d Deps) http.HandlerFunc {
 		// which is fine: the caller is about to discard it anyway.
 		if err := RevokeUserSessions(ctx, d.Valkey, sess.UserID); err != nil {
 			logRevokeError("delete-self", sess.UserID, err)
+		}
+		// sess.Email/sess.Name, not a fresh d.Pool.GetUser lookup: the row
+		// is already gone by this point, so there is nothing left in the
+		// database to look the address up from. The session loaded at the
+		// top of this handler is the only copy of that information still
+		// available - same best-effort treatment as everywhere else mail
+		// is enqueued in this package: the deletion itself already
+		// succeeded and is the source of truth, so a missed confirmation
+		// email must not turn it into a 500 the caller has to retry.
+		if sess.Email != "" {
+			if err := mail.Enqueue(ctx, d.Valkey, mail.DeletedMessage(sess.Email, sess.Name)); err != nil {
+				log.Printf("auth: delete-self: failed to enqueue mail for %s: %v", sess.UserID, err)
+			}
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}
