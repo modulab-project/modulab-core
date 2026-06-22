@@ -201,16 +201,19 @@ func UsersHandler(d Deps) http.HandlerFunc {
 }
 
 // ApproveUserHandler is POST /v1/admin/users/{id}/approve, where {id} is the
-// target user's OIDC subject (db.Pool.ApproveUser). Takes effect on that
-// user's *next* login, not retroactively on any session they may already
-// be holding - CallbackHandler bakes the role into a session once at login
-// and never revisits it (see role.go's doc comment on RolePending), so an
-// already-issued pending session stays pending until they sign out and
-// back in. The spec section 3.5 "user.approved" notification fires
-// immediately regardless: it tells whoever is sitting on /pending right
-// now (useAuthenticatedSession's poll would also eventually notice, but
-// up to POLL_INTERVAL_MS late) that they are free to sign out and back in
-// to pick up their new role.
+// target user's OIDC subject (db.Pool.ApproveUser). Takes effect immediately
+// for anyone already sitting on /pending with a session open, not just on
+// their next login: CallbackHandler bakes the role into a session once at
+// login and never revisits it on its own (see role.go's doc comment on
+// RolePending), so this handler patches every session token already issued
+// to subject in place (UpdateSessionsRole, session.go) with the role
+// db.Pool.UserRole reports right now - the same value CallbackHandler
+// derived and stored on the user row at their last login, gate 2 just
+// wasn't satisfied yet for the session itself. The spec section 3.5
+// "user.approved" notification still fires too: it is what makes
+// Pending.tsx's re-check happen the instant this runs instead of waiting
+// up to POLL_INTERVAL_MS for the next poll, but the actual unblocking now
+// happens here, before that event is published, not on a subsequent login.
 func ApproveUserHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := requireAdmin(d, w, r); !ok {
@@ -229,6 +232,19 @@ func ApproveUserHandler(d Deps) http.HandlerFunc {
 		if affected == 0 {
 			http.Error(w, "no such user", http.StatusNotFound)
 			return
+		}
+		// Best-effort, same reasoning as the notify.Publish/enqueueMail
+		// calls below: the approval itself already succeeded and is the
+		// source of truth, so a Valkey hiccup here should not turn it into
+		// a 500 the admin has to retry - worst case, an already-open
+		// session falls back to the pre-existing behavior of staying
+		// pending until its holder signs out and back in.
+		if role, exists, err := d.Pool.UserRole(r.Context(), subject); err != nil {
+			logNotifyError("approve: look up role for session update", subject, err)
+		} else if exists {
+			if err := UpdateSessionsRole(r.Context(), d.Valkey, subject, role, false); err != nil {
+				logNotifyError("approve: update live sessions", subject, err)
+			}
 		}
 		// Best-effort, same reasoning as LockUserHandler's
 		// RevokeUserSessions call below: the approval itself already

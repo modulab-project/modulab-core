@@ -143,6 +143,51 @@ func DeleteSession(ctx context.Context, vk *valkey.Client, token string) error {
 	return vk.Del(ctx, sessionKeyPrefix+token)
 }
 
+// UpdateSessionsRole rewrites Role (and Locked) on every currently active
+// session token belonging to subject (found via the userSessionsKeyPrefix
+// index, same as RevokeUserSessions), in place - the token itself does not
+// change, so a tab that already has it stored does not need a new one.
+// Used by ApproveUserHandler (admin.go) so an already-issued pending
+// session picks up the user's real role the moment an admin approves them,
+// instead of only on their next login. Each rewritten session gets a fresh
+// SessionTTL, the same as a brand-new login would - approval is enough of
+// a deliberate, meaningful event that treating it like one is acceptable,
+// and simpler than threading the token's remaining TTL through here.
+// Looking up zero tokens (no active session for subject right now) is not
+// an error, same reasoning as RevokeUserSessions.
+func UpdateSessionsRole(ctx context.Context, vk *valkey.Client, subject, role string, locked bool) error {
+	tokens, err := vk.SetMembers(ctx, userSessionsKeyPrefix+subject)
+	if err != nil {
+		return fmt.Errorf("auth: list sessions for role update: %w", err)
+	}
+	for _, token := range tokens {
+		raw, exists, err := vk.Get(ctx, sessionKeyPrefix+token)
+		if err != nil {
+			return fmt.Errorf("auth: load session for role update: %w", err)
+		}
+		if !exists {
+			// Already expired on its own - nothing to rewrite, and not
+			// worth treating as an error (the set itself is cleaned up
+			// lazily, same as RevokeUserSessions).
+			continue
+		}
+		var sess Session
+		if err := json.Unmarshal([]byte(raw), &sess); err != nil {
+			return fmt.Errorf("auth: decode session for role update: %w", err)
+		}
+		sess.Role = role
+		sess.Locked = locked
+		data, err := json.Marshal(sess)
+		if err != nil {
+			return fmt.Errorf("auth: marshal session for role update: %w", err)
+		}
+		if err := vk.SetWithTTL(ctx, sessionKeyPrefix+token, string(data), SessionTTL); err != nil {
+			return fmt.Errorf("auth: store updated session: %w", err)
+		}
+	}
+	return nil
+}
+
 // randomToken generates 256 bits of randomness, base64url-encoded. Used for
 // both session tokens and OAuth2 state values (handlers.go) - the entropy
 // requirement is the same for either.

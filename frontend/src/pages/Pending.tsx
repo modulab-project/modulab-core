@@ -17,15 +17,19 @@ const POLL_INTERVAL_MS = 15_000;
 // correctly grouped but never approved yet (locked === false - the far
 // more common case), or previously approved and since locked by an admin
 // (locked === true). The admin side of both (approve/lock/unlock/delete)
-// lives at /admin/users now - see AdminUsersPage.tsx. Unlike an earlier
-// version of this page, it does NOT claim to detect the moment an admin
-// changes either flag: CallbackHandler bakes the role (and locked flag)
-// into the session once at login and never revisits it, so an
-// already-issued pending session stays "pending" for its full lifetime no
-// matter what changes in the database afterwards. The periodic check below
-// still exists, but only to catch this token being explicitly revoked
-// (logout elsewhere, expiry) - not to detect approval/unlock. A fresh
-// login is the only thing that picks up new approval/lock state.
+// lives at /admin/users now - see AdminUsersPage.tsx. ApproveUserHandler
+// (backend/internal/auth/admin.go) patches this token's session in place
+// the moment an admin approves (UpdateSessionsRole, session.go) rather
+// than waiting for a fresh login, so the check below does detect approval:
+// once getMe() reports a role other than "pending", this page sends the
+// user straight to "/" with the same token, no sign-out/back-in required.
+// Lock is the one case that still requires a fresh login - LockUserHandler
+// revokes the token outright (RevokeUserSessions) instead of patching it,
+// so a locked session's next getMe() call fails closed below and lands on
+// /login. The periodic poll exists for that case, and for catching this
+// token being revoked for any other reason (logout elsewhere, expiry); the
+// "user.approved" SSE handler further down just means approval itself does
+// not have to wait for the next POLL_INTERVAL_MS tick.
 export default function Pending() {
   const navigate = useNavigate();
   const [email, setEmail] = useState<string | null>(null);
@@ -122,7 +126,7 @@ export default function Pending() {
           {email ? `Signed in as ${email}. ` : ""}
           {locked
             ? "An administrator has locked your account. Contact your administrator if you believe this is a mistake."
-            : "An Admin needs to approve your account before you can continue. Once approved, sign out below and sign in again to get access."}
+            : "An Admin needs to approve your account before you can continue. You'll be redirected automatically once approved - no need to sign in again."}
         </p>
         <button
           type="button"
