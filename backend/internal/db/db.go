@@ -526,7 +526,56 @@ func (p *Pool) EnsureNewsSchema(ctx context.Context) error {
 	`); err != nil {
 		return fmt.Errorf("db: ensure user_feed_subscriptions: %w", err)
 	}
+	if _, err := p.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS user_news_preferences (
+			user_id           TEXT    PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+			home_article_count INTEGER NOT NULL DEFAULT 5,
+			show_images       BOOLEAN NOT NULL DEFAULT true
+		)
+	`); err != nil {
+		return fmt.Errorf("db: ensure user_news_preferences: %w", err)
+	}
 	return nil
+}
+
+// NewsPrefs holds a user's news-display preferences.
+type NewsPrefs struct {
+	HomeArticleCount int  `json:"home_article_count"`
+	ShowImages       bool `json:"show_images"`
+}
+
+// GetNewsPrefs returns the stored preferences for userID, or the defaults
+// (5 articles, images on) if no row exists yet.
+func (p *Pool) GetNewsPrefs(ctx context.Context, userID string) (NewsPrefs, error) {
+	var prefs NewsPrefs
+	err := p.QueryRow(ctx, `
+		SELECT home_article_count, show_images
+		FROM   user_news_preferences
+		WHERE  user_id = $1
+	`, userID).Scan(&prefs.HomeArticleCount, &prefs.ShowImages)
+	if err != nil {
+		// No row yet → return defaults.
+		return NewsPrefs{HomeArticleCount: 5, ShowImages: true}, nil
+	}
+	return prefs, nil
+}
+
+// SetNewsPrefs upserts the preferences for userID.
+func (p *Pool) SetNewsPrefs(ctx context.Context, userID string, prefs NewsPrefs) error {
+	if prefs.HomeArticleCount < 1 {
+		prefs.HomeArticleCount = 1
+	}
+	if prefs.HomeArticleCount > 50 {
+		prefs.HomeArticleCount = 50
+	}
+	_, err := p.Exec(ctx, `
+		INSERT INTO user_news_preferences (user_id, home_article_count, show_images)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (user_id) DO UPDATE
+		  SET home_article_count = EXCLUDED.home_article_count,
+		      show_images        = EXCLUDED.show_images
+	`, userID, prefs.HomeArticleCount, prefs.ShowImages)
+	return err
 }
 
 // ListFeeds returns every feed row, oldest first. Used by the admin CRUD and

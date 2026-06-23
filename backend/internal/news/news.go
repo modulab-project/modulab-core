@@ -567,7 +567,6 @@ func NewsHandler(d auth.Deps) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		log.Printf("news: user %s has %d enabled feed(s)", sess.UserID, len(feeds))
 		if len(feeds) == 0 {
 			writeJSON(w, http.StatusOK, []Article{})
 			return
@@ -587,7 +586,6 @@ func NewsHandler(d auth.Deps) http.HandlerFunc {
 			go func(i int, f db.FeedRow) {
 				defer wg.Done()
 				arts, err := cachedFeed(r.Context(), d.Valkey, f.ID, f.URL, f.Label)
-				log.Printf("news: feed %d (%s): %d article(s), err=%v", f.ID, f.URL, len(arts), err)
 				results[i] = result{arts: arts, err: err}
 			}(i, feed)
 		}
@@ -614,5 +612,55 @@ func NewsHandler(d auth.Deps) http.HandlerFunc {
 			all = []Article{}
 		}
 		writeJSON(w, http.StatusOK, all)
+	}
+}
+
+// PrefsHandler serves GET and PATCH /v1/news/preferences.
+//
+//   GET  → returns the calling user's NewsPrefs (defaults if none stored yet).
+//   PATCH → accepts a partial body; only provided fields are updated.
+func PrefsHandler(d auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := requireActiveDeps(d, w, r)
+		if !ok {
+			return
+		}
+
+		if r.Method == http.MethodGet {
+			prefs, err := d.Pool.GetNewsPrefs(r.Context(), sess.UserID)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			writeJSON(w, http.StatusOK, prefs)
+			return
+		}
+
+		// PATCH: read current prefs first, then merge the body.
+		current, err := d.Pool.GetNewsPrefs(r.Context(), sess.UserID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		// Use pointer fields so we can detect which keys the caller sent.
+		var body struct {
+			HomeArticleCount *int  `json:"home_article_count"`
+			ShowImages       *bool `json:"show_images"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if body.HomeArticleCount != nil {
+			current.HomeArticleCount = *body.HomeArticleCount
+		}
+		if body.ShowImages != nil {
+			current.ShowImages = *body.ShowImages
+		}
+		if err := d.Pool.SetNewsPrefs(r.Context(), sess.UserID, current); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, current)
 	}
 }

@@ -411,6 +411,29 @@ export function getNews(token: string): Promise<NewsArticle[]> {
   return request<NewsArticle[]>("/v1/news", { headers: bearerHeaders(token) });
 }
 
+// Mirrors backend/internal/db.NewsPrefs exactly.
+export interface NewsPrefs {
+  home_article_count: number;
+  show_images: boolean;
+}
+
+// GET /v1/news/preferences
+export function getNewsPrefs(token: string): Promise<NewsPrefs> {
+  return request<NewsPrefs>("/v1/news/preferences", { headers: bearerHeaders(token) });
+}
+
+// PATCH /v1/news/preferences — partial update, only provided fields are changed.
+export function updateNewsPrefs(
+  token: string,
+  body: Partial<NewsPrefs>,
+): Promise<NewsPrefs> {
+  return request<NewsPrefs>("/v1/news/preferences", {
+    method: "PATCH",
+    headers: bearerHeaders(token),
+    body: JSON.stringify(body),
+  });
+}
+
 // --- Widget: Weather -----------------------------------------------------
 // Mirrors backend/internal/weather.Response exactly.
 

@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useAuthenticatedSession } from "../lib/useSession";
 import {
   getWeather,
   getNews,
+  getNewsPrefs,
+  updateNewsPrefs,
   listFeeds,
   setFeedSubscription,
   type WeatherResponse,
   type NewsArticle,
+  type NewsPrefs,
   type Feed,
 } from "../lib/api";
 import { getSessionToken } from "../lib/session";
@@ -33,15 +36,27 @@ import { AppShell } from "../components/AppShell";
 // - Inline in Hero: icon + temp + description, click opens the detail panel.
 // - Detail panel: day-view (next 24h hourly) + 16-day forecast.
 // - Graceful degradation: no weather if permission denied or fetch fails.
+//
+// News widget:
+// - Compact preview on home shows up to prefs.home_article_count articles.
+// - "All news →" opens a full slide panel with all articles + settings.
+// - Settings (count + image toggle) are stored server-side per user so they
+//   sync across devices.
+// - News is fetched once on mount. useAuthenticatedSession re-creates the
+//   session object on every 15s poll, which would trigger loadNews on every
+//   poll if we used useEffect([session]) directly. We guard with a ref so
+//   news only loads once on initial mount and on explicit user actions.
 export default function Home() {
   const { session, loading } = useAuthenticatedSession();
   const [weather, setWeather] = useState<WeatherResponse | null>(null);
   const [weatherPanelOpen, setWeatherPanelOpen] = useState(false);
   const [feedsPanelOpen, setFeedsPanelOpen] = useState(false);
+  const [newsAllOpen, setNewsAllOpen] = useState(false);
 
   // News state
   const [articles, setArticles] = useState<NewsArticle[]>([]);
   const [newsLoading, setNewsLoading] = useState(true);
+  const [prefs, setPrefs] = useState<NewsPrefs>({ home_article_count: 5, show_images: true });
 
   // Geolocation: ask once on mount, fetch weather on success.
   // Errors (denied, unavailable) are silently ignored - the widget
@@ -61,8 +76,6 @@ export default function Home() {
     );
   }, []);
 
-  // Fetch news articles on mount (and whenever the feeds panel closes,
-  // so subscription changes are reflected immediately).
   const loadNews = useCallback(() => {
     const token = getSessionToken();
     if (!token) return;
@@ -73,9 +86,26 @@ export default function Home() {
       .finally(() => setNewsLoading(false));
   }, []);
 
+  const loadPrefs = useCallback(() => {
+    const token = getSessionToken();
+    if (!token) return;
+    getNewsPrefs(token)
+      .then(setPrefs)
+      .catch(() => {});
+  }, []);
+
+  // Guard: only load news+prefs once on initial session, not on every 15s poll.
+  // useAuthenticatedSession creates a new session object on each /v1/auth/me
+  // response, so session reference changes on every poll - without this ref
+  // loadNews would fire every 15 seconds and flash "Loading…" endlessly.
+  const initialLoadDone = useRef(false);
   useEffect(() => {
-    if (session) loadNews();
-  }, [session, loadNews]);
+    if (session && !initialLoadDone.current) {
+      initialLoadDone.current = true;
+      loadNews();
+      loadPrefs();
+    }
+  }, [session, loadNews, loadPrefs]);
 
   // Renders nothing rather than a spinner during the brief getMe() round
   // trip - this page is reached almost exclusively via redirects (from
@@ -94,9 +124,11 @@ export default function Home() {
           onWeatherClick={() => setWeatherPanelOpen(true)}
         />
         <EmptyModulesNotice />
-        <NewsPanel
+        <NewsPreview
           articles={articles}
           loading={newsLoading}
+          prefs={prefs}
+          onOpenAll={() => setNewsAllOpen(true)}
           onOpenFeeds={() => setFeedsPanelOpen(true)}
         />
       </AppShell>
@@ -110,12 +142,25 @@ export default function Home() {
         />
       )}
 
-      {/* Feed selection panel */}
+      {/* Full news panel — all articles + settings */}
+      <NewsAllPanel
+        open={newsAllOpen}
+        articles={articles}
+        prefs={prefs}
+        onPrefsChange={(p) => setPrefs(p)}
+        onOpenFeeds={() => {
+          setNewsAllOpen(false);
+          setFeedsPanelOpen(true);
+        }}
+        onClose={() => setNewsAllOpen(false)}
+      />
+
+      {/* Feed subscription panel */}
       <FeedsPanel
         open={feedsPanelOpen}
         onClose={() => {
           setFeedsPanelOpen(false);
-          loadNews(); // refresh articles after subscription changes
+          loadNews();
         }}
       />
     </>
@@ -488,30 +533,50 @@ function formatDayLabel(isoDate: string): string {
   return SHORT_DAYS[d.getDay()];
 }
 
-// --- News panel ----------------------------------------------------------
+// --- News preview (compact, home page) -----------------------------------
 
-function NewsPanel({
+// Shows a limited number of articles on the home page based on user prefs.
+// "All news →" button opens the full NewsAllPanel.
+function NewsPreview({
   articles,
   loading,
+  prefs,
+  onOpenAll,
   onOpenFeeds,
 }: {
   articles: NewsArticle[];
   loading: boolean;
+  prefs: NewsPrefs;
+  onOpenAll: () => void;
   onOpenFeeds: () => void;
 }) {
+  const preview = articles.slice(0, prefs.home_article_count);
+
   return (
     <div className="mx-auto max-w-3xl pb-14">
       <div className="mb-3 flex items-center justify-between px-1">
         <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
           News
         </p>
-        <button
-          type="button"
-          onClick={onOpenFeeds}
-          className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
-        >
-          <i className="ti ti-settings text-[12px]" /> Manage feeds
-        </button>
+        <div className="flex items-center gap-3">
+          {articles.length > 0 && (
+            <button
+              type="button"
+              onClick={onOpenAll}
+              className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+            >
+              All news
+              <i className="ti ti-chevron-right text-[10px]" aria-hidden="true" />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onOpenFeeds}
+            className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+          >
+            <i className="ti ti-settings text-[12px]" aria-hidden="true" /> Manage feeds
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -533,19 +598,261 @@ function NewsPanel({
           </button>
         </div>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {articles.map((a, i) => (
-            <ArticleCard key={`${a.url}-${i}`} article={a} />
-          ))}
-        </div>
+        <>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {preview.map((a, i) => (
+              <ArticleCard key={`${a.url}-${i}`} article={a} showImage={prefs.show_images} />
+            ))}
+          </div>
+          {articles.length > prefs.home_article_count && (
+            <button
+              type="button"
+              onClick={onOpenAll}
+              className="mt-3 w-full rounded-xl border border-gray-100 py-2.5 text-[13px] text-gray-500 hover:bg-gray-50 dark:border-gray-800 dark:text-gray-400 dark:hover:bg-gray-900"
+            >
+              Show all {articles.length} articles
+            </button>
+          )}
+        </>
       )}
     </div>
   );
 }
 
-function ArticleCard({ article }: { article: NewsArticle }) {
+// --- Full news panel (all articles + settings) ---------------------------
+
+function NewsAllPanel({
+  open,
+  articles,
+  prefs,
+  onPrefsChange,
+  onOpenFeeds,
+  onClose,
+}: {
+  open: boolean;
+  articles: NewsArticle[];
+  prefs: NewsPrefs;
+  onPrefsChange: (p: NewsPrefs) => void;
+  onOpenFeeds: () => void;
+  onClose: () => void;
+}) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e: globalThis.KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  // Close settings whenever the panel closes.
+  useEffect(() => {
+    if (!open) setSettingsOpen(false);
+  }, [open]);
+
+  async function handlePrefChange(patch: Partial<NewsPrefs>) {
+    const token = getSessionToken();
+    if (!token || saving) return;
+    setSaving(true);
+    try {
+      const updated = await updateNewsPrefs(token, patch);
+      onPrefsChange(updated);
+    } catch {
+      // silently ignore — local state stays unchanged
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <div
+        className={`fixed inset-x-0 top-[60px] bottom-[44px] z-[25] bg-black/35 transition-opacity duration-200 ${
+          open ? "opacity-100" : "pointer-events-none opacity-0"
+        }`}
+        onClick={onClose}
+      />
+      <div
+        className={`fixed top-[60px] bottom-[44px] right-0 z-30 flex w-full flex-col border-l border-gray-200 bg-white shadow-xl transition-transform duration-200 sm:w-[420px] dark:border-gray-800 dark:bg-gray-950 ${
+          open ? "translate-x-0" : "translate-x-full"
+        }`}
+      >
+        {/* Header */}
+        <div className="flex flex-none items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-800">
+          <h2 className="text-base font-semibold">News</h2>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              aria-label="Settings"
+              onClick={() => setSettingsOpen((v) => !v)}
+              className={`flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-900 ${
+                settingsOpen ? "bg-gray-100 dark:bg-gray-900" : ""
+              }`}
+            >
+              <i className="ti ti-settings text-[15px]" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              aria-label="Close"
+              onClick={onClose}
+              className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-900"
+            >
+              <i className="ti ti-x" aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+
+        {/* Inline settings drawer */}
+        {settingsOpen && (
+          <div className="flex-none border-b border-gray-100 bg-gray-50 px-5 py-4 dark:border-gray-800 dark:bg-gray-900">
+            <p className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+              Display settings
+            </p>
+
+            {/* Articles on home page */}
+            <div className="mb-3 flex items-center justify-between">
+              <label className="text-sm text-gray-700 dark:text-gray-200">
+                Articles on home page
+              </label>
+              <div className="flex gap-1">
+                {[3, 5, 10, 20].map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    disabled={saving}
+                    onClick={() => handlePrefChange({ home_article_count: n })}
+                    className={`h-7 w-9 rounded-lg text-[12px] font-medium transition-colors disabled:opacity-50 ${
+                      prefs.home_article_count === n
+                        ? "bg-teal-600 text-white"
+                        : "border border-gray-200 text-gray-600 hover:border-teal-400 dark:border-gray-700 dark:text-gray-300"
+                    }`}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Show images toggle */}
+            <div className="flex items-center justify-between">
+              <label className="text-sm text-gray-700 dark:text-gray-200">Show images</label>
+              <button
+                type="button"
+                disabled={saving}
+                aria-label={prefs.show_images ? "Disable images" : "Enable images"}
+                onClick={() => handlePrefChange({ show_images: !prefs.show_images })}
+                className={`relative h-[22px] w-10 flex-none rounded-full border transition-colors disabled:opacity-50 ${
+                  prefs.show_images
+                    ? "border-teal-600 bg-teal-600"
+                    : "border-gray-300 bg-gray-100 dark:border-gray-600 dark:bg-gray-800"
+                }`}
+              >
+                <span
+                  className={`absolute top-[2px] h-4 w-4 rounded-full bg-white transition-all ${
+                    prefs.show_images ? "left-[21px]" : "left-[2px]"
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* Manage feeds link */}
+            <button
+              type="button"
+              onClick={onOpenFeeds}
+              className="mt-3 flex items-center gap-1 text-[12px] text-teal-600 hover:underline dark:text-teal-400"
+            >
+              <i className="ti ti-rss text-[12px]" aria-hidden="true" />
+              Manage feed subscriptions
+            </button>
+          </div>
+        )}
+
+        {/* Article list */}
+        <div className="flex-1 overflow-y-auto p-3">
+          {articles.length === 0 ? (
+            <div className="px-2 py-10 text-center">
+              <p className="text-sm text-gray-500 dark:text-gray-400">No articles yet.</p>
+              <button
+                type="button"
+                onClick={onOpenFeeds}
+                className="mt-2 text-[13px] text-teal-600 hover:underline dark:text-teal-400"
+              >
+                Choose feeds
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {articles.map((a, i) => (
+                <ArticleCard
+                  key={`${a.url}-${i}`}
+                  article={a}
+                  showImage={prefs.show_images}
+                  compact
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+// --- Article card --------------------------------------------------------
+
+// Two modes:
+//   compact=false (default): grid card with optional image, used on home preview.
+//   compact=true: horizontal list row used in the full news panel.
+function ArticleCard({
+  article,
+  showImage,
+  compact = false,
+}: {
+  article: NewsArticle;
+  showImage: boolean;
+  compact?: boolean;
+}) {
   const pub = article.published_at ? new Date(article.published_at) : null;
   const age = pub ? relativeNewsTime(pub) : null;
+
+  if (compact) {
+    return (
+      <a
+        href={article.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="group flex items-start gap-3 rounded-xl px-2.5 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-900"
+      >
+        {showImage && article.image_url && (
+          <img
+            src={article.image_url}
+            alt=""
+            className="mt-0.5 h-14 w-14 shrink-0 rounded-lg object-cover"
+            loading="lazy"
+          />
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="line-clamp-2 text-[13px] font-medium leading-snug group-hover:text-teal-600 dark:group-hover:text-teal-400">
+            {article.title}
+          </p>
+          <div className="mt-1 flex items-center gap-1.5 text-[11px] text-gray-400 dark:text-gray-500">
+            <span className="truncate font-medium text-gray-500 dark:text-gray-400">
+              {article.source}
+            </span>
+            {age && (
+              <>
+                <span>·</span>
+                <span>{age}</span>
+              </>
+            )}
+          </div>
+        </div>
+      </a>
+    );
+  }
 
   return (
     <a
@@ -554,7 +861,7 @@ function ArticleCard({ article }: { article: NewsArticle }) {
       rel="noopener noreferrer"
       className="group flex flex-col overflow-hidden rounded-xl border border-gray-100 bg-white transition-shadow hover:shadow-md dark:border-gray-800 dark:bg-gray-900"
     >
-      {article.image_url && (
+      {showImage && article.image_url && (
         <img
           src={article.image_url}
           alt=""

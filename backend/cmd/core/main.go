@@ -300,6 +300,8 @@ func main() {
 	mux.HandleFunc("GET /v1/feeds", news.FeedsHandler(authDeps))
 	mux.HandleFunc("PATCH /v1/feeds/{id}/subscription", news.SubscriptionHandler(authDeps))
 	mux.HandleFunc("GET /v1/news", news.NewsHandler(authDeps))
+	mux.HandleFunc("GET /v1/news/preferences", news.PrefsHandler(authDeps))
+	mux.HandleFunc("PATCH /v1/news/preferences", news.PrefsHandler(authDeps))
 
 	// The mail worker (internal/mail) runs for Core's entire lifetime as a
 	// single background goroutine, draining whatever
