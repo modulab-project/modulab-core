@@ -215,9 +215,9 @@ func (p *Pool) UpsertUser(ctx context.Context, subject, email, name, role string
 func (p *Pool) GetUser(ctx context.Context, subject string) (UserRow, bool, error) {
 	var u UserRow
 	err := p.QueryRow(ctx, `
-		SELECT id, email, name, role, approved, locked, created_at
+		SELECT id, email, name, role, approved, locked, created_at, last_login_at
 		FROM users WHERE id = $1
-	`, subject).Scan(&u.Subject, &u.Email, &u.Name, &u.Role, &u.Approved, &u.Locked, &u.CreatedAt)
+	`, subject).Scan(&u.Subject, &u.Email, &u.Name, &u.Role, &u.Approved, &u.Locked, &u.CreatedAt, &u.LastLoginAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return UserRow{}, false, nil
@@ -316,6 +316,7 @@ type UserRow struct {
 	Approved    bool
 	Locked      bool
 	CreatedAt   time.Time
+	LastLoginAt time.Time
 }
 
 // ListUsers returns every user row, oldest first. Unlike the narrower
@@ -326,7 +327,7 @@ type UserRow struct {
 // look to manage anyone.
 func (p *Pool) ListUsers(ctx context.Context) ([]UserRow, error) {
 	rows, err := p.Query(ctx, `
-		SELECT id, email, name, role, approved, locked, created_at
+		SELECT id, email, name, role, approved, locked, created_at, last_login_at
 		FROM users
 		ORDER BY created_at ASC
 	`)
@@ -338,7 +339,7 @@ func (p *Pool) ListUsers(ctx context.Context) ([]UserRow, error) {
 	var out []UserRow
 	for rows.Next() {
 		var u UserRow
-		if err := rows.Scan(&u.Subject, &u.Email, &u.Name, &u.Role, &u.Approved, &u.Locked, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.Subject, &u.Email, &u.Name, &u.Role, &u.Approved, &u.Locked, &u.CreatedAt, &u.LastLoginAt); err != nil {
 			return nil, fmt.Errorf("db: scan user: %w", err)
 		}
 		out = append(out, u)

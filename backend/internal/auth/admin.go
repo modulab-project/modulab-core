@@ -160,13 +160,14 @@ func guardAgainstLastSuperAdmin(ctx context.Context, d Deps, targetSubject strin
 // admin frontend needs to derive a single status (Pending / Active /
 // Locked) per row and decide which actions to offer for it.
 type UserResponse struct {
-	Subject   string    `json:"subject"`
-	Email     string    `json:"email"`
-	Name      string    `json:"name"`
-	Role      string    `json:"role"`
-	Approved  bool      `json:"approved"`
-	Locked    bool      `json:"locked"`
-	CreatedAt time.Time `json:"created_at"`
+	Subject     string    `json:"subject"`
+	Email       string    `json:"email"`
+	Name        string    `json:"name"`
+	Role        string    `json:"role"`
+	Approved    bool      `json:"approved"`
+	Locked      bool      `json:"locked"`
+	CreatedAt   time.Time `json:"created_at"`
+	LastLoginAt time.Time `json:"last_login_at"`
 }
 
 // UsersHandler is GET /v1/admin/users: every user row (db.Pool.ListUsers),
@@ -187,13 +188,14 @@ func UsersHandler(d Deps) http.HandlerFunc {
 		resp := make([]UserResponse, 0, len(users))
 		for _, u := range users {
 			resp = append(resp, UserResponse{
-				Subject:   u.Subject,
-				Email:     u.Email,
-				Name:      u.Name,
-				Role:      u.Role,
-				Approved:  u.Approved,
-				Locked:    u.Locked,
-				CreatedAt: u.CreatedAt,
+				Subject:     u.Subject,
+				Email:       u.Email,
+				Name:        u.Name,
+				Role:        u.Role,
+				Approved:    u.Approved,
+				Locked:      u.Locked,
+				CreatedAt:   u.CreatedAt,
+				LastLoginAt: u.LastLoginAt,
 			})
 		}
 		writeJSON(w, http.StatusOK, resp)

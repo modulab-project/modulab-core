@@ -220,6 +220,7 @@ export interface AdminUser {
   approved: boolean;
   locked: boolean;
   created_at: string;
+  last_login_at: string;
 }
 
 // GET /v1/admin/users - every user, org-admin/super-admin only (enforced

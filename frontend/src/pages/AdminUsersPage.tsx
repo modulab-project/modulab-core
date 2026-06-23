@@ -134,7 +134,7 @@ export default function AdminUsersPage() {
                       {isSelf && <span className="ml-1.5 text-xs text-gray-400">(you)</span>}
                     </p>
                     <p className="truncate text-xs text-gray-500 dark:text-gray-400">
-                      {u.email} · {u.role} · since {new Date(u.created_at).toLocaleDateString()}
+                      {u.email} · {u.role} · joined {new Date(u.created_at).toLocaleDateString()} · last login {new Date(u.last_login_at).toLocaleDateString()}
                     </p>
                   </div>
                   <div className="flex flex-none items-center gap-2">
