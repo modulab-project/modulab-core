@@ -391,7 +391,7 @@ func MeHandler(d Deps) http.HandlerFunc {
 		}
 
 		resp := MeResponse{Session: sess}
-		if issuer, exists, err := setup.IssuerURL(ctx, d.Pool); err == nil && exists {
+		if issuer, exists, err := setup.IssuerURL(ctx, d.Pool, d.MasterKeyEnv); err == nil && exists {
 			resp.AccountSettingsURL = strings.TrimRight(issuer, "/") + "/settings/account"
 		}
 		writeJSON(w, http.StatusOK, resp)

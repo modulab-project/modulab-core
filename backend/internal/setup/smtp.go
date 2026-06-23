@@ -16,17 +16,12 @@
 // API-Tokens tier, Class B/AES-GCM), so it goes through crypto.Encrypt
 // before ever reaching core_settings, exactly like oidc.go's ClientSecret.
 //
-// Host/Port/Username/FromAddress are stored as plain TEXT, same as
-// oidc.go's IssuerURL/ClientID and dnschallenge.go's Provider - none of
-// this codebase's existing settings follow section 2.4's full "encrypt
-// everything" principle (which calls for Class A/SIV on Username too, and
-// Class B/GCM on everything else down to 🟡 Standard) - only the small set
-// of fields explicitly called out as 🔴 Kritisch secrets are encrypted
-// anywhere in this codebase today. Implementing the full two-class
-// (SIV/GCM) ORM-level encryption layer section 2.4 describes is a
-// pre-existing gap across the whole project (the `users` table's
-// email/name columns are equally unencrypted), not something specific to
-// SMTP - tracked as a follow-up rather than solved piecemeal here.
+// Host/Username/FromAddress are encrypted with AES-256-GCM alongside the
+// password, following spec section 2.4's encrypt-everything principle.
+// Port and the encryption mode flag (smtp_encryption) are left as plaintext:
+// they carry no PII and encrypting them would prevent simple existence checks
+// and is unnecessary per the spec's 🟢 Unkritisch classification for purely
+// technical values.
 package setup
 
 import (
@@ -134,12 +129,16 @@ func SMTPConfigured(ctx context.Context, pool *db.Pool) (bool, error) {
 // queued message without a Core restart - same pattern as
 // ResolveOIDCConfig.
 func ResolveSMTPConfig(ctx context.Context, pool *db.Pool, masterKey string) (SMTPRuntimeConfig, error) {
-	host, exists, err := pool.GetSetting(ctx, smtpHostSettingKey)
+	encHost, exists, err := pool.GetSetting(ctx, smtpHostSettingKey)
 	if err != nil {
 		return SMTPRuntimeConfig{}, err
 	}
 	if !exists {
 		return SMTPRuntimeConfig{}, fmt.Errorf("setup: smtp has not been configured yet (call /v1/admin/smtp/configure first)")
+	}
+	host, err := crypto.DecryptIfNotEmpty(masterKey, encHost)
+	if err != nil {
+		return SMTPRuntimeConfig{}, fmt.Errorf("setup: decrypt smtp_host: %w", err)
 	}
 	portStr, _, err := pool.GetSetting(ctx, smtpPortSettingKey)
 	if err != nil {
@@ -149,13 +148,21 @@ func ResolveSMTPConfig(ctx context.Context, pool *db.Pool, masterKey string) (SM
 	if err != nil {
 		return SMTPRuntimeConfig{}, fmt.Errorf("setup: stored smtp port %q is not a number: %w", portStr, err)
 	}
-	username, _, err := pool.GetSetting(ctx, smtpUsernameSettingKey)
+	encUsername, _, err := pool.GetSetting(ctx, smtpUsernameSettingKey)
 	if err != nil {
 		return SMTPRuntimeConfig{}, err
 	}
-	fromAddress, _, err := pool.GetSetting(ctx, smtpFromAddressSettingKey)
+	username, err := crypto.DecryptIfNotEmpty(masterKey, encUsername)
+	if err != nil {
+		return SMTPRuntimeConfig{}, fmt.Errorf("setup: decrypt smtp_username: %w", err)
+	}
+	encFromAddress, _, err := pool.GetSetting(ctx, smtpFromAddressSettingKey)
 	if err != nil {
 		return SMTPRuntimeConfig{}, err
+	}
+	fromAddress, err := crypto.DecryptIfNotEmpty(masterKey, encFromAddress)
+	if err != nil {
+		return SMTPRuntimeConfig{}, fmt.Errorf("setup: decrypt smtp_from_address: %w", err)
 	}
 	encryption, err := resolveSMTPEncryption(ctx, pool)
 	if err != nil {
@@ -211,12 +218,14 @@ func resolveSMTPEncryption(ctx context.Context, pool *db.Pool) (string, error) {
 }
 
 // SMTPStatusHandler reports whether SMTP has been configured, and if so,
-// every field except the password.
-func SMTPStatusHandler(pool *db.Pool) http.HandlerFunc {
+// every field except the password. masterKey is required to decrypt the
+// host, username, and from_address fields stored as ciphertext since the
+// encrypt-everything migration (spec section 2.4).
+func SMTPStatusHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
-		host, exists, err := pool.GetSetting(ctx, smtpHostSettingKey)
+		encHost, exists, err := pool.GetSetting(ctx, smtpHostSettingKey)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -226,22 +235,41 @@ func SMTPStatusHandler(pool *db.Pool) http.HandlerFunc {
 			return
 		}
 
+		host, err := crypto.DecryptIfNotEmpty(masterKey, encHost)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("decrypt smtp_host: %v", err), http.StatusInternalServerError)
+			return
+		}
+
 		portStr, _, err := pool.GetSetting(ctx, smtpPortSettingKey)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		port, _ := strconv.Atoi(portStr)
-		username, _, err := pool.GetSetting(ctx, smtpUsernameSettingKey)
+
+		encUsername, _, err := pool.GetSetting(ctx, smtpUsernameSettingKey)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		fromAddress, _, err := pool.GetSetting(ctx, smtpFromAddressSettingKey)
+		username, err := crypto.DecryptIfNotEmpty(masterKey, encUsername)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("decrypt smtp_username: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		encFromAddress, _, err := pool.GetSetting(ctx, smtpFromAddressSettingKey)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		fromAddress, err := crypto.DecryptIfNotEmpty(masterKey, encFromAddress)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("decrypt smtp_from_address: %v", err), http.StatusInternalServerError)
+			return
+		}
+
 		encryption, err := resolveSMTPEncryption(ctx, pool)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -299,9 +327,23 @@ func SMTPConfigureHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 			return
 		}
 
+		encHost, err := crypto.Encrypt(masterKey, req.Host)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		encUsername, err := crypto.EncryptIfNotEmpty(masterKey, req.Username)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		encFromAddress, err := crypto.Encrypt(masterKey, req.FromAddress)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		encryptedPassword := ""
 		if req.Password != "" {
-			var err error
 			encryptedPassword, err = crypto.Encrypt(masterKey, req.Password)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -311,11 +353,11 @@ func SMTPConfigureHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 
 		ctx := r.Context()
 		settings := map[string]string{
-			smtpHostSettingKey:        req.Host,
+			smtpHostSettingKey:        encHost,
 			smtpPortSettingKey:        strconv.Itoa(req.Port),
-			smtpUsernameSettingKey:    req.Username,
+			smtpUsernameSettingKey:    encUsername,
 			smtpPasswordSettingKey:    encryptedPassword,
-			smtpFromAddressSettingKey: req.FromAddress,
+			smtpFromAddressSettingKey: encFromAddress,
 			smtpEncryptionSettingKey:  req.Encryption,
 		}
 		for key, value := range settings {

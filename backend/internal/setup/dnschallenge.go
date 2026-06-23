@@ -64,16 +64,23 @@ func DNSChallengeConfigured(ctx context.Context, pool *db.Pool) (bool, error) {
 }
 
 // DNSChallengeStatusHandler reports whether a DNS-challenge provider has
-// been configured, and if so, which one (never the credentials).
-func DNSChallengeStatusHandler(pool *db.Pool) http.HandlerFunc {
+// been configured, and if so, which one (never the credentials). masterKey
+// is required to decrypt the provider name, which is stored as GCM
+// ciphertext (spec section 2.4).
+func DNSChallengeStatusHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		provider, exists, err := pool.GetSetting(r.Context(), dnsChallengeProviderSettingKey)
+		encProvider, exists, err := pool.GetSetting(r.Context(), dnsChallengeProviderSettingKey)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		if !exists {
 			writeJSON(w, http.StatusOK, DNSChallengeStatusResponse{Configured: false})
+			return
+		}
+		provider, err := crypto.Decrypt(masterKey, encProvider)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("decrypt dns_challenge_provider: %v", err), http.StatusInternalServerError)
 			return
 		}
 		writeJSON(w, http.StatusOK, DNSChallengeStatusResponse{
@@ -106,6 +113,11 @@ func DNSChallengeConfigureHandler(pool *db.Pool, masterKey string) http.HandlerF
 			return
 		}
 
+		encProvider, err := crypto.Encrypt(masterKey, req.Provider)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		encryptedCredentials, err := crypto.Encrypt(masterKey, req.Credentials)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -113,7 +125,7 @@ func DNSChallengeConfigureHandler(pool *db.Pool, masterKey string) http.HandlerF
 		}
 
 		ctx := r.Context()
-		if err := pool.SetSetting(ctx, dnsChallengeProviderSettingKey, req.Provider); err != nil {
+		if err := pool.SetSetting(ctx, dnsChallengeProviderSettingKey, encProvider); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

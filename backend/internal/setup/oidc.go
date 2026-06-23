@@ -51,25 +51,31 @@ type OIDCRuntimeConfig struct {
 }
 
 // ResolveOIDCConfig returns the effective OIDC configuration as persisted by
-// /v1/setup/oidc/configure (steps 2-3), with ClientSecret decrypted using
-// masterKey (see ResolveMasterKey for how that is itself resolved). There is
-// deliberately no environment-variable fallback (removed 2026-06-21 on
-// request): OIDC configuration, like the secret it carries, should only
-// ever live encrypted in the database, never duplicated in plaintext in
-// .env. Called by the login flow on every /v1/auth/login and
+// /v1/setup/oidc/configure (steps 2-3), with all three fields decrypted using
+// masterKey. IssuerURL and ClientID are Class B (GCM) just like the secret -
+// none of these values should appear in a DB dump in plaintext (spec section
+// 2.4). Called by the login flow on every /v1/auth/login and
 // /v1/auth/callback request, so a provider configured through the wizard
 // works immediately, without a Core restart.
 func ResolveOIDCConfig(ctx context.Context, pool *db.Pool, masterKey string) (OIDCRuntimeConfig, error) {
-	issuer, exists, err := pool.GetSetting(ctx, oidcIssuerSettingKey)
+	encIssuer, exists, err := pool.GetSetting(ctx, oidcIssuerSettingKey)
 	if err != nil {
 		return OIDCRuntimeConfig{}, err
 	}
 	if !exists {
 		return OIDCRuntimeConfig{}, fmt.Errorf("setup: oidc has not been configured yet (call /v1/setup/oidc/configure first)")
 	}
-	clientID, _, err := pool.GetSetting(ctx, oidcClientIDSettingKey)
+	issuer, err := crypto.Decrypt(masterKey, encIssuer)
+	if err != nil {
+		return OIDCRuntimeConfig{}, fmt.Errorf("setup: decrypt oidc_issuer_url: %w", err)
+	}
+	encClientID, _, err := pool.GetSetting(ctx, oidcClientIDSettingKey)
 	if err != nil {
 		return OIDCRuntimeConfig{}, err
+	}
+	clientID, err := crypto.Decrypt(masterKey, encClientID)
+	if err != nil {
+		return OIDCRuntimeConfig{}, fmt.Errorf("setup: decrypt oidc_client_id: %w", err)
 	}
 	encryptedSecret, _, err := pool.GetSetting(ctx, oidcClientSecretSettingKey)
 	if err != nil {
@@ -82,16 +88,23 @@ func ResolveOIDCConfig(ctx context.Context, pool *db.Pool, masterKey string) (OI
 	return OIDCRuntimeConfig{IssuerURL: issuer, ClientID: clientID, ClientSecret: secret}, nil
 }
 
-// IssuerURL returns just the configured OIDC issuer URL, without resolving
-// the rest of the runtime config - in particular, without needing the
-// master key at all, since the issuer URL itself was never encrypted (only
-// ClientSecret is). For callers that only need to build a link to the IdP
-// (e.g. MeHandler's account_settings_url, in handlers.go) and have no use
-// for ClientID/ClientSecret, this avoids both the master-key resolution and
-// the AES-GCM decrypt that ResolveOIDCConfig would otherwise do for no
-// reason. ok is false if OIDC has not been configured yet.
-func IssuerURL(ctx context.Context, pool *db.Pool) (string, bool, error) {
-	return pool.GetSetting(ctx, oidcIssuerSettingKey)
+// IssuerURL returns just the configured OIDC issuer URL. masterKey is
+// required to decrypt it, since oidc_issuer_url is now stored as GCM
+// ciphertext alongside the other OIDC fields (spec section 2.4). For callers
+// that only need to build a link to the IdP (e.g. MeHandler's
+// account_settings_url) and have no use for ClientID/ClientSecret, this
+// avoids decrypting the other two fields unnecessarily. ok is false if OIDC
+// has not been configured yet.
+func IssuerURL(ctx context.Context, pool *db.Pool, masterKey string) (string, bool, error) {
+	enc, exists, err := pool.GetSetting(ctx, oidcIssuerSettingKey)
+	if err != nil || !exists {
+		return "", exists, err
+	}
+	issuer, err := crypto.Decrypt(masterKey, enc)
+	if err != nil {
+		return "", false, fmt.Errorf("setup: decrypt oidc_issuer_url: %w", err)
+	}
+	return issuer, true, nil
 }
 
 // OIDCConfigured reports whether the OIDC provider has already been
@@ -107,12 +120,14 @@ func OIDCConfigured(ctx context.Context, pool *db.Pool) (bool, error) {
 }
 
 // OIDCStatusHandler reports whether OIDC has been configured, and if so,
-// the issuer URL and client ID (never the client secret).
-func OIDCStatusHandler(pool *db.Pool) http.HandlerFunc {
+// the issuer URL and client ID (never the client secret). masterKey is
+// required to decrypt the stored ciphertext values for display (spec section
+// 2.4: oidc_issuer_url and oidc_client_id are both GCM-encrypted at rest).
+func OIDCStatusHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
-		issuer, exists, err := pool.GetSetting(ctx, oidcIssuerSettingKey)
+		encIssuer, exists, err := pool.GetSetting(ctx, oidcIssuerSettingKey)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -121,10 +136,20 @@ func OIDCStatusHandler(pool *db.Pool) http.HandlerFunc {
 			writeJSON(w, http.StatusOK, OIDCStatusResponse{Configured: false})
 			return
 		}
+		issuer, err := crypto.Decrypt(masterKey, encIssuer)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("decrypt oidc_issuer_url: %v", err), http.StatusInternalServerError)
+			return
+		}
 
-		clientID, _, err := pool.GetSetting(ctx, oidcClientIDSettingKey)
+		encClientID, _, err := pool.GetSetting(ctx, oidcClientIDSettingKey)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		clientID, err := crypto.Decrypt(masterKey, encClientID)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("decrypt oidc_client_id: %v", err), http.StatusInternalServerError)
 			return
 		}
 
@@ -172,6 +197,16 @@ func OIDCConfigureHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 			return
 		}
 
+		encIssuer, err := crypto.Encrypt(masterKey, req.IssuerURL)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		encClientID, err := crypto.Encrypt(masterKey, req.ClientID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		encryptedSecret, err := crypto.Encrypt(masterKey, req.ClientSecret)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -179,11 +214,11 @@ func OIDCConfigureHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 		}
 
 		ctx := r.Context()
-		if err := pool.SetSetting(ctx, oidcIssuerSettingKey, req.IssuerURL); err != nil {
+		if err := pool.SetSetting(ctx, oidcIssuerSettingKey, encIssuer); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		if err := pool.SetSetting(ctx, oidcClientIDSettingKey, req.ClientID); err != nil {
+		if err := pool.SetSetting(ctx, oidcClientIDSettingKey, encClientID); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

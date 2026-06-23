@@ -67,7 +67,7 @@ func main() {
 
 	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable",
 		cfg.DBUser, cfg.DBPassword, cfg.DBHost, cfg.DBPort, cfg.DBName)
-	pool, err := db.Connect(ctx, dsn)
+	pool, err := db.Connect(ctx, dsn, cfg.MasterKey)
 	if err != nil {
 		log.Fatalf("db: %v", err)
 	}
@@ -76,6 +76,13 @@ func main() {
 
 	if err := pool.EnsureCoreSchema(ctx); err != nil {
 		log.Fatalf("db: %v", err)
+	}
+
+	// One-time migration: encrypt any plaintext PII/configuration that
+	// existed before the encrypt-everything feature landed. No-op if already
+	// run (guarded by core_encryption_version in core_settings).
+	if err := pool.MigrateToEncryptedStorage(ctx); err != nil {
+		log.Fatalf("db: encryption migration: %v", err)
 	}
 
 	valkeyClient := valkey.New(net.JoinHostPort(cfg.ValkeyHost, cfg.ValkeyPort))
@@ -164,7 +171,7 @@ func main() {
 	mux.Handle("/v1/setup/status", bootstrapMgr.Middleware(setup.StatusHandler(pool)))
 	mux.Handle("/v1/setup/init", bootstrapMgr.Middleware(setup.InitHandler(pool)))
 
-	mux.Handle("/v1/setup/oidc/status", bootstrapMgr.Middleware(setup.OIDCStatusHandler(pool)))
+	mux.Handle("/v1/setup/oidc/status", bootstrapMgr.Middleware(setup.OIDCStatusHandler(pool, cfg.MasterKey)))
 	mux.Handle("/v1/setup/oidc/configure", bootstrapMgr.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// The OIDC step needs the master key to encrypt the client secret.
 		// ResolveMasterKey only ever returns cfg.MasterKey now (no database
@@ -179,7 +186,7 @@ func main() {
 		setup.OIDCConfigureHandler(pool, masterKey)(w, r)
 	})))
 
-	mux.Handle("/v1/setup/dns-challenge/status", bootstrapMgr.Middleware(setup.DNSChallengeStatusHandler(pool)))
+	mux.Handle("/v1/setup/dns-challenge/status", bootstrapMgr.Middleware(setup.DNSChallengeStatusHandler(pool, cfg.MasterKey)))
 	mux.Handle("/v1/setup/dns-challenge/configure", bootstrapMgr.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Same master-key dependency as the OIDC step above, for the same
 		// reason: the DNS-challenge provider's credentials are encrypted
@@ -260,7 +267,7 @@ func main() {
 	// handlers above: it can't actually fail in practice (no DB fallback
 	// left to resolve), kept this shape purely for consistency.
 	superAdminOnly := auth.RequireSuperAdminMiddleware(authDeps)
-	mux.Handle("GET /v1/admin/smtp/status", superAdminOnly(setup.SMTPStatusHandler(pool)))
+	mux.Handle("GET /v1/admin/smtp/status", superAdminOnly(setup.SMTPStatusHandler(pool, cfg.MasterKey)))
 	mux.Handle("POST /v1/admin/smtp/configure", superAdminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		masterKey, err := setup.ResolveMasterKey(r.Context(), pool, cfg.MasterKey)
 		if err != nil {

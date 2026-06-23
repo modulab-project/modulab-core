@@ -52,6 +52,26 @@ func Decrypt(keyHex, encoded string) (string, error) {
 	return string(plaintext), nil
 }
 
+// EncryptIfNotEmpty encrypts plaintext only when it is non-empty, returning
+// the empty string unchanged. Callers that store optional fields (e.g.
+// smtp_username on an unauthenticated relay) can use this instead of
+// branching on emptiness themselves.
+func EncryptIfNotEmpty(keyHex, plaintext string) (string, error) {
+	if plaintext == "" {
+		return "", nil
+	}
+	return Encrypt(keyHex, plaintext)
+}
+
+// DecryptIfNotEmpty reverses EncryptIfNotEmpty: an empty encoded string is
+// returned as-is without attempting a base64 decode.
+func DecryptIfNotEmpty(keyHex, encoded string) (string, error) {
+	if encoded == "" {
+		return "", nil
+	}
+	return Decrypt(keyHex, encoded)
+}
+
 func newGCM(keyHex string) (cipher.AEAD, error) {
 	key, err := hex.DecodeString(keyHex)
 	if err != nil {

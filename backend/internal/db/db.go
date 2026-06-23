@@ -14,16 +14,25 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/modulab-project/modulab-core/backend/internal/crypto"
 )
 
 // Pool wraps *pgxpool.Pool so Core-specific helper methods can be attached
 // without polluting the pgx API surface everywhere it's used.
+// masterKey is the AES-256 master key used to encrypt/decrypt all PII stored
+// in the users table (email, name) transparently - callers pass and receive
+// plaintext; the encrypt/decrypt happens inside each method.
 type Pool struct {
 	*pgxpool.Pool
+	masterKey string
 }
 
 // Connect opens a pooled connection to Postgres and verifies it is reachable.
-func Connect(ctx context.Context, dsn string) (*Pool, error) {
+// masterKey is the AES-256 hex key (MODULAB_MASTER_KEY) used to encrypt/
+// decrypt user PII transparently in UpsertUser, GetUser, ListUsers, and
+// ListAdmins - the same key that protects OIDC/SMTP/DNS secrets in
+// core_settings.
+func Connect(ctx context.Context, dsn, masterKey string) (*Pool, error) {
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		return nil, fmt.Errorf("db: connect: %w", err)
@@ -32,7 +41,7 @@ func Connect(ctx context.Context, dsn string) (*Pool, error) {
 		pool.Close()
 		return nil, fmt.Errorf("db: ping: %w", err)
 	}
-	return &Pool{pool}, nil
+	return &Pool{Pool: pool, masterKey: masterKey}, nil
 }
 
 // EnsureCoreSchema creates Core's bootstrap tables if they do not exist yet.
@@ -192,6 +201,15 @@ func (p *Pool) UpsertUser(ctx context.Context, subject, email, name, role string
 		return false, fmt.Errorf("db: check existing user %q: %w", subject, err)
 	}
 
+	encEmail, err := crypto.EncryptIfNotEmpty(p.masterKey, email)
+	if err != nil {
+		return false, fmt.Errorf("db: encrypt email for %q: %w", subject, err)
+	}
+	encName, err := crypto.EncryptIfNotEmpty(p.masterKey, name)
+	if err != nil {
+		return false, fmt.Errorf("db: encrypt name for %q: %w", subject, err)
+	}
+
 	_, err = p.Exec(ctx, `
 		INSERT INTO users (id, email, name, role, approved, created_at, last_login_at)
 		VALUES ($1, $2, $3, $4, $5, now(), now())
@@ -200,7 +218,7 @@ func (p *Pool) UpsertUser(ctx context.Context, subject, email, name, role string
 			name = EXCLUDED.name,
 			role = EXCLUDED.role,
 			last_login_at = now()
-	`, subject, email, name, role, approved)
+	`, subject, encEmail, encName, role, approved)
 	if err != nil {
 		return false, fmt.Errorf("db: upsert user %q: %w", subject, err)
 	}
@@ -223,6 +241,12 @@ func (p *Pool) GetUser(ctx context.Context, subject string) (UserRow, bool, erro
 			return UserRow{}, false, nil
 		}
 		return UserRow{}, false, fmt.Errorf("db: get user %q: %w", subject, err)
+	}
+	if u.Email, err = crypto.DecryptIfNotEmpty(p.masterKey, u.Email); err != nil {
+		return UserRow{}, false, fmt.Errorf("db: decrypt email for %q: %w", subject, err)
+	}
+	if u.Name, err = crypto.DecryptIfNotEmpty(p.masterKey, u.Name); err != nil {
+		return UserRow{}, false, fmt.Errorf("db: decrypt name for %q: %w", subject, err)
 	}
 	return u, true, nil
 }
@@ -342,6 +366,13 @@ func (p *Pool) ListUsers(ctx context.Context) ([]UserRow, error) {
 		if err := rows.Scan(&u.Subject, &u.Email, &u.Name, &u.Role, &u.Approved, &u.Locked, &u.CreatedAt, &u.LastLoginAt); err != nil {
 			return nil, fmt.Errorf("db: scan user: %w", err)
 		}
+		var err error
+		if u.Email, err = crypto.DecryptIfNotEmpty(p.masterKey, u.Email); err != nil {
+			return nil, fmt.Errorf("db: decrypt email for %q: %w", u.Subject, err)
+		}
+		if u.Name, err = crypto.DecryptIfNotEmpty(p.masterKey, u.Name); err != nil {
+			return nil, fmt.Errorf("db: decrypt name for %q: %w", u.Subject, err)
+		}
 		out = append(out, u)
 	}
 	if err := rows.Err(); err != nil {
@@ -373,6 +404,13 @@ func (p *Pool) ListAdmins(ctx context.Context) ([]UserRow, error) {
 		var u UserRow
 		if err := rows.Scan(&u.Subject, &u.Email, &u.Name, &u.Role, &u.Approved, &u.Locked, &u.CreatedAt); err != nil {
 			return nil, fmt.Errorf("db: scan admin: %w", err)
+		}
+		var err error
+		if u.Email, err = crypto.DecryptIfNotEmpty(p.masterKey, u.Email); err != nil {
+			return nil, fmt.Errorf("db: decrypt email for %q: %w", u.Subject, err)
+		}
+		if u.Name, err = crypto.DecryptIfNotEmpty(p.masterKey, u.Name); err != nil {
+			return nil, fmt.Errorf("db: decrypt name for %q: %w", u.Subject, err)
 		}
 		out = append(out, u)
 	}
@@ -438,4 +476,95 @@ func (p *Pool) DeleteUser(ctx context.Context, subject string) (int64, error) {
 		return 0, fmt.Errorf("db: delete user %q: %w", subject, err)
 	}
 	return tag.RowsAffected(), nil
+}
+
+// encryptionVersionKey is the core_settings key that records whether the
+// one-time plaintext→encrypted storage migration has been completed for
+// this instance. Absent = not yet run; "1" = done.
+const encryptionVersionKey = "core_encryption_version"
+
+// MigrateToEncryptedStorage is a one-time startup migration that encrypts
+// any plaintext PII that existed in the database before the encrypt-
+// everything feature landed. It is safe to call on every boot: the
+// core_encryption_version flag in core_settings makes it a no-op once it
+// has run successfully.
+//
+// Fields migrated here:
+//   - users.email, users.name
+//   - core_settings: smtp_host, smtp_username, smtp_from_address,
+//     oidc_issuer_url, oidc_client_id, dns_challenge_provider
+//
+// The _enc variants (smtp_password_enc, oidc_client_secret_enc,
+// dns_challenge_credentials_enc) were already encrypted before this
+// feature landed and are left untouched.
+func (p *Pool) MigrateToEncryptedStorage(ctx context.Context) error {
+	v, exists, err := p.GetSetting(ctx, encryptionVersionKey)
+	if err != nil {
+		return fmt.Errorf("db: migration check: %w", err)
+	}
+	if exists && v == "1" {
+		return nil // already done
+	}
+
+	// Migrate users table: read id/email/name, encrypt, write back.
+	rows, err := p.Query(ctx, `SELECT id, email, name FROM users`)
+	if err != nil {
+		return fmt.Errorf("db: migration list users: %w", err)
+	}
+	type userPlain struct{ id, email, name string }
+	var users []userPlain
+	for rows.Next() {
+		var u userPlain
+		if err := rows.Scan(&u.id, &u.email, &u.name); err != nil {
+			rows.Close()
+			return fmt.Errorf("db: migration scan user: %w", err)
+		}
+		users = append(users, u)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("db: migration rows: %w", err)
+	}
+
+	for _, u := range users {
+		encEmail, err := crypto.EncryptIfNotEmpty(p.masterKey, u.email)
+		if err != nil {
+			return fmt.Errorf("db: migration encrypt email for %q: %w", u.id, err)
+		}
+		encName, err := crypto.EncryptIfNotEmpty(p.masterKey, u.name)
+		if err != nil {
+			return fmt.Errorf("db: migration encrypt name for %q: %w", u.id, err)
+		}
+		if _, err := p.Exec(ctx, `UPDATE users SET email=$1, name=$2 WHERE id=$3`, encEmail, encName, u.id); err != nil {
+			return fmt.Errorf("db: migration update user %q: %w", u.id, err)
+		}
+	}
+
+	// Migrate core_settings: plaintext configuration fields.
+	settingsToMigrate := []string{
+		"smtp_host", "smtp_username", "smtp_from_address",
+		"oidc_issuer_url", "oidc_client_id",
+		"dns_challenge_provider",
+	}
+	for _, key := range settingsToMigrate {
+		val, exists, err := p.GetSetting(ctx, key)
+		if err != nil {
+			return fmt.Errorf("db: migration get setting %q: %w", key, err)
+		}
+		if !exists || val == "" {
+			continue
+		}
+		enc, err := crypto.Encrypt(p.masterKey, val)
+		if err != nil {
+			return fmt.Errorf("db: migration encrypt setting %q: %w", key, err)
+		}
+		if err := p.SetSetting(ctx, key, enc); err != nil {
+			return fmt.Errorf("db: migration set setting %q: %w", key, err)
+		}
+	}
+
+	if err := p.SetSetting(ctx, encryptionVersionKey, "1"); err != nil {
+		return fmt.Errorf("db: migration set version flag: %w", err)
+	}
+	return nil
 }
