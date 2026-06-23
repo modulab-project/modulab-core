@@ -331,3 +331,46 @@ export function configureSmtp(token: string, body: SMTPConfigRequest): Promise<S
 export function deleteSmtpConfig(token: string): Promise<void> {
   return request<void>("/v1/admin/smtp", { method: "DELETE", headers: bearerHeaders(token) });
 }
+
+// --- Widget: Weather -----------------------------------------------------
+// Mirrors backend/internal/weather.Response exactly.
+
+export interface WeatherCurrent {
+  temperature: number;
+  apparent_temperature: number;
+  humidity: number;
+  wind_speed: number;
+  weather_code: number;
+}
+
+export interface WeatherHourly {
+  time: string; // "2026-06-23T14:00"
+  temperature: number;
+  weather_code: number;
+  precip_probability: number;
+}
+
+export interface WeatherDaily {
+  time: string; // "2026-06-23"
+  weather_code: number;
+  temp_max: number;
+  temp_min: number;
+  precip_prob_max: number;
+  sunrise: string;
+  sunset: string;
+}
+
+export interface WeatherResponse {
+  current: WeatherCurrent;
+  hourly: WeatherHourly[];
+  daily: WeatherDaily[];
+  timezone: string;
+}
+
+// GET /v1/widgets/weather — no auth required (see weather.go's doc comment).
+// lat and lon come from navigator.geolocation.getCurrentPosition().
+export function getWeather(lat: number, lon: number): Promise<WeatherResponse> {
+  return request<WeatherResponse>(
+    `/v1/widgets/weather?lat=${lat.toFixed(4)}&lon=${lon.toFixed(4)}`,
+  );
+}

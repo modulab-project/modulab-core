@@ -28,6 +28,7 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
 	"github.com/modulab-project/modulab-core/backend/internal/valkey"
 	"github.com/modulab-project/modulab-core/backend/internal/version"
+	"github.com/modulab-project/modulab-core/backend/internal/weather"
 )
 
 type healthStatus struct {
@@ -277,6 +278,14 @@ func main() {
 		setup.SMTPConfigureHandler(pool, masterKey)(w, r)
 	})))
 	mux.Handle("DELETE /v1/admin/smtp", superAdminOnly(setup.SMTPDeleteHandler(pool)))
+
+	// Widget endpoints (spec section 8 / Home page). Not wrapped in any
+	// auth middleware: weather data is not sensitive, and the 15-minute
+	// Valkey cache (internal/weather) limits upstream Open-Meteo calls to
+	// one per location per interval regardless of how many users load the
+	// page simultaneously. lat and lon come from the browser's own
+	// Geolocation API - Core never stores or logs them.
+	mux.HandleFunc("GET /v1/widgets/weather", weather.Handler(valkeyClient))
 
 	// The mail worker (internal/mail) runs for Core's entire lifetime as a
 	// single background goroutine, draining whatever

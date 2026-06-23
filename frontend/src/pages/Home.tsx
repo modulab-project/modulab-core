@@ -1,5 +1,6 @@
 import { useEffect, useState, type KeyboardEvent } from "react";
 import { useAuthenticatedSession } from "../lib/useSession";
+import { getWeather, type WeatherResponse } from "../lib/api";
 import { AppShell } from "../components/AppShell";
 
 // Spec section 6.4's "/" route ("Startseite: Begrüßung, Suche, Widgets,
@@ -15,8 +16,36 @@ import { AppShell } from "../components/AppShell";
 // bookmarks (spec sections 4.x / 5.x) have no backend yet (Phase 3 of the
 // project roadmap), so there is no tile grid of fake data here, and no
 // notification bell either (no SSE/notifications endpoint exists).
+//
+// Weather widget (spec section 8):
+// - Browser Geolocation API supplies lat/lon on mount (one-time permission
+//   prompt, no stored location on the server).
+// - Core's /v1/widgets/weather proxies Open-Meteo and caches 15min in Valkey.
+// - Inline in Hero: icon + temp + description, click opens the detail panel.
+// - Detail panel: day-view (next 24h hourly) + 16-day forecast.
+// - Graceful degradation: no weather if permission denied or fetch fails.
 export default function Home() {
   const { session, loading } = useAuthenticatedSession();
+  const [weather, setWeather] = useState<WeatherResponse | null>(null);
+  const [weatherPanelOpen, setWeatherPanelOpen] = useState(false);
+
+  // Geolocation: ask once on mount, fetch weather on success.
+  // Errors (denied, unavailable) are silently ignored - the widget
+  // simply does not render, which is the correct degraded state.
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => {
+        getWeather(coords.latitude, coords.longitude)
+          .then(setWeather)
+          .catch(() => {});
+      },
+      () => {},
+      { timeout: 8000 },
+    );
+  }, []);
 
   // Renders nothing rather than a spinner during the brief getMe() round
   // trip - this page is reached almost exclusively via redirects (from
@@ -27,14 +56,31 @@ export default function Home() {
   }
 
   return (
-    <AppShell session={session}>
-      <Hero name={firstName(session)} />
-      <EmptyModulesNotice />
-    </AppShell>
+    <>
+      <AppShell session={session}>
+        <Hero
+          name={firstName(session)}
+          weather={weather}
+          onWeatherClick={() => setWeatherPanelOpen(true)}
+        />
+        <EmptyModulesNotice />
+      </AppShell>
+
+      {/* Weather detail panel — rendered outside AppShell so it overlays
+          the full viewport. Uses the same fixed-panel pattern as AppShell's
+          own slide panels (profile/status/notifications). */}
+      {weather && (
+        <WeatherPanel
+          open={weatherPanelOpen}
+          weather={weather}
+          onClose={() => setWeatherPanelOpen(false)}
+        />
+      )}
+    </>
   );
 }
 
-// --- Hero (clock, greeting, search) -------------------------------------
+// --- Hero (clock, greeting, weather inline, search) ----------------------
 
 function useClock() {
   const [now, setNow] = useState(() => new Date());
@@ -61,7 +107,15 @@ const MONTHS = [
   "December",
 ];
 
-function Hero({ name }: { name: string }) {
+function Hero({
+  name,
+  weather,
+  onWeatherClick,
+}: {
+  name: string;
+  weather: WeatherResponse | null;
+  onWeatherClick: () => void;
+}) {
   const now = useClock();
   const hours = String(now.getHours()).padStart(2, "0");
   const minutes = String(now.getMinutes()).padStart(2, "0");
@@ -86,11 +140,36 @@ function Hero({ name }: { name: string }) {
         <span className="text-teal-600 dark:text-teal-400">:</span>
         {minutes}
       </p>
-      <p className="mt-2 mb-6 text-[13.5px] text-gray-500 dark:text-gray-400">
+      <p className="mt-2 text-[13.5px] text-gray-500 dark:text-gray-400">
         {WEEKDAYS[now.getDay()]}, {now.getDate()} {MONTHS[now.getMonth()]} · {greeting}, {name}
       </p>
+
+      {/* Inline weather — only rendered once geolocation + fetch succeed */}
+      {weather && (
+        <button
+          type="button"
+          onClick={onWeatherClick}
+          className="mt-2 mb-4 flex items-center gap-1.5 rounded-full px-3 py-1 text-[13px] text-gray-500 transition-colors hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-900"
+        >
+          <i
+            className={`ti ${wmoIcon(weather.current.weather_code)} text-teal-600 dark:text-teal-400`}
+            style={{ fontSize: 15 }}
+            aria-hidden="true"
+          />
+          <span className="font-medium text-gray-800 dark:text-gray-200">
+            {Math.round(weather.current.temperature)}°C
+          </span>
+          <span>·</span>
+          <span>{wmoDesc(weather.current.weather_code)}</span>
+          <i className="ti ti-chevron-right text-[11px] text-gray-400" aria-hidden="true" />
+        </button>
+      )}
+
+      {/* Spacer when weather widget is absent to maintain consistent search position */}
+      {!weather && <div className="mb-6" />}
+
       <div className="flex h-11 w-full max-w-[440px] items-center gap-2.5 rounded-full border border-teal-600/35 px-[18px]">
-        <i className="ti ti-search text-[16px] text-teal-600 dark:text-teal-400" />
+        <i className="ti ti-search text-[16px] text-teal-600 dark:text-teal-400" aria-hidden="true" />
         <input
           type="text"
           onKeyDown={handleSearchKeyDown}
@@ -122,6 +201,252 @@ function EmptyModulesNotice() {
     </div>
   );
 }
+
+// --- Weather detail panel ------------------------------------------------
+
+function WeatherPanel({
+  open,
+  weather,
+  onClose,
+}: {
+  open: boolean;
+  weather: WeatherResponse;
+  onClose: () => void;
+}) {
+  // Close on Escape key.
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e: globalThis.KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  return (
+    <>
+      {/* Backdrop — sits between AppShell (z-20) and the panel (z-30) */}
+      <div
+        className={`fixed inset-x-0 top-[60px] bottom-[44px] z-[25] bg-black/35 transition-opacity duration-200 ${
+          open ? "opacity-100" : "pointer-events-none opacity-0"
+        }`}
+        onClick={onClose}
+      />
+
+      {/* Slide panel — same dimensions as AppShell's own panels */}
+      <div
+        className={`fixed top-[60px] bottom-[44px] right-0 z-30 flex w-full flex-col border-l border-gray-200 bg-white shadow-xl transition-transform duration-200 sm:w-[360px] dark:border-gray-800 dark:bg-gray-950 ${
+          open ? "translate-x-0" : "translate-x-full"
+        }`}
+      >
+        <div className="flex flex-none items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-800">
+          <h2 className="text-base font-semibold">Weather</h2>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-900"
+          >
+            <i className="ti ti-x" aria-hidden="true" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5">
+          <WeatherPanelContent weather={weather} />
+        </div>
+      </div>
+    </>
+  );
+}
+
+function WeatherPanelContent({ weather }: { weather: WeatherResponse }) {
+  const { current, hourly, daily } = weather;
+
+  return (
+    <>
+      {/* Current conditions */}
+      <div className="mb-5 flex items-center gap-4">
+        <i
+          className={`ti ${wmoIcon(current.weather_code)} text-teal-600 dark:text-teal-400`}
+          style={{ fontSize: 40 }}
+          aria-hidden="true"
+        />
+        <div>
+          <p className="text-3xl font-semibold leading-none">
+            {Math.round(current.temperature)}°C
+          </p>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            {wmoDesc(current.weather_code)}
+          </p>
+          <div className="mt-1.5 flex gap-3 text-xs text-gray-500 dark:text-gray-400">
+            <span className="flex items-center gap-1">
+              <i className="ti ti-thermometer" aria-hidden="true" />
+              feels {Math.round(current.apparent_temperature)}°
+            </span>
+            <span className="flex items-center gap-1">
+              <i className="ti ti-droplet" aria-hidden="true" />
+              {current.humidity}%
+            </span>
+            <span className="flex items-center gap-1">
+              <i className="ti ti-wind" aria-hidden="true" />
+              {Math.round(current.wind_speed)} km/h
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Hourly — next 24 hours */}
+      <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
+        Next 24 hours
+      </p>
+      <div
+        className="mb-5 flex overflow-x-auto rounded-xl border border-gray-100 dark:border-gray-800"
+        style={{ scrollbarWidth: "none" }}
+      >
+        {hourly.map((h, i) => {
+          const timeLabel = i === 0 ? "now" : formatHourLabel(h.time);
+          return (
+            <div
+              key={h.time}
+              className={`flex flex-none flex-col items-center gap-1 border-r border-gray-100 px-3 py-2.5 last:border-r-0 dark:border-gray-800 ${
+                i === 0 ? "bg-teal-50 dark:bg-teal-950/30" : ""
+              }`}
+            >
+              <span
+                className={`text-[11px] ${
+                  i === 0
+                    ? "font-medium text-teal-700 dark:text-teal-400"
+                    : "text-gray-400 dark:text-gray-500"
+                }`}
+              >
+                {timeLabel}
+              </span>
+              <i
+                className={`ti ${wmoIcon(h.weather_code)} text-teal-600 dark:text-teal-400`}
+                style={{ fontSize: 14 }}
+                aria-hidden="true"
+              />
+              <span className="text-[12px] font-medium">{Math.round(h.temperature)}°</span>
+              <span className="text-[10px] text-gray-400 dark:text-gray-500">
+                {h.precip_probability}%
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 16-day daily forecast */}
+      <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
+        16-day forecast
+      </p>
+      <div className="rounded-xl border border-gray-100 dark:border-gray-800">
+        {daily.map((d, i) => {
+          const isToday = i === 0;
+          return (
+            <div
+              key={d.time}
+              className={`flex items-center gap-3 border-b border-gray-100 px-3 py-2 last:border-b-0 dark:border-gray-800 ${
+                isToday ? "bg-teal-50 dark:bg-teal-950/30" : ""
+              }`}
+            >
+              <span
+                className={`w-7 shrink-0 text-[12px] ${
+                  isToday
+                    ? "font-medium text-teal-700 dark:text-teal-400"
+                    : "text-gray-500 dark:text-gray-400"
+                }`}
+              >
+                {isToday ? "Today" : formatDayLabel(d.time)}
+              </span>
+              <i
+                className={`ti ${wmoIcon(d.weather_code)} shrink-0 text-teal-600 dark:text-teal-400`}
+                style={{ fontSize: 14 }}
+                aria-hidden="true"
+              />
+              {/* Precipitation probability bar */}
+              <div className="flex-1">
+                <div className="h-1 rounded-full bg-gray-100 dark:bg-gray-800">
+                  <div
+                    className="h-1 rounded-full bg-teal-400 dark:bg-teal-600"
+                    style={{ width: `${d.precip_prob_max}%` }}
+                  />
+                </div>
+              </div>
+              <div className="flex shrink-0 gap-2 text-[12px]">
+                <span className="font-medium">{Math.round(d.temp_max)}°</span>
+                <span className="text-gray-400 dark:text-gray-500">{Math.round(d.temp_min)}°</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <p className="mt-3 text-center text-[11px] text-gray-400 dark:text-gray-600">
+        Open-Meteo · updated every 15 min
+      </p>
+    </>
+  );
+}
+
+// --- WMO weather code helpers --------------------------------------------
+
+// Maps WMO weather interpretation codes to Tabler outline icon names.
+// https://open-meteo.com/en/docs#weathervariables
+function wmoIcon(code: number): string {
+  if (code === 0 || code === 1) return "ti-sun";
+  if (code === 2) return "ti-cloud-sun";
+  if (code === 3) return "ti-cloud";
+  if (code === 45 || code === 48) return "ti-cloud-fog";
+  if (code >= 51 && code <= 57) return "ti-cloud-drizzle";
+  if (code >= 61 && code <= 67) return "ti-cloud-rain";
+  if (code >= 71 && code <= 77) return "ti-snowflake";
+  if (code >= 80 && code <= 82) return "ti-cloud-rain";
+  if (code === 85 || code === 86) return "ti-snowflake";
+  if (code >= 95) return "ti-cloud-storm";
+  return "ti-cloud";
+}
+
+// Maps WMO codes to short human-readable descriptions.
+function wmoDesc(code: number): string {
+  if (code === 0) return "Clear sky";
+  if (code === 1) return "Mainly clear";
+  if (code === 2) return "Partly cloudy";
+  if (code === 3) return "Overcast";
+  if (code === 45 || code === 48) return "Fog";
+  if (code === 51 || code === 53) return "Drizzle";
+  if (code === 55) return "Heavy drizzle";
+  if (code === 56 || code === 57) return "Freezing drizzle";
+  if (code === 61 || code === 63) return "Rain";
+  if (code === 65) return "Heavy rain";
+  if (code === 66 || code === 67) return "Freezing rain";
+  if (code === 71 || code === 73) return "Snow";
+  if (code === 75) return "Heavy snow";
+  if (code === 77) return "Snow grains";
+  if (code === 80 || code === 81) return "Rain showers";
+  if (code === 82) return "Heavy showers";
+  if (code === 85 || code === 86) return "Snow showers";
+  if (code === 95) return "Thunderstorm";
+  if (code === 96 || code === 99) return "Thunderstorm with hail";
+  return "Unknown";
+}
+
+// --- Time/date formatting ------------------------------------------------
+
+// Formats an ISO hourly time string ("2026-06-23T14:00") to a short label
+// ("14h"). Used in the day-view hourly row.
+function formatHourLabel(isoTime: string): string {
+  const hour = isoTime.slice(11, 13);
+  return `${parseInt(hour, 10)}h`;
+}
+
+// Formats an ISO date string ("2026-06-23") to a short weekday name ("Mon").
+const SHORT_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+function formatDayLabel(isoDate: string): string {
+  const d = new Date(isoDate + "T12:00:00"); // noon avoids DST edge cases
+  return SHORT_DAYS[d.getDay()];
+}
+
+// --- Session helpers -----------------------------------------------------
 
 // First name for the hero greeting - prefers the OIDC-provided display
 // name (e.g. PocketID's "Kay Schneider" -> "Kay"), falling back to the
