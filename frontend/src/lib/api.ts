@@ -5,7 +5,11 @@
 // cached/revalidated GETs that library is for; it gets introduced once the
 // rest of the dashboard (spec section 6.4) starts needing it.
 
-const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
+// Empty string = relative to the current origin. In dev, Vite proxies /v1/*
+// and /healthz to the Go backend (see vite.config.ts), so the browser never
+// needs to know the backend's address directly. VITE_API_BASE_URL can still
+// override this for production builds served from a different origin.
+const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? "";
 
 // Must match bootstrap.HeaderName in the Go backend exactly.
 const BOOTSTRAP_HEADER = "X-ModuLab-Bootstrap-Token";
