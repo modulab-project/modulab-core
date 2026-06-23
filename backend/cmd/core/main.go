@@ -25,6 +25,7 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/config"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
 	"github.com/modulab-project/modulab-core/backend/internal/mail"
+	"github.com/modulab-project/modulab-core/backend/internal/news"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
 	"github.com/modulab-project/modulab-core/backend/internal/valkey"
 	"github.com/modulab-project/modulab-core/backend/internal/version"
@@ -287,6 +288,19 @@ func main() {
 	// Geolocation API - Core never stores or logs them.
 	mux.HandleFunc("GET /v1/widgets/weather", weather.Handler(valkeyClient))
 
+	// News feed management (internal/news):
+	//   Admin CRUD: org-admin and super-admin can manage the global feed pool.
+	//   User endpoints: every approved session can list feeds, toggle their own
+	//   subscriptions, and fetch aggregated articles. The aggregator caches
+	//   each feed's articles in Valkey for 15 minutes per feed.
+	mux.HandleFunc("GET /v1/admin/feeds", news.AdminListHandler(authDeps))
+	mux.HandleFunc("POST /v1/admin/feeds", news.AdminCreateHandler(authDeps))
+	mux.HandleFunc("PATCH /v1/admin/feeds/{id}", news.AdminUpdateHandler(authDeps))
+	mux.HandleFunc("DELETE /v1/admin/feeds/{id}", news.AdminDeleteHandler(authDeps))
+	mux.HandleFunc("GET /v1/feeds", news.FeedsHandler(authDeps))
+	mux.HandleFunc("PATCH /v1/feeds/{id}/subscription", news.SubscriptionHandler(authDeps))
+	mux.HandleFunc("GET /v1/news", news.NewsHandler(authDeps))
+
 	// The mail worker (internal/mail) runs for Core's entire lifetime as a
 	// single background goroutine, draining whatever
 	// admin.go's enqueueMail calls push onto the queue - started
@@ -325,7 +339,7 @@ func main() {
 func corsMiddleware(allowedOrigin string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, "+bootstrap.HeaderName)
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

@@ -332,6 +332,85 @@ export function deleteSmtpConfig(token: string): Promise<void> {
   return request<void>("/v1/admin/smtp", { method: "DELETE", headers: bearerHeaders(token) });
 }
 
+// --- News feeds ----------------------------------------------------------
+// Mirrors backend/internal/news.FeedResponse exactly.
+
+export interface Feed {
+  id: number;
+  url: string;
+  label: string;
+  /** Only present on user-facing GET /v1/feeds, not on admin list. */
+  enabled?: boolean;
+  created_at: string;
+}
+
+// Mirrors backend/internal/news.Article exactly.
+export interface NewsArticle {
+  title: string;
+  url: string;
+  source: string;
+  published_at: string; // RFC3339
+  image_url?: string;
+}
+
+// GET /v1/admin/feeds — org-admin/super-admin only.
+export function adminListFeeds(token: string): Promise<Feed[]> {
+  return request<Feed[]>("/v1/admin/feeds", { headers: bearerHeaders(token) });
+}
+
+// POST /v1/admin/feeds
+export function adminCreateFeed(token: string, body: { url: string; label: string }): Promise<Feed> {
+  return request<Feed>("/v1/admin/feeds", {
+    method: "POST",
+    headers: bearerHeaders(token),
+    body: JSON.stringify(body),
+  });
+}
+
+// PATCH /v1/admin/feeds/{id}
+export function adminUpdateFeed(
+  token: string,
+  id: number,
+  body: { url: string; label: string },
+): Promise<void> {
+  return request<void>(`/v1/admin/feeds/${id}`, {
+    method: "PATCH",
+    headers: bearerHeaders(token),
+    body: JSON.stringify(body),
+  });
+}
+
+// DELETE /v1/admin/feeds/{id}
+export function adminDeleteFeed(token: string, id: number): Promise<void> {
+  return request<void>(`/v1/admin/feeds/${id}`, {
+    method: "DELETE",
+    headers: bearerHeaders(token),
+  });
+}
+
+// GET /v1/feeds — all approved users; returns feeds with enabled flag.
+export function listFeeds(token: string): Promise<Feed[]> {
+  return request<Feed[]>("/v1/feeds", { headers: bearerHeaders(token) });
+}
+
+// PATCH /v1/feeds/{id}/subscription
+export function setFeedSubscription(
+  token: string,
+  id: number,
+  enabled: boolean,
+): Promise<void> {
+  return request<void>(`/v1/feeds/${id}/subscription`, {
+    method: "PATCH",
+    headers: bearerHeaders(token),
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+// GET /v1/news — aggregated articles from user's enabled feeds.
+export function getNews(token: string): Promise<NewsArticle[]> {
+  return request<NewsArticle[]>("/v1/news", { headers: bearerHeaders(token) });
+}
+
 // --- Widget: Weather -----------------------------------------------------
 // Mirrors backend/internal/weather.Response exactly.
 

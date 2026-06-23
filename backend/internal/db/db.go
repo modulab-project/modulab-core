@@ -117,6 +117,10 @@ func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
 		return fmt.Errorf("db: ensure users.locked: %w", err)
 	}
 
+	if err := p.EnsureNewsSchema(ctx); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -476,6 +480,179 @@ func (p *Pool) DeleteUser(ctx context.Context, subject string) (int64, error) {
 		return 0, fmt.Errorf("db: delete user %q: %w", subject, err)
 	}
 	return tag.RowsAffected(), nil
+}
+
+// ---- News feeds -------------------------------------------------------------
+
+// FeedRow is one row of the news_feeds table.
+type FeedRow struct {
+	ID        int
+	URL       string
+	Label     string
+	CreatedAt time.Time
+}
+
+// FeedWithSub pairs a feed row with the requesting user's current
+// subscription state, returned by ListFeedsForUser.
+type FeedWithSub struct {
+	ID        int
+	URL       string
+	Label     string
+	Enabled   bool
+	CreatedAt time.Time
+}
+
+// EnsureNewsSchema creates the news_feeds and user_feed_subscriptions tables
+// if they do not exist yet. Called from EnsureCoreSchema, after the users
+// table, so the foreign key on user_feed_subscriptions.user_id resolves.
+func (p *Pool) EnsureNewsSchema(ctx context.Context) error {
+	if _, err := p.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS news_feeds (
+			id         SERIAL PRIMARY KEY,
+			url        TEXT NOT NULL,
+			label      TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		)
+	`); err != nil {
+		return fmt.Errorf("db: ensure news_feeds: %w", err)
+	}
+	if _, err := p.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS user_feed_subscriptions (
+			user_id TEXT    NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			feed_id INTEGER NOT NULL REFERENCES news_feeds(id) ON DELETE CASCADE,
+			enabled BOOLEAN NOT NULL DEFAULT false,
+			PRIMARY KEY (user_id, feed_id)
+		)
+	`); err != nil {
+		return fmt.Errorf("db: ensure user_feed_subscriptions: %w", err)
+	}
+	return nil
+}
+
+// ListFeeds returns every feed row, oldest first. Used by the admin CRUD and
+// by the news aggregator to look up feed URLs.
+func (p *Pool) ListFeeds(ctx context.Context) ([]FeedRow, error) {
+	rows, err := p.Query(ctx, `
+		SELECT id, url, label, created_at FROM news_feeds ORDER BY created_at ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("db: list feeds: %w", err)
+	}
+	defer rows.Close()
+	var out []FeedRow
+	for rows.Next() {
+		var f FeedRow
+		if err := rows.Scan(&f.ID, &f.URL, &f.Label, &f.CreatedAt); err != nil {
+			return nil, fmt.Errorf("db: scan feed: %w", err)
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// CreateFeed inserts a new feed and returns the created row (with its
+// server-assigned id and created_at).
+func (p *Pool) CreateFeed(ctx context.Context, feedURL, label string) (FeedRow, error) {
+	var f FeedRow
+	err := p.QueryRow(ctx, `
+		INSERT INTO news_feeds (url, label) VALUES ($1, $2)
+		RETURNING id, url, label, created_at
+	`, feedURL, label).Scan(&f.ID, &f.URL, &f.Label, &f.CreatedAt)
+	if err != nil {
+		return FeedRow{}, fmt.Errorf("db: create feed: %w", err)
+	}
+	return f, nil
+}
+
+// UpdateFeed sets url and label for the given feed id. Returns found = false
+// (not an error) when no such id exists, so the handler can return 404
+// without a separate existence check.
+func (p *Pool) UpdateFeed(ctx context.Context, id int, feedURL, label string) (bool, error) {
+	tag, err := p.Exec(ctx, `
+		UPDATE news_feeds SET url = $1, label = $2 WHERE id = $3
+	`, feedURL, label, id)
+	if err != nil {
+		return false, fmt.Errorf("db: update feed %d: %w", id, err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// DeleteFeed removes the feed row. ON DELETE CASCADE in
+// user_feed_subscriptions handles the child rows automatically. Returns
+// found = false when no such id exists.
+func (p *Pool) DeleteFeed(ctx context.Context, id int) (bool, error) {
+	tag, err := p.Exec(ctx, `DELETE FROM news_feeds WHERE id = $1`, id)
+	if err != nil {
+		return false, fmt.Errorf("db: delete feed %d: %w", id, err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// ListFeedsForUser returns every feed paired with whether userID has it
+// enabled. A missing subscription row is treated as enabled = false (the
+// default for newly added feeds, per the agreed spec: new feeds are opt-in).
+func (p *Pool) ListFeedsForUser(ctx context.Context, userID string) ([]FeedWithSub, error) {
+	rows, err := p.Query(ctx, `
+		SELECT f.id, f.url, f.label, f.created_at,
+		       COALESCE(s.enabled, false) AS enabled
+		FROM   news_feeds f
+		LEFT   JOIN user_feed_subscriptions s
+		       ON s.feed_id = f.id AND s.user_id = $1
+		ORDER  BY f.created_at ASC
+	`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("db: list feeds for user: %w", err)
+	}
+	defer rows.Close()
+	var out []FeedWithSub
+	for rows.Next() {
+		var f FeedWithSub
+		if err := rows.Scan(&f.ID, &f.URL, &f.Label, &f.CreatedAt, &f.Enabled); err != nil {
+			return nil, fmt.Errorf("db: scan feed with sub: %w", err)
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// SetFeedSubscription upserts the user's enabled/disabled preference for a
+// single feed. A feedID that does not exist causes a foreign-key violation
+// (returned as an error); callers should surface this as 404.
+func (p *Pool) SetFeedSubscription(ctx context.Context, userID string, feedID int, enabled bool) error {
+	_, err := p.Exec(ctx, `
+		INSERT INTO user_feed_subscriptions (user_id, feed_id, enabled)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (user_id, feed_id) DO UPDATE SET enabled = EXCLUDED.enabled
+	`, userID, feedID, enabled)
+	if err != nil {
+		return fmt.Errorf("db: set feed subscription: %w", err)
+	}
+	return nil
+}
+
+// EnabledFeedsForUser returns the feed rows the user has explicitly enabled,
+// used by the news aggregator to decide which feeds to fetch.
+func (p *Pool) EnabledFeedsForUser(ctx context.Context, userID string) ([]FeedRow, error) {
+	rows, err := p.Query(ctx, `
+		SELECT f.id, f.url, f.label, f.created_at
+		FROM   news_feeds f
+		JOIN   user_feed_subscriptions s ON s.feed_id = f.id
+		WHERE  s.user_id = $1 AND s.enabled = true
+		ORDER  BY f.created_at ASC
+	`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("db: enabled feeds for user: %w", err)
+	}
+	defer rows.Close()
+	var out []FeedRow
+	for rows.Next() {
+		var f FeedRow
+		if err := rows.Scan(&f.ID, &f.URL, &f.Label, &f.CreatedAt); err != nil {
+			return nil, fmt.Errorf("db: scan enabled feed: %w", err)
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
 }
 
 // encryptionVersionKey is the core_settings key that records whether the
