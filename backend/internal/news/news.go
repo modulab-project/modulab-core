@@ -152,7 +152,10 @@ func parseRSS(label string, body []byte) ([]Article, error) {
 	var feed rssFeed
 	d := xml.NewDecoder(bytes.NewReader(body))
 	d.Strict = false
-	d.AutoClose = xml.HTMLAutoClose
+	// Deliberately NOT setting d.AutoClose = xml.HTMLAutoClose here:
+	// in HTML, <link> is a void element, so the HTMLAutoClose list would
+	// treat <link>https://...</link> as an empty self-closing tag and drop
+	// the URL. RSS uses <link> as a normal element with text content.
 	d.Entity = xml.HTMLEntity
 	if err := d.Decode(&feed); err != nil {
 		return nil, fmt.Errorf("rss decode: %w", err)
@@ -598,6 +601,10 @@ func NewsHandler(d auth.Deps) http.HandlerFunc {
 		})
 		if len(all) > maxArticles {
 			all = all[:maxArticles]
+		}
+		// Ensure the response is always a JSON array, never null.
+		if all == nil {
+			all = []Article{}
 		}
 		writeJSON(w, http.StatusOK, all)
 	}
