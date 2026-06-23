@@ -298,8 +298,13 @@ func cachedFeed(ctx context.Context, vk valkeyCache, feedID int, feedURL, label 
 	if err != nil {
 		return nil, err
 	}
-	if data, err := json.Marshal(arts); err == nil {
-		_ = vk.SetWithTTL(ctx, key, string(data), feedCacheTTL)
+	// Only cache non-empty results: caching nil/[] would lock the feed into
+	// an empty state for the full TTL if the first fetch happened to return
+	// nothing (e.g. due to a transient parse error or an upstream glitch).
+	if len(arts) > 0 {
+		if data, err := json.Marshal(arts); err == nil {
+			_ = vk.SetWithTTL(ctx, key, string(data), feedCacheTTL)
+		}
 	}
 	return arts, nil
 }
@@ -562,6 +567,7 @@ func NewsHandler(d auth.Deps) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		log.Printf("news: user %s has %d enabled feed(s)", sess.UserID, len(feeds))
 		if len(feeds) == 0 {
 			writeJSON(w, http.StatusOK, []Article{})
 			return
@@ -581,6 +587,7 @@ func NewsHandler(d auth.Deps) http.HandlerFunc {
 			go func(i int, f db.FeedRow) {
 				defer wg.Done()
 				arts, err := cachedFeed(r.Context(), d.Valkey, f.ID, f.URL, f.Label)
+				log.Printf("news: feed %d (%s): %d article(s), err=%v", f.ID, f.URL, len(arts), err)
 				results[i] = result{arts: arts, err: err}
 			}(i, feed)
 		}
