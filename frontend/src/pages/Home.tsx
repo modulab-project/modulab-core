@@ -196,7 +196,7 @@ export default function Home() {
 
   return (
     <>
-      <AppShell session={session}>
+      <AppShell session={session} onOpenFeeds={() => setFeedsPanelOpen(true)}>
         <Hero
           name={firstName(session)}
           weather={weather}

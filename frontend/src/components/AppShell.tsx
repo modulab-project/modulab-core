@@ -52,7 +52,15 @@ export function isAdminRole(role: string): boolean {
 // links to /profile itself), and the footer's status pill behaves
 // identically everywhere. Each page supplies only its own main content via
 // children.
-export function AppShell({ session, children }: { session: Session; children: ReactNode }) {
+export function AppShell({
+  session,
+  children,
+  onOpenFeeds,
+}: {
+  session: Session;
+  children: ReactNode;
+  onOpenFeeds?: () => void;
+}) {
   const navigate = useNavigate();
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [openPanel, setOpenPanel] = useState<OpenPanel>(null);
@@ -186,6 +194,7 @@ export function AppShell({ session, children }: { session: Session; children: Re
           dark={dark}
           setDark={setDark}
           onLogout={handleLogout}
+          onOpenFeeds={onOpenFeeds ? () => { setOpenPanel(null); onOpenFeeds(); } : undefined}
         />
       </SlidePanel>
       <SlidePanel open={openPanel === "status"} onClose={() => setOpenPanel(null)} title="System status">
@@ -360,12 +369,14 @@ function ProfilePanelContent({
   dark,
   setDark,
   onLogout,
+  onOpenFeeds,
 }: {
   session: Session;
   isAdmin: boolean;
   dark: boolean;
   setDark: (d: boolean) => void;
   onLogout: () => void;
+  onOpenFeeds?: () => void;
 }) {
   const displayName = session.name.trim() || session.email;
 
@@ -384,6 +395,15 @@ function ProfilePanelContent({
       >
         <i className="ti ti-user text-[15px] text-gray-500" /> View profile
       </Link>
+      {onOpenFeeds && (
+        <button
+          type="button"
+          onClick={onOpenFeeds}
+          className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
+        >
+          <i className="ti ti-rss text-[15px] text-gray-500" /> My feeds
+        </button>
+      )}
       {isAdmin && (
         <>
           <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />
