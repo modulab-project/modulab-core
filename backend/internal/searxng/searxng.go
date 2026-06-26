@@ -106,10 +106,13 @@ func Ping(ctx context.Context, baseURL string) bool {
 }
 
 // WebResult is one entry in GET /v1/search/web's response array.
+// Thumbnail and ImgSrc are only populated for category=images results.
 type WebResult struct {
-	Title   string `json:"title"`
-	URL     string `json:"url"`
-	Snippet string `json:"snippet"`
+	Title     string `json:"title"`
+	URL       string `json:"url"`
+	Snippet   string `json:"snippet"`
+	Thumbnail string `json:"thumbnail,omitempty"`
+	ImgSrc    string `json:"img_src,omitempty"`
 }
 
 // resolveURL reads the encrypted SearXNG URL from core_settings.
@@ -268,6 +271,68 @@ func DeleteHandler(pool *db.Pool) http.HandlerFunc {
 	}
 }
 
+// SearchPrefsHandler returns the HTTP handler for GET and POST /v1/user/search-prefs.
+// GET returns the current prefs; POST accepts a partial or full JSON body and saves it.
+func SearchPrefsHandler(deps auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if token == "" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		sess, ok, err := auth.ValidateSession(r.Context(), deps.Valkey, token)
+		if err != nil || !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if sess.Role == "pending" || sess.Locked {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+
+		switch r.Method {
+		case http.MethodGet:
+			prefs, err := deps.Pool.GetSearchPrefs(r.Context(), sess.UserID)
+			if err != nil {
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(prefs)
+
+		case http.MethodPost:
+			// Decode only the fields present in the body so a partial update
+			// (e.g. just changing safesearch) works without overwriting language.
+			current, err := deps.Pool.GetSearchPrefs(r.Context(), sess.UserID)
+			if err != nil {
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			var patch db.SearchPrefs
+			if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+				http.Error(w, "invalid request body", http.StatusBadRequest)
+				return
+			}
+			// Merge: zero value means "not provided" — keep existing.
+			if patch.Language != "" {
+				current.Language = patch.Language
+			}
+			// safesearch 0 is a valid value (off), so we can always accept it.
+			current.Safesearch = patch.Safesearch
+
+			if err := deps.Pool.SetSearchPrefs(r.Context(), sess.UserID, current); err != nil {
+				http.Error(w, "database error", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(current)
+
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	}
+}
+
 // SearchHandler returns the HTTP handler for GET /v1/search/web?q=<query>.
 func SearchHandler(deps auth.Deps, masterKey string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -307,7 +372,26 @@ func SearchHandler(deps auth.Deps, masterKey string) http.HandlerFunc {
 			return
 		}
 
-		results, err := fetchResults(r.Context(), baseURL, q, maxResults, fetchPages)
+		// Load user search prefs for safesearch + language defaults.
+		prefs, err := deps.Pool.GetSearchPrefs(r.Context(), sess.UserID)
+		if err != nil {
+			// Non-fatal: fall back to defaults.
+			prefs = db.SearchPrefs{Safesearch: 0, Language: "all"}
+		}
+
+		// Query params can override stored prefs for this request.
+		category := r.URL.Query().Get("category")
+		if category == "" {
+			category = "general"
+		}
+
+		sp := searchParams{
+			category:   category,
+			safesearch: prefs.Safesearch,
+			language:   prefs.Language,
+		}
+
+		results, err := fetchResults(r.Context(), baseURL, q, maxResults, fetchPages, sp)
 		if err != nil {
 			http.Error(w, "search upstream error: "+err.Error(), http.StatusBadGateway)
 			return
@@ -321,18 +405,34 @@ func SearchHandler(deps auth.Deps, masterKey string) http.HandlerFunc {
 // searxngResponse is the minimal shape of SearXNG's format=json output.
 type searxngResponse struct {
 	Results []struct {
-		Title   string `json:"title"`
-		URL     string `json:"url"`
-		Content string `json:"content"`
+		Title     string `json:"title"`
+		URL       string `json:"url"`
+		Content   string `json:"content"`
+		Thumbnail string `json:"thumbnail"`
+		ImgSrc    string `json:"img_src"`
 	} `json:"results"`
 }
 
+// searchParams holds the per-request parameters forwarded to SearXNG.
+type searchParams struct {
+	category   string // "general" or "images"
+	safesearch int    // 0, 1, or 2
+	language   string // "all", "de", "en", …
+}
+
 // fetchPage fetches one SearXNG result page (1-indexed pageno).
-func fetchPage(ctx context.Context, baseURL, query string, pageno int) ([]WebResult, error) {
+func fetchPage(ctx context.Context, baseURL, query string, pageno int, sp searchParams) ([]WebResult, error) {
+	category := sp.category
+	if category == "" {
+		category = "general"
+	}
 	params := url.Values{
-		"q":      {query},
-		"format": {"json"},
-		"pageno": {strconv.Itoa(pageno)},
+		"q":          {query},
+		"format":     {"json"},
+		"pageno":     {strconv.Itoa(pageno)},
+		"categories": {category},
+		"safesearch": {strconv.Itoa(sp.safesearch)},
+		"language":   {sp.language},
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/search?"+params.Encode(), nil)
 	if err != nil {
@@ -359,7 +459,13 @@ func fetchPage(ctx context.Context, baseURL, query string, pageno int) ([]WebRes
 	}
 	out := make([]WebResult, 0, len(raw.Results))
 	for _, r := range raw.Results {
-		out = append(out, WebResult{Title: r.Title, URL: r.URL, Snippet: r.Content})
+		out = append(out, WebResult{
+			Title:     r.Title,
+			URL:       r.URL,
+			Snippet:   r.Content,
+			Thumbnail: r.Thumbnail,
+			ImgSrc:    r.ImgSrc,
+		})
 	}
 	return out, nil
 }
@@ -367,7 +473,7 @@ func fetchPage(ctx context.Context, baseURL, query string, pageno int) ([]WebRes
 // fetchResults fetches up to fetchPages pages in parallel, merges them,
 // deduplicates by URL, and returns up to maxResults entries.
 // Page 1 results always appear first so ranking is preserved.
-func fetchResults(ctx context.Context, baseURL, query string, maxResults, fetchPages int) ([]WebResult, error) {
+func fetchResults(ctx context.Context, baseURL, query string, maxResults, fetchPages int, sp searchParams) ([]WebResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, searchTimeout)
 	defer cancel()
 
@@ -383,7 +489,7 @@ func fetchResults(ctx context.Context, baseURL, query string, maxResults, fetchP
 		wg.Add(1)
 		go func(pageno int) {
 			defer wg.Done()
-			res, err := fetchPage(ctx, baseURL, query, pageno)
+			res, err := fetchPage(ctx, baseURL, query, pageno, sp)
 			ch <- pageResult{page: pageno, results: res, err: err}
 		}(p)
 	}

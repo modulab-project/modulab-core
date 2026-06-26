@@ -535,6 +535,15 @@ func (p *Pool) EnsureNewsSchema(ctx context.Context) error {
 	`); err != nil {
 		return fmt.Errorf("db: ensure user_news_preferences: %w", err)
 	}
+	if _, err := p.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS user_search_preferences (
+			user_id    TEXT    PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+			safesearch INTEGER NOT NULL DEFAULT 0,
+			language   TEXT    NOT NULL DEFAULT 'all'
+		)
+	`); err != nil {
+		return fmt.Errorf("db: ensure user_search_preferences: %w", err)
+	}
 	return nil
 }
 
@@ -793,4 +802,43 @@ func (p *Pool) MigrateToEncryptedStorage(ctx context.Context) error {
 		return fmt.Errorf("db: migration set version flag: %w", err)
 	}
 	return nil
+}
+
+// SearchPrefs holds a user's web-search preferences.
+type SearchPrefs struct {
+	Safesearch int    `json:"safesearch"` // 0 = off, 1 = moderate, 2 = strict
+	Language   string `json:"language"`   // "all", "de", "en", …
+}
+
+// GetSearchPrefs returns stored search preferences for userID, or defaults
+// (safesearch=0, language="all") when no row exists yet.
+func (p *Pool) GetSearchPrefs(ctx context.Context, userID string) (SearchPrefs, error) {
+	var prefs SearchPrefs
+	err := p.QueryRow(ctx, `
+		SELECT safesearch, language
+		FROM   user_search_preferences
+		WHERE  user_id = $1
+	`, userID).Scan(&prefs.Safesearch, &prefs.Language)
+	if err != nil {
+		return SearchPrefs{Safesearch: 0, Language: "all"}, nil
+	}
+	return prefs, nil
+}
+
+// SetSearchPrefs upserts the search preferences for userID.
+func (p *Pool) SetSearchPrefs(ctx context.Context, userID string, prefs SearchPrefs) error {
+	if prefs.Safesearch < 0 || prefs.Safesearch > 2 {
+		prefs.Safesearch = 0
+	}
+	if prefs.Language == "" {
+		prefs.Language = "all"
+	}
+	_, err := p.Exec(ctx, `
+		INSERT INTO user_search_preferences (user_id, safesearch, language)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (user_id) DO UPDATE
+		  SET safesearch = EXCLUDED.safesearch,
+		      language   = EXCLUDED.language
+	`, userID, prefs.Safesearch, prefs.Language)
+	return err
 }

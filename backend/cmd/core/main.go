@@ -320,6 +320,8 @@ func main() {
 	})))
 	mux.Handle("DELETE /v1/admin/searxng", superAdminOnly(searxng.DeleteHandler(pool)))
 	mux.HandleFunc("GET /v1/search/web", searxng.SearchHandler(authDeps, cfg.MasterKey))
+	mux.HandleFunc("GET /v1/user/search-prefs", searxng.SearchPrefsHandler(authDeps))
+	mux.HandleFunc("POST /v1/user/search-prefs", searxng.SearchPrefsHandler(authDeps))
 
 	// News feed management (internal/news):
 	//   Admin CRUD: org-admin and super-admin can manage the global feed pool.

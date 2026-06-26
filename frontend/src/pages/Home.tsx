@@ -8,12 +8,16 @@ import {
   listFeeds,
   setFeedSubscription,
   searchWeb,
+  getSearchPrefs,
+  updateSearchPrefs,
   ApiError,
   type WeatherResponse,
   type NewsArticle,
   type NewsConfig,
   type Feed,
   type WebResult,
+  type SearchPrefs,
+  type SearchCategory,
 } from "../lib/api";
 import { getSessionToken } from "../lib/session";
 import { AppShell } from "../components/AppShell";
@@ -69,6 +73,8 @@ export default function Home() {
   const [webResults, setWebResults] = useState<WebResult[] | null>(null);
   const [webLoading, setWebLoading] = useState(false);
   const [searxngAvailable, setSearxngAvailable] = useState(true);
+  const [category, setCategory] = useState<SearchCategory>("general");
+  const [searchPrefs, setSearchPrefs] = useState<SearchPrefs>({ safesearch: 0, language: "all" });
 
   // Clear search results whenever the URL loses its ?q= parameter — e.g.
   // when the user clicks the ModuLab logo (navigate("/")) or uses the
@@ -123,6 +129,14 @@ export default function Home() {
       .catch(() => {});
   }, []);
 
+  const loadSearchPrefs = useCallback(() => {
+    const token = getSessionToken();
+    if (!token) return;
+    getSearchPrefs(token)
+      .then(setSearchPrefs)
+      .catch(() => {});
+  }, []);
+
   // Guard: only load news+prefs once on initial session, not on every 15s poll.
   // useAuthenticatedSession creates a new session object on each /v1/auth/me
   // response, so session reference changes on every poll - without this ref
@@ -133,15 +147,17 @@ export default function Home() {
       initialLoadDone.current = true;
       loadNews();
       loadPrefs();
+      loadSearchPrefs();
     }
-  }, [session, loadNews, loadPrefs]);
+  }, [session, loadNews, loadPrefs, loadSearchPrefs]);
 
-  // handleSearch is called by Hero when the user submits the search box.
+  // handleSearch is called by Hero when the user submits the search box,
+  // or by the category tab switcher when the user switches tabs.
   // It updates the URL (?q=...) without a page navigation and fires the
   // SearXNG proxy. A 503 response means SearXNG is not configured - flip
   // the flag so the results section stays hidden for the rest of this load.
   const handleSearch = useCallback(
-    async (q: string) => {
+    async (q: string, cat: SearchCategory = category) => {
       const trimmed = q.trim();
       setSearchQuery(trimmed);
 
@@ -161,7 +177,7 @@ export default function Home() {
       setWebLoading(true);
       setWebResults(null);
       try {
-        const results = await searchWeb(token, trimmed);
+        const results = await searchWeb(token, trimmed, cat);
         setWebResults(results);
       } catch (err) {
         if (err instanceof ApiError && err.status === 503) {
@@ -173,7 +189,18 @@ export default function Home() {
         setWebLoading(false);
       }
     },
-    [searxngAvailable],
+    [searxngAvailable, navigate, category],
+  );
+
+  // Switch category tab and re-fire the current query with the new category.
+  const handleCategoryChange = useCallback(
+    (cat: SearchCategory) => {
+      setCategory(cat);
+      if (searchQuery) {
+        handleSearch(searchQuery, cat);
+      }
+    },
+    [searchQuery, handleSearch],
   );
 
   // If the page was loaded with ?q=... (e.g. from a bookmark or browser
@@ -204,13 +231,26 @@ export default function Home() {
           onSearch={handleSearch}
           initialQuery={searchQuery}
         />
-        {/* Web search results: shown when a query is active and SearXNG is
-            configured. Pushes the module/news sections downward inline. */}
+        {/* Web/image search results: shown when a query is active and SearXNG
+            is configured. Pushes the module/news sections downward inline. */}
         {searxngAvailable && (webLoading || webResults !== null) && (
           <WebResultsPanel
             query={searchQuery}
             results={webResults}
             loading={webLoading}
+            category={category}
+            onCategoryChange={handleCategoryChange}
+            searchPrefs={searchPrefs}
+            onPrefsChange={async (patch) => {
+              const token = getSessionToken();
+              if (!token) return;
+              try {
+                const updated = await updateSearchPrefs(token, patch);
+                setSearchPrefs(updated);
+              } catch {
+                // silently ignore — local state stays unchanged
+              }
+            }}
           />
         )}
         <EmptyModulesNotice />
@@ -383,46 +423,163 @@ function Hero({
   );
 }
 
-// --- Web search results panel -------------------------------------------
+// --- Web / image search results panel ------------------------------------
+
+// Available languages for the filter dropdown.
+const SEARCH_LANGUAGES = [
+  { value: "all", label: "All languages" },
+  { value: "de", label: "Deutsch" },
+  { value: "en", label: "English" },
+  { value: "fr", label: "Français" },
+  { value: "es", label: "Español" },
+  { value: "it", label: "Italiano" },
+  { value: "nl", label: "Nederlands" },
+  { value: "pl", label: "Polski" },
+  { value: "pt", label: "Português" },
+  { value: "ru", label: "Русский" },
+  { value: "zh", label: "中文" },
+];
 
 // Inline results panel that appears directly below the Hero when a search
-// is active. Fades in with a soft transition so the page doesn't jump.
-// Shows a skeleton while loading, the result list once fetched, or an
-// empty-state message when SearXNG returned nothing.
+// is active. Includes a Web/Bilder tab switcher and a filter dropdown for
+// safesearch and language.
 function WebResultsPanel({
   query,
   results,
   loading,
+  category,
+  onCategoryChange,
+  searchPrefs,
+  onPrefsChange,
 }: {
   query: string;
   results: WebResult[] | null;
   loading: boolean;
+  category: SearchCategory;
+  onCategoryChange: (cat: SearchCategory) => void;
+  searchPrefs: SearchPrefs;
+  onPrefsChange: (patch: Partial<SearchPrefs>) => void;
 }) {
+  const [filterOpen, setFilterOpen] = useState(false);
+
   return (
     <div className="mx-auto mb-8 w-full max-w-[680px]">
-      <p className="mb-3 px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-        Web · <span className="normal-case font-normal">{query}</span>
-      </p>
-
-      {loading ? (
-        <div className="flex flex-col gap-3">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div
-              key={i}
-              className="animate-pulse rounded-xl border border-gray-100 p-4 dark:border-gray-800"
+      {/* Tab bar + filter button */}
+      <div className="mb-3 flex items-center justify-between px-1">
+        <div className="flex items-center gap-1">
+          {(["general", "images"] as SearchCategory[]).map((cat) => (
+            <button
+              key={cat}
+              type="button"
+              onClick={() => onCategoryChange(cat)}
+              className={`rounded-full px-3 py-1 text-[12px] font-medium transition-colors ${
+                category === cat
+                  ? "bg-teal-600 text-white"
+                  : "text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
+              }`}
             >
-              <div className="mb-2 h-3.5 w-3/4 rounded bg-gray-100 dark:bg-gray-800" />
-              <div className="mb-1 h-3 w-1/3 rounded bg-gray-100 dark:bg-gray-800" />
-              <div className="h-3 w-full rounded bg-gray-100 dark:bg-gray-800" />
+              {cat === "general" ? "Web" : "Bilder"}
+            </button>
+          ))}
+        </div>
+
+        {/* Filter toggle */}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setFilterOpen((v) => !v)}
+            className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-[12px] transition-colors ${
+              filterOpen
+                ? "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200"
+                : "text-gray-400 hover:bg-gray-100 dark:text-gray-500 dark:hover:bg-gray-800"
+            }`}
+          >
+            <i className="ti ti-adjustments-horizontal text-[13px]" aria-hidden="true" />
+            Filter
+          </button>
+
+          {filterOpen && (
+            <div className="absolute right-0 z-10 mt-1 w-56 rounded-xl border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+              {/* Safesearch */}
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                SafeSearch
+              </p>
+              <div className="mb-3 flex gap-1">
+                {([0, 1, 2] as const).map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => onPrefsChange({ safesearch: v })}
+                    className={`flex-1 rounded-lg py-1 text-[11px] font-medium transition-colors ${
+                      searchPrefs.safesearch === v
+                        ? "bg-teal-600 text-white"
+                        : "border border-gray-200 text-gray-600 hover:border-teal-400 dark:border-gray-700 dark:text-gray-300"
+                    }`}
+                  >
+                    {v === 0 ? "Off" : v === 1 ? "Moderate" : "Strict"}
+                  </button>
+                ))}
+              </div>
+
+              {/* Language */}
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                Language
+              </p>
+              <select
+                value={searchPrefs.language}
+                onChange={(e) => onPrefsChange({ language: e.target.value })}
+                className="w-full rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-[12px] text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+              >
+                {SEARCH_LANGUAGES.map((l) => (
+                  <option key={l.value} value={l.value}>
+                    {l.label}
+                  </option>
+                ))}
+              </select>
             </div>
-          ))}
+          )}
         </div>
+      </div>
+
+      {/* Results */}
+      {loading ? (
+        category === "images" ? (
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div
+                key={i}
+                className="animate-pulse aspect-video rounded-xl bg-gray-100 dark:bg-gray-800"
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div
+                key={i}
+                className="animate-pulse rounded-xl border border-gray-100 p-4 dark:border-gray-800"
+              >
+                <div className="mb-2 h-3.5 w-3/4 rounded bg-gray-100 dark:bg-gray-800" />
+                <div className="mb-1 h-3 w-1/3 rounded bg-gray-100 dark:bg-gray-800" />
+                <div className="h-3 w-full rounded bg-gray-100 dark:bg-gray-800" />
+              </div>
+            ))}
+          </div>
+        )
       ) : results && results.length > 0 ? (
-        <div className="flex flex-col divide-y divide-gray-100 rounded-2xl border border-gray-100 dark:divide-gray-800 dark:border-gray-800">
-          {results.map((r, i) => (
-            <WebResultCard key={`${r.url}-${i}`} result={r} />
-          ))}
-        </div>
+        category === "images" ? (
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {results.map((r, i) => (
+              <ImageResultCard key={`${r.url}-${i}`} result={r} />
+            ))}
+          </div>
+        ) : (
+          <div className="flex flex-col divide-y divide-gray-100 rounded-2xl border border-gray-100 dark:divide-gray-800 dark:border-gray-800">
+            {results.map((r, i) => (
+              <WebResultCard key={`${r.url}-${i}`} result={r} />
+            ))}
+          </div>
+        )
       ) : (
         <div className="rounded-2xl border border-dashed border-gray-300 px-6 py-8 text-center dark:border-gray-700">
           <p className="text-sm text-gray-500 dark:text-gray-400">No results found.</p>
@@ -433,7 +590,6 @@ function WebResultsPanel({
 }
 
 function WebResultCard({ result }: { result: WebResult }) {
-  // Extract a readable host name from the full URL for display.
   let host = result.url;
   try {
     host = new URL(result.url).hostname.replace(/^www\./, "");
@@ -457,6 +613,32 @@ function WebResultCard({ result }: { result: WebResult }) {
           {result.snippet}
         </p>
       )}
+    </a>
+  );
+}
+
+function ImageResultCard({ result }: { result: WebResult }) {
+  const src = result.thumbnail || result.img_src;
+  if (!src) return null;
+
+  return (
+    <a
+      href={result.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="group relative block overflow-hidden rounded-xl bg-gray-100 dark:bg-gray-800"
+      title={result.title}
+    >
+      <img
+        src={src}
+        alt={result.title}
+        loading="lazy"
+        className="aspect-video w-full object-cover transition-opacity group-hover:opacity-90"
+      />
+      {/* Title overlay on hover */}
+      <div className="absolute inset-x-0 bottom-0 translate-y-full bg-black/70 px-2 py-1.5 transition-transform group-hover:translate-y-0">
+        <p className="line-clamp-2 text-[11px] leading-tight text-white">{result.title}</p>
+      </div>
     </a>
   );
 }

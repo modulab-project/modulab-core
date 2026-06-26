@@ -537,19 +537,58 @@ export function deleteSearxngConfig(token: string): Promise<void> {
 }
 
 // One search result returned by GET /v1/search/web.
+// thumbnail and img_src are only populated for category=images results.
 export interface WebResult {
   title: string;
   url: string;
   snippet: string;
+  thumbnail?: string;
+  img_src?: string;
 }
 
-// GET /v1/search/web?q=<query> — any approved session. Returns 503 when
-// SearXNG is not configured (frontend hides the section silently in that
-// case, so callers should treat a 503 ApiError as "not available" rather
-// than a real error).
-export function searchWeb(token: string, query: string): Promise<WebResult[]> {
+// Search category — "general" for web results, "images" for image search.
+export type SearchCategory = "general" | "images";
+
+// GET /v1/search/web?q=<query>&category=<category> — any approved session.
+// Returns 503 when SearXNG is not configured (frontend hides the section
+// silently in that case, so callers should treat a 503 ApiError as "not
+// available" rather than a real error).
+export function searchWeb(
+  token: string,
+  query: string,
+  category: SearchCategory = "general",
+): Promise<WebResult[]> {
   return request<WebResult[]>(
-    `/v1/search/web?q=${encodeURIComponent(query)}`,
+    `/v1/search/web?q=${encodeURIComponent(query)}&category=${category}`,
     { headers: bearerHeaders(token) },
   );
+}
+
+// --- Search preferences (per-user) ----------------------------------------
+// Mirrors backend/internal/db.SearchPrefs exactly.
+
+export interface SearchPrefs {
+  // 0 = off, 1 = moderate, 2 = strict
+  safesearch: number;
+  // "all", "de", "en", "fr", "es", "it", "nl", "pl", "pt", "ru", "zh"
+  language: string;
+}
+
+// GET /v1/user/search-prefs — any approved session.
+export function getSearchPrefs(token: string): Promise<SearchPrefs> {
+  return request<SearchPrefs>("/v1/user/search-prefs", {
+    headers: bearerHeaders(token),
+  });
+}
+
+// POST /v1/user/search-prefs — any approved session.
+export function updateSearchPrefs(
+  token: string,
+  body: Partial<SearchPrefs>,
+): Promise<SearchPrefs> {
+  return request<SearchPrefs>("/v1/user/search-prefs", {
+    method: "POST",
+    headers: bearerHeaders(token),
+    body: JSON.stringify(body),
+  });
 }
