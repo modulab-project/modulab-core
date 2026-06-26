@@ -227,7 +227,7 @@ function Hero({
         <span className="text-teal-600 dark:text-teal-400">:</span>
         {minutes}
       </p>
-      <p className="mt-2 text-[13.5px] text-gray-500 dark:text-gray-400">
+      <p className="mt-2 text-center text-[13.5px] text-gray-500 dark:text-gray-400">
         {WEEKDAYS[now.getDay()]}, {now.getDate()} {MONTHS[now.getMonth()]} · {greeting}, {name}
       </p>
 

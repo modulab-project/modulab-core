@@ -124,50 +124,54 @@ export default function AdminUsersPage() {
               return (
                 <div
                   key={u.subject}
-                  className={`flex items-center justify-between gap-3 px-4 py-3.5 text-sm ${
+                  className={`px-4 py-3.5 text-sm ${
                     i === users.length - 1 ? "" : "border-b border-gray-100 dark:border-gray-800"
                   }`}
                 >
-                  <div className="min-w-0">
-                    <p className="truncate font-medium">
+                  {/* Row 1: name + status badge */}
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="min-w-0 truncate font-medium">
                       {u.name.trim() || u.email}
                       {isSelf && <span className="ml-1.5 text-xs text-gray-400">(you)</span>}
                     </p>
-                    <p className="truncate text-xs text-gray-500 dark:text-gray-400">
+                    <StatusBadge status={status} />
+                  </div>
+                  {/* Row 2: details + action buttons */}
+                  <div className="mt-1.5 flex items-center justify-between gap-2">
+                    <p className="min-w-0 truncate text-xs text-gray-500 dark:text-gray-400">
                       {u.email} · {u.role} · joined {new Date(u.created_at).toLocaleDateString()} · last login {new Date(u.last_login_at).toLocaleDateString()}
                     </p>
-                  </div>
-                  <div className="flex flex-none items-center gap-2">
-                    <StatusBadge status={status} />
-                    {status === "pending" && (
-                      <ActionButton busy={busy} onClick={() => runAction(u.subject, approveUser)}>
-                        Approve
-                      </ActionButton>
-                    )}
-                    {status === "active" && !isSelf && (
-                      <>
-                        <ActionButton
-                          variant="secondary"
-                          busy={busy}
-                          onClick={() => runAction(u.subject, lockUser)}
-                        >
-                          Lock
+                    <div className="flex flex-none items-center gap-1.5">
+                      {status === "pending" && (
+                        <ActionButton busy={busy} onClick={() => runAction(u.subject, approveUser)}>
+                          Approve
                         </ActionButton>
-                        <ActionButton variant="danger" busy={busy} onClick={() => handleDelete(u)}>
-                          Delete
-                        </ActionButton>
-                      </>
-                    )}
-                    {status === "locked" && (
-                      <>
-                        <ActionButton busy={busy} onClick={() => runAction(u.subject, unlockUser)}>
-                          Unlock
-                        </ActionButton>
-                        <ActionButton variant="danger" busy={busy} onClick={() => handleDelete(u)}>
-                          Delete
-                        </ActionButton>
-                      </>
-                    )}
+                      )}
+                      {status === "active" && !isSelf && (
+                        <>
+                          <ActionButton
+                            variant="secondary"
+                            busy={busy}
+                            onClick={() => runAction(u.subject, lockUser)}
+                          >
+                            Lock
+                          </ActionButton>
+                          <ActionButton variant="danger" busy={busy} onClick={() => handleDelete(u)}>
+                            Delete
+                          </ActionButton>
+                        </>
+                      )}
+                      {status === "locked" && (
+                        <>
+                          <ActionButton busy={busy} onClick={() => runAction(u.subject, unlockUser)}>
+                            Unlock
+                          </ActionButton>
+                          <ActionButton variant="danger" busy={busy} onClick={() => handleDelete(u)}>
+                            Delete
+                          </ActionButton>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
               );

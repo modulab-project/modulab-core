@@ -432,7 +432,7 @@ function StepGroupPrefix({
           </p>
           <ul className="list-disc space-y-1 pl-5 font-mono text-gray-600 dark:text-gray-400">
             {groups.map((g) => (
-              <li key={g}>{g}</li>
+              <li key={g} className="break-all">{g}</li>
             ))}
           </ul>
           <AuthButton onClick={onSuccess} type="button" className="mt-4">

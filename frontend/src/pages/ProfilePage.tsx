@@ -170,12 +170,12 @@ function ProfileRow({
 }) {
   return (
     <div
-      className={`flex items-center justify-between px-4 py-3.5 text-sm ${
+      className={`flex items-start justify-between gap-4 px-4 py-3.5 text-sm ${
         last ? "" : "border-b border-gray-100 dark:border-gray-800"
       }`}
     >
-      <span className="text-gray-500 dark:text-gray-400">{label}</span>
-      <span className="font-medium">{value}</span>
+      <span className="flex-shrink-0 text-gray-500 dark:text-gray-400">{label}</span>
+      <span className="min-w-0 break-all text-right font-medium">{value}</span>
     </div>
   );
 }
