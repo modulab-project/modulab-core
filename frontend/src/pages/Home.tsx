@@ -235,7 +235,6 @@ export default function Home() {
             is configured. Pushes the module/news sections downward inline. */}
         {searxngAvailable && (webLoading || webResults !== null) && (
           <WebResultsPanel
-            query={searchQuery}
             results={webResults}
             loading={webLoading}
             category={category}
@@ -444,7 +443,6 @@ const SEARCH_LANGUAGES = [
 // is active. Includes a Web/Bilder tab switcher and a filter dropdown for
 // safesearch and language.
 function WebResultsPanel({
-  query,
   results,
   loading,
   category,
@@ -452,7 +450,6 @@ function WebResultsPanel({
   searchPrefs,
   onPrefsChange,
 }: {
-  query: string;
   results: WebResult[] | null;
   loading: boolean;
   category: SearchCategory;
