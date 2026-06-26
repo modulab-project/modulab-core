@@ -1,6 +1,18 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { getHealth, listUsers, logoutRequest, type HealthResponse, type Session } from "../lib/api";
+import {
+  getHealth,
+  listAIProviders,
+  listUsers,
+  logoutRequest,
+  setAIUserKey,
+  deleteAIUserKey,
+  streamAIChat,
+  type AIUserProvider,
+  type ChatMessage,
+  type HealthResponse,
+  type Session,
+} from "../lib/api";
 import { clearSessionToken, getSessionToken } from "../lib/session";
 import { useNotificationEvents, type ServerEvent } from "../lib/useEvents";
 import { useToasts, ToastStack } from "./Toast";
@@ -11,6 +23,10 @@ import packageJson from "../../package.json";
 // and Header/FooterBar so either one can open/close any of them. Widened
 // to include "notifications" alongside the original "profile"/"status".
 type OpenPanel = "profile" | "status" | "notifications" | null;
+
+// Whether the AI chat floating panel is open (independent of the slide panels).
+// Kept separate so chat can coexist with an open slide panel.
+type ChatState = { open: false } | { open: true };
 
 // One entry in the notification feed (NotificationsPanelContent) - kept
 // purely in memory for the life of this tab, not persisted anywhere: a
@@ -93,6 +109,7 @@ export function AppShell({
   }
 
   const isAdmin = isAdminRole(session.role);
+  const [chatOpen, setChatOpen] = useState(false);
 
   // pendingCount is the authoritative "how many people are waiting right
   // now" number, fetched straight from GET /v1/admin/users (the same data
@@ -172,12 +189,21 @@ export function AppShell({
         pendingCount={pendingCount}
         openPanel={openPanel}
         onTogglePanel={togglePanel}
+        chatOpen={chatOpen}
+        onToggleChat={() => setChatOpen((v) => !v)}
       />
 
       <main className="flex-1 overflow-y-auto px-3 sm:px-6">{children}</main>
 
       <FooterBar isAdmin={isAdmin} health={health} onTogglePanel={togglePanel} />
       <ToastStack toasts={toasts} />
+
+      {chatOpen && (
+        <ChatPanel
+          session={session}
+          onClose={() => setChatOpen(false)}
+        />
+      )}
 
       {openPanel && (
         <div
@@ -224,12 +250,16 @@ function Header({
   pendingCount,
   openPanel,
   onTogglePanel,
+  chatOpen,
+  onToggleChat,
 }: {
   session: Session;
   isAdmin: boolean;
   pendingCount: number | null;
   openPanel: OpenPanel;
   onTogglePanel: (panel: Exclude<OpenPanel, null>) => void;
+  chatOpen: boolean;
+  onToggleChat: () => void;
 }) {
   const navigate = useNavigate();
   return (
@@ -264,6 +294,17 @@ function Header({
             )}
           </button>
         )}
+        <button
+          type="button"
+          aria-label="AI Chat"
+          aria-expanded={chatOpen}
+          onClick={onToggleChat}
+          className={`flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-900 ${
+            chatOpen ? "bg-teal-50 text-teal-600 dark:bg-teal-950 dark:text-teal-400" : ""
+          }`}
+        >
+          <i className={`ti ti-sparkles text-[18px] ${chatOpen ? "text-teal-600 dark:text-teal-400" : "text-gray-500 dark:text-gray-400"}`} />
+        </button>
         <button
           type="button"
           aria-haspopup="true"
@@ -443,6 +484,13 @@ function ProfilePanelContent({
                 className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
               >
                 <i className="ti ti-search text-[15px] text-gray-500" /> SearXNG
+              </Link>
+              <Link
+                to="/admin/ai"
+                onClick={onClose}
+                className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
+              >
+                <i className="ti ti-sparkles text-[15px] text-gray-500" /> AI providers
               </Link>
             </>
           )}
@@ -667,4 +715,238 @@ function formatUptime(seconds: number): string {
   const days = Math.floor(hours / 24);
   const remHours = hours % 24;
   return `${days}d ${remHours}h`;
+}
+
+// --- ChatPanel --------------------------------------------------------------
+// Floating chat panel that opens from the sparkles button in the header.
+// Streams responses via SSE (streamAIChat in lib/api.ts). No persistence —
+// messages live only in component state for the lifetime of this mount.
+
+function ChatPanel({ session, onClose }: { session: Session; onClose: () => void }) {
+  const [providers, setProviders] = useState<AIUserProvider[]>([]);
+  const [selectedProvider, setSelectedProvider] = useState<AIUserProvider | null>(null);
+  const [model, setModel] = useState("");
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [streaming, setStreaming] = useState(false);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Load available providers on mount.
+  useEffect(() => {
+    const token = getSessionToken();
+    if (!token) return;
+    listAIProviders(token)
+      .then((list) => {
+        const available = list.filter((p) => p.available);
+        setProviders(available);
+        if (available.length > 0) {
+          setSelectedProvider(available[0]);
+          setModel(available[0].default_model);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Scroll to bottom whenever messages change.
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  // Stop streaming when panel closes.
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
+  async function handleSend() {
+    if (!input.trim() || streaming || !selectedProvider) return;
+    const token = getSessionToken();
+    if (!token) return;
+
+    const userMsg: ChatMessage = { role: "user", content: input.trim() };
+    const newMessages = [...messages, userMsg];
+    setMessages(newMessages);
+    setInput("");
+    setStreaming(true);
+
+    // Placeholder assistant message that we stream into.
+    setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+
+    try {
+      await streamAIChat(
+        token,
+        selectedProvider.id,
+        model,
+        newMessages,
+        (delta) => {
+          setMessages((prev) => {
+            const copy = [...prev];
+            const last = copy[copy.length - 1];
+            if (last?.role === "assistant") {
+              copy[copy.length - 1] = { ...last, content: last.content + delta };
+            }
+            return copy;
+          });
+        },
+        ctrl.signal,
+      );
+    } catch (e) {
+      if ((e as Error).name !== "AbortError") {
+        setMessages((prev) => {
+          const copy = [...prev];
+          const last = copy[copy.length - 1];
+          if (last?.role === "assistant" && last.content === "") {
+            copy[copy.length - 1] = { ...last, content: "Error — could not reach the AI provider." };
+          }
+          return copy;
+        });
+      }
+    } finally {
+      setStreaming(false);
+      abortRef.current = null;
+    }
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  }
+
+  const activeProvider = selectedProvider;
+
+  return (
+    <div className="fixed bottom-[52px] right-4 z-40 flex w-[340px] flex-col rounded-2xl border border-gray-200 bg-white shadow-xl dark:border-gray-800 dark:bg-gray-950"
+      style={{ maxHeight: "calc(100vh - 120px)" }}
+    >
+      {/* Header */}
+      <div className="flex flex-none items-center justify-between border-b border-gray-100 px-4 py-3 dark:border-gray-800">
+        <div className="flex items-center gap-2">
+          <i className="ti ti-sparkles text-[16px] text-teal-600 dark:text-teal-400" />
+          <span className="text-sm font-semibold">AI Chat</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {/* Model selector */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setModelPickerOpen((v) => !v)}
+              className="flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
+            >
+              <span className="max-w-[100px] truncate">{activeProvider?.name ?? "No provider"}</span>
+              <i className="ti ti-chevron-down text-[10px]" />
+            </button>
+            {modelPickerOpen && providers.length > 0 && (
+              <div className="absolute right-0 top-full z-10 mt-1 w-52 rounded-xl border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                {providers.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedProvider(p);
+                      setModel(p.default_model);
+                      setModelPickerOpen(false);
+                    }}
+                    className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-800 ${
+                      p.id === selectedProvider?.id ? "font-medium text-teal-600 dark:text-teal-400" : "text-gray-700 dark:text-gray-300"
+                    }`}
+                  >
+                    <span className="flex-1 truncate">{p.name}</span>
+                    {p.has_user_key && (
+                      <span className="rounded-full bg-teal-50 px-1.5 py-0.5 text-[10px] text-teal-600 dark:bg-teal-950 dark:text-teal-400">
+                        own key
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            aria-label="Close chat"
+            onClick={onClose}
+            className="flex h-7 w-7 items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-800"
+          >
+            <i className="ti ti-x text-[14px] text-gray-500" />
+          </button>
+        </div>
+      </div>
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto px-3 py-3" style={{ minHeight: "200px" }}>
+        {messages.length === 0 ? (
+          <p className="mt-8 text-center text-xs text-gray-400 dark:text-gray-600">
+            {providers.length === 0
+              ? "No AI providers configured yet."
+              : "Ask anything — session is not saved."}
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {messages.map((msg, i) => (
+              <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                <div
+                  className={`max-w-[85%] rounded-xl px-3 py-2 text-xs leading-relaxed ${
+                    msg.role === "user"
+                      ? "bg-teal-600 text-white"
+                      : "border border-gray-100 bg-gray-50 text-gray-800 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-200"
+                  }`}
+                  style={{ whiteSpace: "pre-wrap" }}
+                >
+                  {msg.content || (streaming && msg.role === "assistant" ? (
+                    <span className="animate-pulse text-gray-400">…</span>
+                  ) : "")}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div ref={bottomRef} />
+      </div>
+
+      {/* Input */}
+      <div className="flex flex-none items-end gap-2 border-t border-gray-100 p-3 dark:border-gray-800">
+        <textarea
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder={providers.length === 0 ? "No providers available" : "Message… (Enter to send)"}
+          disabled={streaming || providers.length === 0}
+          rows={1}
+          className="flex-1 resize-none rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs outline-none placeholder:text-gray-400 focus:border-teal-400 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+          style={{ minHeight: "36px", maxHeight: "120px" }}
+          onInput={(e) => {
+            const el = e.currentTarget;
+            el.style.height = "auto";
+            el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+          }}
+        />
+        {streaming ? (
+          <button
+            type="button"
+            onClick={() => abortRef.current?.abort()}
+            className="flex h-8 w-8 flex-none items-center justify-center rounded-full border border-red-200 text-red-500 hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-950"
+          >
+            <i className="ti ti-square text-[14px]" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={handleSend}
+            disabled={!input.trim() || providers.length === 0}
+            className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-40"
+          >
+            <i className="ti ti-send text-[14px]" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }

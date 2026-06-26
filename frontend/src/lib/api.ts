@@ -596,3 +596,176 @@ export function updateSearchPrefs(
     body: JSON.stringify(body),
   });
 }
+
+// --- AI providers -----------------------------------------------------------
+// Mirrors backend/internal/ai's JSON shapes exactly.
+
+// Admin view: full provider details.
+export interface AIProvider {
+  id: string;
+  type: string;
+  name: string;
+  base_url?: string;
+  has_admin_key: boolean;
+  default_model: string;
+  user_can_override: boolean;
+  enabled: boolean;
+  sort_order: number;
+}
+
+// User view: availability info without key material.
+export interface AIUserProvider {
+  id: string;
+  name: string;
+  type: string;
+  default_model: string;
+  available: boolean;
+  has_user_key: boolean;
+  has_admin_key: boolean;
+  can_override: boolean;
+}
+
+// GET /v1/admin/ai/providers — super-admin only.
+export function adminListAIProviders(token: string): Promise<AIProvider[]> {
+  return request<AIProvider[]>("/v1/admin/ai/providers", {
+    headers: bearerHeaders(token),
+  });
+}
+
+// POST /v1/admin/ai/providers — super-admin only.
+export function adminCreateAIProvider(
+  token: string,
+  body: {
+    id: string;
+    type: string;
+    name: string;
+    base_url?: string;
+    admin_key?: string;
+    default_model: string;
+    user_can_override: boolean;
+    enabled: boolean;
+    sort_order: number;
+  },
+): Promise<AIProvider> {
+  return request<AIProvider>("/v1/admin/ai/providers", {
+    method: "POST",
+    headers: bearerHeaders(token),
+    body: JSON.stringify(body),
+  });
+}
+
+// PATCH /v1/admin/ai/providers/{id} — super-admin only.
+export function adminPatchAIProvider(
+  token: string,
+  id: string,
+  body: Partial<{
+    name: string;
+    base_url: string;
+    admin_key: string;
+    default_model: string;
+    user_can_override: boolean;
+    enabled: boolean;
+    sort_order: number;
+  }>,
+): Promise<AIProvider> {
+  return request<AIProvider>(`/v1/admin/ai/providers/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: bearerHeaders(token),
+    body: JSON.stringify(body),
+  });
+}
+
+// DELETE /v1/admin/ai/providers/{id} — super-admin only.
+export function adminDeleteAIProvider(token: string, id: string): Promise<void> {
+  return request<void>(`/v1/admin/ai/providers/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: bearerHeaders(token),
+  });
+}
+
+// DELETE /v1/admin/ai/providers/{id}/key — clears admin key only.
+export function adminClearAIProviderKey(token: string, id: string): Promise<void> {
+  return request<void>(`/v1/admin/ai/providers/${encodeURIComponent(id)}/key`, {
+    method: "DELETE",
+    headers: bearerHeaders(token),
+  });
+}
+
+// GET /v1/ai/providers — any approved session.
+export function listAIProviders(token: string): Promise<AIUserProvider[]> {
+  return request<AIUserProvider[]>("/v1/ai/providers", {
+    headers: bearerHeaders(token),
+  });
+}
+
+// PUT /v1/ai/keys/{id} — set own API key for a provider.
+export function setAIUserKey(token: string, providerId: string, key: string): Promise<void> {
+  return request<void>(`/v1/ai/keys/${encodeURIComponent(providerId)}`, {
+    method: "PUT",
+    headers: bearerHeaders(token),
+    body: JSON.stringify({ key }),
+  });
+}
+
+// DELETE /v1/ai/keys/{id} — remove own API key (fall back to admin key).
+export function deleteAIUserKey(token: string, providerId: string): Promise<void> {
+  return request<void>(`/v1/ai/keys/${encodeURIComponent(providerId)}`, {
+    method: "DELETE",
+    headers: bearerHeaders(token),
+  });
+}
+
+// Chat message shape mirroring backend/internal/ai.chatMessage.
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+// streamAIChat opens a POST /v1/ai/chat SSE stream and calls onDelta for each
+// text chunk received. Returns a Promise that resolves when [DONE] is received
+// or rejects on error. The caller is responsible for aborting via the signal.
+export function streamAIChat(
+  token: string,
+  providerId: string,
+  model: string,
+  messages: ChatMessage[],
+  onDelta: (text: string) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  return fetch(`${API_BASE_URL}/v1/ai/chat`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ provider_id: providerId, model, messages }),
+    signal,
+  }).then(async (res) => {
+    if (!res.ok) {
+      const text = await res.text();
+      throw new ApiError(res.status, text || res.statusText);
+    }
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const data = line.slice(6);
+        if (data === "[DONE]") return;
+        try {
+          const parsed = JSON.parse(data) as { delta?: string; error?: string };
+          if (parsed.error) throw new Error(parsed.error);
+          if (parsed.delta) onDelta(parsed.delta);
+        } catch {
+          // malformed chunk — skip
+        }
+      }
+    }
+  });
+}

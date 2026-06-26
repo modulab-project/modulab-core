@@ -1,0 +1,651 @@
+// Package ai implements the AI chat feature: admin-managed provider
+// configuration, per-user API key overrides, and a streaming chat endpoint.
+//
+// Providers come in two flavours:
+//
+//   - "anthropic"    — Anthropic's own Messages API (messages/stream format)
+//   - "openai_compat" — any OpenAI-compatible endpoint (OpenAI, Gemini,
+//     DeepSeek, Ollama, Groq, …); base_url selects the target
+//
+// Key resolution follows the hybrid model: a user's own key (if present and
+// the provider allows overrides) wins; the admin key is the fallback. Both
+// are stored GCM-encrypted in the database and never leave the backend.
+//
+// Admin endpoints (super-admin only):
+//
+//	GET    /v1/admin/ai/providers              → []ProviderResponse
+//	POST   /v1/admin/ai/providers              → ProviderResponse   (create)
+//	PATCH  /v1/admin/ai/providers/{id}         → ProviderResponse   (update)
+//	DELETE /v1/admin/ai/providers/{id}         → 204
+//	DELETE /v1/admin/ai/providers/{id}/key     → 204  (clear admin key only)
+//
+// User endpoints (any approved session):
+//
+//	GET    /v1/ai/providers                    → []UserProviderResponse
+//	PUT    /v1/ai/keys/{id}                    → 204  (set own key)
+//	DELETE /v1/ai/keys/{id}                    → 204  (remove own key)
+//
+// Chat endpoint (any approved session):
+//
+//	POST   /v1/ai/chat                         → text/event-stream SSE
+package ai
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"strings"
+
+	"github.com/modulab-project/modulab-core/backend/internal/auth"
+	"github.com/modulab-project/modulab-core/backend/internal/db"
+)
+
+// ---- types -----------------------------------------------------------------
+
+// ProviderResponse is the JSON shape returned to admin callers.
+type ProviderResponse struct {
+	ID              string `json:"id"`
+	Type            string `json:"type"`
+	Name            string `json:"name"`
+	BaseURL         string `json:"base_url,omitempty"`
+	HasAdminKey     bool   `json:"has_admin_key"`
+	DefaultModel    string `json:"default_model"`
+	UserCanOverride bool   `json:"user_can_override"`
+	Enabled         bool   `json:"enabled"`
+	SortOrder       int    `json:"sort_order"`
+}
+
+// UserProviderResponse is the JSON shape returned to non-admin callers.
+// It shows whether a key is available (admin or user) and whether the user
+// has their own key set — without exposing any key material.
+type UserProviderResponse struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Type         string `json:"type"`
+	DefaultModel string `json:"default_model"`
+	Available    bool   `json:"available"` // true when at least one key exists
+	HasUserKey   bool   `json:"has_user_key"`
+	HasAdminKey  bool   `json:"has_admin_key"`
+	CanOverride  bool   `json:"can_override"`
+}
+
+// createProviderRequest is the body of POST /v1/admin/ai/providers.
+type createProviderRequest struct {
+	ID              string `json:"id"`
+	Type            string `json:"type"`
+	Name            string `json:"name"`
+	BaseURL         string `json:"base_url"`
+	AdminKey        string `json:"admin_key"`
+	DefaultModel    string `json:"default_model"`
+	UserCanOverride bool   `json:"user_can_override"`
+	Enabled         bool   `json:"enabled"`
+	SortOrder       int    `json:"sort_order"`
+}
+
+// patchProviderRequest is the body of PATCH /v1/admin/ai/providers/{id}.
+// Only non-zero/non-empty fields are applied.
+type patchProviderRequest struct {
+	Name            *string `json:"name"`
+	BaseURL         *string `json:"base_url"`
+	AdminKey        *string `json:"admin_key"`
+	DefaultModel    *string `json:"default_model"`
+	UserCanOverride *bool   `json:"user_can_override"`
+	Enabled         *bool   `json:"enabled"`
+	SortOrder       *int    `json:"sort_order"`
+}
+
+// setKeyRequest is the body of PUT /v1/ai/keys/{id}.
+type setKeyRequest struct {
+	Key string `json:"key"`
+}
+
+// chatRequest is the body of POST /v1/ai/chat.
+type chatRequest struct {
+	ProviderID string        `json:"provider_id"`
+	Model      string        `json:"model"`
+	Messages   []chatMessage `json:"messages"`
+}
+
+type chatMessage struct {
+	Role    string `json:"role"`    // "user" or "assistant"
+	Content string `json:"content"`
+}
+
+// ---- helpers ----------------------------------------------------------------
+
+func rowToResponse(r db.AIProviderRow) ProviderResponse {
+	return ProviderResponse{
+		ID:              r.ID,
+		Type:            r.Type,
+		Name:            r.Name,
+		BaseURL:         r.BaseURL,
+		HasAdminKey:     r.HasAdminKey,
+		DefaultModel:    r.DefaultModel,
+		UserCanOverride: r.UserCanOverride,
+		Enabled:         r.Enabled,
+		SortOrder:       r.SortOrder,
+	}
+}
+
+func requireApprovedSession(deps auth.Deps, r *http.Request) (sess auth.Session, ok bool) {
+	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if token == "" {
+		return auth.Session{}, false
+	}
+	var err error
+	var valid bool
+	sess, valid, err = auth.ValidateSession(r.Context(), deps.Valkey, token)
+	if err != nil || !valid {
+		return auth.Session{}, false
+	}
+	if sess.Role == "pending" || sess.Locked {
+		return auth.Session{}, false
+	}
+	return sess, true
+}
+
+// writeSSE sends a single SSE data line.
+func writeSSE(w http.ResponseWriter, data string) {
+	fmt.Fprintf(w, "data: %s\n\n", data)
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// ---- admin handlers --------------------------------------------------------
+
+// AdminListHandler handles GET /v1/admin/ai/providers.
+// Returns all providers regardless of enabled state (admins see everything).
+// Auth is enforced by the superAdminOnly middleware in main.go.
+func AdminListHandler(deps auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		rows, err := deps.Pool.ListAIProviders(r.Context())
+		if err != nil {
+			log.Printf("ai: list providers: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		out := make([]ProviderResponse, len(rows))
+		for i, row := range rows {
+			out[i] = rowToResponse(row)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(out)
+	}
+}
+
+// AdminCreateHandler handles POST /v1/admin/ai/providers.
+func AdminCreateHandler(deps auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req createProviderRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		if req.ID == "" || req.Type == "" || req.Name == "" {
+			http.Error(w, "id, type, and name are required", http.StatusBadRequest)
+			return
+		}
+		validTypes := map[string]bool{
+			"anthropic": true, "openai": true, "gemini": true,
+			"deepseek": true, "openai_compat": true,
+		}
+		if !validTypes[req.Type] {
+			http.Error(w, "invalid type", http.StatusBadRequest)
+			return
+		}
+		row := db.AIProviderRow{
+			ID:              req.ID,
+			Type:            req.Type,
+			Name:            req.Name,
+			BaseURL:         req.BaseURL,
+			DefaultModel:    req.DefaultModel,
+			UserCanOverride: req.UserCanOverride,
+			Enabled:         req.Enabled,
+			SortOrder:       req.SortOrder,
+		}
+		if err := deps.Pool.UpsertAIProvider(r.Context(), row, req.AdminKey); err != nil {
+			log.Printf("ai: upsert provider: %v", err)
+			http.Error(w, "database error", http.StatusInternalServerError)
+			return
+		}
+		created, _, err := deps.Pool.GetAIProvider(r.Context(), req.ID)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(rowToResponse(created))
+	}
+}
+
+// AdminPatchHandler handles PATCH /v1/admin/ai/providers/{id}.
+func AdminPatchHandler(deps auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, "missing id", http.StatusBadRequest)
+			return
+		}
+		existing, found, err := deps.Pool.GetAIProvider(r.Context(), id)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if !found {
+			http.Error(w, "provider not found", http.StatusNotFound)
+			return
+		}
+
+		var req patchProviderRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		// Apply patch fields to the existing row.
+		if req.Name != nil {
+			existing.Name = *req.Name
+		}
+		if req.BaseURL != nil {
+			existing.BaseURL = *req.BaseURL
+		}
+		if req.DefaultModel != nil {
+			existing.DefaultModel = *req.DefaultModel
+		}
+		if req.UserCanOverride != nil {
+			existing.UserCanOverride = *req.UserCanOverride
+		}
+		if req.Enabled != nil {
+			existing.Enabled = *req.Enabled
+		}
+		if req.SortOrder != nil {
+			existing.SortOrder = *req.SortOrder
+		}
+
+		adminKey := ""
+		if req.AdminKey != nil {
+			adminKey = *req.AdminKey
+		}
+		if err := deps.Pool.UpsertAIProvider(r.Context(), existing, adminKey); err != nil {
+			log.Printf("ai: patch provider %q: %v", id, err)
+			http.Error(w, "database error", http.StatusInternalServerError)
+			return
+		}
+		updated, _, _ := deps.Pool.GetAIProvider(r.Context(), id)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(rowToResponse(updated))
+	}
+}
+
+// AdminDeleteHandler handles DELETE /v1/admin/ai/providers/{id}.
+func AdminDeleteHandler(deps auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		id := r.PathValue("id")
+		found, err := deps.Pool.DeleteAIProvider(r.Context(), id)
+		if err != nil {
+			http.Error(w, "database error", http.StatusInternalServerError)
+			return
+		}
+		if !found {
+			http.Error(w, "provider not found", http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// AdminClearKeyHandler handles DELETE /v1/admin/ai/providers/{id}/key.
+// Removes the admin key without deleting the provider itself.
+func AdminClearKeyHandler(deps auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		id := r.PathValue("id")
+		if err := deps.Pool.ClearAIProviderAdminKey(r.Context(), id); err != nil {
+			http.Error(w, "database error", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// ---- user handlers ---------------------------------------------------------
+
+// UserProvidersHandler handles GET /v1/ai/providers.
+// Returns only enabled providers with availability info for this user.
+func UserProvidersHandler(deps auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		sess, ok := requireApprovedSession(deps, r)
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		rows, err := deps.Pool.ListAIProvidersForUser(r.Context(), sess.UserID)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		out := make([]UserProviderResponse, 0, len(rows))
+		for _, row := range rows {
+			available := row.HasAdminKey || (row.HasUserKey && row.UserCanOverride)
+			out = append(out, UserProviderResponse{
+				ID:           row.ID,
+				Name:         row.Name,
+				Type:         row.Type,
+				DefaultModel: row.DefaultModel,
+				Available:    available,
+				HasUserKey:   row.HasUserKey,
+				HasAdminKey:  row.HasAdminKey,
+				CanOverride:  row.UserCanOverride,
+			})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(out)
+	}
+}
+
+// UserSetKeyHandler handles PUT /v1/ai/keys/{id}.
+func UserSetKeyHandler(deps auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		sess, ok := requireApprovedSession(deps, r)
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		providerID := r.PathValue("id")
+		if providerID == "" {
+			http.Error(w, "missing provider id", http.StatusBadRequest)
+			return
+		}
+		// Verify provider exists and allows user override.
+		prov, found, err := deps.Pool.GetAIProvider(r.Context(), providerID)
+		if err != nil || !found {
+			http.Error(w, "provider not found", http.StatusNotFound)
+			return
+		}
+		if !prov.UserCanOverride {
+			http.Error(w, "this provider does not allow user keys", http.StatusForbidden)
+			return
+		}
+		var req setKeyRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Key == "" {
+			http.Error(w, "key is required", http.StatusBadRequest)
+			return
+		}
+		if err := deps.Pool.SetAIUserKey(r.Context(), sess.UserID, providerID, req.Key); err != nil {
+			http.Error(w, "database error", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// UserDeleteKeyHandler handles DELETE /v1/ai/keys/{id}.
+func UserDeleteKeyHandler(deps auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		sess, ok := requireApprovedSession(deps, r)
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		providerID := r.PathValue("id")
+		if err := deps.Pool.DeleteAIUserKey(r.Context(), sess.UserID, providerID); err != nil {
+			http.Error(w, "database error", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// ---- chat handler ----------------------------------------------------------
+
+// ChatHandler handles POST /v1/ai/chat and streams the response as SSE.
+//
+// Each SSE event carries either:
+//
+//	data: {"delta":"..."}   — a text chunk from the model
+//	data: [DONE]            — stream finished
+//	data: {"error":"..."}   — an error occurred
+//
+// The handler resolves the API key (user > admin), selects the right upstream
+// client based on the provider's type, and proxies the stream back.
+func ChatHandler(deps auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		sess, ok := requireApprovedSession(deps, r)
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		var req chatRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		if req.ProviderID == "" || len(req.Messages) == 0 {
+			http.Error(w, "provider_id and messages are required", http.StatusBadRequest)
+			return
+		}
+
+		prov, found, err := deps.Pool.GetAIProvider(r.Context(), req.ProviderID)
+		if err != nil || !found || !prov.Enabled {
+			http.Error(w, "provider not found or disabled", http.StatusNotFound)
+			return
+		}
+
+		apiKey, err := deps.Pool.ResolveAIKey(r.Context(), sess.UserID, req.ProviderID)
+		if err != nil || apiKey == "" {
+			http.Error(w, "no API key configured for this provider", http.StatusServiceUnavailable)
+			return
+		}
+
+		model := req.Model
+		if model == "" {
+			model = prov.DefaultModel
+		}
+
+		// Set SSE headers before any streaming begins.
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no") // tell Nginx/Traefik not to buffer
+
+		var streamErr error
+		if prov.Type == "anthropic" {
+			streamErr = streamAnthropic(r.Context(), w, apiKey, model, req.Messages)
+		} else {
+			baseURL := prov.BaseURL
+			if baseURL == "" {
+				baseURL = defaultBaseURL(prov.Type)
+			}
+			streamErr = streamOpenAICompat(r.Context(), w, apiKey, baseURL, model, req.Messages)
+		}
+
+		if streamErr != nil {
+			log.Printf("ai: stream error (provider=%s): %v", req.ProviderID, streamErr)
+			writeSSE(w, `{"error":"stream error"}`)
+		}
+		writeSSE(w, "[DONE]")
+	}
+}
+
+// defaultBaseURL returns the canonical OpenAI-compatible base URL for
+// well-known built-in providers. Custom providers always set base_url
+// themselves, so this only covers the four built-ins that happen to use
+// the OpenAI-compat client.
+func defaultBaseURL(providerType string) string {
+	switch providerType {
+	case "openai":
+		return "https://api.openai.com/v1"
+	case "gemini":
+		return "https://generativelanguage.googleapis.com/v1beta/openai"
+	case "deepseek":
+		return "https://api.deepseek.com/v1"
+	default:
+		return ""
+	}
+}
+
+// ---- Anthropic streaming client --------------------------------------------
+
+// streamAnthropic calls Anthropic's Messages API with stream=true and
+// forwards content_block_delta events as SSE deltas.
+func streamAnthropic(ctx context.Context, w http.ResponseWriter, apiKey, model string, messages []chatMessage) error {
+	body := map[string]any{
+		"model":      model,
+		"max_tokens": 4096,
+		"stream":     true,
+		"messages":   messages,
+	}
+	bodyBytes, _ := json.Marshal(body)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://api.anthropic.com/v1/messages", bytes.NewReader(bodyBytes))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", apiKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("anthropic: request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("anthropic: HTTP %d: %s", resp.StatusCode, string(b))
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := strings.TrimPrefix(line, "data: ")
+		if data == "[DONE]" {
+			break
+		}
+		// Parse the Anthropic event to extract the delta text.
+		var event struct {
+			Type  string `json:"type"`
+			Delta *struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"delta"`
+		}
+		if err := json.Unmarshal([]byte(data), &event); err != nil {
+			continue
+		}
+		if event.Type == "content_block_delta" && event.Delta != nil && event.Delta.Type == "text_delta" {
+			chunk, _ := json.Marshal(map[string]string{"delta": event.Delta.Text})
+			writeSSE(w, string(chunk))
+		}
+	}
+	return scanner.Err()
+}
+
+// ---- OpenAI-compatible streaming client ------------------------------------
+
+// streamOpenAICompat calls any OpenAI-compatible /chat/completions endpoint
+// with stream=true and forwards choices[0].delta.content events as SSE deltas.
+func streamOpenAICompat(ctx context.Context, w http.ResponseWriter, apiKey, baseURL, model string, messages []chatMessage) error {
+	body := map[string]any{
+		"model":    model,
+		"stream":   true,
+		"messages": messages,
+	}
+	bodyBytes, _ := json.Marshal(body)
+
+	url := strings.TrimRight(baseURL, "/") + "/chat/completions"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("openai_compat: request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("openai_compat: HTTP %d: %s", resp.StatusCode, string(b))
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := strings.TrimPrefix(line, "data: ")
+		if data == "[DONE]" {
+			break
+		}
+		var event struct {
+			Choices []struct {
+				Delta struct {
+					Content string `json:"content"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(data), &event); err != nil {
+			continue
+		}
+		if len(event.Choices) > 0 && event.Choices[0].Delta.Content != "" {
+			chunk, _ := json.Marshal(map[string]string{"delta": event.Choices[0].Delta.Content})
+			writeSSE(w, string(chunk))
+		}
+	}
+	return scanner.Err()
+}

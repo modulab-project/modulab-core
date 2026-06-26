@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/modulab-project/modulab-core/backend/internal/ai"
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
 	"github.com/modulab-project/modulab-core/backend/internal/bootstrap"
 	"github.com/modulab-project/modulab-core/backend/internal/config"
@@ -339,6 +340,21 @@ func main() {
 	mux.HandleFunc("GET /v1/admin/news/settings", news.AdminNewsSettingsHandler(authDeps))
 	mux.HandleFunc("PATCH /v1/admin/news/settings", news.AdminNewsSettingsHandler(authDeps))
 
+	// AI provider management (internal/ai): admin CRUD is super-admin only
+	// (same tier as SMTP/SearXNG); user key management and chat streaming
+	// require any approved session. The chat endpoint streams SSE, so
+	// Traefik/Nginx buffering is suppressed via X-Accel-Buffering: no inside
+	// ChatHandler itself.
+	mux.Handle("GET /v1/admin/ai/providers", superAdminOnly(ai.AdminListHandler(authDeps)))
+	mux.Handle("POST /v1/admin/ai/providers", superAdminOnly(ai.AdminCreateHandler(authDeps)))
+	mux.Handle("PATCH /v1/admin/ai/providers/{id}", superAdminOnly(ai.AdminPatchHandler(authDeps)))
+	mux.Handle("DELETE /v1/admin/ai/providers/{id}", superAdminOnly(ai.AdminDeleteHandler(authDeps)))
+	mux.Handle("DELETE /v1/admin/ai/providers/{id}/key", superAdminOnly(ai.AdminClearKeyHandler(authDeps)))
+	mux.HandleFunc("GET /v1/ai/providers", ai.UserProvidersHandler(authDeps))
+	mux.HandleFunc("PUT /v1/ai/keys/{id}", ai.UserSetKeyHandler(authDeps))
+	mux.HandleFunc("DELETE /v1/ai/keys/{id}", ai.UserDeleteKeyHandler(authDeps))
+	mux.HandleFunc("POST /v1/ai/chat", ai.ChatHandler(authDeps))
+
 	// The mail worker (internal/mail) runs for Core's entire lifetime as a
 	// single background goroutine, draining whatever
 	// admin.go's enqueueMail calls push onto the queue - started
@@ -377,7 +393,7 @@ func main() {
 func corsMiddleware(allowedOrigin string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, "+bootstrap.HeaderName)
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
