@@ -600,12 +600,20 @@ func NewsHandler(d auth.Deps) http.HandlerFunc {
 			all = append(all, res.arts...)
 		}
 
-		// Sort newest first, cap at maxArticles.
+		// Read admin-configured cap; fall back to compile-time default.
+		cap := maxArticles
+		if v, ok, _ := d.Pool.GetSetting(r.Context(), "news_max_articles"); ok {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				cap = n
+			}
+		}
+
+		// Sort newest first, cap at the configured limit.
 		sort.Slice(all, func(i, j int) bool {
 			return all[i].PublishedAt.After(all[j].PublishedAt)
 		})
-		if len(all) > maxArticles {
-			all = all[:maxArticles]
+		if len(all) > cap {
+			all = all[:cap]
 		}
 		// Ensure the response is always a JSON array, never null.
 		if all == nil {
@@ -615,52 +623,120 @@ func NewsHandler(d auth.Deps) http.HandlerFunc {
 	}
 }
 
-// PrefsHandler serves GET and PATCH /v1/news/preferences.
-//
-//   GET  → returns the calling user's NewsPrefs (defaults if none stored yet).
-//   PATCH → accepts a partial body; only provided fields are updated.
-func PrefsHandler(d auth.Deps) http.HandlerFunc {
+// newsSettingsDefaults returns the global news settings from core_settings,
+// applying defaults when a key is absent.
+func newsSettingsDefaults(ctx context.Context, pool interface {
+	GetSetting(context.Context, string) (string, bool, error)
+}) (maxArt, homeCount int, showImages bool) {
+	maxArt, homeCount, showImages = 100, 5, true
+
+	if v, ok, _ := pool.GetSetting(ctx, "news_max_articles"); ok {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxArt = n
+		}
+	}
+	if v, ok, _ := pool.GetSetting(ctx, "news_home_count"); ok {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			homeCount = n
+		}
+	}
+	if v, ok, _ := pool.GetSetting(ctx, "news_show_images"); ok {
+		showImages = v != "false"
+	}
+	return
+}
+
+// NewsConfigHandler is GET /v1/news/config.
+// Returns the admin-configured display settings relevant to regular users:
+// how many articles to show on the home page and whether to show images.
+func NewsConfigHandler(d auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sess, ok := requireActiveDeps(d, w, r)
-		if !ok {
+		if _, ok := requireActiveDeps(d, w, r); !ok {
+			return
+		}
+		_, homeCount, showImages := newsSettingsDefaults(r.Context(), d.Pool)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"home_count":  homeCount,
+			"show_images": showImages,
+		})
+	}
+}
+
+// AdminNewsSettingsHandler serves GET and PATCH /v1/admin/news/settings.
+// Requires org-admin or super-admin role.
+//
+//	GET  → returns current settings (with defaults for unset keys).
+//	PATCH → partial update; only provided fields are changed.
+func AdminNewsSettingsHandler(d auth.Deps) http.HandlerFunc {
+	type settings struct {
+		MaxArticles *int  `json:"max_articles"`
+		HomeCount   *int  `json:"home_count"`
+		ShowImages  *bool `json:"show_images"`
+	}
+
+	readCurrent := func(ctx context.Context) settings {
+		maxArt, homeCount, showImages := newsSettingsDefaults(ctx, d.Pool)
+		return settings{
+			MaxArticles: &maxArt,
+			HomeCount:   &homeCount,
+			ShowImages:  &showImages,
+		}
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := requireAdminDeps(d, w, r); !ok {
 			return
 		}
 
 		if r.Method == http.MethodGet {
-			prefs, err := d.Pool.GetNewsPrefs(r.Context(), sess.UserID)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			writeJSON(w, http.StatusOK, prefs)
+			writeJSON(w, http.StatusOK, readCurrent(r.Context()))
 			return
 		}
 
-		// PATCH: read current prefs first, then merge the body.
-		current, err := d.Pool.GetNewsPrefs(r.Context(), sess.UserID)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		// Use pointer fields so we can detect which keys the caller sent.
-		var body struct {
-			HomeArticleCount *int  `json:"home_article_count"`
-			ShowImages       *bool `json:"show_images"`
-		}
+		// PATCH: decode partial body, merge with current, persist changed keys.
+		var body settings
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-		if body.HomeArticleCount != nil {
-			current.HomeArticleCount = *body.HomeArticleCount
+
+		if body.MaxArticles != nil {
+			v := *body.MaxArticles
+			if v < 1 {
+				v = 1
+			}
+			if v > 1000 {
+				v = 1000
+			}
+			if err := d.Pool.SetSetting(r.Context(), "news_max_articles", strconv.Itoa(v)); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+		if body.HomeCount != nil {
+			v := *body.HomeCount
+			if v < 1 {
+				v = 1
+			}
+			if v > 50 {
+				v = 50
+			}
+			if err := d.Pool.SetSetting(r.Context(), "news_home_count", strconv.Itoa(v)); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
 		}
 		if body.ShowImages != nil {
-			current.ShowImages = *body.ShowImages
+			val := "true"
+			if !*body.ShowImages {
+				val = "false"
+			}
+			if err := d.Pool.SetSetting(r.Context(), "news_show_images", val); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
 		}
-		if err := d.Pool.SetNewsPrefs(r.Context(), sess.UserID, current); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		writeJSON(w, http.StatusOK, current)
+
+		writeJSON(w, http.StatusOK, readCurrent(r.Context()))
 	}
 }

@@ -1,6 +1,8 @@
 // Admin news-feed management page (/admin/feeds).
 // Org-admin and super-admin can add, edit, and delete RSS/Atom feed URLs
-// from the global feed pool that all users pick from.
+// from the global feed pool that all users pick from. They can also configure
+// global news display settings (max articles fetched, articles shown on the
+// home page, whether to show images).
 // Gate is enforced server-side (requireAdminDeps in internal/news/news.go);
 // client-side we additionally redirect non-admins to / via isAdminRole.
 import { useEffect, useState } from "react";
@@ -10,7 +12,10 @@ import {
   adminCreateFeed,
   adminUpdateFeed,
   adminDeleteFeed,
+  adminGetNewsSettings,
+  adminUpdateNewsSettings,
   type Feed,
+  type AdminNewsSettings,
   type ApiError,
 } from "../lib/api";
 import { getSessionToken } from "../lib/session";
@@ -25,6 +30,11 @@ export default function AdminFeedsPage() {
   const [fetching, setFetching] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // News settings state
+  const [settings, setSettings] = useState<AdminNewsSettings | null>(null);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+
   // Modal state
   const [editTarget, setEditTarget] = useState<Feed | null>(null); // null = create
   const [modalOpen, setModalOpen] = useState(false);
@@ -36,6 +46,7 @@ export default function AdminFeedsPage() {
       return;
     }
     load();
+    loadSettings();
   }, [session]);
 
   function load() {
@@ -49,6 +60,29 @@ export default function AdminFeedsPage() {
       })
       .catch((e: ApiError) => setError(e.message))
       .finally(() => setFetching(false));
+  }
+
+  function loadSettings() {
+    const token = getSessionToken();
+    if (!token) return;
+    adminGetNewsSettings(token)
+      .then(setSettings)
+      .catch(() => {});
+  }
+
+  async function handleSettingChange(patch: Partial<AdminNewsSettings>) {
+    const token = getSessionToken();
+    if (!token || settingsSaving) return;
+    setSettingsSaving(true);
+    setSettingsError(null);
+    try {
+      const updated = await adminUpdateNewsSettings(token, patch);
+      setSettings(updated);
+    } catch {
+      setSettingsError("Failed to save settings.");
+    } finally {
+      setSettingsSaving(false);
+    }
   }
 
   function openCreate() {
@@ -78,9 +112,108 @@ export default function AdminFeedsPage() {
   return (
     <AppShell session={session}>
       <div className="mx-auto max-w-3xl py-8 px-2">
+
+        {/* ── News display settings ────────────────────────────────── */}
+        <div className="mb-8">
+          <h1 className="text-xl font-semibold">News Settings</h1>
+          <p className="mt-0.5 mb-4 text-sm text-gray-500 dark:text-gray-400">
+            Global display settings applied to all users.
+          </p>
+
+          {settings && (
+            <div className="rounded-xl border border-gray-200 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800">
+              {/* Articles on home page */}
+              <div className="flex items-center justify-between px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium">Articles on home page</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    How many articles each user sees in the compact home preview.
+                  </p>
+                </div>
+                <div className="flex gap-1 ml-4 shrink-0">
+                  {[3, 5, 10, 20].map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      disabled={settingsSaving}
+                      onClick={() => handleSettingChange({ home_count: n })}
+                      className={`h-7 w-9 rounded-lg text-[12px] font-medium transition-colors disabled:opacity-50 ${
+                        settings.home_count === n
+                          ? "bg-teal-600 text-white"
+                          : "border border-gray-200 text-gray-600 hover:border-teal-400 dark:border-gray-700 dark:text-gray-300"
+                      }`}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Max articles total */}
+              <div className="flex items-center justify-between px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium">Max articles total</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Maximum number of articles returned by /v1/news across all feeds.
+                  </p>
+                </div>
+                <div className="flex gap-1 ml-4 shrink-0">
+                  {[50, 100, 200, 500].map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      disabled={settingsSaving}
+                      onClick={() => handleSettingChange({ max_articles: n })}
+                      className={`h-7 min-w-[2.5rem] px-2 rounded-lg text-[12px] font-medium transition-colors disabled:opacity-50 ${
+                        settings.max_articles === n
+                          ? "bg-teal-600 text-white"
+                          : "border border-gray-200 text-gray-600 hover:border-teal-400 dark:border-gray-700 dark:text-gray-300"
+                      }`}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Show images */}
+              <div className="flex items-center justify-between px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium">Show images</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Display article preview images in the news panel.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={settingsSaving}
+                  aria-label={settings.show_images ? "Disable images" : "Enable images"}
+                  onClick={() => handleSettingChange({ show_images: !settings.show_images })}
+                  className={`relative h-[22px] w-10 flex-none rounded-full border transition-colors disabled:opacity-50 ml-4 ${
+                    settings.show_images
+                      ? "border-teal-600 bg-teal-600"
+                      : "border-gray-300 bg-gray-100 dark:border-gray-600 dark:bg-gray-800"
+                  }`}
+                >
+                  <span
+                    className={`absolute top-[2px] h-4 w-4 rounded-full bg-white transition-all ${
+                      settings.show_images ? "left-[21px]" : "left-[2px]"
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {settingsError && (
+            <p className="mt-2 text-sm text-red-600 dark:text-red-400">{settingsError}</p>
+          )}
+        </div>
+
+        {/* ── Feed pool ───────────────────────────────────────────── */}
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-semibold">News Feeds</h1>
+            <h2 className="text-xl font-semibold">News Feeds</h2>
             <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
               Manage the global RSS/Atom feed pool users can subscribe to.
             </p>

@@ -418,23 +418,37 @@ export function getNews(token: string): Promise<NewsArticle[]> {
   return request<NewsArticle[]>("/v1/news", { headers: bearerHeaders(token) });
 }
 
-// Mirrors backend/internal/db.NewsPrefs exactly.
-export interface NewsPrefs {
-  home_article_count: number;
+// Admin-controlled display config returned by GET /v1/news/config.
+export interface NewsConfig {
+  home_count: number;
   show_images: boolean;
 }
 
-// GET /v1/news/preferences
-export function getNewsPrefs(token: string): Promise<NewsPrefs> {
-  return request<NewsPrefs>("/v1/news/preferences", { headers: bearerHeaders(token) });
+// GET /v1/news/config — returns global display settings for authenticated users.
+export function getNewsConfig(token: string): Promise<NewsConfig> {
+  return request<NewsConfig>("/v1/news/config", { headers: bearerHeaders(token) });
 }
 
-// PATCH /v1/news/preferences — partial update, only provided fields are changed.
-export function updateNewsPrefs(
+// Admin news settings (GET/PATCH /v1/admin/news/settings).
+export interface AdminNewsSettings {
+  max_articles: number;
+  home_count: number;
+  show_images: boolean;
+}
+
+// GET /v1/admin/news/settings
+export function adminGetNewsSettings(token: string): Promise<AdminNewsSettings> {
+  return request<AdminNewsSettings>("/v1/admin/news/settings", {
+    headers: bearerHeaders(token),
+  });
+}
+
+// PATCH /v1/admin/news/settings — partial update.
+export function adminUpdateNewsSettings(
   token: string,
-  body: Partial<NewsPrefs>,
-): Promise<NewsPrefs> {
-  return request<NewsPrefs>("/v1/news/preferences", {
+  body: Partial<AdminNewsSettings>,
+): Promise<AdminNewsSettings> {
+  return request<AdminNewsSettings>("/v1/admin/news/settings", {
     method: "PATCH",
     headers: bearerHeaders(token),
     body: JSON.stringify(body),

@@ -4,15 +4,14 @@ import { useAuthenticatedSession } from "../lib/useSession";
 import {
   getWeather,
   getNews,
-  getNewsPrefs,
-  updateNewsPrefs,
+  getNewsConfig,
   listFeeds,
   setFeedSubscription,
   searchWeb,
   ApiError,
   type WeatherResponse,
   type NewsArticle,
-  type NewsPrefs,
+  type NewsConfig,
   type Feed,
   type WebResult,
 } from "../lib/api";
@@ -86,7 +85,7 @@ export default function Home() {
   // News state
   const [articles, setArticles] = useState<NewsArticle[]>([]);
   const [newsLoading, setNewsLoading] = useState(true);
-  const [prefs, setPrefs] = useState<NewsPrefs>({ home_article_count: 5, show_images: true });
+  const [prefs, setPrefs] = useState<NewsConfig>({ home_count: 5, show_images: true });
 
   // Geolocation: ask once on mount, fetch weather on success.
   // Errors (denied, unavailable) are silently ignored - the widget
@@ -119,7 +118,7 @@ export default function Home() {
   const loadPrefs = useCallback(() => {
     const token = getSessionToken();
     if (!token) return;
-    getNewsPrefs(token)
+    getNewsConfig(token)
       .then(setPrefs)
       .catch(() => {});
   }, []);
@@ -238,7 +237,6 @@ export default function Home() {
         open={newsAllOpen}
         articles={articles}
         prefs={prefs}
-        onPrefsChange={(p) => setPrefs(p)}
         onOpenFeeds={() => {
           setNewsAllOpen(false);
           setFeedsPanelOpen(true);
@@ -741,37 +739,18 @@ function NewsPreview({
 }: {
   articles: NewsArticle[];
   loading: boolean;
-  prefs: NewsPrefs;
+  prefs: NewsConfig;
   onOpenAll: () => void;
   onOpenFeeds: () => void;
 }) {
-  const preview = articles.slice(0, prefs.home_article_count);
+  const preview = articles.slice(0, prefs.home_count);
 
   return (
     <div className="mx-auto max-w-3xl pb-14">
-      <div className="mb-3 flex items-center justify-between px-1">
+      <div className="mb-3 px-1">
         <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
           News
         </p>
-        <div className="flex items-center gap-3">
-          {articles.length > 0 && (
-            <button
-              type="button"
-              onClick={onOpenAll}
-              className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
-            >
-              All news
-              <i className="ti ti-chevron-right text-[10px]" aria-hidden="true" />
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={onOpenFeeds}
-            className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
-          >
-            <i className="ti ti-settings text-[12px]" aria-hidden="true" /> Manage feeds
-          </button>
-        </div>
       </div>
 
       {loading ? (
@@ -799,7 +778,7 @@ function NewsPreview({
               <ArticleCard key={`${a.url}-${i}`} article={a} showImage={prefs.show_images} />
             ))}
           </div>
-          {articles.length > prefs.home_article_count && (
+          {articles.length > prefs.home_count && (
             <button
               type="button"
               onClick={onOpenAll}
@@ -820,20 +799,15 @@ function NewsAllPanel({
   open,
   articles,
   prefs,
-  onPrefsChange,
   onOpenFeeds,
   onClose,
 }: {
   open: boolean;
   articles: NewsArticle[];
-  prefs: NewsPrefs;
-  onPrefsChange: (p: NewsPrefs) => void;
+  prefs: NewsConfig;
   onOpenFeeds: () => void;
   onClose: () => void;
 }) {
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-
   useEffect(() => {
     if (!open) return;
     function onKey(e: globalThis.KeyboardEvent) {
@@ -842,25 +816,6 @@ function NewsAllPanel({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [open, onClose]);
-
-  // Close settings whenever the panel closes.
-  useEffect(() => {
-    if (!open) setSettingsOpen(false);
-  }, [open]);
-
-  async function handlePrefChange(patch: Partial<NewsPrefs>) {
-    const token = getSessionToken();
-    if (!token || saving) return;
-    setSaving(true);
-    try {
-      const updated = await updateNewsPrefs(token, patch);
-      onPrefsChange(updated);
-    } catch {
-      // silently ignore — local state stays unchanged
-    } finally {
-      setSaving(false);
-    }
-  }
 
   return (
     <>
@@ -878,92 +833,15 @@ function NewsAllPanel({
         {/* Header */}
         <div className="flex flex-none items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-800">
           <h2 className="text-base font-semibold">News</h2>
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              aria-label="Settings"
-              onClick={() => setSettingsOpen((v) => !v)}
-              className={`flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-900 ${
-                settingsOpen ? "bg-gray-100 dark:bg-gray-900" : ""
-              }`}
-            >
-              <i className="ti ti-settings text-[15px]" aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              aria-label="Close"
-              onClick={onClose}
-              className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-900"
-            >
-              <i className="ti ti-x" aria-hidden="true" />
-            </button>
-          </div>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-900"
+          >
+            <i className="ti ti-x" aria-hidden="true" />
+          </button>
         </div>
-
-        {/* Inline settings drawer */}
-        {settingsOpen && (
-          <div className="flex-none border-b border-gray-100 bg-gray-50 px-5 py-4 dark:border-gray-800 dark:bg-gray-900">
-            <p className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-              Display settings
-            </p>
-
-            {/* Articles on home page */}
-            <div className="mb-3 flex items-center justify-between">
-              <label className="text-sm text-gray-700 dark:text-gray-200">
-                Articles on home page
-              </label>
-              <div className="flex gap-1">
-                {[3, 5, 10, 20].map((n) => (
-                  <button
-                    key={n}
-                    type="button"
-                    disabled={saving}
-                    onClick={() => handlePrefChange({ home_article_count: n })}
-                    className={`h-7 w-9 rounded-lg text-[12px] font-medium transition-colors disabled:opacity-50 ${
-                      prefs.home_article_count === n
-                        ? "bg-teal-600 text-white"
-                        : "border border-gray-200 text-gray-600 hover:border-teal-400 dark:border-gray-700 dark:text-gray-300"
-                    }`}
-                  >
-                    {n}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Show images toggle */}
-            <div className="flex items-center justify-between">
-              <label className="text-sm text-gray-700 dark:text-gray-200">Show images</label>
-              <button
-                type="button"
-                disabled={saving}
-                aria-label={prefs.show_images ? "Disable images" : "Enable images"}
-                onClick={() => handlePrefChange({ show_images: !prefs.show_images })}
-                className={`relative h-[22px] w-10 flex-none rounded-full border transition-colors disabled:opacity-50 ${
-                  prefs.show_images
-                    ? "border-teal-600 bg-teal-600"
-                    : "border-gray-300 bg-gray-100 dark:border-gray-600 dark:bg-gray-800"
-                }`}
-              >
-                <span
-                  className={`absolute top-[2px] h-4 w-4 rounded-full bg-white transition-all ${
-                    prefs.show_images ? "left-[21px]" : "left-[2px]"
-                  }`}
-                />
-              </button>
-            </div>
-
-            {/* Manage feeds link */}
-            <button
-              type="button"
-              onClick={onOpenFeeds}
-              className="mt-3 flex items-center gap-1 text-[12px] text-teal-600 hover:underline dark:text-teal-400"
-            >
-              <i className="ti ti-rss text-[12px]" aria-hidden="true" />
-              Manage feed subscriptions
-            </button>
-          </div>
-        )}
 
         {/* Article list */}
         <div className="flex-1 overflow-y-auto p-3">
