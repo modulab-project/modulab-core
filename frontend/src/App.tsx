@@ -13,6 +13,7 @@ import AdminSmtpPage from "./pages/AdminSmtpPage";
 import AdminFeedsPage from "./pages/AdminFeedsPage";
 import AdminSearxngPage from "./pages/AdminSearxngPage";
 import AdminAIPage from "./pages/AdminAIPage";
+import UserAIKeysPage from "./pages/UserAIKeysPage";
 import Footer from "./components/Footer";
 
 // Two different page shapes share this router:
@@ -40,6 +41,7 @@ export default function App() {
       <Route path="/profile" element={<ProfilePage />} />
       <Route path="/user/feeds" element={<UserFeedsPage />} />
       <Route path="/user/search-prefs" element={<UserSearchPrefsPage />} />
+      <Route path="/user/ai-keys" element={<UserAIKeysPage />} />
       <Route path="/admin/users" element={<AdminUsersPage />} />
       <Route path="/admin/smtp" element={<AdminSmtpPage />} />
       <Route path="/admin/feeds" element={<AdminFeedsPage />} />

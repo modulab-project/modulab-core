@@ -1,15 +1,9 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell, Avatar } from "../components/AppShell";
 import { AuthButton } from "../components/AuthShell";
-import {
-  deleteSelf,
-  listAIProviders,
-  setAIUserKey,
-  deleteAIUserKey,
-  type AIUserProvider,
-} from "../lib/api";
+import { deleteSelf } from "../lib/api";
 import { clearSessionToken, getSessionToken } from "../lib/session";
 
 // "/profile" route, linked from the profile panel AppShell renders on every
@@ -127,8 +121,6 @@ export default function ProfilePage() {
           </AuthButton>
         )}
 
-        <AIKeysSection />
-
         <div className="mt-10 rounded-2xl border border-red-200 p-4 dark:border-red-900">
           <p className="text-sm font-medium text-red-700 dark:text-red-400">Delete account</p>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -188,159 +180,3 @@ function ProfileRow({
   );
 }
 
-// --- AI Keys Section --------------------------------------------------------
-// Shown on the profile page. Lists all enabled providers and lets the user
-// set their own API key (overriding the admin key) or remove it (falling
-// back to the admin key). Providers the admin configured as user_can_override=false
-// are shown as read-only (admin key only, no override possible).
-
-function AIKeysSection() {
-  const [providers, setProviders] = useState<AIUserProvider[] | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [keyInput, setKeyInput] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = () => {
-    const token = getSessionToken();
-    if (!token) return;
-    listAIProviders(token)
-      .then(setProviders)
-      .catch(() => {});
-  };
-
-  useEffect(() => {
-    refresh();
-  }, []);
-
-  if (!providers || providers.length === 0) return null;
-
-  async function handleSave(providerId: string) {
-    if (!keyInput.trim()) return;
-    const token = getSessionToken();
-    if (!token) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await setAIUserKey(token, providerId, keyInput.trim());
-      setEditingId(null);
-      setKeyInput("");
-      refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save key.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleRemove(providerId: string) {
-    const token = getSessionToken();
-    if (!token) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await deleteAIUserKey(token, providerId);
-      refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to remove key.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="mt-10">
-      <h2 className="mb-1 text-base font-semibold">AI providers</h2>
-      <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-        Your own API key overrides the admin key for that provider — useful if you have a better plan.
-      </p>
-      {error && <p className="mb-3 text-sm text-red-600 dark:text-red-400">{error}</p>}
-      <div className="rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
-        {providers.map((p, i) => {
-          const isEditing = editingId === p.id;
-          const isLast = i === providers.length - 1;
-          return (
-            <div
-              key={p.id}
-              className={`px-4 py-3.5 text-sm ${isLast ? "" : "border-b border-gray-100 dark:border-gray-800"}`}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <p className="font-medium">{p.name}</p>
-                <span
-                  className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                    p.has_user_key
-                      ? "bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-400"
-                      : p.has_admin_key
-                      ? "bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-400"
-                      : "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400"
-                  }`}
-                >
-                  {p.has_user_key ? "Your key" : p.has_admin_key ? "Admin key" : "No key"}
-                </span>
-              </div>
-
-              {isEditing ? (
-                <div className="mt-2 flex items-center gap-2">
-                  <input
-                    type="password"
-                    autoComplete="off"
-                    autoFocus
-                    value={keyInput}
-                    onChange={(e) => setKeyInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") handleSave(p.id);
-                      if (e.key === "Escape") { setEditingId(null); setKeyInput(""); }
-                    }}
-                    placeholder="sk-..."
-                    className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-800"
-                  />
-                  <button
-                    type="button"
-                    disabled={busy || !keyInput.trim()}
-                    onClick={() => handleSave(p.id)}
-                    className="rounded-md bg-teal-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-700 disabled:opacity-50"
-                  >
-                    {busy ? "…" : "Save"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setEditingId(null); setKeyInput(""); }}
-                    className="rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              ) : (
-                <div className="mt-1.5 flex items-center gap-1.5">
-                  {p.can_override && (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => { setEditingId(p.id); setKeyInput(""); }}
-                      className="rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
-                    >
-                      {p.has_user_key ? "Update key" : "Add own key"}
-                    </button>
-                  )}
-                  {p.has_user_key && (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => handleRemove(p.id)}
-                      className="rounded-md border border-red-300 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
-                    >
-                      Remove
-                    </button>
-                  )}
-                  {!p.can_override && (
-                    <span className="text-xs text-gray-400 dark:text-gray-600">Override not allowed</span>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}

@@ -441,6 +441,13 @@ function ProfilePanelContent({
       >
         <i className="ti ti-search text-[15px] text-gray-500" /> Search settings
       </Link>
+      <Link
+        to="/user/ai-keys"
+        onClick={onClose}
+        className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
+      >
+        <i className="ti ti-sparkles text-[15px] text-gray-500" /> AI providers
+      </Link>
       {isAdmin && (
         <>
           <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />

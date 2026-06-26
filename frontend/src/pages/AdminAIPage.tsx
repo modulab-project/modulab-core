@@ -336,22 +336,27 @@ function SetKeyModal({
     if (!token) return;
     setBusy(true);
     try {
-      // Upsert the provider (creates if new, updates key if existing).
-      await adminPatchAIProvider(token, provider.id, { admin_key: key.trim() });
       if (!provider.has_admin_key) {
-        // Provider row doesn't exist yet for built-ins — create it first.
-        await adminCreateAIProvider(token, {
-          id: provider.id,
-          type: provider.type,
-          name: provider.name,
-          admin_key: key.trim(),
-          default_model: provider.default_model,
-          user_can_override: true,
-          enabled: true,
-          sort_order: 0,
-        }).catch(() => {
-          // If create fails because it already exists, the patch above already handled it.
-        });
+        // No DB row yet for this built-in provider — create it first.
+        // If the row already exists (race condition), fall back to PATCH.
+        try {
+          await adminCreateAIProvider(token, {
+            id: provider.id,
+            type: provider.type,
+            name: provider.name,
+            admin_key: key.trim(),
+            default_model: provider.default_model,
+            user_can_override: true,
+            enabled: true,
+            sort_order: 0,
+          });
+        } catch {
+          // Row already exists — update the key via PATCH instead.
+          await adminPatchAIProvider(token, provider.id, { admin_key: key.trim() });
+        }
+      } else {
+        // Row exists — update the key.
+        await adminPatchAIProvider(token, provider.id, { admin_key: key.trim() });
       }
       onSaved();
       onClose();
