@@ -11,13 +11,8 @@ import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
 
 // "/admin/searxng" — super-admin only. Lets the operator configure the
-// SearXNG instance URL that ModuLab's home-page search box proxies to.
-// The URL is stored GCM-encrypted in core_settings (same treatment as SMTP
-// credentials) and never returned to non-super-admin callers.
-//
-// When SearXNG is not configured (status.configured === false), the
-// GET /v1/search/web endpoint returns 503 and the frontend silently hides
-// the web-results section - so this setting is purely opt-in.
+// SearXNG instance URL, the maximum number of results shown to users,
+// and how many SearXNG pages are fetched in parallel per query.
 export default function AdminSearxngPage() {
   const navigate = useNavigate();
   const { session, loading } = useAuthenticatedSession();
@@ -28,9 +23,9 @@ export default function AdminSearxngPage() {
   const [removing, setRemoving] = useState(false);
 
   const [url, setUrl] = useState("");
+  const [maxResults, setMaxResults] = useState(25);
+  const [fetchPages, setFetchPages] = useState(2);
 
-  // Same guard as AdminSmtpPage: prevent the 15s session poll from
-  // re-fetching status and overwriting unsaved field edits.
   const hasFetchedStatus = useRef(false);
 
   useEffect(() => {
@@ -47,9 +42,9 @@ export default function AdminSearxngPage() {
     searxngStatus(token)
       .then((s) => {
         setStatus(s);
-        if (s.configured && s.url) {
-          setUrl(s.url);
-        }
+        if (s.configured && s.url) setUrl(s.url);
+        setMaxResults(s.max_results);
+        setFetchPages(s.fetch_pages);
       })
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
   }, [session, navigate]);
@@ -61,7 +56,11 @@ export default function AdminSearxngPage() {
     setError(null);
     setSaving(true);
     try {
-      const s = await configureSearxng(token, url.trim());
+      const s = await configureSearxng(token, {
+        url: url.trim(),
+        max_results: maxResults,
+        fetch_pages: fetchPages,
+      });
       setStatus(s);
       setSavedAt(Date.now());
     } catch (err) {
@@ -78,8 +77,10 @@ export default function AdminSearxngPage() {
     setRemoving(true);
     try {
       await deleteSearxngConfig(token);
-      setStatus({ configured: false });
+      setStatus({ configured: false, max_results: 25, fetch_pages: 2 });
       setUrl("");
+      setMaxResults(25);
+      setFetchPages(2);
       setSavedAt(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -96,11 +97,9 @@ export default function AdminSearxngPage() {
         <h1 className="mb-1 text-xl font-semibold">SearXNG</h1>
         <p className="mb-8 text-sm text-gray-500 dark:text-gray-400">
           Configure the SearXNG instance that powers ModuLab's home-page web search. When set, the
-          search box on the home page shows inline results instead of opening an external search
-          engine.
+          search box shows inline results instead of opening an external search engine.
         </p>
 
-        {/* Current status badge */}
         {status && (
           <div className="mb-6 flex items-center gap-2">
             <span
@@ -114,7 +113,7 @@ export default function AdminSearxngPage() {
           </div>
         )}
 
-        <form onSubmit={handleSave} className="flex flex-col gap-4">
+        <form onSubmit={handleSave} className="flex flex-col gap-5">
           {/* URL */}
           <div className="flex flex-col gap-1.5">
             <label htmlFor="searxng-url" className="text-sm font-medium">
@@ -130,10 +129,49 @@ export default function AdminSearxngPage() {
               className="rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-900"
             />
             <p className="text-[12px] text-gray-500 dark:text-gray-400">
-              Base URL of your SearXNG instance without a trailing slash. ModuLab will call{" "}
+              Base URL without trailing slash. ModuLab calls{" "}
               <code className="rounded bg-gray-100 px-1 dark:bg-gray-800">/search?format=json</code>{" "}
-              on this URL server-side.
+              server-side.
             </p>
+          </div>
+
+          {/* Max results + fetch pages side by side */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="max-results" className="text-sm font-medium">
+                Max results
+              </label>
+              <input
+                id="max-results"
+                type="number"
+                min={1}
+                max={100}
+                value={maxResults}
+                onChange={(e) => setMaxResults(Math.max(1, Math.min(100, Number(e.target.value))))}
+                className="rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-900"
+              />
+              <p className="text-[12px] text-gray-500 dark:text-gray-400">
+                Results shown per search (1–100).
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="fetch-pages" className="text-sm font-medium">
+                Pages fetched
+              </label>
+              <input
+                id="fetch-pages"
+                type="number"
+                min={1}
+                max={5}
+                value={fetchPages}
+                onChange={(e) => setFetchPages(Math.max(1, Math.min(5, Number(e.target.value))))}
+                className="rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-900"
+              />
+              <p className="text-[12px] text-gray-500 dark:text-gray-400">
+                SearXNG pages fetched in parallel (1–5). More = more results, same latency.
+              </p>
+            </div>
           </div>
 
           {error && (
@@ -143,9 +181,7 @@ export default function AdminSearxngPage() {
           )}
 
           {savedAt && (
-            <p className="text-sm text-green-700 dark:text-green-400">
-              Saved successfully.
-            </p>
+            <p className="text-sm text-green-700 dark:text-green-400">Saved successfully.</p>
           )}
 
           <div className="flex items-center gap-3">
@@ -170,24 +206,16 @@ export default function AdminSearxngPage() {
           </div>
         </form>
 
-        {/* Docker Compose hint for operators who don't have SearXNG yet */}
         {!status?.configured && (
           <div className="mt-10 rounded-xl border border-gray-200 p-5 dark:border-gray-800">
             <p className="mb-2 text-sm font-medium">Don't have SearXNG yet?</p>
             <p className="mb-3 text-[13px] text-gray-500 dark:text-gray-400">
-              Start it alongside ModuLab by running Docker Compose with the{" "}
+              Start it alongside ModuLab with the{" "}
               <code className="rounded bg-gray-100 px-1 dark:bg-gray-800">search</code> profile:
             </p>
             <pre className="overflow-x-auto rounded-lg bg-gray-900 px-4 py-3 text-[12px] text-gray-100">
               {"docker compose --profile search up -d"}
             </pre>
-            <p className="mt-2 text-[12px] text-gray-500 dark:text-gray-400">
-              Then enter{" "}
-              <code className="rounded bg-gray-100 px-1 dark:bg-gray-800">
-                https://your-domain/searxng
-              </code>{" "}
-              as the URL above (or the internal Docker hostname for same-compose setups).
-            </p>
           </div>
         )}
       </div>

@@ -487,6 +487,9 @@ export function getWeather(lat: number, lon: number): Promise<WeatherResponse> {
 export interface SearXNGStatus {
   configured: boolean;
   url?: string;
+  // Both fields are always present (backend fills defaults when unset).
+  max_results: number;
+  fetch_pages: number;
 }
 
 // GET /v1/admin/searxng/status — super-admin only.
@@ -497,11 +500,14 @@ export function searxngStatus(token: string): Promise<SearXNGStatus> {
 }
 
 // POST /v1/admin/searxng/configure — super-admin only.
-export function configureSearxng(token: string, url: string): Promise<SearXNGStatus> {
+export function configureSearxng(
+  token: string,
+  body: { url: string; max_results: number; fetch_pages: number },
+): Promise<SearXNGStatus> {
   return request<SearXNGStatus>("/v1/admin/searxng/configure", {
     method: "POST",
     headers: bearerHeaders(token),
-    body: JSON.stringify({ url }),
+    body: JSON.stringify(body),
   });
 }
 

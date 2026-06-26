@@ -2,17 +2,14 @@
 // the super-admin configuration endpoints (GET|POST|DELETE /v1/admin/searxng)
 // for ModuLab's SearXNG integration (spec section 6.4, search widget).
 //
-// SearXNG is a self-hosted, privacy-respecting meta-search engine. This
-// package acts as a thin authenticated proxy so:
-//   - The frontend never talks to SearXNG directly (no CORS dance).
-//   - The SearXNG URL stays server-side and is never exposed to clients.
-//   - A 2-second per-request timeout prevents a slow SearXNG instance from
-//     blocking the home-page load.
+// Configuration lives in core_settings:
+//   - "searxng_url_enc"      — GCM-encrypted base URL (spec 2.4 URL tier)
+//   - "searxng_max_results"  — plaintext integer, max results forwarded
+//   - "searxng_fetch_pages"  — plaintext integer, pages fetched in parallel
 //
-// Configuration lives in core_settings under the key "searxng_url_enc"
-// (GCM-encrypted, following spec section 2.4's encrypt-everything policy for
-// URLs/endpoints). When unconfigured, GET /v1/search/web returns HTTP 503 so
-// the frontend can silently hide the web-search section.
+// Both integer settings are purely technical values (no PII) and are
+// therefore stored as plaintext, matching the same classify/encrypt logic
+// used for SMTP port and encryption-mode fields.
 //
 // Admin endpoints (super-admin only, same tier as SMTP):
 //
@@ -32,6 +29,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -42,47 +40,47 @@ import (
 )
 
 const (
-	settingKeyURL = "searxng_url_enc"
+	settingKeyURL        = "searxng_url_enc"
+	settingKeyMaxResults = "searxng_max_results"
+	settingKeyFetchPages = "searxng_fetch_pages"
 
-	// searchTimeout is the hard cap for a SearXNG round-trip. A slow
-	// instance must not block the home-page load for longer than this.
-	// Both pages are fetched in parallel so the wall-clock cost is one
-	// round-trip, not two.
+	// searchTimeout is the hard cap for a SearXNG round-trip. Both pages
+	// are fetched in parallel so the wall-clock cost is one round-trip.
 	searchTimeout = 2 * time.Second
 
-	// fetchPages is how many SearXNG result pages we request in parallel.
-	// Each page typically yields ~10 results; after deduplication by URL
-	// the combined set usually reaches 15–25 unique entries.
-	fetchPages = 2
+	// Defaults used when no value has been saved to core_settings yet.
+	defaultMaxResults = 25
+	defaultFetchPages = 2
 
-	// maxResults caps the final list forwarded to the frontend.
-	maxResults = 25
+	// Hard limits to prevent accidental DoS of the SearXNG instance.
+	limitMaxResults = 100
+	limitFetchPages = 5
 )
 
 // SearXNGStatus is the JSON body of GET /v1/admin/searxng/status.
-// The URL is returned in plaintext (decrypted) so the admin UI can show
-// the current value - it is never sensitive the way a password is.
 type SearXNGStatus struct {
 	Configured bool   `json:"configured"`
 	URL        string `json:"url,omitempty"`
+	MaxResults int    `json:"max_results"`
+	FetchPages int    `json:"fetch_pages"`
 }
 
 // SearXNGConfigRequest is the body of POST /v1/admin/searxng/configure.
 type SearXNGConfigRequest struct {
-	URL string `json:"url"`
+	URL        string `json:"url"`
+	MaxResults int    `json:"max_results"`
+	FetchPages int    `json:"fetch_pages"`
 }
 
 // WebResult is one entry in GET /v1/search/web's response array.
-// Matches the fields SearXNG returns in format=json that the frontend
-// actually uses; the rest of SearXNG's payload is discarded.
 type WebResult struct {
 	Title   string `json:"title"`
 	URL     string `json:"url"`
 	Snippet string `json:"snippet"`
 }
 
-// resolveURL reads the encrypted SearXNG URL from core_settings and
-// decrypts it. Returns ("", false, nil) when not configured.
+// resolveURL reads the encrypted SearXNG URL from core_settings.
+// Returns ("", false, nil) when not configured.
 func resolveURL(ctx context.Context, pool *db.Pool, masterKey string) (string, bool, error) {
 	enc, ok, err := pool.GetSetting(ctx, settingKeyURL)
 	if err != nil {
@@ -98,15 +96,50 @@ func resolveURL(ctx context.Context, pool *db.Pool, masterKey string) (string, b
 	return plain, true, nil
 }
 
+// resolveInt reads an integer setting from core_settings, returning
+// defaultVal when the key is absent or unparseable.
+func resolveInt(ctx context.Context, pool *db.Pool, key string, defaultVal int) int {
+	raw, ok, err := pool.GetSetting(ctx, key)
+	if err != nil || !ok || raw == "" {
+		return defaultVal
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v <= 0 {
+		return defaultVal
+	}
+	return v
+}
+
+// resolveConfig reads all three settings in one go.
+func resolveConfig(ctx context.Context, pool *db.Pool, masterKey string) (rawURL string, configured bool, maxResults int, fetchPages int, err error) {
+	rawURL, configured, err = resolveURL(ctx, pool, masterKey)
+	if err != nil {
+		return
+	}
+	maxResults = resolveInt(ctx, pool, settingKeyMaxResults, defaultMaxResults)
+	fetchPages = resolveInt(ctx, pool, settingKeyFetchPages, defaultFetchPages)
+	return
+}
+
+// clamp ensures v is within [min, max].
+func clamp(v, min, max int) int {
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
+}
+
 // StatusHandler returns the HTTP handler for GET /v1/admin/searxng/status.
-// Super-admin only (enforced by RequireSuperAdminMiddleware in main.go).
 func StatusHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		rawURL, ok, err := resolveURL(r.Context(), pool, masterKey)
+		rawURL, ok, maxResults, fetchPages, err := resolveConfig(r.Context(), pool, masterKey)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
@@ -115,12 +148,13 @@ func StatusHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 		_ = json.NewEncoder(w).Encode(SearXNGStatus{
 			Configured: ok,
 			URL:        rawURL,
+			MaxResults: maxResults,
+			FetchPages: fetchPages,
 		})
 	}
 }
 
 // ConfigureHandler returns the HTTP handler for POST /v1/admin/searxng/configure.
-// Super-admin only (enforced by RequireSuperAdminMiddleware in main.go).
 func ConfigureHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -137,45 +171,71 @@ func ConfigureHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 			http.Error(w, "url is required", http.StatusBadRequest)
 			return
 		}
-		// Basic URL sanity check.
 		if _, err := url.ParseRequestURI(rawURL); err != nil {
 			http.Error(w, "url is not a valid URL", http.StatusBadRequest)
 			return
 		}
+
+		// Apply defaults when the caller sends zero values.
+		maxResults := req.MaxResults
+		if maxResults <= 0 {
+			maxResults = defaultMaxResults
+		}
+		fetchPages := req.FetchPages
+		if fetchPages <= 0 {
+			fetchPages = defaultFetchPages
+		}
+		maxResults = clamp(maxResults, 1, limitMaxResults)
+		fetchPages = clamp(fetchPages, 1, limitFetchPages)
+
 		enc, err := crypto.Encrypt(masterKey, rawURL)
 		if err != nil {
 			http.Error(w, "encrypt error", http.StatusInternalServerError)
 			return
 		}
-		if err := pool.SetSetting(r.Context(), settingKeyURL, enc); err != nil {
+		ctx := r.Context()
+		if err := pool.SetSetting(ctx, settingKeyURL, enc); err != nil {
 			http.Error(w, "database error", http.StatusInternalServerError)
 			return
 		}
+		if err := pool.SetSetting(ctx, settingKeyMaxResults, strconv.Itoa(maxResults)); err != nil {
+			http.Error(w, "database error", http.StatusInternalServerError)
+			return
+		}
+		if err := pool.SetSetting(ctx, settingKeyFetchPages, strconv.Itoa(fetchPages)); err != nil {
+			http.Error(w, "database error", http.StatusInternalServerError)
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(SearXNGStatus{Configured: true, URL: rawURL})
+		_ = json.NewEncoder(w).Encode(SearXNGStatus{
+			Configured: true,
+			URL:        rawURL,
+			MaxResults: maxResults,
+			FetchPages: fetchPages,
+		})
 	}
 }
 
 // DeleteHandler returns the HTTP handler for DELETE /v1/admin/searxng.
-// Super-admin only (enforced by RequireSuperAdminMiddleware in main.go).
 func DeleteHandler(pool *db.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if err := pool.DeleteSetting(r.Context(), settingKeyURL); err != nil {
-			http.Error(w, "database error", http.StatusInternalServerError)
-			return
+		ctx := r.Context()
+		for _, key := range []string{settingKeyURL, settingKeyMaxResults, settingKeyFetchPages} {
+			if err := pool.DeleteSetting(ctx, key); err != nil {
+				http.Error(w, "database error", http.StatusInternalServerError)
+				return
+			}
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
 // SearchHandler returns the HTTP handler for GET /v1/search/web?q=<query>.
-// Requires any approved session (Bearer token). When SearXNG is not
-// configured, returns HTTP 503 so the frontend can silently hide the
-// web-search section.
 func SearchHandler(deps auth.Deps, masterKey string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -183,7 +243,6 @@ func SearchHandler(deps auth.Deps, masterKey string) http.HandlerFunc {
 			return
 		}
 
-		// Auth: any approved, non-locked session.
 		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if token == "" {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -205,19 +264,17 @@ func SearchHandler(deps auth.Deps, masterKey string) http.HandlerFunc {
 			return
 		}
 
-		baseURL, configured, err := resolveURL(r.Context(), deps.Pool, masterKey)
+		baseURL, configured, maxResults, fetchPages, err := resolveConfig(r.Context(), deps.Pool, masterKey)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 		if !configured {
-			// 503 = SearXNG not configured. The frontend interprets this as
-			// "hide the web-search results section silently".
 			http.Error(w, "web search not configured", http.StatusServiceUnavailable)
 			return
 		}
 
-		results, err := fetchResults(r.Context(), baseURL, q)
+		results, err := fetchResults(r.Context(), baseURL, q, maxResults, fetchPages)
 		if err != nil {
 			http.Error(w, "search upstream error: "+err.Error(), http.StatusBadGateway)
 			return
@@ -229,7 +286,6 @@ func SearchHandler(deps auth.Deps, masterKey string) http.HandlerFunc {
 }
 
 // searxngResponse is the minimal shape of SearXNG's format=json output.
-// Only the fields we actually use are mapped; the rest is ignored.
 type searxngResponse struct {
 	Results []struct {
 		Title   string `json:"title"`
@@ -238,16 +294,14 @@ type searxngResponse struct {
 	} `json:"results"`
 }
 
-// fetchPage fetches a single SearXNG result page (1-indexed pageno).
+// fetchPage fetches one SearXNG result page (1-indexed pageno).
 func fetchPage(ctx context.Context, baseURL, query string, pageno int) ([]WebResult, error) {
 	params := url.Values{
 		"q":      {query},
 		"format": {"json"},
-		"pageno": {fmt.Sprintf("%d", pageno)},
+		"pageno": {strconv.Itoa(pageno)},
 	}
-	reqURL := baseURL + "/search?" + params.Encode()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/search?"+params.Encode(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -262,32 +316,25 @@ func fetchPage(ctx context.Context, baseURL, query string, pageno int) ([]WebRes
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("searxng returned HTTP %d", resp.StatusCode)
 	}
-
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
-
 	var raw searxngResponse
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
-
 	out := make([]WebResult, 0, len(raw.Results))
 	for _, r := range raw.Results {
-		out = append(out, WebResult{
-			Title:   r.Title,
-			URL:     r.URL,
-			Snippet: r.Content,
-		})
+		out = append(out, WebResult{Title: r.Title, URL: r.URL, Snippet: r.Content})
 	}
 	return out, nil
 }
 
-// fetchResults fetches fetchPages pages from SearXNG in parallel, merges
-// them, deduplicates by URL, and returns up to maxResults entries. Page 1
-// results always appear first so ranking is preserved.
-func fetchResults(ctx context.Context, baseURL, query string) ([]WebResult, error) {
+// fetchResults fetches up to fetchPages pages in parallel, merges them,
+// deduplicates by URL, and returns up to maxResults entries.
+// Page 1 results always appear first so ranking is preserved.
+func fetchResults(ctx context.Context, baseURL, query string, maxResults, fetchPages int) ([]WebResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, searchTimeout)
 	defer cancel()
 
@@ -299,23 +346,16 @@ func fetchResults(ctx context.Context, baseURL, query string) ([]WebResult, erro
 
 	ch := make(chan pageResult, fetchPages)
 	var wg sync.WaitGroup
-
 	for p := 1; p <= fetchPages; p++ {
 		wg.Add(1)
 		go func(pageno int) {
 			defer wg.Done()
-			results, err := fetchPage(ctx, baseURL, query, pageno)
-			ch <- pageResult{page: pageno, results: results, err: err}
+			res, err := fetchPage(ctx, baseURL, query, pageno)
+			ch <- pageResult{page: pageno, results: res, err: err}
 		}(p)
 	}
+	go func() { wg.Wait(); close(ch) }()
 
-	// Close channel once all goroutines finish.
-	go func() {
-		wg.Wait()
-		close(ch)
-	}()
-
-	// Collect results keyed by page number to preserve page-1-first order.
 	byPage := make(map[int][]WebResult, fetchPages)
 	var firstErr error
 	for pr := range ch {
@@ -327,14 +367,10 @@ func fetchResults(ctx context.Context, baseURL, query string) ([]WebResult, erro
 		}
 		byPage[pr.page] = pr.results
 	}
-
-	// If page 1 failed entirely, surface the error. If only page 2 failed
-	// we still return page 1's results rather than an error.
 	if len(byPage) == 0 && firstErr != nil {
 		return nil, firstErr
 	}
 
-	// Merge pages in order, deduplicate by URL.
 	seen := make(map[string]struct{})
 	out := make([]WebResult, 0, maxResults)
 	for p := 1; p <= fetchPages; p++ {
