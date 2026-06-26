@@ -33,6 +33,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
@@ -45,11 +46,17 @@ const (
 
 	// searchTimeout is the hard cap for a SearXNG round-trip. A slow
 	// instance must not block the home-page load for longer than this.
+	// Both pages are fetched in parallel so the wall-clock cost is one
+	// round-trip, not two.
 	searchTimeout = 2 * time.Second
 
-	// maxResults is the number of results we forward to the frontend.
-	// SearXNG may return more; we trim client-side bandwidth.
-	maxResults = 15
+	// fetchPages is how many SearXNG result pages we request in parallel.
+	// Each page typically yields ~10 results; after deduplication by URL
+	// the combined set usually reaches 15–25 unique entries.
+	fetchPages = 2
+
+	// maxResults caps the final list forwarded to the frontend.
+	maxResults = 25
 )
 
 // SearXNGStatus is the JSON body of GET /v1/admin/searxng/status.
@@ -231,15 +238,12 @@ type searxngResponse struct {
 	} `json:"results"`
 }
 
-// fetchResults calls SearXNG's /search?format=json endpoint and returns
-// up to maxResults trimmed WebResult values.
-func fetchResults(ctx context.Context, baseURL, query string) ([]WebResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, searchTimeout)
-	defer cancel()
-
+// fetchPage fetches a single SearXNG result page (1-indexed pageno).
+func fetchPage(ctx context.Context, baseURL, query string, pageno int) ([]WebResult, error) {
 	params := url.Values{
 		"q":      {query},
 		"format": {"json"},
+		"pageno": {fmt.Sprintf("%d", pageno)},
 	}
 	reqURL := baseURL + "/search?" + params.Encode()
 
@@ -269,16 +273,84 @@ func fetchResults(ctx context.Context, baseURL, query string) ([]WebResult, erro
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
 
-	out := make([]WebResult, 0, min(len(raw.Results), maxResults))
-	for i, r := range raw.Results {
-		if i >= maxResults {
-			break
-		}
+	out := make([]WebResult, 0, len(raw.Results))
+	for _, r := range raw.Results {
 		out = append(out, WebResult{
 			Title:   r.Title,
 			URL:     r.URL,
 			Snippet: r.Content,
 		})
+	}
+	return out, nil
+}
+
+// fetchResults fetches fetchPages pages from SearXNG in parallel, merges
+// them, deduplicates by URL, and returns up to maxResults entries. Page 1
+// results always appear first so ranking is preserved.
+func fetchResults(ctx context.Context, baseURL, query string) ([]WebResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, searchTimeout)
+	defer cancel()
+
+	type pageResult struct {
+		page    int
+		results []WebResult
+		err     error
+	}
+
+	ch := make(chan pageResult, fetchPages)
+	var wg sync.WaitGroup
+
+	for p := 1; p <= fetchPages; p++ {
+		wg.Add(1)
+		go func(pageno int) {
+			defer wg.Done()
+			results, err := fetchPage(ctx, baseURL, query, pageno)
+			ch <- pageResult{page: pageno, results: results, err: err}
+		}(p)
+	}
+
+	// Close channel once all goroutines finish.
+	go func() {
+		wg.Wait()
+		close(ch)
+	}()
+
+	// Collect results keyed by page number to preserve page-1-first order.
+	byPage := make(map[int][]WebResult, fetchPages)
+	var firstErr error
+	for pr := range ch {
+		if pr.err != nil {
+			if firstErr == nil {
+				firstErr = pr.err
+			}
+			continue
+		}
+		byPage[pr.page] = pr.results
+	}
+
+	// If page 1 failed entirely, surface the error. If only page 2 failed
+	// we still return page 1's results rather than an error.
+	if len(byPage) == 0 && firstErr != nil {
+		return nil, firstErr
+	}
+
+	// Merge pages in order, deduplicate by URL.
+	seen := make(map[string]struct{})
+	out := make([]WebResult, 0, maxResults)
+	for p := 1; p <= fetchPages; p++ {
+		for _, r := range byPage[p] {
+			if len(out) >= maxResults {
+				break
+			}
+			if _, dup := seen[r.URL]; dup {
+				continue
+			}
+			seen[r.URL] = struct{}{}
+			out = append(out, r)
+		}
+		if len(out) >= maxResults {
+			break
+		}
 	}
 	return out, nil
 }

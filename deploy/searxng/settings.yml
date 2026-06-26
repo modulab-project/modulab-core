@@ -1,0 +1,9 @@
+use_default_settings: true
+
+server:
+  secret_key: "modulab-dev-secret-key-not-for-production"
+
+search:
+  formats:
+    - html
+    - json

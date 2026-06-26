@@ -19,5 +19,15 @@ services:
     ports:
       - "6379:6379"
 
+  searxng:
+    image: searxng/searxng:latest
+    ports:
+      - "8888:8080"
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8888/
+      - SEARXNG_REDIS_URL=redis://valkey:6379/1
+    volumes:
+      - ./searxng:/etc/searxng
+
 volumes:
   postgres-dev-data:
