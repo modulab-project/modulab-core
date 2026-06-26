@@ -137,10 +137,11 @@ export default function AdminUsersPage() {
                     <StatusBadge status={status} />
                   </div>
                   {/* Row 2: details + action buttons */}
-                  <div className="mt-1.5 flex items-center justify-between gap-2">
-                    <p className="min-w-0 truncate text-xs text-gray-500 dark:text-gray-400">
-                      {u.email} · {u.role} · joined {new Date(u.created_at).toLocaleDateString()} · last login {new Date(u.last_login_at).toLocaleDateString()}
-                    </p>
+                  <div className="mt-1.5 flex items-end justify-between gap-2">
+                    <div className="min-w-0 text-xs text-gray-500 dark:text-gray-400">
+                      <p className="truncate">{u.email} · {u.role}</p>
+                      <p className="truncate">joined {new Date(u.created_at).toLocaleDateString()} · last login {new Date(u.last_login_at).toLocaleDateString()}</p>
+                    </div>
                     <div className="flex flex-none items-center gap-1.5">
                       {status === "pending" && (
                         <ActionButton busy={busy} onClick={() => runAction(u.subject, approveUser)}>
