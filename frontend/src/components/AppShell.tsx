@@ -403,12 +403,20 @@ function ProfilePanelContent({
             <i className="ti ti-rss text-[15px] text-gray-500" /> News Feeds
           </Link>
           {session.role === "super-admin" && (
-            <Link
-              to="/admin/smtp"
-              className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
-            >
-              <i className="ti ti-mail text-[15px] text-gray-500" /> SMTP
-            </Link>
+            <>
+              <Link
+                to="/admin/smtp"
+                className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
+              >
+                <i className="ti ti-mail text-[15px] text-gray-500" /> SMTP
+              </Link>
+              <Link
+                to="/admin/searxng"
+                className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
+              >
+                <i className="ti ti-search text-[15px] text-gray-500" /> SearXNG
+              </Link>
+            </>
           )}
         </>
       )}

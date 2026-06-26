@@ -7,10 +7,13 @@ import {
   updateNewsPrefs,
   listFeeds,
   setFeedSubscription,
+  searchWeb,
+  ApiError,
   type WeatherResponse,
   type NewsArticle,
   type NewsPrefs,
   type Feed,
+  type WebResult,
 } from "../lib/api";
 import { getSessionToken } from "../lib/session";
 import { AppShell } from "../components/AppShell";
@@ -52,6 +55,18 @@ export default function Home() {
   const [weatherPanelOpen, setWeatherPanelOpen] = useState(false);
   const [feedsPanelOpen, setFeedsPanelOpen] = useState(false);
   const [newsAllOpen, setNewsAllOpen] = useState(false);
+
+  // Web search state. searchQuery drives the URL (?q=...) and the results
+  // panel. searxngAvailable starts as true (optimistic) and flips to false
+  // on the first 503 - that permanently hides the web-results section for
+  // the rest of the page lifetime without any explicit user action.
+  const [searchQuery, setSearchQuery] = useState<string>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("q") ?? "";
+  });
+  const [webResults, setWebResults] = useState<WebResult[] | null>(null);
+  const [webLoading, setWebLoading] = useState(false);
+  const [searxngAvailable, setSearxngAvailable] = useState(true);
 
   // News state
   const [articles, setArticles] = useState<NewsArticle[]>([]);
@@ -107,6 +122,57 @@ export default function Home() {
     }
   }, [session, loadNews, loadPrefs]);
 
+  // handleSearch is called by Hero when the user submits the search box.
+  // It updates the URL (?q=...) without a page navigation and fires the
+  // SearXNG proxy. A 503 response means SearXNG is not configured - flip
+  // the flag so the results section stays hidden for the rest of this load.
+  const handleSearch = useCallback(
+    async (q: string) => {
+      const trimmed = q.trim();
+      setSearchQuery(trimmed);
+
+      // Update URL bar so the search is bookmarkable/shareable.
+      const next = trimmed
+        ? `${window.location.pathname}?q=${encodeURIComponent(trimmed)}`
+        : window.location.pathname;
+      window.history.pushState({}, "", next);
+
+      if (!trimmed || !searxngAvailable) {
+        setWebResults(null);
+        return;
+      }
+
+      const token = getSessionToken();
+      if (!token) return;
+
+      setWebLoading(true);
+      setWebResults(null);
+      try {
+        const results = await searchWeb(token, trimmed);
+        setWebResults(results);
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 503) {
+          // SearXNG not configured - hide the section silently.
+          setSearxngAvailable(false);
+        }
+        setWebResults([]);
+      } finally {
+        setWebLoading(false);
+      }
+    },
+    [searxngAvailable],
+  );
+
+  // If the page was loaded with ?q=... (e.g. from a bookmark or browser
+  // back/forward), fire the search immediately after the session resolves.
+  const initialSearchDone = useRef(false);
+  useEffect(() => {
+    if (session && searchQuery && !initialSearchDone.current) {
+      initialSearchDone.current = true;
+      handleSearch(searchQuery);
+    }
+  }, [session, searchQuery, handleSearch]);
+
   // Renders nothing rather than a spinner during the brief getMe() round
   // trip - this page is reached almost exclusively via redirects (from
   // AuthComplete or useAuthenticatedSession's own guard), so there is
@@ -122,7 +188,18 @@ export default function Home() {
           name={firstName(session)}
           weather={weather}
           onWeatherClick={() => setWeatherPanelOpen(true)}
+          onSearch={handleSearch}
+          initialQuery={searchQuery}
         />
+        {/* Web search results: shown when a query is active and SearXNG is
+            configured. Pushes the module/news sections downward inline. */}
+        {searxngAvailable && (webLoading || webResults !== null) && (
+          <WebResultsPanel
+            query={searchQuery}
+            results={webResults}
+            loading={webLoading}
+          />
+        )}
         <EmptyModulesNotice />
         <NewsPreview
           articles={articles}
@@ -198,10 +275,14 @@ function Hero({
   name,
   weather,
   onWeatherClick,
+  onSearch,
+  initialQuery,
 }: {
   name: string;
   weather: WeatherResponse | null;
   onWeatherClick: () => void;
+  onSearch: (q: string) => void;
+  initialQuery: string;
 }) {
   const now = useClock();
   const hours = String(now.getHours()).padStart(2, "0");
@@ -209,15 +290,15 @@ function Hero({
   const hour = now.getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
 
+  // Controlled input so we can clear it programmatically (e.g. when the user
+  // navigates back to the blank home page state).
+  const [value, setValue] = useState(initialQuery);
+
   function handleSearchKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key !== "Enter") {
       return;
     }
-    const query = e.currentTarget.value.trim();
-    if (!query) {
-      return;
-    }
-    window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, "_blank", "noopener");
+    onSearch(e.currentTarget.value);
   }
 
   return (
@@ -259,12 +340,105 @@ function Hero({
         <i className="ti ti-search text-[16px] text-teal-600 dark:text-teal-400" aria-hidden="true" />
         <input
           type="text"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleSearchKeyDown}
           placeholder="Search the web…"
           className="w-full flex-1 bg-transparent text-sm outline-none placeholder:text-gray-400"
         />
+        {value && (
+          <button
+            type="button"
+            aria-label="Clear search"
+            onClick={() => {
+              setValue("");
+              onSearch("");
+            }}
+            className="flex-none text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+          >
+            <i className="ti ti-x text-[14px]" aria-hidden="true" />
+          </button>
+        )}
       </div>
     </div>
+  );
+}
+
+// --- Web search results panel -------------------------------------------
+
+// Inline results panel that appears directly below the Hero when a search
+// is active. Fades in with a soft transition so the page doesn't jump.
+// Shows a skeleton while loading, the result list once fetched, or an
+// empty-state message when SearXNG returned nothing.
+function WebResultsPanel({
+  query,
+  results,
+  loading,
+}: {
+  query: string;
+  results: WebResult[] | null;
+  loading: boolean;
+}) {
+  return (
+    <div className="mx-auto mb-8 w-full max-w-[680px]">
+      <p className="mb-3 px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+        Web · <span className="normal-case font-normal">{query}</span>
+      </p>
+
+      {loading ? (
+        <div className="flex flex-col gap-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div
+              key={i}
+              className="animate-pulse rounded-xl border border-gray-100 p-4 dark:border-gray-800"
+            >
+              <div className="mb-2 h-3.5 w-3/4 rounded bg-gray-100 dark:bg-gray-800" />
+              <div className="mb-1 h-3 w-1/3 rounded bg-gray-100 dark:bg-gray-800" />
+              <div className="h-3 w-full rounded bg-gray-100 dark:bg-gray-800" />
+            </div>
+          ))}
+        </div>
+      ) : results && results.length > 0 ? (
+        <div className="flex flex-col divide-y divide-gray-100 rounded-2xl border border-gray-100 dark:divide-gray-800 dark:border-gray-800">
+          {results.map((r, i) => (
+            <WebResultCard key={`${r.url}-${i}`} result={r} />
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-dashed border-gray-300 px-6 py-8 text-center dark:border-gray-700">
+          <p className="text-sm text-gray-500 dark:text-gray-400">No results found.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WebResultCard({ result }: { result: WebResult }) {
+  // Extract a readable host name from the full URL for display.
+  let host = result.url;
+  try {
+    host = new URL(result.url).hostname.replace(/^www\./, "");
+  } catch {
+    // leave as-is if URL is malformed
+  }
+
+  return (
+    <a
+      href={result.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="group flex flex-col gap-0.5 px-5 py-3.5 first:rounded-t-2xl last:rounded-b-2xl hover:bg-gray-50 dark:hover:bg-gray-900"
+    >
+      <p className="text-[11px] text-gray-400 dark:text-gray-500">{host}</p>
+      <p className="text-sm font-medium leading-snug text-blue-700 group-hover:underline dark:text-blue-400">
+        {result.title}
+      </p>
+      {result.snippet && (
+        <p className="line-clamp-2 text-[13px] text-gray-600 dark:text-gray-400">
+          {result.snippet}
+        </p>
+      )}
+    </a>
   );
 }
 

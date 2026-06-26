@@ -26,6 +26,7 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/db"
 	"github.com/modulab-project/modulab-core/backend/internal/mail"
 	"github.com/modulab-project/modulab-core/backend/internal/news"
+	"github.com/modulab-project/modulab-core/backend/internal/searxng"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
 	"github.com/modulab-project/modulab-core/backend/internal/valkey"
 	"github.com/modulab-project/modulab-core/backend/internal/version"
@@ -287,6 +288,22 @@ func main() {
 	// page simultaneously. lat and lon come from the browser's own
 	// Geolocation API - Core never stores or logs them.
 	mux.HandleFunc("GET /v1/widgets/weather", weather.Handler(valkeyClient))
+
+	// SearXNG web-search proxy (spec section 6.4, search widget).
+	// Admin configuration: super-admin only (same tier as SMTP).
+	// Search endpoint: any approved session - proxies the query to the
+	// configured SearXNG instance and returns trimmed JSON results.
+	mux.Handle("GET /v1/admin/searxng/status", superAdminOnly(searxng.StatusHandler(pool, cfg.MasterKey)))
+	mux.Handle("POST /v1/admin/searxng/configure", superAdminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		masterKey, err := setup.ResolveMasterKey(r.Context(), pool, cfg.MasterKey)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusPreconditionFailed)
+			return
+		}
+		searxng.ConfigureHandler(pool, masterKey)(w, r)
+	})))
+	mux.Handle("DELETE /v1/admin/searxng", superAdminOnly(searxng.DeleteHandler(pool)))
+	mux.HandleFunc("GET /v1/search/web", searxng.SearchHandler(authDeps, cfg.MasterKey))
 
 	// News feed management (internal/news):
 	//   Admin CRUD: org-admin and super-admin can manage the global feed pool.

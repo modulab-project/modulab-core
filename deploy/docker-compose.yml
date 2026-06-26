@@ -54,6 +54,35 @@ services:
     networks:
       - modulab-internal
 
+  # SearXNG is optional - only started when the "search" profile is active.
+  # To enable: docker compose --profile search up -d
+  # Operators who already run their own SearXNG instance can skip this and
+  # just enter the external URL in Admin → SearXNG.
+  #
+  # SearXNG uses Valkey (Redis-compatible) for its internal rate-limiting
+  # cache. We reuse ModuLab's own Valkey instance to avoid adding a second
+  # in-memory store - SearXNG's keys are namespaced by SearXNG itself so
+  # there is no collision risk.
+  searxng:
+    profiles: ["search"]
+    image: searxng/searxng:latest
+    environment:
+      - SEARXNG_BASE_URL=https://${MODULAB_DOMAIN:-modulab.example.com}/searxng/
+      - SEARXNG_REDIS_URL=redis://valkey:6379/1
+    volumes:
+      - searxng-data:/etc/searxng
+    depends_on:
+      - valkey
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.searxng.rule=Host(`${MODULAB_DOMAIN:-modulab.example.com}`) && PathPrefix(`/searxng`)"
+      - "traefik.http.routers.searxng.tls.certresolver=le"
+      - "traefik.http.middlewares.searxng-strip.stripprefix.prefixes=/searxng"
+      - "traefik.http.routers.searxng.middlewares=searxng-strip"
+      - "traefik.http.services.searxng.loadbalancer.server.port=8080"
+    networks:
+      - modulab-internal
+
 networks:
   modulab-internal:
     internal: true
@@ -62,3 +91,4 @@ volumes:
   postgres-data:
   valkey-data:
   traefik-acme:
+  searxng-data:

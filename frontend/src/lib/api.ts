@@ -480,3 +480,53 @@ export function getWeather(lat: number, lon: number): Promise<WeatherResponse> {
     `/v1/widgets/weather?lat=${lat.toFixed(4)}&lon=${lon.toFixed(4)}`,
   );
 }
+
+// --- SearXNG web search --------------------------------------------------
+// Mirrors backend/internal/searxng's JSON shapes exactly.
+
+export interface SearXNGStatus {
+  configured: boolean;
+  url?: string;
+}
+
+// GET /v1/admin/searxng/status — super-admin only.
+export function searxngStatus(token: string): Promise<SearXNGStatus> {
+  return request<SearXNGStatus>("/v1/admin/searxng/status", {
+    headers: bearerHeaders(token),
+  });
+}
+
+// POST /v1/admin/searxng/configure — super-admin only.
+export function configureSearxng(token: string, url: string): Promise<SearXNGStatus> {
+  return request<SearXNGStatus>("/v1/admin/searxng/configure", {
+    method: "POST",
+    headers: bearerHeaders(token),
+    body: JSON.stringify({ url }),
+  });
+}
+
+// DELETE /v1/admin/searxng — super-admin only.
+export function deleteSearxngConfig(token: string): Promise<void> {
+  return request<void>("/v1/admin/searxng", {
+    method: "DELETE",
+    headers: bearerHeaders(token),
+  });
+}
+
+// One search result returned by GET /v1/search/web.
+export interface WebResult {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+// GET /v1/search/web?q=<query> — any approved session. Returns 503 when
+// SearXNG is not configured (frontend hides the section silently in that
+// case, so callers should treat a 503 ApiError as "not available" rather
+// than a real error).
+export function searchWeb(token: string, query: string): Promise<WebResult[]> {
+  return request<WebResult[]>(
+    `/v1/search/web?q=${encodeURIComponent(query)}`,
+    { headers: bearerHeaders(token) },
+  );
+}

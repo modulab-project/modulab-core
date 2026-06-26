@@ -9,6 +9,7 @@ import ProfilePage from "./pages/ProfilePage";
 import AdminUsersPage from "./pages/AdminUsersPage";
 import AdminSmtpPage from "./pages/AdminSmtpPage";
 import AdminFeedsPage from "./pages/AdminFeedsPage";
+import AdminSearxngPage from "./pages/AdminSearxngPage";
 import Footer from "./components/Footer";
 
 // Two different page shapes share this router:
@@ -37,6 +38,7 @@ export default function App() {
       <Route path="/admin/users" element={<AdminUsersPage />} />
       <Route path="/admin/smtp" element={<AdminSmtpPage />} />
       <Route path="/admin/feeds" element={<AdminFeedsPage />} />
+      <Route path="/admin/searxng" element={<AdminSearxngPage />} />
       <Route
         path="/setup"
         element={
