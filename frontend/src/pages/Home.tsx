@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useAuthenticatedSession } from "../lib/useSession";
 import {
   getWeather,
@@ -53,6 +53,7 @@ import { AppShell } from "../components/AppShell";
 export default function Home() {
   const { session, loading } = useAuthenticatedSession();
   const location = useLocation();
+  const navigate = useNavigate();
   const [weather, setWeather] = useState<WeatherResponse | null>(null);
   const [weatherPanelOpen, setWeatherPanelOpen] = useState(false);
   const [feedsPanelOpen, setFeedsPanelOpen] = useState(false);
@@ -145,11 +146,10 @@ export default function Home() {
       const trimmed = q.trim();
       setSearchQuery(trimmed);
 
-      // Update URL bar so the search is bookmarkable/shareable.
-      const next = trimmed
-        ? `${window.location.pathname}?q=${encodeURIComponent(trimmed)}`
-        : window.location.pathname;
-      window.history.pushState({}, "", next);
+      // Update URL via React Router so location.search stays in sync and
+      // the clear-on-navigate effect fires correctly. replace:true avoids
+      // flooding the browser history with every keystroke search.
+      navigate(trimmed ? `/?q=${encodeURIComponent(trimmed)}` : "/", { replace: true });
 
       if (!trimmed || !searxngAvailable) {
         setWebResults(null);
@@ -307,6 +307,13 @@ function Hero({
   // Controlled input so we can clear it programmatically (e.g. when the user
   // navigates back to the blank home page state).
   const [value, setValue] = useState(initialQuery);
+
+  // Sync local value when the parent clears initialQuery (e.g. logo click
+  // navigates to "/" which triggers the location.search effect in Home and
+  // resets searchQuery to "").
+  useEffect(() => {
+    setValue(initialQuery);
+  }, [initialQuery]);
 
   function handleSearchKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key !== "Enter") {
