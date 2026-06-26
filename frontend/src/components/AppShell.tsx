@@ -540,6 +540,11 @@ function StatusPanelContent({ health }: { health: HealthResponse }) {
       <StatusRow icon="ti-clock" label="Uptime" value={formatUptime(health.uptime_seconds)} />
       <StatusRow icon="ti-database" label="PostgreSQL" ok={health.postgres_reachable} />
       <StatusRow icon="ti-bolt" label="Valkey" ok={health.valkey_reachable} />
+      {health.searxng_configured ? (
+        <StatusRow icon="ti-search" label="SearXNG" ok={health.searxng_reachable} />
+      ) : (
+        <StatusRow icon="ti-search" label="SearXNG" value="Not configured" />
+      )}
     </div>
   );
 }

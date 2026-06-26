@@ -72,6 +72,39 @@ type SearXNGConfigRequest struct {
 	FetchPages int    `json:"fetch_pages"`
 }
 
+// IsConfigured returns true when a SearXNG URL has been saved to
+// core_settings. Used by /healthz to decide whether to show a reachability
+// row for SearXNG at all.
+func IsConfigured(ctx context.Context, pool *db.Pool, masterKey string) (bool, error) {
+	_, ok, err := resolveURL(ctx, pool, masterKey)
+	return ok, err
+}
+
+// ResolveURLPublic is the exported counterpart of resolveURL, used by
+// main.go's /healthz handler to retrieve the base URL for Ping.
+func ResolveURLPublic(ctx context.Context, pool *db.Pool, masterKey string) (string, bool, error) {
+	return resolveURL(ctx, pool, masterKey)
+}
+
+// Ping performs a lightweight GET against the SearXNG base URL and returns
+// true if the instance responds with any non-5xx status within 1 second.
+// Intended only for /healthz — not a full search round-trip.
+func Ping(ctx context.Context, baseURL string) bool {
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/", nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("User-Agent", "ModuLab-Core/1.0 (https://modulab.app)")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode < 500
+}
+
 // WebResult is one entry in GET /v1/search/web's response array.
 type WebResult struct {
 	Title   string `json:"title"`

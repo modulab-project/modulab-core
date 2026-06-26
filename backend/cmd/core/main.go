@@ -34,13 +34,17 @@ import (
 )
 
 type healthStatus struct {
-	Status         string `json:"status"`
-	Version        string `json:"version"`
-	UptimeSeconds  int64  `json:"uptime_seconds"`
-	PostgresUp     bool   `json:"postgres_reachable"`
-	ValkeyUp       bool   `json:"valkey_reachable"`
-	MasterKeySetUp bool   `json:"master_key_present"`
-	SetupCompleted bool   `json:"setup_completed"`
+	Status             string `json:"status"`
+	Version            string `json:"version"`
+	UptimeSeconds      int64  `json:"uptime_seconds"`
+	PostgresUp         bool   `json:"postgres_reachable"`
+	ValkeyUp           bool   `json:"valkey_reachable"`
+	MasterKeySetUp     bool   `json:"master_key_present"`
+	SetupCompleted     bool   `json:"setup_completed"`
+	SearXNGConfigured  bool   `json:"searxng_configured"`
+	// SearXNGUp is nil when SearXNG is not configured (omitted from JSON).
+	// When configured it reflects whether the last ping succeeded.
+	SearXNGUp         *bool  `json:"searxng_reachable,omitempty"`
 }
 
 func main() {
@@ -162,6 +166,18 @@ func main() {
 			ValkeyUp:       valkeyClient.Ping(r.Context()) == nil,
 			MasterKeySetUp: cfg.MasterKey != "",
 			SetupCompleted: bootstrapMgr.Completed(),
+		}
+		// SearXNG is optional: only check reachability when a URL is saved.
+		// resolveURL is a fast DB lookup; the Ping adds ~1 RTT on the internal
+		// Docker network (same order of magnitude as the Postgres/Valkey checks).
+		if configured, err := searxng.IsConfigured(r.Context(), pool, cfg.MasterKey); err == nil {
+			status.SearXNGConfigured = configured
+			if configured {
+				if rawURL, _, err := searxng.ResolveURLPublic(r.Context(), pool, cfg.MasterKey); err == nil {
+					up := searxng.Ping(r.Context(), rawURL)
+					status.SearXNGUp = &up
+				}
+			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(status)

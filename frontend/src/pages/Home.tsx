@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useLocation } from "react-router-dom";
 import { useAuthenticatedSession } from "../lib/useSession";
 import {
   getWeather,
@@ -51,6 +52,7 @@ import { AppShell } from "../components/AppShell";
 //   news only loads once on initial mount and on explicit user actions.
 export default function Home() {
   const { session, loading } = useAuthenticatedSession();
+  const location = useLocation();
   const [weather, setWeather] = useState<WeatherResponse | null>(null);
   const [weatherPanelOpen, setWeatherPanelOpen] = useState(false);
   const [feedsPanelOpen, setFeedsPanelOpen] = useState(false);
@@ -67,6 +69,18 @@ export default function Home() {
   const [webResults, setWebResults] = useState<WebResult[] | null>(null);
   const [webLoading, setWebLoading] = useState(false);
   const [searxngAvailable, setSearxngAvailable] = useState(true);
+
+  // Clear search results whenever the URL loses its ?q= parameter — e.g.
+  // when the user clicks the ModuLab logo (navigate("/")) or uses the
+  // browser back button to return to the bare home page.
+  useEffect(() => {
+    const q = new URLSearchParams(location.search).get("q") ?? "";
+    if (!q) {
+      setSearchQuery("");
+      setWebResults(null);
+      setWebLoading(false);
+    }
+  }, [location.search]);
 
   // News state
   const [articles, setArticles] = useState<NewsArticle[]>([]);

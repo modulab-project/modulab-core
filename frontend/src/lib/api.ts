@@ -131,6 +131,9 @@ export interface HealthResponse {
   valkey_reachable: boolean;
   master_key_present: boolean;
   setup_completed: boolean;
+  searxng_configured: boolean;
+  // Only present when searxng_configured is true.
+  searxng_reachable?: boolean;
 }
 
 // /healthz needs no bootstrap token - it's exempt from that gate in main.go
