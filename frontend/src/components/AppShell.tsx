@@ -5,8 +5,6 @@ import {
   listAIProviders,
   listUsers,
   logoutRequest,
-  setAIUserKey,
-  deleteAIUserKey,
   streamAIChat,
   type AIUserProvider,
   type ChatMessage,
@@ -24,9 +22,6 @@ import packageJson from "../../package.json";
 // to include "notifications" alongside the original "profile"/"status".
 type OpenPanel = "profile" | "status" | "notifications" | null;
 
-// Whether the AI chat floating panel is open (independent of the slide panels).
-// Kept separate so chat can coexist with an open slide panel.
-type ChatState = { open: false } | { open: true };
 
 // One entry in the notification feed (NotificationsPanelContent) - kept
 // purely in memory for the life of this tab, not persisted anywhere: a
@@ -199,10 +194,7 @@ export function AppShell({
       <ToastStack toasts={toasts} />
 
       {chatOpen && (
-        <ChatPanel
-          session={session}
-          onClose={() => setChatOpen(false)}
-        />
+        <ChatPanel onClose={() => setChatOpen(false)} />
       )}
 
       {openPanel && (
@@ -722,7 +714,7 @@ function formatUptime(seconds: number): string {
 // Streams responses via SSE (streamAIChat in lib/api.ts). No persistence —
 // messages live only in component state for the lifetime of this mount.
 
-function ChatPanel({ session, onClose }: { session: Session; onClose: () => void }) {
+function ChatPanel({ onClose }: { onClose: () => void }) {
   const [providers, setProviders] = useState<AIUserProvider[]>([]);
   const [selectedProvider, setSelectedProvider] = useState<AIUserProvider | null>(null);
   const [model, setModel] = useState("");
