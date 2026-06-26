@@ -363,7 +363,7 @@ function Hero({
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleSearchKeyDown}
           placeholder="Search the web…"
-          className="w-full flex-1 bg-transparent text-sm outline-none placeholder:text-gray-400"
+          className="w-full flex-1 bg-transparent text-base outline-none placeholder:text-gray-400 md:text-sm"
         />
         {value && (
           <button
