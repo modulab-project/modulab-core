@@ -18,6 +18,7 @@ import {
   type WebResult,
   type SearchPrefs,
   type SearchCategory,
+  type SearchTimeRange,
 } from "../lib/api";
 import { getSessionToken } from "../lib/session";
 import { AppShell } from "../components/AppShell";
@@ -74,6 +75,7 @@ export default function Home() {
   const [webLoading, setWebLoading] = useState(false);
   const [searxngAvailable, setSearxngAvailable] = useState(true);
   const [category, setCategory] = useState<SearchCategory>("general");
+  const [timeRange, setTimeRange] = useState<SearchTimeRange>("");
   const [searchPrefs, setSearchPrefs] = useState<SearchPrefs>({ safesearch: 0, language: "all" });
 
   // Clear search results whenever the URL loses its ?q= parameter — e.g.
@@ -157,7 +159,7 @@ export default function Home() {
   // SearXNG proxy. A 503 response means SearXNG is not configured - flip
   // the flag so the results section stays hidden for the rest of this load.
   const handleSearch = useCallback(
-    async (q: string, cat: SearchCategory = category) => {
+    async (q: string, cat: SearchCategory = category, tr: SearchTimeRange = timeRange) => {
       const trimmed = q.trim();
       setSearchQuery(trimmed);
 
@@ -177,7 +179,7 @@ export default function Home() {
       setWebLoading(true);
       setWebResults(null);
       try {
-        const results = await searchWeb(token, trimmed, cat);
+        const results = await searchWeb(token, trimmed, cat, tr);
         setWebResults(results);
       } catch (err) {
         if (err instanceof ApiError && err.status === 503) {
@@ -189,7 +191,7 @@ export default function Home() {
         setWebLoading(false);
       }
     },
-    [searxngAvailable, navigate, category],
+    [searxngAvailable, navigate, category, timeRange],
   );
 
   // Switch category tab and re-fire the current query with the new category.
@@ -197,10 +199,21 @@ export default function Home() {
     (cat: SearchCategory) => {
       setCategory(cat);
       if (searchQuery) {
-        handleSearch(searchQuery, cat);
+        handleSearch(searchQuery, cat, timeRange);
       }
     },
-    [searchQuery, handleSearch],
+    [searchQuery, handleSearch, timeRange],
+  );
+
+  // Change time range and immediately re-fire the current query.
+  const handleTimeRangeChange = useCallback(
+    (tr: SearchTimeRange) => {
+      setTimeRange(tr);
+      if (searchQuery) {
+        handleSearch(searchQuery, category, tr);
+      }
+    },
+    [searchQuery, handleSearch, category],
   );
 
   // If the page was loaded with ?q=... (e.g. from a bookmark or browser
@@ -239,6 +252,8 @@ export default function Home() {
             loading={webLoading}
             category={category}
             onCategoryChange={handleCategoryChange}
+            timeRange={timeRange}
+            onTimeRangeChange={handleTimeRangeChange}
             searchPrefs={searchPrefs}
             onPrefsChange={async (patch) => {
               const token = getSessionToken();
@@ -442,11 +457,21 @@ const SEARCH_LANGUAGES = [
 // Inline results panel that appears directly below the Hero when a search
 // is active. Includes a Web/Bilder tab switcher and a filter dropdown for
 // safesearch and language.
+const TIME_RANGE_OPTIONS: { value: SearchTimeRange; label: string }[] = [
+  { value: "", label: "Any time" },
+  { value: "day", label: "Last 24 hours" },
+  { value: "week", label: "Last week" },
+  { value: "month", label: "Last month" },
+  { value: "year", label: "Last year" },
+];
+
 function WebResultsPanel({
   results,
   loading,
   category,
   onCategoryChange,
+  timeRange,
+  onTimeRangeChange,
   searchPrefs,
   onPrefsChange,
 }: {
@@ -454,6 +479,8 @@ function WebResultsPanel({
   loading: boolean;
   category: SearchCategory;
   onCategoryChange: (cat: SearchCategory) => void;
+  timeRange: SearchTimeRange;
+  onTimeRangeChange: (tr: SearchTimeRange) => void;
   searchPrefs: SearchPrefs;
   onPrefsChange: (patch: Partial<SearchPrefs>) => void;
 }) {
@@ -486,17 +513,40 @@ function WebResultsPanel({
             type="button"
             onClick={() => setFilterOpen((v) => !v)}
             className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-[12px] transition-colors ${
-              filterOpen
+              filterOpen || timeRange
                 ? "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200"
                 : "text-gray-400 hover:bg-gray-100 dark:text-gray-500 dark:hover:bg-gray-800"
             }`}
           >
             <i className="ti ti-adjustments-horizontal text-[13px]" aria-hidden="true" />
-            Filter
+            {timeRange
+              ? TIME_RANGE_OPTIONS.find((o) => o.value === timeRange)?.label ?? "Filter"
+              : "Filter"}
           </button>
 
           {filterOpen && (
             <div className="absolute right-0 z-10 mt-1 w-56 rounded-xl border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+              {/* Time range */}
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                Time
+              </p>
+              <div className="mb-3 flex flex-col gap-0.5">
+                {TIME_RANGE_OPTIONS.map(({ value, label }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => onTimeRangeChange(value)}
+                    className={`w-full rounded-lg px-2.5 py-1.5 text-left text-[12px] transition-colors ${
+                      timeRange === value
+                        ? "bg-teal-600 text-white"
+                        : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
               {/* Safesearch */}
               <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
                 SafeSearch

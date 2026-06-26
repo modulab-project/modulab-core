@@ -549,17 +549,21 @@ export interface WebResult {
 // Search category — "general" for web results, "images" for image search.
 export type SearchCategory = "general" | "images";
 
-// GET /v1/search/web?q=<query>&category=<category> — any approved session.
-// Returns 503 when SearXNG is not configured (frontend hides the section
-// silently in that case, so callers should treat a 503 ApiError as "not
-// available" rather than a real error).
+// Time range filter — "" means any time.
+export type SearchTimeRange = "" | "day" | "week" | "month" | "year";
+
+// GET /v1/search/web?q=<query>&category=<category>&time_range=<range>
+// Any approved session. Returns 503 when SearXNG is not configured.
 export function searchWeb(
   token: string,
   query: string,
   category: SearchCategory = "general",
+  timeRange: SearchTimeRange = "",
 ): Promise<WebResult[]> {
+  const params = new URLSearchParams({ q: query, category });
+  if (timeRange) params.set("time_range", timeRange);
   return request<WebResult[]>(
-    `/v1/search/web?q=${encodeURIComponent(query)}&category=${category}`,
+    `/v1/search/web?${params.toString()}`,
     { headers: bearerHeaders(token) },
   );
 }

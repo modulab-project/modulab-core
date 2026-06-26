@@ -385,10 +385,20 @@ func SearchHandler(deps auth.Deps, masterKey string) http.HandlerFunc {
 			category = "general"
 		}
 
+		// Validate time_range against the set SearXNG accepts.
+		timeRange := r.URL.Query().Get("time_range")
+		switch timeRange {
+		case "day", "week", "month", "year":
+			// valid
+		default:
+			timeRange = ""
+		}
+
 		sp := searchParams{
 			category:   category,
 			safesearch: prefs.Safesearch,
 			language:   prefs.Language,
+			timeRange:  timeRange,
 		}
 
 		results, err := fetchResults(r.Context(), baseURL, q, maxResults, fetchPages, sp)
@@ -418,6 +428,7 @@ type searchParams struct {
 	category   string // "general" or "images"
 	safesearch int    // 0, 1, or 2
 	language   string // "all", "de", "en", …
+	timeRange  string // "", "day", "week", "month", "year"
 }
 
 // fetchPage fetches one SearXNG result page (1-indexed pageno).
@@ -433,6 +444,9 @@ func fetchPage(ctx context.Context, baseURL, query string, pageno int, sp search
 		"categories": {category},
 		"safesearch": {strconv.Itoa(sp.safesearch)},
 		"language":   {sp.language},
+	}
+	if sp.timeRange != "" {
+		params.Set("time_range", sp.timeRange)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/search?"+params.Encode(), nil)
 	if err != nil {
