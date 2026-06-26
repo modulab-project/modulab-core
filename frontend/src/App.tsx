@@ -6,6 +6,8 @@ import Login from "./pages/Login";
 import Pending from "./pages/Pending";
 import Home from "./pages/Home";
 import ProfilePage from "./pages/ProfilePage";
+import UserFeedsPage from "./pages/UserFeedsPage";
+import UserSearchPrefsPage from "./pages/UserSearchPrefsPage";
 import AdminUsersPage from "./pages/AdminUsersPage";
 import AdminSmtpPage from "./pages/AdminSmtpPage";
 import AdminFeedsPage from "./pages/AdminFeedsPage";
@@ -35,6 +37,8 @@ export default function App() {
       <Route path="/" element={<Home />} />
       {/* Like Home, owns its own full-viewport header - no WithFooter here. */}
       <Route path="/profile" element={<ProfilePage />} />
+      <Route path="/user/feeds" element={<UserFeedsPage />} />
+      <Route path="/user/search-prefs" element={<UserSearchPrefsPage />} />
       <Route path="/admin/users" element={<AdminUsersPage />} />
       <Route path="/admin/smtp" element={<AdminSmtpPage />} />
       <Route path="/admin/feeds" element={<AdminFeedsPage />} />

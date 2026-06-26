@@ -55,11 +55,9 @@ export function isAdminRole(role: string): boolean {
 export function AppShell({
   session,
   children,
-  onOpenFeeds,
 }: {
   session: Session;
   children: ReactNode;
-  onOpenFeeds?: () => void;
 }) {
   const navigate = useNavigate();
   const [health, setHealth] = useState<HealthResponse | null>(null);
@@ -194,7 +192,7 @@ export function AppShell({
           dark={dark}
           setDark={setDark}
           onLogout={handleLogout}
-          onOpenFeeds={onOpenFeeds ? () => { setOpenPanel(null); onOpenFeeds(); } : undefined}
+          onClose={() => setOpenPanel(null)}
         />
       </SlidePanel>
       <SlidePanel open={openPanel === "status"} onClose={() => setOpenPanel(null)} title="System status">
@@ -369,14 +367,14 @@ function ProfilePanelContent({
   dark,
   setDark,
   onLogout,
-  onOpenFeeds,
+  onClose,
 }: {
   session: Session;
   isAdmin: boolean;
   dark: boolean;
   setDark: (d: boolean) => void;
   onLogout: () => void;
-  onOpenFeeds?: () => void;
+  onClose: () => void;
 }) {
   const displayName = session.name.trim() || session.email;
 
@@ -391,19 +389,25 @@ function ProfilePanelContent({
       <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />
       <Link
         to="/profile"
+        onClick={onClose}
         className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
       >
         <i className="ti ti-user text-[15px] text-gray-500" /> View profile
       </Link>
-      {onOpenFeeds && (
-        <button
-          type="button"
-          onClick={onOpenFeeds}
-          className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
-        >
-          <i className="ti ti-rss text-[15px] text-gray-500" /> My feeds
-        </button>
-      )}
+      <Link
+        to="/user/feeds"
+        onClick={onClose}
+        className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
+      >
+        <i className="ti ti-rss text-[15px] text-gray-500" /> My feeds
+      </Link>
+      <Link
+        to="/user/search-prefs"
+        onClick={onClose}
+        className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
+      >
+        <i className="ti ti-search text-[15px] text-gray-500" /> Search settings
+      </Link>
       {isAdmin && (
         <>
           <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />
@@ -412,12 +416,14 @@ function ProfilePanelContent({
           </p>
           <Link
             to="/admin/users"
+            onClick={onClose}
             className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
           >
             <i className="ti ti-users text-[15px] text-gray-500" /> Users
           </Link>
           <Link
             to="/admin/feeds"
+            onClick={onClose}
             className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
           >
             <i className="ti ti-rss text-[15px] text-gray-500" /> News Feeds
@@ -426,12 +432,14 @@ function ProfilePanelContent({
             <>
               <Link
                 to="/admin/smtp"
+                onClick={onClose}
                 className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
               >
                 <i className="ti ti-mail text-[15px] text-gray-500" /> SMTP
               </Link>
               <Link
                 to="/admin/searxng"
+                onClick={onClose}
                 className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
               >
                 <i className="ti ti-search text-[15px] text-gray-500" /> SearXNG
