@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { getSessionToken } from "../lib/session";
+import { AppShell, isAdminRole } from "../components/AppShell";
 import {
   type AdminTile,
   createAdminQuickLink,
@@ -139,6 +141,7 @@ function QuickLinkForm({
 
 export default function AdminQuickLinksPage() {
   const { session, loading } = useAuthenticatedSession();
+  const navigate = useNavigate();
   const [links, setLinks] = useState<AdminTile[]>([]);
   const [fetching, setFetching] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -148,19 +151,17 @@ export default function AdminQuickLinksPage() {
 
   useEffect(() => {
     if (!session) return;
+    if (!isAdminRole(session.role)) {
+      navigate("/", { replace: true });
+      return;
+    }
     listAdminQuickLinks(token)
       .then(setLinks)
       .catch(() => {})
       .finally(() => setFetching(false));
-  }, [session, token]);
+  }, [session, token, navigate]);
 
-  if (loading || fetching) {
-    return (
-      <div className="flex min-h-screen items-center justify-center text-gray-400">
-        <i className="ti ti-loader-2 animate-spin text-2xl" />
-      </div>
-    );
-  }
+  if (loading || !session) return null;
 
   async function handleCreate(data: {
     title: string;
@@ -191,6 +192,7 @@ export default function AdminQuickLinksPage() {
   }
 
   return (
+    <AppShell session={session}>
     <div className="mx-auto max-w-3xl px-4 py-8">
       <div className="mb-6 flex items-center justify-between">
         <div>
@@ -284,5 +286,6 @@ export default function AdminQuickLinksPage() {
         </div>
       )}
     </div>
+    </AppShell>
   );
 }
