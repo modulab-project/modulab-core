@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { AppShell } from "../components/AppShell";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { listAIProviders, setAIUserKey, deleteAIUserKey, type AIUserProvider } from "../lib/api";
+// AIUserProvider may include providers the admin hasn't enabled yet — users
+// can still pre-configure their own key; the chat panel filters by available.
 import { getSessionToken } from "../lib/session";
 
 // /user/ai-keys — lets users manage their own AI provider API keys.
@@ -86,18 +88,25 @@ export default function UserAIKeysPage() {
                   className={`px-4 py-3.5 text-sm ${isLast ? "" : "border-b border-gray-100 dark:border-gray-800"}`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <p className="font-medium">{p.name}</p>
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                        p.has_user_key
-                          ? "bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-400"
-                          : p.has_admin_key
-                          ? "bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-400"
-                          : "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400"
-                      }`}
-                    >
-                      {p.has_user_key ? "Your key" : p.has_admin_key ? "Admin key" : "No key"}
-                    </span>
+                    <p className={`font-medium ${!p.enabled ? "text-gray-400 dark:text-gray-500" : ""}`}>{p.name}</p>
+                    <div className="flex items-center gap-1.5">
+                      {!p.enabled && (
+                        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                          Not enabled
+                        </span>
+                      )}
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                          p.has_user_key
+                            ? "bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-400"
+                            : p.has_admin_key
+                            ? "bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-400"
+                            : "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400"
+                        }`}
+                      >
+                        {p.has_user_key ? "Your key" : p.has_admin_key ? "Admin key" : "No key"}
+                      </span>
+                    </div>
                   </div>
 
                   {isEditing ? (

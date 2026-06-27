@@ -889,6 +889,21 @@ func (p *Pool) EnsureAISchema(ctx context.Context) error {
 	`); err != nil {
 		return fmt.Errorf("db: ensure ai_user_keys: %w", err)
 	}
+	// Seed the four built-in providers so they always exist in the DB, even
+	// before an admin adds any keys. Users can then add their own keys for any
+	// built-in. ON CONFLICT DO NOTHING preserves any admin changes (keys,
+	// enabled flag, model, etc.) made after the initial seed.
+	if _, err := p.Exec(ctx, `
+		INSERT INTO ai_providers (id, type, name, base_url, default_model, user_can_override, enabled, sort_order)
+		VALUES
+			('anthropic', 'anthropic', 'Anthropic (Claude)', '',         'claude-sonnet-4-5', true, true, 1),
+			('openai',    'openai',    'OpenAI',             '',         'gpt-4o',            true, true, 2),
+			('gemini',    'gemini',    'Google Gemini',      '',         'gemini-2.0-flash',  true, true, 3),
+			('deepseek',  'deepseek',  'DeepSeek',           '',         'deepseek-chat',     true, true, 4)
+		ON CONFLICT (id) DO NOTHING
+	`); err != nil {
+		return fmt.Errorf("db: seed built-in ai_providers: %w", err)
+	}
 	return nil
 }
 
@@ -1089,7 +1104,6 @@ func (p *Pool) ListAIProvidersForUser(ctx context.Context, userID string) ([]AIP
 		       (k.encrypted_key IS NOT NULL) AS has_user_key
 		FROM ai_providers pr
 		LEFT JOIN ai_user_keys k ON k.provider_id = pr.id AND k.user_id = $1
-		WHERE pr.enabled = true
 		ORDER BY pr.sort_order ASC, pr.name ASC
 	`, userID)
 	if err != nil {

@@ -620,6 +620,7 @@ export interface AIUserProvider {
   type: string;
   default_model: string;
   available: boolean;
+  enabled: boolean;
   has_user_key: boolean;
   has_admin_key: boolean;
   can_override: boolean;

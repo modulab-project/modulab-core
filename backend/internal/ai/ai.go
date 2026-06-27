@@ -69,6 +69,7 @@ type UserProviderResponse struct {
 	Type         string `json:"type"`
 	DefaultModel string `json:"default_model"`
 	Available    bool   `json:"available"` // true when at least one key exists
+	Enabled      bool   `json:"enabled"`
 	HasUserKey   bool   `json:"has_user_key"`
 	HasAdminKey  bool   `json:"has_admin_key"`
 	CanOverride  bool   `json:"can_override"`
@@ -363,6 +364,7 @@ func UserProvidersHandler(deps auth.Deps) http.HandlerFunc {
 				Type:         row.Type,
 				DefaultModel: row.DefaultModel,
 				Available:    available,
+				Enabled:      row.Enabled,
 				HasUserKey:   row.HasUserKey,
 				HasAdminKey:  row.HasAdminKey,
 				CanOverride:  row.UserCanOverride,
