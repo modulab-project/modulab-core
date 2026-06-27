@@ -10,6 +10,10 @@ import UserFeedsPage from "./pages/UserFeedsPage";
 import UserSearchPrefsPage from "./pages/UserSearchPrefsPage";
 import AdminUsersPage from "./pages/AdminUsersPage";
 import AdminFeedsPage from "./pages/AdminFeedsPage";
+import AdminSystemOIDCPage from "./pages/AdminSystemOIDCPage";
+import AdminSystemDNSPage from "./pages/AdminSystemDNSPage";
+import AdminSystemSmtpPage from "./pages/AdminSystemSmtpPage";
+import AdminSystemSearxngPage from "./pages/AdminSystemSearxngPage";
 import AdminAIPage from "./pages/AdminAIPage";
 import AdminQuickLinksPage from "./pages/AdminQuickLinksPage";
 import AdminSystemPage from "./pages/AdminSystemPage";
@@ -51,6 +55,10 @@ export default function App() {
       <Route path="/admin/ai" element={<AdminAIPage />} />
       <Route path="/admin/quick-links" element={<AdminQuickLinksPage />} />
       <Route path="/admin/system" element={<AdminSystemPage />} />
+      <Route path="/admin/system/oidc" element={<AdminSystemOIDCPage />} />
+      <Route path="/admin/system/dns" element={<AdminSystemDNSPage />} />
+      <Route path="/admin/system/smtp" element={<AdminSystemSmtpPage />} />
+      <Route path="/admin/system/searxng" element={<AdminSystemSearxngPage />} />
       <Route path="/admin/audit" element={<AdminAuditPage />} />
       <Route
         path="/setup"
