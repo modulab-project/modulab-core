@@ -12,9 +12,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -297,16 +299,34 @@ func main() {
 			http.Error(w, err.Error(), http.StatusPreconditionFailed)
 			return
 		}
-		// Capture the response code to know whether the configure succeeded
-		// before writing to the audit log (best-effort, same as everywhere).
+		// Buffer the body so we can (a) pass it to the handler and (b) read
+		// the non-sensitive fields for the audit log without decrypting them
+		// from the DB after the fact.
+		bodyBytes, _ := io.ReadAll(r.Body)
+		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
 		rw := &responseRecorder{ResponseWriter: w, code: http.StatusOK}
 		setup.SMTPConfigureHandler(pool, masterKey)(rw, r)
 		if rw.code < 400 {
 			if sess, ok := auth.SessionFromContext(r.Context()); ok {
+				// Extract non-sensitive fields for the audit detail blob.
+				// Password is deliberately excluded.
+				var smtpReq struct {
+					Host        string `json:"host"`
+					Port        int    `json:"port"`
+					FromAddress string `json:"from_address"`
+					Encryption  string `json:"encryption"`
+				}
+				_ = json.Unmarshal(bodyBytes, &smtpReq)
+				details := fmt.Sprintf(
+					`{"host":%q,"port":%d,"from":%q,"encryption":%q}`,
+					smtpReq.Host, smtpReq.Port, smtpReq.FromAddress, smtpReq.Encryption,
+				)
 				if err := audit.Log(r.Context(), pool, masterKey, audit.LogParams{
 					EventType:  audit.EventConfigSMTP,
 					ActorID:    sess.UserID,
 					ActorEmail: sess.Email,
+					Details:    details,
 				}); err != nil {
 					log.Printf("main: audit smtp configure: %v", err)
 				}
