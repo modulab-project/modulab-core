@@ -4,13 +4,13 @@
 // one is a one-shot handoff consumed exactly once by whichever page reads
 // it next, while this one persists for as long as the session is valid.
 //
-// Deliberately sessionStorage, not localStorage: spec section 7.2 calls
-// for the bearer token to live in sessionStorage specifically so it does
-// not survive as a permanent, XSS-reachable artifact across browser
-// restarts - see backend/internal/auth/session.go's SessionTTL doc comment
-// for the matching backend-side reasoning (opaque token, 24h TTL, no
-// refresh flow yet). The practical trade-off: closing the tab signs the
-// user out, a new tab needs a fresh login. That is intentional, not a bug.
+// Deliberately sessionStorage, not localStorage: spec section 3.2 calls
+// for the bearer token to live in sessionStorage so it does not survive as
+// a permanent, XSS-reachable artifact across browser restarts. The backend
+// uses a 24-hour sliding window (see auth/session.go ValidateSession) - as
+// long as the user has at least one tab open and making requests, their
+// session auto-extends and never expires mid-use. Closing all tabs signs
+// them out; a new tab after that requires a fresh OIDC login.
 const SESSION_TOKEN_KEY = "modulab_session_token";
 
 export function storeSessionToken(token: string): void {

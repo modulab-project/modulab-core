@@ -98,6 +98,16 @@ func (c *Client) AddSetMember(ctx context.Context, key, member string, ttl time.
 	return nil
 }
 
+// Expire resets the TTL of an existing key without changing its value. A
+// no-op (not an error) if the key does not exist or has already expired.
+// Used by auth.ValidateSession to slide the session window on every request.
+func (c *Client) Expire(ctx context.Context, key string, ttl time.Duration) error {
+	if err := c.rdb.Expire(ctx, key, ttl).Err(); err != nil {
+		return fmt.Errorf("valkey: expire %q: %w", key, err)
+	}
+	return nil
+}
+
 // SetMembers returns every member currently in the set at key (empty, not an
 // error, if key does not exist or has expired).
 func (c *Client) SetMembers(ctx context.Context, key string) ([]string, error) {

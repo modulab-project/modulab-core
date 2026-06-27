@@ -11,10 +11,13 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/valkey"
 )
 
-// SessionTTL is how long an issued session token remains valid. There is no
-// refresh mechanism yet - once this expires, the user has to log in again
-// via the IdP. Revisit once Phase 2's frontend exists and can react to a
-// 401 by re-triggering /v1/auth/login.
+// SessionTTL is the sliding-window duration for session tokens. Every
+// authenticated request resets the expiry back to this value (see
+// ValidateSession below), so an actively-used session never expires.
+// A session that goes completely unused for SessionTTL - e.g. the user
+// closes all their tabs and is away for 24 hours - will require a new
+// login. This is the simplest form of "silent renewal": no OIDC refresh
+// token flow needed, no client-side timer, no extra round-trip.
 const SessionTTL = 24 * time.Hour
 
 const sessionKeyPrefix = "session:"
@@ -123,6 +126,14 @@ func RevokeUserSessions(ctx context.Context, vk *valkey.Client, subject string) 
 // ValidateSession looks up token in Valkey and returns the session it maps
 // to, if any. A missing or expired token is not an error - ok is simply
 // false.
+//
+// Sliding window: on every successful lookup the TTL of both the session
+// key and the per-user session index are reset to SessionTTL. This means
+// an actively-used session never expires mid-use; only a session that
+// goes completely untouched for 24 hours will require a new login. TTL
+// extension failures are non-fatal: the session was already read
+// successfully, so the caller gets a valid response regardless. Worst
+// case the session expires on its original schedule rather than sliding.
 func ValidateSession(ctx context.Context, vk *valkey.Client, token string) (Session, bool, error) {
 	raw, exists, err := vk.Get(ctx, sessionKeyPrefix+token)
 	if err != nil {
@@ -135,6 +146,11 @@ func ValidateSession(ctx context.Context, vk *valkey.Client, token string) (Sess
 	if err := json.Unmarshal([]byte(raw), &sess); err != nil {
 		return Session{}, false, fmt.Errorf("auth: decode session: %w", err)
 	}
+
+	// Slide the window - best effort, non-fatal if Valkey hiccups here.
+	_ = vk.Expire(ctx, sessionKeyPrefix+token, SessionTTL)
+	_ = vk.Expire(ctx, userSessionsKeyPrefix+sess.UserID, SessionTTL)
+
 	return sess, true, nil
 }
 
