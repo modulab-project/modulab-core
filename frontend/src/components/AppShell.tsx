@@ -486,6 +486,7 @@ function ProfilePanelContent({
           </Link>
           {session.role === "super-admin" && (
             <>
+              <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />
               <Link
                 to="/admin/audit"
                 onClick={onClose}
