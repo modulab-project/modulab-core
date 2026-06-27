@@ -14,6 +14,7 @@ package quicklinks
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
@@ -47,44 +48,17 @@ type AdminTile struct {
 	CreatedBy   string `json:"created_by"`
 }
 
-// ---- Auth helpers (same pattern as news/searxng/ai packages) ----------------
+// ---- Local helpers ----------------------------------------------------------
 
-func bearerToken(r *http.Request) string {
-	return strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-}
-
-func requireActive(d auth.Deps, w http.ResponseWriter, r *http.Request) (auth.Session, bool) {
-	token := bearerToken(r)
-	if token == "" {
-		http.Error(w, "missing bearer token", http.StatusUnauthorized)
-		return auth.Session{}, false
-	}
-	sess, ok, err := auth.ValidateSession(r.Context(), d.Valkey, token)
+// isHTTPURL returns true when raw is a syntactically valid http or https URL.
+// Prevents javascript:, data:, and other dangerous schemes from being stored
+// as tile URLs, which the frontend renders as anchor hrefs.
+func isHTTPURL(raw string) bool {
+	u, err := url.ParseRequestURI(strings.TrimSpace(raw))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return auth.Session{}, false
+		return false
 	}
-	if !ok {
-		http.Error(w, "invalid or expired session", http.StatusUnauthorized)
-		return auth.Session{}, false
-	}
-	if sess.Role == auth.RolePending {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return auth.Session{}, false
-	}
-	return sess, true
-}
-
-func requireAdmin(d auth.Deps, w http.ResponseWriter, r *http.Request) (auth.Session, bool) {
-	sess, ok := requireActive(d, w, r)
-	if !ok {
-		return auth.Session{}, false
-	}
-	if sess.Role != auth.RoleOrgAdmin && sess.Role != auth.RoleSuperAdmin {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return auth.Session{}, false
-	}
-	return sess, true
+	return u.Scheme == "http" || u.Scheme == "https"
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -168,7 +142,7 @@ func mergedTiles(adminLinks []db.AdminQuickLinkRow, userLinks []db.UserQuickLink
 // Returns the merged, user-ordered list of all admin and personal tiles.
 func ListHandler(d auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sess, ok := requireActive(d, w, r)
+		sess, ok := auth.RequireActiveSession(d, w, r)
 		if !ok {
 			return
 		}
@@ -200,7 +174,7 @@ func ListHandler(d auth.Deps) http.HandlerFunc {
 // Creates a personal tile for the current user and returns the new tile id.
 func CreateUserLinkHandler(d auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sess, ok := requireActive(d, w, r)
+		sess, ok := auth.RequireActiveSession(d, w, r)
 		if !ok {
 			return
 		}
@@ -218,6 +192,10 @@ func CreateUserLinkHandler(d auth.Deps) http.HandlerFunc {
 			http.Error(w, "title and url are required", http.StatusBadRequest)
 			return
 		}
+		if !isHTTPURL(body.URL) {
+			http.Error(w, "url must be a valid http or https URL", http.StatusBadRequest)
+			return
+		}
 		id, err := d.Pool.CreateUserQuickLink(r.Context(), sess.UserID, body.Title, body.URL, body.Icon, body.Description)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -231,7 +209,7 @@ func CreateUserLinkHandler(d auth.Deps) http.HandlerFunc {
 // Deletes a personal tile owned by the current user (user_id guard in DB).
 func DeleteUserLinkHandler(d auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sess, ok := requireActive(d, w, r)
+		sess, ok := auth.RequireActiveSession(d, w, r)
 		if !ok {
 			return
 		}
@@ -254,7 +232,7 @@ func DeleteUserLinkHandler(d auth.Deps) http.HandlerFunc {
 // Persists the user's custom tile ordering.
 func SaveOrderHandler(d auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sess, ok := requireActive(d, w, r)
+		sess, ok := auth.RequireActiveSession(d, w, r)
 		if !ok {
 			return
 		}
@@ -278,7 +256,7 @@ func SaveOrderHandler(d auth.Deps) http.HandlerFunc {
 // AdminListHandler is GET /v1/admin/quick-links.
 func AdminListHandler(d auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := requireAdmin(d, w, r); !ok {
+		if _, ok := auth.RequireAdminSession(d, w, r); !ok {
 			return
 		}
 		links, err := d.Pool.ListAdminQuickLinks(r.Context())
@@ -306,7 +284,7 @@ func AdminListHandler(d auth.Deps) http.HandlerFunc {
 // Body: {"title":"…","url":"…","icon":"…","description":"…","sort_order":0}
 func AdminCreateHandler(d auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sess, ok := requireAdmin(d, w, r)
+		sess, ok := auth.RequireAdminSession(d, w, r)
 		if !ok {
 			return
 		}
@@ -323,6 +301,10 @@ func AdminCreateHandler(d auth.Deps) http.HandlerFunc {
 		}
 		if strings.TrimSpace(body.Title) == "" || strings.TrimSpace(body.URL) == "" {
 			http.Error(w, "title and url are required", http.StatusBadRequest)
+			return
+		}
+		if !isHTTPURL(body.URL) {
+			http.Error(w, "url must be a valid http or https URL", http.StatusBadRequest)
 			return
 		}
 		link, err := d.Pool.CreateAdminQuickLink(r.Context(),
@@ -347,7 +329,7 @@ func AdminCreateHandler(d auth.Deps) http.HandlerFunc {
 // Body: {"title":"…","url":"…","icon":"…","description":"…","sort_order":0}
 func AdminUpdateHandler(d auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := requireAdmin(d, w, r); !ok {
+		if _, ok := auth.RequireAdminSession(d, w, r); !ok {
 			return
 		}
 		id := r.PathValue("id")
@@ -364,6 +346,10 @@ func AdminUpdateHandler(d auth.Deps) http.HandlerFunc {
 		}
 		if strings.TrimSpace(body.Title) == "" || strings.TrimSpace(body.URL) == "" {
 			http.Error(w, "title and url are required", http.StatusBadRequest)
+			return
+		}
+		if !isHTTPURL(body.URL) {
+			http.Error(w, "url must be a valid http or https URL", http.StatusBadRequest)
 			return
 		}
 		found, err := d.Pool.UpdateAdminQuickLink(r.Context(),
@@ -383,7 +369,7 @@ func AdminUpdateHandler(d auth.Deps) http.HandlerFunc {
 // AdminDeleteHandler is DELETE /v1/admin/quick-links/{id}.
 func AdminDeleteHandler(d auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := requireAdmin(d, w, r); !ok {
+		if _, ok := auth.RequireAdminSession(d, w, r); !ok {
 			return
 		}
 		id := r.PathValue("id")

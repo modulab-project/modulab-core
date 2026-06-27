@@ -156,6 +156,54 @@ func guardAgainstLastSuperAdmin(ctx context.Context, d Deps, targetSubject strin
 	return false, "", nil
 }
 
+// RequireActiveSession validates the request's bearer token and returns the
+// session if it is valid, non-pending, and not locked. On failure it writes
+// the appropriate error status itself and returns ok = false; callers must
+// return immediately without writing anything further.
+//
+// This is the canonical session guard for all user-facing endpoints across
+// every package - use it instead of a local copy so the Locked check is
+// never accidentally omitted (the bug that motivated this: packages that
+// checked only Role == RolePending would pass a session whose revocation
+// failed due to a Valkey hiccup, since Locked is only set to true on a
+// session that was never revoked).
+func RequireActiveSession(d Deps, w http.ResponseWriter, r *http.Request) (Session, bool) {
+	token := bearerToken(r)
+	if token == "" {
+		http.Error(w, "missing bearer token", http.StatusUnauthorized)
+		return Session{}, false
+	}
+	sess, ok, err := ValidateSession(r.Context(), d.Valkey, token)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return Session{}, false
+	}
+	if !ok {
+		http.Error(w, "invalid or expired session", http.StatusUnauthorized)
+		return Session{}, false
+	}
+	if sess.Role == RolePending || sess.Locked {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return Session{}, false
+	}
+	return sess, true
+}
+
+// RequireAdminSession is RequireActiveSession plus an org-admin/super-admin
+// role check. Use for any endpoint that manages users, configuration, or
+// other resources that regular users must not touch.
+func RequireAdminSession(d Deps, w http.ResponseWriter, r *http.Request) (Session, bool) {
+	sess, ok := RequireActiveSession(d, w, r)
+	if !ok {
+		return Session{}, false
+	}
+	if sess.Role != RoleOrgAdmin && sess.Role != RoleSuperAdmin {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return Session{}, false
+	}
+	return sess, true
+}
+
 // UserResponse is one entry in UsersHandler's JSON array - every column an
 // admin frontend needs to derive a single status (Pending / Active /
 // Locked) per row and decide which actions to offer for it.

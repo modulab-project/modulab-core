@@ -40,7 +40,9 @@ import (
 	"log"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
@@ -135,21 +137,19 @@ func rowToResponse(r db.AIProviderRow) ProviderResponse {
 	}
 }
 
-func requireApprovedSession(deps auth.Deps, r *http.Request) (sess auth.Session, ok bool) {
-	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if token == "" {
-		return auth.Session{}, false
+// chatRPMLimit reads the configured chat requests-per-minute limit from
+// core_settings. Returns 60 as the default when the key is absent or
+// unparseable; 0 means unlimited.
+func chatRPMLimit(ctx context.Context, pool *db.Pool) int {
+	val, ok, err := pool.GetSetting(ctx, "ai_chat_rpm_limit")
+	if err != nil || !ok || val == "" {
+		return 60 // default: 60 RPM
 	}
-	var err error
-	var valid bool
-	sess, valid, err = auth.ValidateSession(r.Context(), deps.Valkey, token)
-	if err != nil || !valid {
-		return auth.Session{}, false
+	n, err := strconv.Atoi(val)
+	if err != nil || n < 0 {
+		return 60
 	}
-	if sess.Role == "pending" || sess.Locked {
-		return auth.Session{}, false
-	}
-	return sess, true
+	return n
 }
 
 // writeSSE sends a single SSE data line.
@@ -432,6 +432,49 @@ func fetchModels(ctx context.Context, provType, baseURL, apiKey string) ([]strin
 	return ids, nil
 }
 
+// AdminSettingsHandler handles GET and PATCH /v1/admin/ai/settings.
+// Auth is enforced by the superAdminOnly middleware in main.go.
+//
+// The single configurable setting is chat_rpm_limit: how many POST /v1/ai/chat
+// requests a single user may make per minute (0 = unlimited). The default when
+// the key is absent is 60 RPM (see chatRPMLimit). Changes take effect
+// immediately on the next ChatHandler request - there is no restart needed and
+// no cache to flush, since chatRPMLimit reads from the database on every call.
+func AdminSettingsHandler(deps auth.Deps) http.HandlerFunc {
+	type aiSettings struct {
+		ChatRPMLimit int `json:"chat_rpm_limit"`
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			limit := chatRPMLimit(r.Context(), deps.Pool)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(aiSettings{ChatRPMLimit: limit})
+
+		case http.MethodPatch:
+			var body aiSettings
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				http.Error(w, "invalid request body", http.StatusBadRequest)
+				return
+			}
+			if body.ChatRPMLimit < 0 {
+				http.Error(w, "chat_rpm_limit must be >= 0 (0 = unlimited)", http.StatusBadRequest)
+				return
+			}
+			if err := deps.Pool.SetSetting(r.Context(), "ai_chat_rpm_limit", strconv.Itoa(body.ChatRPMLimit)); err != nil {
+				http.Error(w, "database error", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(aiSettings{ChatRPMLimit: body.ChatRPMLimit})
+
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	}
+}
+
 // ---- user handlers ---------------------------------------------------------
 
 // UserProvidersHandler handles GET /v1/ai/providers.
@@ -442,9 +485,8 @@ func UserProvidersHandler(deps auth.Deps) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		sess, ok := requireApprovedSession(deps, r)
+		sess, ok := auth.RequireActiveSession(deps, w, r)
 		if !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		rows, err := deps.Pool.ListAIProvidersForUser(r.Context(), sess.UserID)
@@ -480,9 +522,8 @@ func UserSetKeyHandler(deps auth.Deps) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		sess, ok := requireApprovedSession(deps, r)
+		sess, ok := auth.RequireActiveSession(deps, w, r)
 		if !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		providerID := r.PathValue("id")
@@ -520,9 +561,8 @@ func UserDeleteKeyHandler(deps auth.Deps) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		sess, ok := requireApprovedSession(deps, r)
+		sess, ok := auth.RequireActiveSession(deps, w, r)
 		if !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		providerID := r.PathValue("id")
@@ -542,9 +582,8 @@ func UserSetPreferredModelHandler(deps auth.Deps) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		sess, ok := requireApprovedSession(deps, r)
+		sess, ok := auth.RequireActiveSession(deps, w, r)
 		if !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		providerID := r.PathValue("id")
@@ -571,9 +610,8 @@ func UserListModelsHandler(deps auth.Deps) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		sess, ok := requireApprovedSession(deps, r)
+		sess, ok := auth.RequireActiveSession(deps, w, r)
 		if !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		providerID := r.PathValue("id")
@@ -620,10 +658,25 @@ func ChatHandler(deps auth.Deps) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		sess, ok := requireApprovedSession(deps, r)
+		sess, ok := auth.RequireActiveSession(deps, w, r)
 		if !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
+		}
+
+		// Per-user rate limiting: check the configured RPM cap before doing
+		// any DB or upstream AI work. A Valkey error here is non-fatal (fail
+		// open) — a cache hiccup must not block legitimate chat traffic.
+		rpmLimit := chatRPMLimit(r.Context(), deps.Pool)
+		if rpmLimit > 0 {
+			rlKey := "ratelimit:chat:" + sess.UserID
+			count, rlErr := deps.Valkey.IncrExpire(r.Context(), rlKey, time.Minute)
+			if rlErr != nil {
+				log.Printf("ai: rate limit check failed for %s: %v", sess.UserID, rlErr)
+			} else if count > int64(rpmLimit) {
+				w.Header().Set("Retry-After", "60")
+				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+				return
+			}
 		}
 
 		var req chatRequest

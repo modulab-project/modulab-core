@@ -22,6 +22,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -309,44 +310,17 @@ func cachedFeed(ctx context.Context, vk valkeyCache, feedID int, feedURL, label 
 	return arts, nil
 }
 
-// ---- Auth helpers (replicated from auth package to avoid coupling) ----------
+// ---- Local helpers ----------------------------------------------------------
 
-func bearerToken(r *http.Request) string {
-	return strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-}
-
-func requireActiveDeps(d auth.Deps, w http.ResponseWriter, r *http.Request) (auth.Session, bool) {
-	token := bearerToken(r)
-	if token == "" {
-		http.Error(w, "missing bearer token", http.StatusUnauthorized)
-		return auth.Session{}, false
-	}
-	sess, ok, err := auth.ValidateSession(r.Context(), d.Valkey, token)
+// isHTTPURL returns true when raw is a syntactically valid http or https URL.
+// Blocks javascript:, data:, and any other non-http scheme that could be used
+// as a stored XSS vector when the frontend renders URLs as anchor hrefs.
+func isHTTPURL(raw string) bool {
+	u, err := url.ParseRequestURI(strings.TrimSpace(raw))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return auth.Session{}, false
+		return false
 	}
-	if !ok {
-		http.Error(w, "invalid or expired session", http.StatusUnauthorized)
-		return auth.Session{}, false
-	}
-	if sess.Role == auth.RolePending {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return auth.Session{}, false
-	}
-	return sess, true
-}
-
-func requireAdminDeps(d auth.Deps, w http.ResponseWriter, r *http.Request) (auth.Session, bool) {
-	sess, ok := requireActiveDeps(d, w, r)
-	if !ok {
-		return auth.Session{}, false
-	}
-	if sess.Role != auth.RoleOrgAdmin && sess.Role != auth.RoleSuperAdmin {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return auth.Session{}, false
-	}
-	return sess, true
+	return u.Scheme == "http" || u.Scheme == "https"
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -365,7 +339,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 // AdminListHandler is GET /v1/admin/feeds.
 func AdminListHandler(d auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := requireAdminDeps(d, w, r); !ok {
+		if _, ok := auth.RequireAdminSession(d, w, r); !ok {
 			return
 		}
 		feeds, err := d.Pool.ListFeeds(r.Context())
@@ -390,7 +364,7 @@ func AdminListHandler(d auth.Deps) http.HandlerFunc {
 // Body: {"url": "...", "label": "..."}
 func AdminCreateHandler(d auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := requireAdminDeps(d, w, r); !ok {
+		if _, ok := auth.RequireAdminSession(d, w, r); !ok {
 			return
 		}
 		var body struct {
@@ -405,6 +379,10 @@ func AdminCreateHandler(d auth.Deps) http.HandlerFunc {
 		body.Label = strings.TrimSpace(body.Label)
 		if body.URL == "" || body.Label == "" {
 			http.Error(w, "url and label are required", http.StatusBadRequest)
+			return
+		}
+		if !isHTTPURL(body.URL) {
+			http.Error(w, "url must be a valid http or https URL", http.StatusBadRequest)
 			return
 		}
 		feed, err := d.Pool.CreateFeed(r.Context(), body.URL, body.Label)
@@ -425,7 +403,7 @@ func AdminCreateHandler(d auth.Deps) http.HandlerFunc {
 // Body: {"url": "...", "label": "..."} — both fields required.
 func AdminUpdateHandler(d auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := requireAdminDeps(d, w, r); !ok {
+		if _, ok := auth.RequireAdminSession(d, w, r); !ok {
 			return
 		}
 		id, err := strconv.Atoi(r.PathValue("id"))
@@ -447,6 +425,10 @@ func AdminUpdateHandler(d auth.Deps) http.HandlerFunc {
 			http.Error(w, "url and label are required", http.StatusBadRequest)
 			return
 		}
+		if !isHTTPURL(body.URL) {
+			http.Error(w, "url must be a valid http or https URL", http.StatusBadRequest)
+			return
+		}
 		found, err := d.Pool.UpdateFeed(r.Context(), id, body.URL, body.Label)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -466,7 +448,7 @@ func AdminUpdateHandler(d auth.Deps) http.HandlerFunc {
 // AdminDeleteHandler is DELETE /v1/admin/feeds/{id}.
 func AdminDeleteHandler(d auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := requireAdminDeps(d, w, r); !ok {
+		if _, ok := auth.RequireAdminSession(d, w, r); !ok {
 			return
 		}
 		id, err := strconv.Atoi(r.PathValue("id"))
@@ -495,7 +477,7 @@ func AdminDeleteHandler(d auth.Deps) http.HandlerFunc {
 // subscription state (enabled = true/false per feed).
 func FeedsHandler(d auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sess, ok := requireActiveDeps(d, w, r)
+		sess, ok := auth.RequireActiveSession(d, w, r)
 		if !ok {
 			return
 		}
@@ -523,7 +505,7 @@ func FeedsHandler(d auth.Deps) http.HandlerFunc {
 // Body: {"enabled": true|false}
 func SubscriptionHandler(d auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sess, ok := requireActiveDeps(d, w, r)
+		sess, ok := auth.RequireActiveSession(d, w, r)
 		if !ok {
 			return
 		}
@@ -557,7 +539,7 @@ func SubscriptionHandler(d auth.Deps) http.HandlerFunc {
 // where possible. Returns up to maxArticles items sorted newest-first.
 func NewsHandler(d auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sess, ok := requireActiveDeps(d, w, r)
+		sess, ok := auth.RequireActiveSession(d, w, r)
 		if !ok {
 			return
 		}
@@ -651,7 +633,7 @@ func newsSettingsDefaults(ctx context.Context, pool interface {
 // how many articles to show on the home page and whether to show images.
 func NewsConfigHandler(d auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := requireActiveDeps(d, w, r); !ok {
+		if _, ok := auth.RequireActiveSession(d, w, r); !ok {
 			return
 		}
 		_, homeCount, showImages := newsSettingsDefaults(r.Context(), d.Pool)
@@ -684,7 +666,7 @@ func AdminNewsSettingsHandler(d auth.Deps) http.HandlerFunc {
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := requireAdminDeps(d, w, r); !ok {
+		if _, ok := auth.RequireAdminSession(d, w, r); !ok {
 			return
 		}
 

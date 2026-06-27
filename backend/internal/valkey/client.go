@@ -23,18 +23,22 @@ type Client struct {
 	rdb *redis.Client
 }
 
-// New creates a client for addr ("host:port"). No authentication is
-// configured yet - neither .env.example nor config.Config has a
-// MODULAB_VALKEY_PASSWORD field today, so this matches current behavior.
-// Add one here (and to config.Config) if/when a password is introduced.
+// New creates a client for addr ("host:port"). password may be empty when
+// Valkey runs without authentication (the default for a single-node homelab
+// deployment where Valkey is not exposed beyond the Docker-internal network).
+// Set MODULAB_VALKEY_PASSWORD to require authentication; the value is passed
+// through to go-redis as-is.
 //
 // This does not dial immediately - go-redis connects lazily on first use -
 // so it never fails here even if Valkey is not yet reachable at process
 // start. Call Ping to check reachability; main.go does this once at boot
 // (for the startup log) and again on every /healthz request, mirroring the
 // TCP-reachability stub this replaces.
-func New(addr string) *Client {
-	return &Client{rdb: redis.NewClient(&redis.Options{Addr: addr})}
+func New(addr, password string) *Client {
+	return &Client{rdb: redis.NewClient(&redis.Options{
+		Addr:     addr,
+		Password: password,
+	})}
 }
 
 // Ping verifies the connection is currently alive.
@@ -198,4 +202,21 @@ func (c *Client) BLPop(ctx context.Context, timeout time.Duration, key string) (
 	// BLPop's result is [key, value] - result[0] is always the key name we
 	// already know (key), only result[1] is new information.
 	return result[1], true, nil
+}
+
+// IncrExpire atomically increments key and (re)sets its TTL to ttl via a
+// pipeline. Returns the new counter value. Intended for fixed-window rate
+// limiting: the TTL is refreshed on every increment so the window slides
+// forward from the last request, which is slightly stricter than a pure
+// fixed window but simpler and requires no Lua scripting. On Valkey/Redis
+// error the caller should fail open (let the request through) rather than
+// blocking everyone on a cache hiccup.
+func (c *Client) IncrExpire(ctx context.Context, key string, ttl time.Duration) (int64, error) {
+	pipe := c.rdb.Pipeline()
+	incr := pipe.Incr(ctx, key)
+	pipe.Expire(ctx, key, ttl)
+	if _, err := pipe.Exec(ctx); err != nil {
+		return 0, fmt.Errorf("valkey: incr-expire %q: %w", key, err)
+	}
+	return incr.Val(), nil
 }

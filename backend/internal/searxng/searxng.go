@@ -275,18 +275,8 @@ func DeleteHandler(pool *db.Pool) http.HandlerFunc {
 // GET returns the current prefs; POST accepts a partial or full JSON body and saves it.
 func SearchPrefsHandler(deps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if token == "" {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		sess, ok, err := auth.ValidateSession(r.Context(), deps.Valkey, token)
-		if err != nil || !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		if sess.Role == "pending" || sess.Locked {
-			http.Error(w, "forbidden", http.StatusForbidden)
+		sess, ok := auth.RequireActiveSession(deps, w, r)
+		if !ok {
 			return
 		}
 
@@ -341,18 +331,8 @@ func SearchHandler(deps auth.Deps, masterKey string) http.HandlerFunc {
 			return
 		}
 
-		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if token == "" {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		sess, ok, err := auth.ValidateSession(r.Context(), deps.Valkey, token)
-		if err != nil || !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		if sess.Role == "pending" || sess.Locked {
-			http.Error(w, "forbidden", http.StatusForbidden)
+		sess, ok := auth.RequireActiveSession(deps, w, r)
+		if !ok {
 			return
 		}
 
@@ -463,7 +443,7 @@ func fetchPage(ctx context.Context, baseURL, query string, pageno int, sp search
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("searxng returned HTTP %d", resp.StatusCode)
 	}
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20)) // 2 MB cap
 	if err != nil {
 		return nil, err
 	}

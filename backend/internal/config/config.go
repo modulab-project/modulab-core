@@ -33,8 +33,9 @@ type Config struct {
 	DBUser     string
 	DBPassword string
 
-	ValkeyHost string
-	ValkeyPort string
+	ValkeyHost     string
+	ValkeyPort     string
+	ValkeyPassword string
 
 	DenoSocketPath string
 	DenoBinaryPath string
@@ -97,8 +98,9 @@ func Load() (Config, error) {
 		DBUser:     getEnvDefault("MODULAB_DB_USER", "modulab"),
 		DBPassword: os.Getenv("MODULAB_DB_PASSWORD"),
 
-		ValkeyHost: getEnvDefault("MODULAB_VALKEY_HOST", "localhost"),
-		ValkeyPort: getEnvDefault("MODULAB_VALKEY_PORT", "6379"),
+		ValkeyHost:     getEnvDefault("MODULAB_VALKEY_HOST", "localhost"),
+		ValkeyPort:     getEnvDefault("MODULAB_VALKEY_PORT", "6379"),
+		ValkeyPassword: os.Getenv("MODULAB_VALKEY_PASSWORD"),
 
 		DenoSocketPath: getEnvDefault("MODULAB_DENO_SOCKET_PATH", "/tmp/modulab-deno.sock"),
 		DenoBinaryPath: getEnvDefault("MODULAB_DENO_BINARY_PATH", "/usr/local/bin/deno"),

@@ -94,7 +94,7 @@ func main() {
 		log.Fatalf("db: encryption migration: %v", err)
 	}
 
-	valkeyClient := valkey.New(net.JoinHostPort(cfg.ValkeyHost, cfg.ValkeyPort))
+	valkeyClient := valkey.New(net.JoinHostPort(cfg.ValkeyHost, cfg.ValkeyPort), cfg.ValkeyPassword)
 	defer valkeyClient.Close()
 
 	// Checked once, actively, at boot - unlike /healthz's lazy per-request
@@ -346,6 +346,8 @@ func main() {
 	// require any approved session. The chat endpoint streams SSE, so
 	// Traefik/Nginx buffering is suppressed via X-Accel-Buffering: no inside
 	// ChatHandler itself.
+	mux.Handle("GET /v1/admin/ai/settings", superAdminOnly(ai.AdminSettingsHandler(authDeps)))
+	mux.Handle("PATCH /v1/admin/ai/settings", superAdminOnly(ai.AdminSettingsHandler(authDeps)))
 	mux.Handle("GET /v1/admin/ai/providers", superAdminOnly(ai.AdminListHandler(authDeps)))
 	mux.Handle("POST /v1/admin/ai/providers", superAdminOnly(ai.AdminCreateHandler(authDeps)))
 	mux.Handle("PATCH /v1/admin/ai/providers/{id}", superAdminOnly(ai.AdminPatchHandler(authDeps)))
@@ -394,9 +396,35 @@ func main() {
 		effectiveGroupPrefix = "(not yet configured)"
 	}
 	log.Printf("modulab-core listening on %s (group prefix %q, frontend origin %q)", cfg.HTTPAddr, effectiveGroupPrefix, cfg.FrontendBaseURL)
-	if err := http.ListenAndServe(cfg.HTTPAddr, corsMiddleware(cfg.FrontendBaseURL, mux)); err != nil {
+	handler := corsMiddleware(cfg.FrontendBaseURL, mux)
+	handler = maxBodyMiddleware(handler)
+	handler = secHeadersMiddleware(handler)
+	if err := http.ListenAndServe(cfg.HTTPAddr, handler); err != nil {
 		log.Fatalf("server: %v", err)
 	}
+}
+
+// maxBodyMiddleware caps every request body at 1 MB. Bodies larger than this
+// cause json.Decoder.Decode to return an error, which each handler already
+// treats as a 400. The cap prevents a malicious client from sending an
+// arbitrarily large body to exhaust server memory.
+func maxBodyMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB
+		next.ServeHTTP(w, r)
+	})
+}
+
+// secHeadersMiddleware adds defensive HTTP response headers that do not
+// require per-route knowledge. TLS-related headers (HSTS, etc.) are handled
+// by Traefik at the edge and are intentionally omitted here.
+func secHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // corsMiddleware allows cfg.FrontendBaseURL's origin to call every route on
