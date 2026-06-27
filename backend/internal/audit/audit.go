@@ -34,14 +34,26 @@ import (
 // Event type constants. Callers import these rather than using raw strings so
 // a typo shows up as a compile error, not a silent mis-labelled log entry.
 const (
+	// User lifecycle events (admin-driven)
 	EventUserApproved  = "user.approved"
 	EventUserLocked    = "user.locked"
 	EventUserUnlocked  = "user.unlocked"
 	EventUserDeleted   = "user.deleted"
-	EventConfigSMTP    = "config.smtp"
-	EventConfigSMTPDel = "config.smtp.deleted"
-	EventConfigOIDC    = "config.oidc"
-	EventConfigDNS     = "config.dns_challenge"
+	// User self-service
+	EventUserSelfDeleted = "user.self_deleted"
+	// Auth events
+	EventAuthLogin = "auth.login"
+	// System config events
+	EventConfigSMTP         = "config.smtp"
+	EventConfigSMTPDel      = "config.smtp.deleted"
+	EventConfigOIDC         = "config.oidc"
+	EventConfigDNS          = "config.dns_challenge"
+	EventConfigSearXNG      = "config.searxng"
+	EventConfigSearXNGDel   = "config.searxng.deleted"
+	EventConfigAIProvider    = "config.ai_provider"
+	EventConfigAIProviderDel = "config.ai_provider.deleted"
+	EventConfigAIKeyCleared  = "config.ai_provider.key_cleared"
+	// Setup
 	EventSetupComplete = "setup.completed"
 )
 

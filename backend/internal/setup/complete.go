@@ -6,8 +6,10 @@ package setup
 
 import (
 	"context"
+	"log"
 	"net/http"
 
+	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/bootstrap"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
 )
@@ -26,7 +28,10 @@ type CompleteResponse struct {
 // (spec section 3.3's Dynamic Prefix Hard Gate leaves them RolePending
 // instead) - db.Pool.HasSuperAdmin is what actually verifies step 6
 // succeeded, not just that login was attempted.
-func CompleteHandler(pool *db.Pool, mgr *bootstrap.Manager) http.HandlerFunc {
+//
+// masterKeyEnv is the raw MODULAB_MASTER_KEY value, forwarded here so the
+// handler can record an audit entry without requiring a separate wrapper.
+func CompleteHandler(pool *db.Pool, mgr *bootstrap.Manager, masterKeyEnv string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -48,6 +53,19 @@ func CompleteHandler(pool *db.Pool, mgr *bootstrap.Manager) http.HandlerFunc {
 		}
 
 		mgr.Complete()
+
+		// Best-effort audit. No user session exists at this point (the
+		// endpoint is behind the bootstrap token, not a user session), so
+		// actor_id is "bootstrap" and actor_email is left empty.
+		if masterKey, err := ResolveMasterKey(ctx, pool, masterKeyEnv); err == nil {
+			if err := audit.Log(ctx, pool, masterKey, audit.LogParams{
+				EventType: audit.EventSetupComplete,
+				ActorID:   "bootstrap",
+			}); err != nil {
+				log.Printf("setup: audit complete: %v", err)
+			}
+		}
+
 		writeJSON(w, http.StatusOK, CompleteResponse{Completed: true})
 	}
 }

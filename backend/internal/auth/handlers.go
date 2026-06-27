@@ -12,12 +12,14 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
 	"github.com/modulab-project/modulab-core/backend/internal/mail"
 	"github.com/modulab-project/modulab-core/backend/internal/notify"
@@ -342,6 +344,19 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 			return
 		}
 
+		// Best-effort: audit the successful login. A failed write must not
+		// block an otherwise-successful login — log the error and continue.
+		if masterKey, mkErr := setup.ResolveMasterKey(ctx, d.Pool, d.MasterKeyEnv); mkErr == nil {
+			if err := audit.Log(ctx, d.Pool, masterKey, audit.LogParams{
+				EventType:  audit.EventAuthLogin,
+				ActorID:    claims.Subject,
+				ActorEmail: claims.Email,
+				Details:    fmt.Sprintf(`{"role":%q}`, sessionRole),
+			}); err != nil {
+				log.Printf("auth: audit login for %s: %v", claims.Subject, err)
+			}
+		}
+
 		redirectToFrontend(w, r, target, url.Values{
 			"token": {token},
 			"email": {claims.Email},
@@ -464,6 +479,17 @@ func DeleteSelfHandler(d Deps) http.HandlerFunc {
 		// which is fine: the caller is about to discard it anyway.
 		if err := RevokeUserSessions(ctx, d.Valkey, sess.UserID); err != nil {
 			logRevokeError("delete-self", sess.UserID, err)
+		}
+		// Best-effort: audit the self-deletion. The row is already gone and
+		// sessions are revoked; a failed write must not turn this into a 500.
+		if masterKey, mkErr := setup.ResolveMasterKey(ctx, d.Pool, d.MasterKeyEnv); mkErr == nil {
+			if err := audit.Log(ctx, d.Pool, masterKey, audit.LogParams{
+				EventType:  audit.EventUserSelfDeleted,
+				ActorID:    sess.UserID,
+				ActorEmail: sess.Email,
+			}); err != nil {
+				log.Printf("auth: audit self-delete for %s: %v", sess.UserID, err)
+			}
 		}
 		// sess.Email/sess.Name, not a fresh d.Pool.GetUser lookup: the row
 		// is already gone by this point, so there is nothing left in the

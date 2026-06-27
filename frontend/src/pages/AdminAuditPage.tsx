@@ -9,14 +9,26 @@ import { AppShell } from "../components/AppShell";
 // Known event types for the filter dropdown — matches the constants in
 // backend/internal/audit/audit.go.
 const EVENT_TYPES = [
+  // Auth
+  "auth.login",
+  // User lifecycle (admin-driven)
   "user.approved",
   "user.locked",
   "user.unlocked",
   "user.deleted",
+  // User self-service
+  "user.self_deleted",
+  // System config
   "config.smtp",
   "config.smtp.deleted",
   "config.oidc",
   "config.dns_challenge",
+  "config.searxng",
+  "config.searxng.deleted",
+  "config.ai_provider",
+  "config.ai_provider.deleted",
+  "config.ai_provider.key_cleared",
+  // Setup
   "setup.completed",
 ];
 

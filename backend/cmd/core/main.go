@@ -232,7 +232,7 @@ func main() {
 	// setup.CompleteHandler / missingSteps for what "actually checks out"
 	// means, in particular for step 6 (a bound Super-Admin, not just an
 	// attempted login).
-	mux.Handle("/v1/setup/complete", bootstrapMgr.Middleware(setup.CompleteHandler(pool, bootstrapMgr)))
+	mux.Handle("/v1/setup/complete", bootstrapMgr.Middleware(setup.CompleteHandler(pool, bootstrapMgr, cfg.MasterKey)))
 
 	// The actual end-user login flow (spec section 6.5 wizard step 6 /
 	// section 3.3) - deliberately NOT wrapped in bootstrapMgr.Middleware,
@@ -375,7 +375,7 @@ func main() {
 		}
 		searxng.ConfigureHandler(pool, masterKey)(w, r)
 	})))
-	mux.Handle("DELETE /v1/admin/searxng", superAdminOnly(searxng.DeleteHandler(pool)))
+	mux.Handle("DELETE /v1/admin/searxng", superAdminOnly(searxng.DeleteHandler(pool, cfg.MasterKey)))
 	mux.HandleFunc("GET /v1/search/web", searxng.SearchHandler(authDeps, cfg.MasterKey))
 	mux.HandleFunc("GET /v1/user/search-prefs", searxng.SearchPrefsHandler(authDeps))
 	mux.HandleFunc("POST /v1/user/search-prefs", searxng.SearchPrefsHandler(authDeps))

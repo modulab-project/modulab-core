@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -34,9 +35,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
 	"github.com/modulab-project/modulab-core/backend/internal/crypto"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/setup"
 )
 
 const (
@@ -243,6 +246,17 @@ func ConfigureHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 			return
 		}
 
+		// Best-effort audit; a failed write must not undo the saved config.
+		sess, _ := auth.SessionFromContext(r.Context())
+		if err := audit.Log(ctx, pool, masterKey, audit.LogParams{
+			EventType:  audit.EventConfigSearXNG,
+			ActorID:    sess.UserID,
+			ActorEmail: sess.Email,
+			Details:    fmt.Sprintf(`{"url":%q}`, rawURL),
+		}); err != nil {
+			log.Printf("searxng: audit configure: %v", err)
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(SearXNGStatus{
 			Configured: true,
@@ -254,7 +268,10 @@ func ConfigureHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 }
 
 // DeleteHandler returns the HTTP handler for DELETE /v1/admin/searxng.
-func DeleteHandler(pool *db.Pool) http.HandlerFunc {
+// masterKeyEnv is the raw MODULAB_MASTER_KEY value (or "" to fall back to the
+// DB-persisted key) — passed so the handler can write an audit entry without
+// a separate wrapper in main.go.
+func DeleteHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -267,6 +284,20 @@ func DeleteHandler(pool *db.Pool) http.HandlerFunc {
 				return
 			}
 		}
+
+		// Best-effort audit; a failed write must not turn a successful delete
+		// into an error.
+		sess, _ := auth.SessionFromContext(ctx)
+		if masterKey, err := setup.ResolveMasterKey(ctx, pool, masterKeyEnv); err == nil {
+			if err := audit.Log(ctx, pool, masterKey, audit.LogParams{
+				EventType:  audit.EventConfigSearXNGDel,
+				ActorID:    sess.UserID,
+				ActorEmail: sess.Email,
+			}); err != nil {
+				log.Printf("searxng: audit delete: %v", err)
+			}
+		}
+
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

@@ -44,8 +44,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/setup"
 )
 
 // ---- types -----------------------------------------------------------------
@@ -240,6 +242,20 @@ func AdminCreateHandler(deps auth.Deps) http.HandlerFunc {
 			http.Error(w, "database error", http.StatusInternalServerError)
 			return
 		}
+
+		// Best-effort audit; a failed write must not block the response.
+		sess, _ := auth.SessionFromContext(r.Context())
+		if masterKey, err := setup.ResolveMasterKey(r.Context(), deps.Pool, deps.MasterKeyEnv); err == nil {
+			if err := audit.Log(r.Context(), deps.Pool, masterKey, audit.LogParams{
+				EventType:  audit.EventConfigAIProvider,
+				ActorID:    sess.UserID,
+				ActorEmail: sess.Email,
+				Details:    fmt.Sprintf(`{"action":"create","provider_id":%q,"name":%q}`, req.ID, req.Name),
+			}); err != nil {
+				log.Printf("ai: audit create provider %q: %v", req.ID, err)
+			}
+		}
+
 		created, _, err := deps.Pool.GetAIProvider(r.Context(), req.ID)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
@@ -308,6 +324,20 @@ func AdminPatchHandler(deps auth.Deps) http.HandlerFunc {
 			http.Error(w, "database error", http.StatusInternalServerError)
 			return
 		}
+
+		// Best-effort audit; a failed write must not block the response.
+		sess, _ := auth.SessionFromContext(r.Context())
+		if masterKey, err := setup.ResolveMasterKey(r.Context(), deps.Pool, deps.MasterKeyEnv); err == nil {
+			if err := audit.Log(r.Context(), deps.Pool, masterKey, audit.LogParams{
+				EventType:  audit.EventConfigAIProvider,
+				ActorID:    sess.UserID,
+				ActorEmail: sess.Email,
+				Details:    fmt.Sprintf(`{"action":"patch","provider_id":%q,"name":%q}`, id, existing.Name),
+			}); err != nil {
+				log.Printf("ai: audit patch provider %q: %v", id, err)
+			}
+		}
+
 		updated, _, _ := deps.Pool.GetAIProvider(r.Context(), id)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(rowToResponse(updated))
@@ -322,6 +352,14 @@ func AdminDeleteHandler(deps auth.Deps) http.HandlerFunc {
 			return
 		}
 		id := r.PathValue("id")
+
+		// Read the name before deleting so the audit entry can include it.
+		// Best-effort: if the lookup fails, fall back to the ID.
+		provName := id
+		if prov, found, err := deps.Pool.GetAIProvider(r.Context(), id); err == nil && found {
+			provName = prov.Name
+		}
+
 		found, err := deps.Pool.DeleteAIProvider(r.Context(), id)
 		if err != nil {
 			http.Error(w, "database error", http.StatusInternalServerError)
@@ -331,6 +369,21 @@ func AdminDeleteHandler(deps auth.Deps) http.HandlerFunc {
 			http.Error(w, "provider not found", http.StatusNotFound)
 			return
 		}
+
+		// Best-effort audit; a failed write must not turn a successful delete
+		// into an error.
+		sess, _ := auth.SessionFromContext(r.Context())
+		if masterKey, err := setup.ResolveMasterKey(r.Context(), deps.Pool, deps.MasterKeyEnv); err == nil {
+			if err := audit.Log(r.Context(), deps.Pool, masterKey, audit.LogParams{
+				EventType:  audit.EventConfigAIProviderDel,
+				ActorID:    sess.UserID,
+				ActorEmail: sess.Email,
+				Details:    fmt.Sprintf(`{"provider_id":%q,"name":%q}`, id, provName),
+			}); err != nil {
+				log.Printf("ai: audit delete provider %q: %v", id, err)
+			}
+		}
+
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -348,6 +401,20 @@ func AdminClearKeyHandler(deps auth.Deps) http.HandlerFunc {
 			http.Error(w, "database error", http.StatusInternalServerError)
 			return
 		}
+
+		// Best-effort audit.
+		sess, _ := auth.SessionFromContext(r.Context())
+		if masterKey, err := setup.ResolveMasterKey(r.Context(), deps.Pool, deps.MasterKeyEnv); err == nil {
+			if err := audit.Log(r.Context(), deps.Pool, masterKey, audit.LogParams{
+				EventType:  audit.EventConfigAIKeyCleared,
+				ActorID:    sess.UserID,
+				ActorEmail: sess.Email,
+				Details:    fmt.Sprintf(`{"provider_id":%q}`, id),
+			}); err != nil {
+				log.Printf("ai: audit clear key for provider %q: %v", id, err)
+			}
+		}
+
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
