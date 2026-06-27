@@ -328,11 +328,18 @@ func ApproveUserHandler(d Deps) http.HandlerFunc {
 		enqueueMail(r.Context(), d, "approve", subject, func(email, name string) mail.Message {
 			return mail.ApprovedMessage(email, name, d.FrontendBaseURL)
 		})
+		// Best-effort: include the target's email in the audit entry so the
+		// log is readable without having to cross-reference UUIDs.
+		targetEmail := ""
+		if u, exists, err := d.Pool.GetUser(r.Context(), subject); err == nil && exists {
+			targetEmail = u.Email
+		}
 		logAudit(r.Context(), d, audit.LogParams{
-			EventType:  audit.EventUserApproved,
-			ActorID:    sess.UserID,
-			ActorEmail: sess.Email,
-			TargetID:   subject,
+			EventType:   audit.EventUserApproved,
+			ActorID:     sess.UserID,
+			ActorEmail:  sess.Email,
+			TargetID:    subject,
+			TargetEmail: targetEmail,
 		})
 		w.WriteHeader(http.StatusNoContent)
 	}
@@ -389,11 +396,17 @@ func LockUserHandler(d Deps) http.HandlerFunc {
 		enqueueMail(r.Context(), d, "lock", subject, func(email, name string) mail.Message {
 			return mail.LockedMessage(email, name)
 		})
+		// Best-effort: include the target's email in the audit entry.
+		lockedEmail := ""
+		if u, exists, err := d.Pool.GetUser(r.Context(), subject); err == nil && exists {
+			lockedEmail = u.Email
+		}
 		logAudit(r.Context(), d, audit.LogParams{
-			EventType:  audit.EventUserLocked,
-			ActorID:    sess.UserID,
-			ActorEmail: sess.Email,
-			TargetID:   subject,
+			EventType:   audit.EventUserLocked,
+			ActorID:     sess.UserID,
+			ActorEmail:  sess.Email,
+			TargetID:    subject,
+			TargetEmail: lockedEmail,
 		})
 		w.WriteHeader(http.StatusNoContent)
 	}
@@ -425,11 +438,17 @@ func UnlockUserHandler(d Deps) http.HandlerFunc {
 		enqueueMail(r.Context(), d, "unlock", subject, func(email, name string) mail.Message {
 			return mail.UnlockedMessage(email, name, d.FrontendBaseURL)
 		})
+		// Best-effort: include the target's email in the audit entry.
+		unlockedEmail := ""
+		if u, exists, err := d.Pool.GetUser(r.Context(), subject); err == nil && exists {
+			unlockedEmail = u.Email
+		}
 		logAudit(r.Context(), d, audit.LogParams{
-			EventType:  audit.EventUserUnlocked,
-			ActorID:    sess.UserID,
-			ActorEmail: sess.Email,
-			TargetID:   subject,
+			EventType:   audit.EventUserUnlocked,
+			ActorID:     sess.UserID,
+			ActorEmail:  sess.Email,
+			TargetID:    subject,
+			TargetEmail: unlockedEmail,
 		})
 		w.WriteHeader(http.StatusNoContent)
 	}

@@ -316,9 +316,16 @@ func main() {
 					Port        int    `json:"port"`
 					FromAddress string `json:"from_address"`
 					Encryption  string `json:"encryption"`
+					Password    string `json:"password"`
 				}
 				_ = json.Unmarshal(bodyBytes, &newReq)
 				details := smtpDiff(oldSMTP, newReq.Host, newReq.Port, newReq.FromAddress, newReq.Encryption)
+				// smtpDiff omits the password (never log credentials). If the
+				// diff is empty but the request contained a new password, make
+				// that visible in the audit entry instead of showing nothing.
+				if details == "{}" && newReq.Password != "" {
+					details = `{"credentials":"updated"}`
+				}
 				if err := audit.Log(r.Context(), pool, masterKey, audit.LogParams{
 					EventType:  audit.EventConfigSMTP,
 					ActorID:    sess.UserID,

@@ -225,11 +225,11 @@ function EventBadge({ type }: { type: string }) {
 function DetailsCell({ raw }: { raw: string }) {
   try {
     const parsed = JSON.parse(raw);
+    const entries = Object.entries(parsed as Record<string, string>);
+    if (entries.length === 0) return <span className="text-gray-300 dark:text-gray-600">—</span>;
     return (
       <span title={raw}>
-        {Object.entries(parsed as Record<string, string>)
-          .map(([k, v]) => `${k}: ${v}`)
-          .join(", ")}
+        {entries.map(([k, v]) => `${k}: ${v}`).join(" · ")}
       </span>
     );
   } catch {
