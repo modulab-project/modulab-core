@@ -198,6 +198,7 @@
     "search_clear": "Clear search",
     "no_modules_title": "No modules installed yet",
     "no_modules_body": "Module support is part of Phase 3 of the project - once it ships, your installed apps and bookmarks will show up here.",
+    "quick_links": "Quick Access",
     "search": {
       "tab_web": "Web",
       "tab_images": "Images",
@@ -282,6 +283,7 @@
     "admin_section": "Admin",
     "users_link": "Users",
     "news_feeds_link": "News Feeds",
+    "quick_links_link": "Quick Access Tiles",
     "smtp_link": "SMTP",
     "searxng_link": "SearXNG",
     "dark_mode": "Dark mode",

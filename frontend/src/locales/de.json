@@ -198,6 +198,7 @@
     "search_clear": "Suche leeren",
     "no_modules_title": "Noch keine Module installiert",
     "no_modules_body": "Modul-Unterstützung ist Teil von Phase 3 des Projekts – sobald sie verfügbar ist, erscheinen deine installierten Apps und Lesezeichen hier.",
+    "quick_links": "Schnellzugriff",
     "search": {
       "tab_web": "Web",
       "tab_images": "Bilder",
@@ -282,6 +283,7 @@
     "admin_section": "Admin",
     "users_link": "Benutzer",
     "news_feeds_link": "News-Feeds",
+    "quick_links_link": "Schnellzugriff-Kacheln",
     "smtp_link": "SMTP",
     "searxng_link": "SearXNG",
     "dark_mode": "Dunkelmodus",

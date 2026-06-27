@@ -27,6 +27,7 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/db"
 	"github.com/modulab-project/modulab-core/backend/internal/mail"
 	"github.com/modulab-project/modulab-core/backend/internal/news"
+	"github.com/modulab-project/modulab-core/backend/internal/quicklinks"
 	"github.com/modulab-project/modulab-core/backend/internal/searxng"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
 	"github.com/modulab-project/modulab-core/backend/internal/valkey"
@@ -357,6 +358,19 @@ func main() {
 	mux.HandleFunc("PATCH /v1/ai/keys/{id}/model", ai.UserSetPreferredModelHandler(authDeps))
 	mux.HandleFunc("GET /v1/ai/keys/{id}/models", ai.UserListModelsHandler(authDeps))
 	mux.HandleFunc("POST /v1/ai/chat", ai.ChatHandler(authDeps))
+
+	// Quick links / Schnellzugriff-Grid (internal/quicklinks):
+	//   User endpoints: any approved session can list merged tiles, create or
+	//   delete personal tiles, and save their custom ordering.
+	//   Admin CRUD: org-admin / super-admin only.
+	mux.HandleFunc("GET /v1/quick-links", quicklinks.ListHandler(authDeps))
+	mux.HandleFunc("POST /v1/quick-links", quicklinks.CreateUserLinkHandler(authDeps))
+	mux.HandleFunc("DELETE /v1/quick-links/{id}", quicklinks.DeleteUserLinkHandler(authDeps))
+	mux.HandleFunc("PATCH /v1/quick-links/order", quicklinks.SaveOrderHandler(authDeps))
+	mux.HandleFunc("GET /v1/admin/quick-links", quicklinks.AdminListHandler(authDeps))
+	mux.HandleFunc("POST /v1/admin/quick-links", quicklinks.AdminCreateHandler(authDeps))
+	mux.HandleFunc("PATCH /v1/admin/quick-links/{id}", quicklinks.AdminUpdateHandler(authDeps))
+	mux.HandleFunc("DELETE /v1/admin/quick-links/{id}", quicklinks.AdminDeleteHandler(authDeps))
 
 	// The mail worker (internal/mail) runs for Core's entire lifetime as a
 	// single background goroutine, draining whatever

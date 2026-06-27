@@ -23,6 +23,8 @@ import {
 } from "../lib/api";
 import { getSessionToken } from "../lib/session";
 import { AppShell } from "../components/AppShell";
+import { QuickLinksGrid } from "../components/QuickLinksGrid";
+import { listQuickLinks, type Tile } from "../lib/quicklinks";
 
 // Spec section 6.4's "/" route ("Startseite: Begrüßung, Suche, Widgets,
 // Schnellzugriff", Consumer+ access). This is the network-wide browser
@@ -91,6 +93,9 @@ export default function Home() {
     }
   }, [location.search]);
 
+  // Quick links state
+  const [tiles, setTiles] = useState<Tile[]>([]);
+
   // News state
   const [articles, setArticles] = useState<NewsArticle[]>([]);
   const [newsLoading, setNewsLoading] = useState(true);
@@ -140,6 +145,14 @@ export default function Home() {
       .catch(() => {});
   }, []);
 
+  const loadTiles = useCallback(() => {
+    const token = getSessionToken();
+    if (!token) return;
+    listQuickLinks(token)
+      .then((t) => setTiles(t ?? []))
+      .catch(() => {});
+  }, []);
+
   // Guard: only load news+prefs once on initial session, not on every 15s poll.
   // useAuthenticatedSession creates a new session object on each /v1/auth/me
   // response, so session reference changes on every poll - without this ref
@@ -151,8 +164,9 @@ export default function Home() {
       loadNews();
       loadPrefs();
       loadSearchPrefs();
+      loadTiles();
     }
-  }, [session, loadNews, loadPrefs, loadSearchPrefs]);
+  }, [session, loadNews, loadPrefs, loadSearchPrefs, loadTiles]);
 
   // handleSearch is called by Hero when the user submits the search box,
   // or by the category tab switcher when the user switches tabs.
@@ -268,7 +282,14 @@ export default function Home() {
             }}
           />
         )}
-        <EmptyModulesNotice />
+        <div className="mx-auto max-w-3xl pb-8 px-4">
+          <div className="mb-3 px-1">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+              {t("home.quick_links")}
+            </p>
+          </div>
+          <QuickLinksGrid initialTiles={tiles} token={getSessionToken() ?? ""} />
+        </div>
         <NewsPreview
           articles={articles}
           loading={newsLoading}
@@ -677,27 +698,6 @@ function ImageResultCard({ result }: { result: WebResult }) {
         <p className="line-clamp-2 text-[11px] leading-tight text-white">{result.title}</p>
       </div>
     </a>
-  );
-}
-
-// --- Empty modules/bookmarks notice --------------------------------------
-
-// Honest placeholder, not a fake tile grid: module installs and bookmarks
-// have no backend yet (Phase 3 of the project roadmap, spec sections 4.x/
-// 5.x). This block is the one thing in this file that is meant to be torn
-// out and replaced once that API exists - everything else here (hero) is
-// already real, and the header/footer chrome lives in AppShell now.
-function EmptyModulesNotice() {
-  const { t } = useTranslation();
-  return (
-    <div className="mx-auto max-w-xl pb-14">
-      <div className="rounded-2xl border border-dashed border-gray-300 px-6 py-10 text-center dark:border-gray-700">
-        <p className="text-sm font-medium text-gray-700 dark:text-gray-200">{t("home.no_modules_title")}</p>
-        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          {t("home.no_modules_body")}
-        </p>
-      </div>
-    </div>
   );
 }
 
