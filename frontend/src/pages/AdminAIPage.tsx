@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   adminListAIProviders,
@@ -152,6 +152,11 @@ export default function AdminAIPage() {
   return (
     <AppShell session={session}>
       <div className="mx-auto w-full max-w-2xl py-10">
+        <Link to="/admin/system"
+          className="mb-6 flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200">
+          <i className="ti ti-arrow-left text-[14px]" />
+          {t("admin.system.back")}
+        </Link>
         <h1 className="mb-1 text-xl font-semibold">{t("admin.ai.title")}</h1>
         <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">
           {t("admin.ai.subtitle")}

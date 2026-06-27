@@ -48,11 +48,12 @@ export default function App() {
       <Route path="/user/search-prefs" element={<UserSearchPrefsPage />} />
       <Route path="/user/ai-keys" element={<UserAIKeysPage />} />
       <Route path="/admin/users" element={<AdminUsersPage />} />
-      {/* Legacy direct routes redirect to the unified system config page */}
-      <Route path="/admin/smtp" element={<Navigate to="/admin/system" replace />} />
-      <Route path="/admin/searxng" element={<Navigate to="/admin/system" replace />} />
+      {/* Legacy direct routes redirect to the sub-pages under /admin/system */}
+      <Route path="/admin/smtp" element={<Navigate to="/admin/system/smtp" replace />} />
+      <Route path="/admin/searxng" element={<Navigate to="/admin/system/searxng" replace />} />
       <Route path="/admin/feeds" element={<AdminFeedsPage />} />
-      <Route path="/admin/ai" element={<AdminAIPage />} />
+      <Route path="/admin/ai" element={<Navigate to="/admin/system/ai" replace />} />
+      <Route path="/admin/system/ai" element={<AdminAIPage />} />
       <Route path="/admin/quick-links" element={<AdminQuickLinksPage />} />
       <Route path="/admin/system" element={<AdminSystemPage />} />
       <Route path="/admin/system/oidc" element={<AdminSystemOIDCPage />} />

@@ -125,9 +125,9 @@ export default function AdminSystemPage() {
             t={t}
           />
 
-          {/* KI-Anbieter — always links to /admin/ai */}
+          {/* KI-Anbieter */}
           <Link
-            to="/admin/ai"
+            to="/admin/system/ai"
             className="group flex flex-col rounded-xl border border-gray-200 p-4 transition-colors hover:border-teal-400 hover:bg-teal-50/40 dark:border-gray-800 dark:hover:border-teal-700 dark:hover:bg-teal-950/30"
           >
             <div className="flex items-start justify-between gap-3 mb-2">
