@@ -130,6 +130,67 @@ func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
 		return err
 	}
 
+	if err := p.EnsureAuditSchema(ctx); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// EnsureAuditSchema creates the audit_log table and its immutable-row trigger
+// if they do not exist yet. Called from EnsureCoreSchema so a fresh instance
+// has the table on first boot without running a separate migration step.
+// Mirrors migrations/0003_add_audit_log.up.sql — both must be kept in sync.
+func (p *Pool) EnsureAuditSchema(ctx context.Context) error {
+	if _, err := p.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS audit_log (
+			id               BIGSERIAL   PRIMARY KEY,
+			created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+			event_type       TEXT        NOT NULL,
+			actor_id         TEXT        NOT NULL,
+			actor_email_enc  TEXT        NOT NULL,
+			target_id        TEXT        NOT NULL DEFAULT '',
+			target_email_enc TEXT        NOT NULL DEFAULT '',
+			details_enc      TEXT        NOT NULL DEFAULT '',
+			prev_hash        TEXT        NOT NULL DEFAULT '',
+			hash             TEXT        NOT NULL DEFAULT ''
+		)
+	`); err != nil {
+		return fmt.Errorf("db: ensure audit_log: %w", err)
+	}
+
+	// Trigger function: raises an exception on any UPDATE or DELETE attempt.
+	// CREATE OR REPLACE is idempotent so safe to run on every boot.
+	if _, err := p.Exec(ctx, `
+		CREATE OR REPLACE FUNCTION audit_log_immutable()
+		RETURNS TRIGGER LANGUAGE plpgsql AS $$
+		BEGIN
+			RAISE EXCEPTION 'audit_log rows are immutable and cannot be modified or deleted';
+		END;
+		$$
+	`); err != nil {
+		return fmt.Errorf("db: ensure audit_log_immutable fn: %w", err)
+	}
+
+	// CREATE TRIGGER does not have IF NOT EXISTS before PG 17, so use a
+	// DO block that checks pg_trigger and skips the CREATE if it already
+	// exists — fully idempotent on PG 14+ (the minimum supported version).
+	if _, err := p.Exec(ctx, `
+		DO $$ BEGIN
+			IF NOT EXISTS (
+				SELECT 1 FROM pg_trigger
+				WHERE tgname = 'audit_log_before_change'
+				  AND tgrelid = 'audit_log'::regclass
+			) THEN
+				CREATE TRIGGER audit_log_before_change
+					BEFORE UPDATE OR DELETE ON audit_log
+					FOR EACH ROW EXECUTE FUNCTION audit_log_immutable();
+			END IF;
+		END $$
+	`); err != nil {
+		return fmt.Errorf("db: ensure audit_log trigger: %w", err)
+	}
+
 	return nil
 }
 
