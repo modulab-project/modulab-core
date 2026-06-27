@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Tile } from "../lib/quicklinks";
 import { createUserQuickLink, deleteUserQuickLink, saveOrder } from "../lib/quicklinks";
@@ -235,6 +235,11 @@ export function QuickLinksGrid({
   const { t } = useTranslation();
   const [tiles, setTiles] = useState<Tile[]>(initialTiles);
   const [showAdd, setShowAdd] = useState(false);
+
+  // Sync when the parent delivers fetched tiles after first render.
+  useEffect(() => {
+    setTiles(initialTiles);
+  }, [initialTiles]);
   const dragSrcIdx = useRef<number | null>(null);
   const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
