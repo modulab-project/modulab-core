@@ -6,6 +6,7 @@ import {
   adminPatchAIProvider,
   adminDeleteAIProvider,
   adminClearAIProviderKey,
+  adminFetchAIProviderModels,
   type AIProvider,
 } from "../lib/api";
 import { getSessionToken } from "../lib/session";
@@ -323,6 +324,24 @@ function EditBuiltinModal({
   const [model, setModel] = useState(provider.default_model);
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
+  const [models, setModels] = useState<string[] | null>(null);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+
+  async function handleLoadModels() {
+    const token = getSessionToken();
+    if (!token) return;
+    setLoadingModels(true);
+    setModelsError(null);
+    try {
+      const list = await adminFetchAIProviderModels(token, provider.id);
+      setModels(list);
+    } catch (e) {
+      setModelsError(e instanceof Error ? e.message : "Could not fetch models.");
+    } finally {
+      setLoadingModels(false);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -366,14 +385,49 @@ function EditBuiltinModal({
       <form onSubmit={handleSubmit} className="space-y-4">
         <h2 className="text-base font-semibold">Edit — {provider.name}</h2>
         <div className="space-y-3">
-          <Field label="Default model" required>
-            <input
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              placeholder="gpt-4o"
-              className={inputCls}
-            />
-          </Field>
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <label className="text-xs text-gray-500 dark:text-gray-400">
+                Default model <span className="ml-0.5 text-red-500">*</span>
+              </label>
+              {provider.has_admin_key && (
+                <button
+                  type="button"
+                  disabled={loadingModels}
+                  onClick={handleLoadModels}
+                  className="text-xs text-teal-600 hover:underline disabled:opacity-50 dark:text-teal-400"
+                >
+                  {loadingModels ? "Loading…" : "Load available models"}
+                </button>
+              )}
+            </div>
+            {models && models.length > 0 ? (
+              <select
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                className={inputCls}
+              >
+                {models.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                placeholder="gpt-4o"
+                className={inputCls}
+              />
+            )}
+            {modelsError && (
+              <p className="mt-1 text-xs text-red-500">{modelsError}</p>
+            )}
+            {!provider.has_admin_key && (
+              <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                Save an API key first to load available models.
+              </p>
+            )}
+          </div>
           <Field label={provider.has_admin_key ? "API key (leave empty to keep existing)" : "API key"}>
             <input
               type="password"
@@ -423,9 +477,30 @@ function CustomProviderModal({
   const [name, setName] = useState(existing?.name ?? "");
   const [baseURL, setBaseURL] = useState(existing?.base_url ?? "");
   const [model, setModel] = useState(existing?.default_model ?? "");
+  const [models, setModels] = useState<string[] | null>(null);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [userCanOverride, setUserCanOverride] = useState(existing?.user_can_override ?? true);
   const [busy, setBusy] = useState(false);
+
+  // For existing providers: load models via the stored admin key.
+  // The provider must already be saved (existing != null) to use this.
+  async function handleLoadModels() {
+    if (!existing) return;
+    const token = getSessionToken();
+    if (!token) return;
+    setLoadingModels(true);
+    setModelsError(null);
+    try {
+      const list = await adminFetchAIProviderModels(token, existing.id);
+      setModels(list);
+    } catch (e) {
+      setModelsError(e instanceof Error ? e.message : "Could not fetch models.");
+    } finally {
+      setLoadingModels(false);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -499,14 +574,44 @@ function CustomProviderModal({
               className={inputCls}
             />
           </Field>
-          <Field label="Default model" required>
-            <input
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              placeholder="llama3.2"
-              className={inputCls}
-            />
-          </Field>
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <label className="text-xs text-gray-500 dark:text-gray-400">
+                Default model <span className="ml-0.5 text-red-500">*</span>
+              </label>
+              {existing?.has_admin_key && (
+                <button
+                  type="button"
+                  disabled={loadingModels}
+                  onClick={handleLoadModels}
+                  className="text-xs text-teal-600 hover:underline disabled:opacity-50 dark:text-teal-400"
+                >
+                  {loadingModels ? "Loading…" : "Load available models"}
+                </button>
+              )}
+            </div>
+            {models && models.length > 0 ? (
+              <select
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                className={inputCls}
+              >
+                {models.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                placeholder="llama3.2"
+                className={inputCls}
+              />
+            )}
+            {modelsError && (
+              <p className="mt-1 text-xs text-red-500">{modelsError}</p>
+            )}
+          </div>
           <Field label={existing ? "API key (leave empty to keep existing)" : "API key (optional)"}>
             <input
               type="password"

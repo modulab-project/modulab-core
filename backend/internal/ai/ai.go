@@ -39,6 +39,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
@@ -333,6 +334,101 @@ func AdminClearKeyHandler(deps auth.Deps) http.HandlerFunc {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+// AdminListModelsHandler handles GET /v1/admin/ai/providers/{id}/models.
+// It proxies the provider's model-list API and returns a sorted list of model
+// IDs. Only the stored admin key is used — the user key is never sent to this
+// endpoint. Requires a stored admin key.
+func AdminListModelsHandler(deps auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		id := r.PathValue("id")
+		prov, found, err := deps.Pool.GetAIProvider(r.Context(), id)
+		if err != nil || !found {
+			http.Error(w, "provider not found", http.StatusNotFound)
+			return
+		}
+		// Resolve admin key only (not the user key — this is an admin action).
+		adminKey, err := deps.Pool.GetAIProviderAdminKey(r.Context(), id)
+		if err != nil || adminKey == "" {
+			http.Error(w, "no admin API key configured for this provider", http.StatusServiceUnavailable)
+			return
+		}
+
+		baseURL := prov.BaseURL
+		if baseURL == "" {
+			baseURL = defaultBaseURL(prov.Type)
+		}
+
+		models, err := fetchModels(r.Context(), prov.Type, baseURL, adminKey)
+		if err != nil {
+			log.Printf("ai: fetch models (provider=%s): %v", id, err)
+			http.Error(w, "failed to fetch models from provider", http.StatusBadGateway)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string][]string{"models": models})
+	}
+}
+
+// fetchModels calls the provider's model-list endpoint and returns sorted
+// model IDs. Anthropic uses a dedicated header; all others use Bearer auth
+// against their OpenAI-compatible /models endpoint.
+func fetchModels(ctx context.Context, provType, baseURL, apiKey string) ([]string, error) {
+	var req *http.Request
+	var err error
+
+	if provType == "anthropic" {
+		req, err = http.NewRequestWithContext(ctx, http.MethodGet,
+			"https://api.anthropic.com/v1/models", nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("x-api-key", apiKey)
+		req.Header.Set("anthropic-version", "2023-06-01")
+	} else {
+		req, err = http.NewRequestWithContext(ctx, http.MethodGet,
+			strings.TrimRight(baseURL, "/")+"/models", nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("provider returned %d: %s", resp.StatusCode, body)
+	}
+
+	// Both Anthropic and OpenAI-compat return {"data": [{"id": "..."}, ...]}.
+	var result struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+
+	ids := make([]string, 0, len(result.Data))
+	for _, m := range result.Data {
+		if m.ID != "" {
+			ids = append(ids, m.ID)
+		}
+	}
+	sort.Strings(ids)
+	return ids, nil
 }
 
 // ---- user handlers ---------------------------------------------------------

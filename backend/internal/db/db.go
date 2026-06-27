@@ -1005,6 +1005,26 @@ func (p *Pool) ClearAIProviderAdminKey(ctx context.Context, id string) error {
 	return err
 }
 
+// GetAIProviderAdminKey returns the decrypted admin key for a provider.
+// Returns ("", nil) if no key is set.
+func (p *Pool) GetAIProviderAdminKey(ctx context.Context, providerID string) (string, error) {
+	var enc *string
+	err := p.QueryRow(ctx, `
+		SELECT encrypted_admin_key FROM ai_providers WHERE id = $1
+	`, providerID).Scan(&enc)
+	if err != nil {
+		return "", fmt.Errorf("db: get ai provider admin key: %w", err)
+	}
+	if enc == nil || *enc == "" {
+		return "", nil
+	}
+	plain, err := crypto.Decrypt(p.masterKey, *enc)
+	if err != nil {
+		return "", fmt.Errorf("db: decrypt ai admin key: %w", err)
+	}
+	return plain, nil
+}
+
 // DeleteAIProvider removes the provider row. ON DELETE CASCADE in ai_user_keys
 // removes all per-user keys for it automatically.
 func (p *Pool) DeleteAIProvider(ctx context.Context, id string) (bool, error) {

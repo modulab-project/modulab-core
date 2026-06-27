@@ -692,6 +692,15 @@ export function adminClearAIProviderKey(token: string, id: string): Promise<void
   });
 }
 
+// GET /v1/admin/ai/providers/{id}/models — fetches available models from the provider API.
+export async function adminFetchAIProviderModels(token: string, id: string): Promise<string[]> {
+  const result = await request<{ models: string[] }>(
+    `/v1/admin/ai/providers/${encodeURIComponent(id)}/models`,
+    { headers: bearerHeaders(token) },
+  );
+  return result.models ?? [];
+}
+
 // GET /v1/ai/providers — any approved session.
 export function listAIProviders(token: string): Promise<AIUserProvider[]> {
   return request<AIUserProvider[]>("/v1/ai/providers", {

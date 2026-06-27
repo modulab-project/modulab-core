@@ -350,6 +350,7 @@ func main() {
 	mux.Handle("PATCH /v1/admin/ai/providers/{id}", superAdminOnly(ai.AdminPatchHandler(authDeps)))
 	mux.Handle("DELETE /v1/admin/ai/providers/{id}", superAdminOnly(ai.AdminDeleteHandler(authDeps)))
 	mux.Handle("DELETE /v1/admin/ai/providers/{id}/key", superAdminOnly(ai.AdminClearKeyHandler(authDeps)))
+	mux.Handle("GET /v1/admin/ai/providers/{id}/models", superAdminOnly(ai.AdminListModelsHandler(authDeps)))
 	mux.HandleFunc("GET /v1/ai/providers", ai.UserProvidersHandler(authDeps))
 	mux.HandleFunc("PUT /v1/ai/keys/{id}", ai.UserSetKeyHandler(authDeps))
 	mux.HandleFunc("DELETE /v1/ai/keys/{id}", ai.UserDeleteKeyHandler(authDeps))
