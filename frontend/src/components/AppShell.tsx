@@ -724,7 +724,6 @@ function formatUptime(seconds: number): string {
 function ChatPanel({ onClose }: { onClose: () => void }) {
   const [providers, setProviders] = useState<AIUserProvider[]>([]);
   const [selectedProvider, setSelectedProvider] = useState<AIUserProvider | null>(null);
-  const [model, setModel] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -740,10 +739,7 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
       .then((list) => {
         const available = list.filter((p) => p.available);
         setProviders(available);
-        if (available.length > 0) {
-          setSelectedProvider(available[0]);
-          setModel(available[0].default_model);
-        }
+        if (available.length > 0) setSelectedProvider(available[0]);
       })
       .catch(() => {});
   }, []);
@@ -781,7 +777,7 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
       await streamAIChat(
         token,
         selectedProvider.id,
-        model,
+        "", // model is determined server-side based on key type
         newMessages,
         (delta) => {
           setMessages((prev) => {
@@ -819,7 +815,13 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
     }
   }
 
-  const activeProvider = selectedProvider;
+  // Derive the active model label for display: user's preferred model when
+  // they have their own key, otherwise the admin-set default.
+  const activeModel = selectedProvider
+    ? (selectedProvider.has_user_key && selectedProvider.preferred_model)
+      ? selectedProvider.preferred_model
+      : selectedProvider.default_model
+    : null;
 
   return (
     <div className="fixed bottom-[52px] right-4 z-40 flex w-[340px] flex-col rounded-2xl border border-gray-200 bg-white shadow-xl dark:border-gray-800 dark:bg-gray-950"
@@ -827,44 +829,59 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
     >
       {/* Header */}
       <div className="flex flex-none items-center justify-between border-b border-gray-100 px-4 py-3 dark:border-gray-800">
-        <div className="flex items-center gap-2">
-          <i className="ti ti-sparkles text-[16px] text-teal-600 dark:text-teal-400" />
-          <span className="text-sm font-semibold">AI Chat</span>
+        <div className="flex min-w-0 items-center gap-2">
+          <i className="ti ti-sparkles flex-none text-[16px] text-teal-600 dark:text-teal-400" />
+          <div className="min-w-0">
+            <span className="text-sm font-semibold">AI Chat</span>
+            {activeModel && (
+              <span className="ml-1.5 text-[11px] text-gray-400 dark:text-gray-500 truncate">
+                {activeModel}
+              </span>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-1.5">
-          {/* Model selector */}
+        <div className="flex flex-none items-center gap-1.5">
+          {/* Provider selector */}
           <div className="relative">
             <button
               type="button"
               onClick={() => setModelPickerOpen((v) => !v)}
               className="flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
             >
-              <span className="max-w-[100px] truncate">{activeProvider?.name ?? "No provider"}</span>
+              <span className="max-w-[80px] truncate">{selectedProvider?.name ?? "No provider"}</span>
               <i className="ti ti-chevron-down text-[10px]" />
             </button>
             {modelPickerOpen && providers.length > 0 && (
-              <div className="absolute right-0 top-full z-10 mt-1 w-52 rounded-xl border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
-                {providers.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedProvider(p);
-                      setModel(p.default_model);
-                      setModelPickerOpen(false);
-                    }}
-                    className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-800 ${
-                      p.id === selectedProvider?.id ? "font-medium text-teal-600 dark:text-teal-400" : "text-gray-700 dark:text-gray-300"
-                    }`}
-                  >
-                    <span className="flex-1 truncate">{p.name}</span>
-                    {p.has_user_key && (
-                      <span className="rounded-full bg-teal-50 px-1.5 py-0.5 text-[10px] text-teal-600 dark:bg-teal-950 dark:text-teal-400">
-                        own key
+              <div className="absolute right-0 top-full z-10 mt-1 w-56 rounded-xl border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                {providers.map((p) => {
+                  const modelLabel = (p.has_user_key && p.preferred_model) ? p.preferred_model : p.default_model;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedProvider(p);
+                        setModelPickerOpen(false);
+                      }}
+                      className={`flex w-full flex-col px-3 py-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-800 ${
+                        p.id === selectedProvider?.id ? "text-teal-600 dark:text-teal-400" : "text-gray-700 dark:text-gray-300"
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span className="flex-1 truncate font-medium">{p.name}</span>
+                        {p.has_user_key && (
+                          <span className="rounded-full bg-teal-50 px-1.5 py-0.5 text-[10px] text-teal-600 dark:bg-teal-950 dark:text-teal-400">
+                            own key
+                          </span>
+                        )}
+                      </div>
+                      <span className="mt-0.5 truncate text-[10px] text-gray-400 dark:text-gray-500">
+                        {modelLabel}
+                        {!p.has_user_key && " · fixed by admin"}
                       </span>
-                    )}
-                  </button>
-                ))}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>

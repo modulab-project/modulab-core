@@ -1,18 +1,23 @@
 import { useEffect, useState } from "react";
 import { AppShell } from "../components/AppShell";
 import { useAuthenticatedSession } from "../lib/useSession";
-import { listAIProviders, setAIUserKey, deleteAIUserKey, type AIUserProvider } from "../lib/api";
-// AIUserProvider may include providers the admin hasn't enabled yet — users
-// can still pre-configure their own key; the chat panel filters by available.
+import {
+  listAIProviders,
+  setAIUserKey,
+  deleteAIUserKey,
+  setAIUserPreferredModel,
+  fetchUserAIProviderModels,
+  type AIUserProvider,
+} from "../lib/api";
 import { getSessionToken } from "../lib/session";
 
-// /user/ai-keys — lets users manage their own AI provider API keys.
-// Each key overrides the admin-configured key for that provider, useful when
-// the user has a higher-tier plan. Reachable from the profile panel.
+// /user/ai-keys — lets users manage their own AI provider API keys and, when
+// using their own key, choose which model to use. Users using the admin key
+// cannot change the model (the admin's default_model is used, fixed).
 export default function UserAIKeysPage() {
   const { session, loading } = useAuthenticatedSession();
   const [providers, setProviders] = useState<AIUserProvider[] | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingKeyId, setEditingKeyId] = useState<string | null>(null);
   const [keyInput, setKeyInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -20,9 +25,7 @@ export default function UserAIKeysPage() {
   const refresh = () => {
     const token = getSessionToken();
     if (!token) return;
-    listAIProviders(token)
-      .then(setProviders)
-      .catch(() => {});
+    listAIProviders(token).then(setProviders).catch(() => {});
   };
 
   useEffect(() => {
@@ -32,7 +35,7 @@ export default function UserAIKeysPage() {
 
   if (loading || !session) return null;
 
-  async function handleSave(providerId: string) {
+  async function handleSaveKey(providerId: string) {
     if (!keyInput.trim()) return;
     const token = getSessionToken();
     if (!token) return;
@@ -40,7 +43,7 @@ export default function UserAIKeysPage() {
     setError(null);
     try {
       await setAIUserKey(token, providerId, keyInput.trim());
-      setEditingId(null);
+      setEditingKeyId(null);
       setKeyInput("");
       refresh();
     } catch (e) {
@@ -70,25 +73,30 @@ export default function UserAIKeysPage() {
       <div className="mx-auto w-full max-w-md py-10">
         <h1 className="mb-1 text-xl font-semibold">AI providers</h1>
         <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">
-          Your own API key overrides the admin key for that provider — useful if you have a better plan.
+          Add your own API key to override the admin key. With your own key you also choose which model to use.
         </p>
 
         {error && <p className="mb-4 text-sm text-red-600 dark:text-red-400">{error}</p>}
 
         {providers === null ? null : providers.length === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">No AI providers have been configured by the admin yet.</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            No AI providers configured yet.
+          </p>
         ) : (
           <div className="rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
             {providers.map((p, i) => {
-              const isEditing = editingId === p.id;
+              const isEditingKey = editingKeyId === p.id;
               const isLast = i === providers.length - 1;
               return (
                 <div
                   key={p.id}
                   className={`px-4 py-3.5 text-sm ${isLast ? "" : "border-b border-gray-100 dark:border-gray-800"}`}
                 >
+                  {/* Header row: name + badges */}
                   <div className="flex items-center justify-between gap-2">
-                    <p className={`font-medium ${!p.enabled ? "text-gray-400 dark:text-gray-500" : ""}`}>{p.name}</p>
+                    <p className={`font-medium ${!p.enabled ? "text-gray-400 dark:text-gray-500" : ""}`}>
+                      {p.name}
+                    </p>
                     <div className="flex items-center gap-1.5">
                       {!p.enabled && (
                         <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400">
@@ -109,7 +117,15 @@ export default function UserAIKeysPage() {
                     </div>
                   </div>
 
-                  {isEditing ? (
+                  {/* Model line */}
+                  <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
+                    {p.has_user_key
+                      ? `Model: ${p.preferred_model || p.default_model}`
+                      : `Model: ${p.default_model} (fixed by admin)`}
+                  </p>
+
+                  {/* Key edit row */}
+                  {isEditingKey ? (
                     <div className="mt-2 flex items-center gap-2">
                       <input
                         type="password"
@@ -118,8 +134,8 @@ export default function UserAIKeysPage() {
                         value={keyInput}
                         onChange={(e) => setKeyInput(e.target.value)}
                         onKeyDown={(e) => {
-                          if (e.key === "Enter") handleSave(p.id);
-                          if (e.key === "Escape") { setEditingId(null); setKeyInput(""); }
+                          if (e.key === "Enter") handleSaveKey(p.id);
+                          if (e.key === "Escape") { setEditingKeyId(null); setKeyInput(""); }
                         }}
                         placeholder="sk-..."
                         className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-800"
@@ -127,26 +143,26 @@ export default function UserAIKeysPage() {
                       <button
                         type="button"
                         disabled={busy || !keyInput.trim()}
-                        onClick={() => handleSave(p.id)}
+                        onClick={() => handleSaveKey(p.id)}
                         className="rounded-md bg-teal-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-700 disabled:opacity-50"
                       >
                         {busy ? "…" : "Save"}
                       </button>
                       <button
                         type="button"
-                        onClick={() => { setEditingId(null); setKeyInput(""); }}
+                        onClick={() => { setEditingKeyId(null); setKeyInput(""); }}
                         className="rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300"
                       >
                         Cancel
                       </button>
                     </div>
                   ) : (
-                    <div className="mt-1.5 flex items-center gap-1.5">
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                       {p.can_override && (
                         <button
                           type="button"
                           disabled={busy}
-                          onClick={() => { setEditingId(p.id); setKeyInput(""); }}
+                          onClick={() => { setEditingKeyId(p.id); setKeyInput(""); }}
                           className="rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
                         >
                           {p.has_user_key ? "Update key" : "Add own key"}
@@ -159,13 +175,22 @@ export default function UserAIKeysPage() {
                           onClick={() => handleRemove(p.id)}
                           className="rounded-md border border-red-300 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
                         >
-                          Remove
+                          Remove key
                         </button>
                       )}
                       {!p.can_override && (
                         <span className="text-xs text-gray-400 dark:text-gray-600">Override not allowed</span>
                       )}
                     </div>
+                  )}
+
+                  {/* Model selector — only shown when user has their own key */}
+                  {p.has_user_key && !isEditingKey && (
+                    <ModelSelector
+                      provider={p}
+                      onChanged={refresh}
+                      onError={setError}
+                    />
                   )}
                 </div>
               );
@@ -174,5 +199,81 @@ export default function UserAIKeysPage() {
         )}
       </div>
     </AppShell>
+  );
+}
+
+// ModelSelector lets the user pick which model to use with their own key.
+// It lazily fetches the available models from the provider on demand.
+function ModelSelector({
+  provider,
+  onChanged,
+  onError,
+}: {
+  provider: AIUserProvider;
+  onChanged: () => void;
+  onError: (e: string | null) => void;
+}) {
+  const [models, setModels] = useState<string[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const current = provider.preferred_model || provider.default_model;
+
+  async function handleLoad() {
+    const token = getSessionToken();
+    if (!token) return;
+    setLoading(true);
+    onError(null);
+    try {
+      const list = await fetchUserAIProviderModels(token, provider.id);
+      setModels(list);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Could not fetch models.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSelect(model: string) {
+    const token = getSessionToken();
+    if (!token) return;
+    setSaving(true);
+    onError(null);
+    try {
+      await setAIUserPreferredModel(token, provider.id, model);
+      onChanged();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Could not save model.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-2 border-t border-gray-100 pt-2 dark:border-gray-800">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs text-gray-500 dark:text-gray-400">Your model</span>
+        {models === null ? (
+          <button
+            type="button"
+            disabled={loading}
+            onClick={handleLoad}
+            className="text-xs text-teal-600 hover:underline disabled:opacity-50 dark:text-teal-400"
+          >
+            {loading ? "Loading…" : "Load available models"}
+          </button>
+        ) : (
+          <select
+            value={current}
+            disabled={saving}
+            onChange={(e) => handleSelect(e.target.value)}
+            className="rounded-md border border-gray-200 bg-white px-2 py-1 text-xs outline-none focus:border-teal-500 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800"
+          >
+            {models.map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+        )}
+      </div>
+    </div>
   );
 }

@@ -904,6 +904,13 @@ func (p *Pool) EnsureAISchema(ctx context.Context) error {
 	`); err != nil {
 		return fmt.Errorf("db: seed built-in ai_providers: %w", err)
 	}
+	// Idempotent migration: add preferred_model to ai_user_keys if it was
+	// created before this column existed.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE ai_user_keys ADD COLUMN IF NOT EXISTS preferred_model TEXT NOT NULL DEFAULT ''
+	`); err != nil {
+		return fmt.Errorf("db: migrate ai_user_keys preferred_model: %w", err)
+	}
 	return nil
 }
 
@@ -1081,14 +1088,15 @@ func (p *Pool) ResolveAIKey(ctx context.Context, userID, providerID string) (str
 }
 
 // SetAIUserKey stores (or replaces) the user's own API key for a provider.
+// preferred_model is preserved across key updates (only reset on delete).
 func (p *Pool) SetAIUserKey(ctx context.Context, userID, providerID, plainKey string) error {
 	enc, err := crypto.Encrypt(p.masterKey, plainKey)
 	if err != nil {
 		return fmt.Errorf("db: encrypt user ai key: %w", err)
 	}
 	_, err = p.Exec(ctx, `
-		INSERT INTO ai_user_keys (user_id, provider_id, encrypted_key, updated_at)
-		VALUES ($1, $2, $3, now())
+		INSERT INTO ai_user_keys (user_id, provider_id, encrypted_key, preferred_model, updated_at)
+		VALUES ($1, $2, $3, '', now())
 		ON CONFLICT (user_id, provider_id) DO UPDATE
 		  SET encrypted_key = EXCLUDED.encrypted_key,
 		      updated_at    = now()
@@ -1097,6 +1105,44 @@ func (p *Pool) SetAIUserKey(ctx context.Context, userID, providerID, plainKey st
 		return fmt.Errorf("db: set user ai key: %w", err)
 	}
 	return nil
+}
+
+// SetAIUserPreferredModel updates the preferred model for a user's own key.
+// The key itself is not changed.
+func (p *Pool) SetAIUserPreferredModel(ctx context.Context, userID, providerID, model string) error {
+	tag, err := p.Exec(ctx, `
+		UPDATE ai_user_keys SET preferred_model = $3, updated_at = now()
+		WHERE user_id = $1 AND provider_id = $2
+	`, userID, providerID, model)
+	if err != nil {
+		return fmt.Errorf("db: set user preferred model: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("db: no user key found for provider %q", providerID)
+	}
+	return nil
+}
+
+// GetAIUserDecryptedKey returns the decrypted key the user stored for a
+// provider, and their preferred model. Returns found=false if no row exists.
+func (p *Pool) GetAIUserDecryptedKey(ctx context.Context, userID, providerID string) (key, preferredModel string, found bool, err error) {
+	var enc string
+	var pref string
+	scanErr := p.QueryRow(ctx, `
+		SELECT encrypted_key, preferred_model FROM ai_user_keys
+		WHERE user_id = $1 AND provider_id = $2
+	`, userID, providerID).Scan(&enc, &pref)
+	if scanErr != nil {
+		if errors.Is(scanErr, pgx.ErrNoRows) {
+			return "", "", false, nil
+		}
+		return "", "", false, fmt.Errorf("db: get user ai key: %w", scanErr)
+	}
+	plain, err := crypto.Decrypt(p.masterKey, enc)
+	if err != nil {
+		return "", "", false, fmt.Errorf("db: decrypt user ai key: %w", err)
+	}
+	return plain, pref, true, nil
 }
 
 // DeleteAIUserKey removes a user's own key for a provider. After this the
@@ -1108,12 +1154,11 @@ func (p *Pool) DeleteAIUserKey(ctx context.Context, userID, providerID string) e
 	return err
 }
 
-// ListAIUserKeys returns all provider rows with an additional flag indicating
-// whether this specific user has their own key set. Used by the profile page
-// to show the full provider list with per-row state.
+// AIProviderWithUserKey combines a provider row with per-user key state.
 type AIProviderWithUserKey struct {
 	AIProviderRow
-	HasUserKey bool
+	HasUserKey     bool
+	PreferredModel string // user's preferred model; empty = use provider default
 }
 
 func (p *Pool) ListAIProvidersForUser(ctx context.Context, userID string) ([]AIProviderWithUserKey, error) {
@@ -1121,7 +1166,8 @@ func (p *Pool) ListAIProvidersForUser(ctx context.Context, userID string) ([]AIP
 		SELECT pr.id, pr.type, pr.name, pr.base_url,
 		       (pr.encrypted_admin_key IS NOT NULL AND pr.encrypted_admin_key != '') AS has_admin_key,
 		       pr.default_model, pr.user_can_override, pr.enabled, pr.sort_order,
-		       (k.encrypted_key IS NOT NULL) AS has_user_key
+		       (k.encrypted_key IS NOT NULL) AS has_user_key,
+		       COALESCE(k.preferred_model, '') AS preferred_model
 		FROM ai_providers pr
 		LEFT JOIN ai_user_keys k ON k.provider_id = pr.id AND k.user_id = $1
 		ORDER BY pr.sort_order ASC, pr.name ASC
@@ -1134,7 +1180,8 @@ func (p *Pool) ListAIProvidersForUser(ctx context.Context, userID string) ([]AIP
 	for rows.Next() {
 		var r AIProviderWithUserKey
 		if err := rows.Scan(&r.ID, &r.Type, &r.Name, &r.BaseURL, &r.HasAdminKey,
-			&r.DefaultModel, &r.UserCanOverride, &r.Enabled, &r.SortOrder, &r.HasUserKey); err != nil {
+			&r.DefaultModel, &r.UserCanOverride, &r.Enabled, &r.SortOrder,
+			&r.HasUserKey, &r.PreferredModel); err != nil {
 			return nil, fmt.Errorf("db: scan ai provider for user: %w", err)
 		}
 		out = append(out, r)

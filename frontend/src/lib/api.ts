@@ -618,7 +618,8 @@ export interface AIUserProvider {
   id: string;
   name: string;
   type: string;
-  default_model: string;
+  default_model: string;   // admin-set model; fixed when using admin key
+  preferred_model: string; // user's model choice; only active when has_user_key
   available: boolean;
   enabled: boolean;
   has_user_key: boolean;
@@ -723,6 +724,24 @@ export function deleteAIUserKey(token: string, providerId: string): Promise<void
     method: "DELETE",
     headers: bearerHeaders(token),
   });
+}
+
+// PATCH /v1/ai/keys/{id}/model — save preferred model for own key.
+export function setAIUserPreferredModel(token: string, providerId: string, model: string): Promise<void> {
+  return request<void>(`/v1/ai/keys/${encodeURIComponent(providerId)}/model`, {
+    method: "PATCH",
+    headers: bearerHeaders(token),
+    body: JSON.stringify({ model }),
+  });
+}
+
+// GET /v1/ai/keys/{id}/models — fetch available models using the user's own key.
+export async function fetchUserAIProviderModels(token: string, providerId: string): Promise<string[]> {
+  const result = await request<{ models: string[] }>(
+    `/v1/ai/keys/${encodeURIComponent(providerId)}/models`,
+    { headers: bearerHeaders(token) },
+  );
+  return result.models ?? [];
 }
 
 // Chat message shape mirroring backend/internal/ai.chatMessage.

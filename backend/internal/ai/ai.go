@@ -65,15 +65,16 @@ type ProviderResponse struct {
 // It shows whether a key is available (admin or user) and whether the user
 // has their own key set — without exposing any key material.
 type UserProviderResponse struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Type         string `json:"type"`
-	DefaultModel string `json:"default_model"`
-	Available    bool   `json:"available"` // true when at least one key exists
-	Enabled      bool   `json:"enabled"`
-	HasUserKey   bool   `json:"has_user_key"`
-	HasAdminKey  bool   `json:"has_admin_key"`
-	CanOverride  bool   `json:"can_override"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Type           string `json:"type"`
+	DefaultModel   string `json:"default_model"`   // admin-set model; always shown
+	PreferredModel string `json:"preferred_model"` // user's own model choice; only used when has_user_key
+	Available      bool   `json:"available"`       // true when at least one key exists
+	Enabled        bool   `json:"enabled"`
+	HasUserKey     bool   `json:"has_user_key"`
+	HasAdminKey    bool   `json:"has_admin_key"`
+	CanOverride    bool   `json:"can_override"`
 }
 
 // createProviderRequest is the body of POST /v1/admin/ai/providers.
@@ -455,15 +456,16 @@ func UserProvidersHandler(deps auth.Deps) http.HandlerFunc {
 		for _, row := range rows {
 			available := row.HasAdminKey || (row.HasUserKey && row.UserCanOverride)
 			out = append(out, UserProviderResponse{
-				ID:           row.ID,
-				Name:         row.Name,
-				Type:         row.Type,
-				DefaultModel: row.DefaultModel,
-				Available:    available,
-				Enabled:      row.Enabled,
-				HasUserKey:   row.HasUserKey,
-				HasAdminKey:  row.HasAdminKey,
-				CanOverride:  row.UserCanOverride,
+				ID:             row.ID,
+				Name:           row.Name,
+				Type:           row.Type,
+				DefaultModel:   row.DefaultModel,
+				PreferredModel: row.PreferredModel,
+				Available:      available,
+				Enabled:        row.Enabled,
+				HasUserKey:     row.HasUserKey,
+				HasAdminKey:    row.HasAdminKey,
+				CanOverride:    row.UserCanOverride,
 			})
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -532,6 +534,74 @@ func UserDeleteKeyHandler(deps auth.Deps) http.HandlerFunc {
 	}
 }
 
+// UserSetPreferredModelHandler handles PATCH /v1/ai/keys/{id}/model.
+// Saves the user's preferred model for a provider they have their own key for.
+func UserSetPreferredModelHandler(deps auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		sess, ok := requireApprovedSession(deps, r)
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		providerID := r.PathValue("id")
+		var body struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Model == "" {
+			http.Error(w, "model is required", http.StatusBadRequest)
+			return
+		}
+		if err := deps.Pool.SetAIUserPreferredModel(r.Context(), sess.UserID, providerID, body.Model); err != nil {
+			http.Error(w, "database error", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// UserListModelsHandler handles GET /v1/ai/keys/{id}/models.
+// Fetches available models from the provider using the user's own stored key.
+func UserListModelsHandler(deps auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		sess, ok := requireApprovedSession(deps, r)
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		providerID := r.PathValue("id")
+		prov, found, err := deps.Pool.GetAIProvider(r.Context(), providerID)
+		if err != nil || !found {
+			http.Error(w, "provider not found", http.StatusNotFound)
+			return
+		}
+		userKey, _, hasKey, err := deps.Pool.GetAIUserDecryptedKey(r.Context(), sess.UserID, providerID)
+		if err != nil || !hasKey || userKey == "" {
+			http.Error(w, "no user key stored for this provider", http.StatusServiceUnavailable)
+			return
+		}
+		baseURL := prov.BaseURL
+		if baseURL == "" {
+			baseURL = defaultBaseURL(prov.Type)
+		}
+		models, err := fetchModels(r.Context(), prov.Type, baseURL, userKey)
+		if err != nil {
+			log.Printf("ai: user fetch models (provider=%s): %v", providerID, err)
+			http.Error(w, "failed to fetch models from provider", http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string][]string{"models": models})
+	}
+}
+
 // ---- chat handler ----------------------------------------------------------
 
 // ChatHandler handles POST /v1/ai/chat and streams the response as SSE.
@@ -572,14 +642,35 @@ func ChatHandler(deps auth.Deps) http.HandlerFunc {
 			return
 		}
 
-		apiKey, err := deps.Pool.ResolveAIKey(r.Context(), sess.UserID, req.ProviderID)
-		if err != nil || apiKey == "" {
-			http.Error(w, "no API key configured for this provider", http.StatusServiceUnavailable)
+		// Determine which key to use and which model to run.
+		// Rule: user's own key → user picks the model (preferred_model, else
+		// provider default). Admin key → admin-set default_model, fixed.
+		var apiKey string
+		var model string
+
+		userKey, preferredModel, hasUserKey, ukErr := deps.Pool.GetAIUserDecryptedKey(
+			r.Context(), sess.UserID, req.ProviderID)
+		if ukErr != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 
-		model := req.Model
-		if model == "" {
+		if hasUserKey && prov.UserCanOverride && userKey != "" {
+			apiKey = userKey
+			// User can choose model; fall back to their preference, then provider default.
+			if preferredModel != "" {
+				model = preferredModel
+			} else {
+				model = prov.DefaultModel
+			}
+		} else {
+			// Use admin key — model is fixed to what the admin configured.
+			adminKey, akErr := deps.Pool.GetAIProviderAdminKey(r.Context(), req.ProviderID)
+			if akErr != nil || adminKey == "" {
+				http.Error(w, "no API key configured for this provider", http.StatusServiceUnavailable)
+				return
+			}
+			apiKey = adminKey
 			model = prov.DefaultModel
 		}
 

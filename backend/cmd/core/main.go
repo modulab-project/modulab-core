@@ -354,6 +354,8 @@ func main() {
 	mux.HandleFunc("GET /v1/ai/providers", ai.UserProvidersHandler(authDeps))
 	mux.HandleFunc("PUT /v1/ai/keys/{id}", ai.UserSetKeyHandler(authDeps))
 	mux.HandleFunc("DELETE /v1/ai/keys/{id}", ai.UserDeleteKeyHandler(authDeps))
+	mux.HandleFunc("PATCH /v1/ai/keys/{id}/model", ai.UserSetPreferredModelHandler(authDeps))
+	mux.HandleFunc("GET /v1/ai/keys/{id}/models", ai.UserListModelsHandler(authDeps))
 	mux.HandleFunc("POST /v1/ai/chat", ai.ChatHandler(authDeps))
 
 	// The mail worker (internal/mail) runs for Core's entire lifetime as a
