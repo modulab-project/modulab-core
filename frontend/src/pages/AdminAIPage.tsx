@@ -24,7 +24,7 @@ const BUILTIN_PROVIDERS = [
 
 type ModalState =
   | { kind: "closed" }
-  | { kind: "set-key"; provider: AIProvider }
+  | { kind: "edit-builtin"; provider: AIProvider }
   | { kind: "create-custom" }
   | { kind: "edit-custom"; provider: AIProvider };
 
@@ -149,55 +149,46 @@ export default function AdminAIPage() {
                 </div>
                 <div className="mt-1.5 flex items-center justify-between gap-2">
                   <p className="text-xs text-gray-500 dark:text-gray-400">
-                    {p ? `Default model: ${p.default_model}` : "Not configured"}
+                    Model: <span className="font-medium text-gray-700 dark:text-gray-300">{p?.default_model ?? def.defaultModel}</span>
                   </p>
                   <div className="flex flex-none items-center gap-1.5">
-                    {hasKey && p && (
-                      <>
-                        <ActionButton
-                          variant="secondary"
-                          busy={busy}
-                          onClick={() => handleToggleEnabled(p)}
-                        >
-                          {enabled ? "Disable" : "Enable"}
-                        </ActionButton>
-                        <ActionButton
-                          variant="secondary"
-                          busy={busy}
-                          onClick={() => setModal({ kind: "set-key", provider: p })}
-                        >
-                          Update key
-                        </ActionButton>
-                        <ActionButton
-                          variant="danger"
-                          busy={busy}
-                          onClick={() => handleClearKey(def.id)}
-                        >
-                          Clear key
-                        </ActionButton>
-                      </>
-                    )}
-                    {!hasKey && (
+                    <ActionButton
+                      variant="secondary"
+                      busy={busy}
+                      onClick={() =>
+                        setModal({
+                          kind: "edit-builtin",
+                          provider: p ?? {
+                            id: def.id,
+                            type: def.type,
+                            name: def.name,
+                            has_admin_key: false,
+                            default_model: def.defaultModel,
+                            user_can_override: true,
+                            enabled: true,
+                            sort_order: 0,
+                          },
+                        })
+                      }
+                    >
+                      Edit
+                    </ActionButton>
+                    {p && (
                       <ActionButton
-                        variant="primary"
+                        variant="secondary"
                         busy={busy}
-                        onClick={() =>
-                          setModal({
-                            kind: "set-key",
-                            provider: p ?? {
-                              id: def.id,
-                              type: def.type,
-                              name: def.name,
-                              has_admin_key: false,
-                              default_model: def.defaultModel,
-                              user_can_override: true,
-                              enabled: true,
-                              sort_order: 0,
-                            },
-                          })
-                        }
+                        onClick={() => handleToggleEnabled(p)}
                       >
-                        Add key
+                        {enabled ? "Disable" : "Enable"}
+                      </ActionButton>
+                    )}
+                    {hasKey && (
+                      <ActionButton
+                        variant="danger"
+                        busy={busy}
+                        onClick={() => handleClearKey(def.id)}
+                      >
+                        Clear key
                       </ActionButton>
                     )}
                   </div>
@@ -286,8 +277,8 @@ export default function AdminAIPage() {
       </div>
 
       {/* Modals */}
-      {modal.kind === "set-key" && (
-        <SetKeyModal
+      {modal.kind === "edit-builtin" && (
+        <EditBuiltinModal
           provider={modal.provider}
           onClose={() => setModal({ kind: "closed" })}
           onSaved={refresh}
@@ -313,9 +304,12 @@ export default function AdminAIPage() {
   );
 }
 
-// ---- SetKeyModal -----------------------------------------------------------
+// ---- EditBuiltinModal ------------------------------------------------------
+// Lets the admin change the default model and/or API key for a built-in
+// provider (Anthropic, OpenAI, Gemini, DeepSeek). The key field is optional
+// when a key is already stored — leave it empty to keep the existing one.
 
-function SetKeyModal({
+function EditBuiltinModal({
   provider,
   onClose,
   onSaved,
@@ -326,42 +320,42 @@ function SetKeyModal({
   onSaved: () => void;
   setError: (e: string | null) => void;
 }) {
+  const [model, setModel] = useState(provider.default_model);
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!key.trim()) return;
+    if (!model.trim()) return;
     const token = getSessionToken();
     if (!token) return;
     setBusy(true);
     try {
-      if (!provider.has_admin_key) {
-        // No DB row yet for this built-in provider — create it first.
-        // If the row already exists (race condition), fall back to PATCH.
-        try {
-          await adminCreateAIProvider(token, {
-            id: provider.id,
-            type: provider.type,
-            name: provider.name,
-            admin_key: key.trim(),
-            default_model: provider.default_model,
-            user_can_override: true,
-            enabled: true,
-            sort_order: 0,
-          });
-        } catch {
-          // Row already exists — update the key via PATCH instead.
-          await adminPatchAIProvider(token, provider.id, { admin_key: key.trim() });
-        }
-      } else {
-        // Row exists — update the key.
-        await adminPatchAIProvider(token, provider.id, { admin_key: key.trim() });
+      const patch: Parameters<typeof adminPatchAIProvider>[2] = {
+        default_model: model.trim(),
+      };
+      if (key.trim()) patch.admin_key = key.trim();
+
+      // Rows are seeded on startup, so PATCH should always work.
+      // Fall back to CREATE if the row somehow doesn't exist yet.
+      try {
+        await adminPatchAIProvider(token, provider.id, patch);
+      } catch {
+        await adminCreateAIProvider(token, {
+          id: provider.id,
+          type: provider.type,
+          name: provider.name,
+          default_model: model.trim(),
+          admin_key: key.trim() || undefined,
+          user_can_override: true,
+          enabled: true,
+          sort_order: provider.sort_order,
+        });
       }
       onSaved();
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save key.");
+      setError(e instanceof Error ? e.message : "Failed to save.");
     } finally {
       setBusy(false);
     }
@@ -370,27 +364,38 @@ function SetKeyModal({
   return (
     <Overlay onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
-        <h2 className="text-base font-semibold">
-          {provider.has_admin_key ? "Update" : "Add"} key — {provider.name}
-        </h2>
-        <div>
-          <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">API key</label>
-          <input
-            type="password"
-            autoComplete="off"
-            value={key}
-            onChange={(e) => setKey(e.target.value)}
-            placeholder="sk-..."
-            className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-800"
-          />
+        <h2 className="text-base font-semibold">Edit — {provider.name}</h2>
+        <div className="space-y-3">
+          <Field label="Default model" required>
+            <input
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder="gpt-4o"
+              className={inputCls}
+            />
+          </Field>
+          <Field label={provider.has_admin_key ? "API key (leave empty to keep existing)" : "API key"}>
+            <input
+              type="password"
+              autoComplete="off"
+              value={key}
+              onChange={(e) => setKey(e.target.value)}
+              placeholder={provider.has_admin_key ? "••••••••" : "sk-..."}
+              className={inputCls}
+            />
+          </Field>
         </div>
         <div className="flex justify-end gap-2 pt-2">
-          <button type="button" onClick={onClose} className="rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+          >
             Cancel
           </button>
           <button
             type="submit"
-            disabled={busy || !key.trim()}
+            disabled={busy || !model.trim()}
             className="rounded-md bg-teal-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-700 disabled:opacity-50"
           >
             {busy ? "Saving…" : "Save"}
