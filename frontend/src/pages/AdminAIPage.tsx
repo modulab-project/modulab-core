@@ -8,6 +8,8 @@ import {
   adminDeleteAIProvider,
   adminClearAIProviderKey,
   adminFetchAIProviderModels,
+  adminGetAISettings,
+  adminPatchAISettings,
   type AIProvider,
 } from "../lib/api";
 import { getSessionToken } from "../lib/session";
@@ -39,6 +41,12 @@ export default function AdminAIPage() {
   const [busy, setBusy] = useState(false);
   const [modal, setModal] = useState<ModalState>({ kind: "closed" });
 
+  // Rate-limit settings
+  const [rpmLimit, setRpmLimit] = useState<number | null>(null);
+  const [rpmInput, setRpmInput] = useState("");
+  const [rpmBusy, setRpmBusy] = useState(false);
+  const [rpmSaved, setRpmSaved] = useState(false);
+
   const refresh = useCallback(() => {
     const token = getSessionToken();
     if (!token) return;
@@ -54,6 +62,12 @@ export default function AdminAIPage() {
       return;
     }
     refresh();
+    const token = getSessionToken();
+    if (token) {
+      adminGetAISettings(token)
+        .then((s) => { setRpmLimit(s.chat_rpm_limit); setRpmInput(String(s.chat_rpm_limit)); })
+        .catch(() => {});
+    }
   }, [session, navigate, refresh]);
 
   if (loading || !session || !isAdminRole(session.role)) return null;
@@ -90,6 +104,26 @@ export default function AdminAIPage() {
       setError(e instanceof Error ? e.message : t("admin.ai.delete_error"));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleSaveRPM(e: React.FormEvent) {
+    e.preventDefault();
+    const val = parseInt(rpmInput, 10);
+    if (isNaN(val) || val < 0) return;
+    const token = getSessionToken();
+    if (!token) return;
+    setRpmBusy(true);
+    try {
+      const s = await adminPatchAISettings(token, val);
+      setRpmLimit(s.chat_rpm_limit);
+      setRpmInput(String(s.chat_rpm_limit));
+      setRpmSaved(true);
+      setTimeout(() => setRpmSaved(false), 2000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t("admin.ai.settings.save_error"));
+    } finally {
+      setRpmBusy(false);
     }
   }
 
@@ -276,6 +310,37 @@ export default function AdminAIPage() {
             ))}
           </div>
         )}
+
+        {/* Rate-limit settings */}
+        <h2 className="mb-2 mt-8 text-sm font-semibold text-gray-700 dark:text-gray-300">
+          {t("admin.ai.settings.title")}
+        </h2>
+        <div className="rounded-2xl border border-gray-200 bg-white px-4 py-4 dark:border-gray-800 dark:bg-gray-900">
+          <form onSubmit={handleSaveRPM} className="flex items-end gap-3">
+            <div className="flex-1">
+              <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">
+                {t("admin.ai.settings.rpm_label")}
+              </label>
+              <input
+                type="number"
+                min={0}
+                value={rpmInput}
+                onChange={(e) => setRpmInput(e.target.value)}
+                className={inputCls}
+              />
+              <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                {t("admin.ai.settings.rpm_hint")}
+              </p>
+            </div>
+            <button
+              type="submit"
+              disabled={rpmBusy || rpmInput === String(rpmLimit)}
+              className="mb-5 rounded-md bg-teal-600 px-3 py-2 text-xs font-medium text-white hover:bg-teal-700 disabled:opacity-50"
+            >
+              {rpmSaved ? t("admin.ai.settings.saved") : rpmBusy ? t("common.saving") : t("common.save")}
+            </button>
+          </form>
+        </div>
       </div>
 
       {/* Modals */}

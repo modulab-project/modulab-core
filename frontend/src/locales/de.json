@@ -92,6 +92,13 @@
         "add_provider": "Anbieter hinzufügen",
         "delete": "Löschen"
       },
+      "settings": {
+        "title": "Einstellungen",
+        "rpm_label": "Chat-Rate-Limit (Anfragen pro Minute pro Nutzer)",
+        "rpm_hint": "0 = unbegrenzt. Standard: 60.",
+        "save_error": "Einstellungen konnten nicht gespeichert werden.",
+        "saved": "Gespeichert"
+      },
       "modal": {
         "edit_builtin_title": "Bearbeiten — {{name}}",
         "default_model": "Standardmodell",

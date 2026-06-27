@@ -702,6 +702,22 @@ export async function adminFetchAIProviderModels(token: string, id: string): Pro
   return result.models ?? [];
 }
 
+// GET /v1/admin/ai/settings — super-admin only.
+export function adminGetAISettings(token: string): Promise<{ chat_rpm_limit: number }> {
+  return request<{ chat_rpm_limit: number }>("/v1/admin/ai/settings", {
+    headers: bearerHeaders(token),
+  });
+}
+
+// PATCH /v1/admin/ai/settings — super-admin only.
+export function adminPatchAISettings(token: string, chatRPMLimit: number): Promise<{ chat_rpm_limit: number }> {
+  return request<{ chat_rpm_limit: number }>("/v1/admin/ai/settings", {
+    method: "PATCH",
+    headers: bearerHeaders(token),
+    body: JSON.stringify({ chat_rpm_limit: chatRPMLimit }),
+  });
+}
+
 // GET /v1/ai/providers — any approved session.
 export function listAIProviders(token: string): Promise<AIUserProvider[]> {
   return request<AIUserProvider[]>("/v1/ai/providers", {

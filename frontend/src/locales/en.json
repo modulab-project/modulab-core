@@ -92,6 +92,13 @@
         "add_provider": "Add provider",
         "delete": "Delete"
       },
+      "settings": {
+        "title": "Settings",
+        "rpm_label": "Chat rate limit (requests per minute per user)",
+        "rpm_hint": "0 = unlimited. Default: 60.",
+        "save_error": "Failed to save settings.",
+        "saved": "Saved"
+      },
       "modal": {
         "edit_builtin_title": "Edit — {{name}}",
         "default_model": "Default model",
