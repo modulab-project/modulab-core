@@ -1,0 +1,327 @@
+// Package adminapi provides the super-admin-only endpoints that expose and
+// mutate system configuration post-Setup-Wizard completion:
+//
+//   GET  /v1/admin/system          — OIDC, DNS-challenge, group prefix (read-only)
+//   PATCH /v1/admin/oidc           — update OIDC configuration
+//   PATCH /v1/admin/dns-challenge  — update DNS-challenge credentials
+//   GET  /v1/audit-log             — paginated, filtered audit log
+//
+// All four require a super-admin session (enforced by the
+// auth.RequireSuperAdminMiddleware wrapper that main.go applies to each
+// route). OIDC and DNS-challenge changes are also written to the audit log.
+//
+// Relationship to the Setup Wizard: oidc.go / dnschallenge.go in the setup
+// package handle the wizard steps (behind the bootstrap token, inaccessible
+// post-completion). These handlers reuse the same core_settings keys and
+// crypto helpers but require a live super-admin session instead, making the
+// config editable without re-running the wizard.
+package adminapi
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/modulab-project/modulab-core/backend/internal/audit"
+	"github.com/modulab-project/modulab-core/backend/internal/auth"
+	"github.com/modulab-project/modulab-core/backend/internal/crypto"
+	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/setup"
+)
+
+// ---- /v1/admin/system ----------------------------------------------------------
+
+// SystemStatusResponse is what GET /v1/admin/system returns: the current
+// non-secret state of every system-level configuration block. The frontend's
+// AdminSystemPage uses this to pre-fill the edit forms.
+type SystemStatusResponse struct {
+	OIDC         OIDCStatus         `json:"oidc"`
+	DNSChallenge DNSChallengeStatus `json:"dns_challenge"`
+	GroupPrefix  string             `json:"group_prefix"`
+}
+
+// OIDCStatus mirrors setup.OIDCStatusResponse for the system page.
+type OIDCStatus struct {
+	Configured bool   `json:"configured"`
+	IssuerURL  string `json:"issuer_url,omitempty"`
+	ClientID   string `json:"client_id,omitempty"`
+}
+
+// DNSChallengeStatus mirrors setup.DNSChallengeStatusResponse.
+type DNSChallengeStatus struct {
+	Configured bool   `json:"configured"`
+	Provider   string `json:"provider,omitempty"`
+}
+
+// SystemStatusHandler serves GET /v1/admin/system. masterKey must already be
+// resolved (or be the env fallback) - same convention as smtp.go's handlers.
+func SystemStatusHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
+		masterKey, err := setup.ResolveMasterKey(ctx, pool, masterKeyEnv)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusPreconditionFailed)
+			return
+		}
+
+		// OIDC
+		var oidcStatus OIDCStatus
+		encIssuer, issuerExists, err := pool.GetSetting(ctx, "oidc_issuer_url")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if issuerExists && encIssuer != "" {
+			oidcStatus.Configured = true
+			oidcStatus.IssuerURL, _ = crypto.DecryptIfNotEmpty(masterKey, encIssuer)
+			encClientID, cidExists, _ := pool.GetSetting(ctx, "oidc_client_id")
+			if cidExists {
+				oidcStatus.ClientID, _ = crypto.DecryptIfNotEmpty(masterKey, encClientID)
+			}
+		}
+
+		// DNS-challenge
+		var dnsStatus DNSChallengeStatus
+		encProvider, providerExists, err := pool.GetSetting(ctx, "dns_challenge_provider")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if providerExists && encProvider != "" {
+			dnsStatus.Configured = true
+			dnsStatus.Provider, _ = crypto.DecryptIfNotEmpty(masterKey, encProvider)
+		}
+
+		// Group prefix (plaintext)
+		prefix, _, err := pool.GetSetting(ctx, "group_prefix")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, SystemStatusResponse{
+			OIDC:         oidcStatus,
+			DNSChallenge: dnsStatus,
+			GroupPrefix:  prefix,
+		})
+	}
+}
+
+// ---- PATCH /v1/admin/oidc ------------------------------------------------------
+
+// OIDCUpdateRequest is the body for PATCH /v1/admin/oidc.
+// ClientSecret is optional: omit or set to "" to keep the existing secret.
+type OIDCUpdateRequest struct {
+	IssuerURL    string `json:"issuer_url"`
+	ClientID     string `json:"client_id"`
+	ClientSecret string `json:"client_secret"` // "" = keep existing
+}
+
+// OIDCUpdateHandler persists updated OIDC configuration. Mirrors the wizard's
+// OIDCConfigureHandler logic but requires a super-admin session instead of
+// the bootstrap token, making the config editable after wizard completion.
+func OIDCUpdateHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
+		masterKey, err := setup.ResolveMasterKey(ctx, pool, masterKeyEnv)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusPreconditionFailed)
+			return
+		}
+
+		var req OIDCUpdateRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
+			return
+		}
+		req.IssuerURL = strings.TrimSpace(req.IssuerURL)
+		req.ClientID = strings.TrimSpace(req.ClientID)
+		req.ClientSecret = strings.TrimSpace(req.ClientSecret)
+
+		if req.IssuerURL == "" || req.ClientID == "" {
+			http.Error(w, "issuer_url and client_id are required", http.StatusBadRequest)
+			return
+		}
+
+		encIssuer, err := crypto.Encrypt(masterKey, req.IssuerURL)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		encClientID, err := crypto.Encrypt(masterKey, req.ClientID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if err := pool.SetSetting(ctx, "oidc_issuer_url", encIssuer); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := pool.SetSetting(ctx, "oidc_client_id", encClientID); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if req.ClientSecret != "" {
+			encSecret, err := crypto.Encrypt(masterKey, req.ClientSecret)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if err := pool.SetSetting(ctx, "oidc_client_secret_enc", encSecret); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		// Audit — best-effort.
+		if sess, ok := auth.SessionFromContext(ctx); ok {
+			if err := audit.Log(ctx, pool, masterKey, audit.LogParams{
+				EventType:  audit.EventConfigOIDC,
+				ActorID:    sess.UserID,
+				ActorEmail: sess.Email,
+				Details:    fmt.Sprintf(`{"issuer_url":%q}`, req.IssuerURL),
+			}); err != nil {
+				log.Printf("adminapi: audit oidc update: %v", err)
+			}
+		}
+
+		writeJSON(w, http.StatusOK, OIDCStatus{
+			Configured: true,
+			IssuerURL:  req.IssuerURL,
+			ClientID:   req.ClientID,
+		})
+	}
+}
+
+// ---- PATCH /v1/admin/dns-challenge ---------------------------------------------
+
+// DNSChallengeUpdateRequest is the body for PATCH /v1/admin/dns-challenge.
+// Credentials is optional: omit or "" to keep the existing value.
+type DNSChallengeUpdateRequest struct {
+	Provider    string `json:"provider"`
+	Credentials string `json:"credentials"` // "" = keep existing
+}
+
+// DNSChallengeUpdateHandler persists updated DNS-challenge configuration.
+// Mirrors the wizard's DNSChallengeConfigHandler but requires super-admin.
+func DNSChallengeUpdateHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
+		masterKey, err := setup.ResolveMasterKey(ctx, pool, masterKeyEnv)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusPreconditionFailed)
+			return
+		}
+
+		var req DNSChallengeUpdateRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
+			return
+		}
+		req.Provider = strings.TrimSpace(req.Provider)
+
+		if req.Provider == "" {
+			http.Error(w, "provider is required", http.StatusBadRequest)
+			return
+		}
+
+		encProvider, err := crypto.Encrypt(masterKey, req.Provider)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := pool.SetSetting(ctx, "dns_challenge_provider", encProvider); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if req.Credentials != "" {
+			encCreds, err := crypto.Encrypt(masterKey, req.Credentials)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if err := pool.SetSetting(ctx, "dns_challenge_credentials_enc", encCreds); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		// Audit — best-effort.
+		if sess, ok := auth.SessionFromContext(ctx); ok {
+			if err := audit.Log(ctx, pool, masterKey, audit.LogParams{
+				EventType:  audit.EventConfigDNS,
+				ActorID:    sess.UserID,
+				ActorEmail: sess.Email,
+				Details:    fmt.Sprintf(`{"provider":%q}`, req.Provider),
+			}); err != nil {
+				log.Printf("adminapi: audit dns update: %v", err)
+			}
+		}
+
+		writeJSON(w, http.StatusOK, DNSChallengeStatus{
+			Configured: true,
+			Provider:   req.Provider,
+		})
+	}
+}
+
+// ---- GET /v1/audit-log --------------------------------------------------------
+
+// AuditLogHandler serves GET /v1/audit-log with optional query parameters:
+//   event_type  — filter to entries of exactly this event type
+//   before      — cursor: return entries with id < before (newest-first paging)
+//   limit       — max entries per page (1-200, default 50)
+func AuditLogHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
+		masterKey, err := setup.ResolveMasterKey(ctx, pool, masterKeyEnv)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusPreconditionFailed)
+			return
+		}
+
+		q := r.URL.Query()
+		var before int64
+		if s := q.Get("before"); s != "" {
+			before, _ = strconv.ParseInt(s, 10, 64)
+		}
+		limit := 50
+		if s := q.Get("limit"); s != "" {
+			if n, err := strconv.Atoi(s); err == nil {
+				limit = n
+			}
+		}
+
+		entries, err := audit.List(ctx, pool, masterKey, audit.ListParams{
+			EventType: q.Get("event_type"),
+			Before:    before,
+			Limit:     limit,
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if entries == nil {
+			entries = []audit.Entry{}
+		}
+		writeJSON(w, http.StatusOK, entries)
+	}
+}
+
+// writeJSON is a local copy of the same helper from setup/wizard.go and
+// auth/admin.go - each package keeps its own so there is no shared utility
+// dependency just for one line of JSON encoding.
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}

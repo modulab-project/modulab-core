@@ -20,7 +20,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/modulab-project/modulab-core/backend/internal/adminapi"
 	"github.com/modulab-project/modulab-core/backend/internal/ai"
+	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
 	"github.com/modulab-project/modulab-core/backend/internal/bootstrap"
 	"github.com/modulab-project/modulab-core/backend/internal/config"
@@ -295,9 +297,45 @@ func main() {
 			http.Error(w, err.Error(), http.StatusPreconditionFailed)
 			return
 		}
-		setup.SMTPConfigureHandler(pool, masterKey)(w, r)
+		// Capture the response code to know whether the configure succeeded
+		// before writing to the audit log (best-effort, same as everywhere).
+		rw := &responseRecorder{ResponseWriter: w, code: http.StatusOK}
+		setup.SMTPConfigureHandler(pool, masterKey)(rw, r)
+		if rw.code < 400 {
+			if sess, ok := auth.SessionFromContext(r.Context()); ok {
+				if err := audit.Log(r.Context(), pool, masterKey, audit.LogParams{
+					EventType:  audit.EventConfigSMTP,
+					ActorID:    sess.UserID,
+					ActorEmail: sess.Email,
+				}); err != nil {
+					log.Printf("main: audit smtp configure: %v", err)
+				}
+			}
+		}
 	})))
-	mux.Handle("DELETE /v1/admin/smtp", superAdminOnly(setup.SMTPDeleteHandler(pool)))
+	mux.Handle("DELETE /v1/admin/smtp", superAdminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rw := &responseRecorder{ResponseWriter: w, code: http.StatusOK}
+		setup.SMTPDeleteHandler(pool)(rw, r)
+		if rw.code < 400 {
+			masterKey, _ := setup.ResolveMasterKey(r.Context(), pool, cfg.MasterKey)
+			if sess, ok := auth.SessionFromContext(r.Context()); ok && masterKey != "" {
+				if err := audit.Log(r.Context(), pool, masterKey, audit.LogParams{
+					EventType:  audit.EventConfigSMTPDel,
+					ActorID:    sess.UserID,
+					ActorEmail: sess.Email,
+				}); err != nil {
+					log.Printf("main: audit smtp delete: %v", err)
+				}
+			}
+		}
+	})))
+
+	// Admin system page + OIDC/DNS-challenge post-wizard config + audit log.
+	// All super-admin only (same tier as SMTP above).
+	mux.Handle("GET /v1/admin/system", superAdminOnly(adminapi.SystemStatusHandler(pool, cfg.MasterKey)))
+	mux.Handle("PATCH /v1/admin/oidc", superAdminOnly(adminapi.OIDCUpdateHandler(pool, cfg.MasterKey)))
+	mux.Handle("PATCH /v1/admin/dns-challenge", superAdminOnly(adminapi.DNSChallengeUpdateHandler(pool, cfg.MasterKey)))
+	mux.Handle("GET /v1/audit-log", superAdminOnly(adminapi.AuditLogHandler(pool, cfg.MasterKey)))
 
 	// Widget endpoints (spec section 8 / Home page). Not wrapped in any
 	// auth middleware: weather data is not sensitive, and the 15-minute
@@ -402,6 +440,19 @@ func main() {
 	if err := http.ListenAndServe(cfg.HTTPAddr, handler); err != nil {
 		log.Fatalf("server: %v", err)
 	}
+}
+
+// responseRecorder wraps http.ResponseWriter and captures the status code
+// written by the downstream handler so the caller can decide post-hoc
+// whether to emit an audit log entry (only on success).
+type responseRecorder struct {
+	http.ResponseWriter
+	code int
+}
+
+func (r *responseRecorder) WriteHeader(code int) {
+	r.code = code
+	r.ResponseWriter.WriteHeader(code)
 }
 
 // maxBodyMiddleware caps every request body using the max_body_bytes setting

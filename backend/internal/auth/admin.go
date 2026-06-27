@@ -13,8 +13,10 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/mail"
 	"github.com/modulab-project/modulab-core/backend/internal/notify"
+	"github.com/modulab-project/modulab-core/backend/internal/setup"
 )
 
 // logRevokeError logs a failed RevokeUserSessions call. Pulled out to one
@@ -57,6 +59,21 @@ func enqueueMail(ctx context.Context, d Deps, action, subject string, build func
 	}
 	if err := mail.Enqueue(ctx, d.Valkey, build(user.Email, user.Name)); err != nil {
 		log.Printf("auth: %s: failed to enqueue mail for %s: %v", action, subject, err)
+	}
+}
+
+// logAudit appends one entry to the audit log - best-effort, same treatment
+// as logRevokeError/logNotifyError: the admin action itself already succeeded
+// and is the source of truth, so a failed audit write must not turn a
+// successful approve/lock/unlock/delete into a 500 the admin has to retry.
+func logAudit(ctx context.Context, d Deps, p audit.LogParams) {
+	masterKey, err := setup.ResolveMasterKey(ctx, d.Pool, d.MasterKeyEnv)
+	if err != nil {
+		log.Printf("auth: audit: failed to resolve master key for %s: %v", p.EventType, err)
+		return
+	}
+	if err := audit.Log(ctx, d.Pool, masterKey, p); err != nil {
+		log.Printf("auth: audit: failed to write %s: %v", p.EventType, err)
 	}
 }
 
@@ -112,7 +129,11 @@ func RequireSuperAdminMiddleware(d Deps) func(http.Handler) http.Handler {
 				http.Error(w, "forbidden", http.StatusForbidden)
 				return
 			}
-			next.ServeHTTP(w, r)
+			// Store the validated session in the context so downstream
+			// handlers (e.g. SMTP/OIDC/DNS-challenge configure) can
+			// retrieve the actor for audit logging without re-parsing the
+			// bearer token.
+			next.ServeHTTP(w, r.WithContext(ContextWithSession(r.Context(), sess)))
 		})
 	}
 }
@@ -266,7 +287,8 @@ func UsersHandler(d Deps) http.HandlerFunc {
 // happens here, before that event is published, not on a subsequent login.
 func ApproveUserHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := requireAdmin(d, w, r); !ok {
+		sess, ok := requireAdmin(d, w, r)
+		if !ok {
 			return
 		}
 		subject := r.PathValue("id")
@@ -305,6 +327,12 @@ func ApproveUserHandler(d Deps) http.HandlerFunc {
 		}
 		enqueueMail(r.Context(), d, "approve", subject, func(email, name string) mail.Message {
 			return mail.ApprovedMessage(email, name, d.FrontendBaseURL)
+		})
+		logAudit(r.Context(), d, audit.LogParams{
+			EventType:  audit.EventUserApproved,
+			ActorID:    sess.UserID,
+			ActorEmail: sess.Email,
+			TargetID:   subject,
 		})
 		w.WriteHeader(http.StatusNoContent)
 	}
@@ -361,6 +389,12 @@ func LockUserHandler(d Deps) http.HandlerFunc {
 		enqueueMail(r.Context(), d, "lock", subject, func(email, name string) mail.Message {
 			return mail.LockedMessage(email, name)
 		})
+		logAudit(r.Context(), d, audit.LogParams{
+			EventType:  audit.EventUserLocked,
+			ActorID:    sess.UserID,
+			ActorEmail: sess.Email,
+			TargetID:   subject,
+		})
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -370,7 +404,8 @@ func LockUserHandler(d Deps) http.HandlerFunc {
 // never strand the instance the way locking or deleting could.
 func UnlockUserHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := requireAdmin(d, w, r); !ok {
+		sess, ok := requireAdmin(d, w, r)
+		if !ok {
 			return
 		}
 		subject := r.PathValue("id")
@@ -389,6 +424,12 @@ func UnlockUserHandler(d Deps) http.HandlerFunc {
 		}
 		enqueueMail(r.Context(), d, "unlock", subject, func(email, name string) mail.Message {
 			return mail.UnlockedMessage(email, name, d.FrontendBaseURL)
+		})
+		logAudit(r.Context(), d, audit.LogParams{
+			EventType:  audit.EventUserUnlocked,
+			ActorID:    sess.UserID,
+			ActorEmail: sess.Email,
+			TargetID:   subject,
 		})
 		w.WriteHeader(http.StatusNoContent)
 	}
@@ -454,6 +495,17 @@ func DeleteUserHandler(d Deps) http.HandlerFunc {
 				log.Printf("auth: delete: failed to enqueue mail for %s: %v", subject, err)
 			}
 		}
+		targetEmail := ""
+		if targetExists {
+			targetEmail = target.Email
+		}
+		logAudit(r.Context(), d, audit.LogParams{
+			EventType:   audit.EventUserDeleted,
+			ActorID:     sess.UserID,
+			ActorEmail:  sess.Email,
+			TargetID:    subject,
+			TargetEmail: targetEmail,
+		})
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

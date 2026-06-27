@@ -819,3 +819,86 @@ export function streamAIChat(
     }
   });
 }
+
+// ---- Admin system status -------------------------------------------------------
+
+export interface OIDCStatus {
+  configured: boolean;
+  issuer_url?: string;
+  client_id?: string;
+}
+
+export interface DNSChallengeStatus {
+  configured: boolean;
+  provider?: string;
+}
+
+export interface SystemStatus {
+  oidc: OIDCStatus;
+  dns_challenge: DNSChallengeStatus;
+  group_prefix: string;
+}
+
+// GET /v1/admin/system — OIDC config, DNS-challenge, group prefix (read-only).
+export function getSystemStatus(token: string): Promise<SystemStatus> {
+  return request<SystemStatus>("/v1/admin/system", {
+    headers: bearerHeaders(token),
+  });
+}
+
+// PATCH /v1/admin/oidc — update OIDC configuration. client_secret is optional;
+// omit or pass "" to keep the existing secret.
+export function updateOIDC(
+  token: string,
+  body: { issuer_url: string; client_id: string; client_secret?: string },
+): Promise<OIDCStatus> {
+  return request<OIDCStatus>("/v1/admin/oidc", {
+    method: "PATCH",
+    headers: bearerHeaders(token),
+    body: JSON.stringify(body),
+  });
+}
+
+// PATCH /v1/admin/dns-challenge — update DNS-challenge configuration.
+// credentials is optional; omit or pass "" to keep existing credentials.
+export function updateDNSChallenge(
+  token: string,
+  body: { provider: string; credentials?: string },
+): Promise<DNSChallengeStatus> {
+  return request<DNSChallengeStatus>("/v1/admin/dns-challenge", {
+    method: "PATCH",
+    headers: bearerHeaders(token),
+    body: JSON.stringify(body),
+  });
+}
+
+// ---- Audit log ----------------------------------------------------------------
+
+export interface AuditEntry {
+  id: number;
+  created_at: string;    // ISO-8601 timestamp
+  event_type: string;
+  actor_id: string;
+  actor_email: string;
+  target_id: string;
+  target_email: string;
+  details: string;       // JSON string, "" if none
+  prev_hash: string;
+  hash: string;
+}
+
+// GET /v1/audit-log — paginated, newest first.
+// event_type: filter to one event type; before: cursor (id < before); limit: page size.
+export function getAuditLog(
+  token: string,
+  opts?: { event_type?: string; before?: number; limit?: number },
+): Promise<AuditEntry[]> {
+  const params = new URLSearchParams();
+  if (opts?.event_type) params.set("event_type", opts.event_type);
+  if (opts?.before) params.set("before", String(opts.before));
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  const qs = params.toString();
+  return request<AuditEntry[]>(`/v1/audit-log${qs ? `?${qs}` : ""}`, {
+    headers: bearerHeaders(token),
+  });
+}

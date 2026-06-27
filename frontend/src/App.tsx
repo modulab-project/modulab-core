@@ -14,6 +14,8 @@ import AdminFeedsPage from "./pages/AdminFeedsPage";
 import AdminSearxngPage from "./pages/AdminSearxngPage";
 import AdminAIPage from "./pages/AdminAIPage";
 import AdminQuickLinksPage from "./pages/AdminQuickLinksPage";
+import AdminSystemPage from "./pages/AdminSystemPage";
+import AdminAuditPage from "./pages/AdminAuditPage";
 import UserAIKeysPage from "./pages/UserAIKeysPage";
 import Footer from "./components/Footer";
 
@@ -49,6 +51,8 @@ export default function App() {
       <Route path="/admin/searxng" element={<AdminSearxngPage />} />
       <Route path="/admin/ai" element={<AdminAIPage />} />
       <Route path="/admin/quick-links" element={<AdminQuickLinksPage />} />
+      <Route path="/admin/system" element={<AdminSystemPage />} />
+      <Route path="/admin/audit" element={<AdminAuditPage />} />
       <Route
         path="/setup"
         element={

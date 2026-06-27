@@ -507,6 +507,20 @@ function ProfilePanelContent({
               >
                 <i className="ti ti-sparkles text-[15px] text-gray-500" /> {t("shell.ai_providers")}
               </Link>
+              <Link
+                to="/admin/system"
+                onClick={onClose}
+                className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
+              >
+                <i className="ti ti-settings text-[15px] text-gray-500" /> {t("shell.system_link")}
+              </Link>
+              <Link
+                to="/admin/audit"
+                onClick={onClose}
+                className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
+              >
+                <i className="ti ti-shield-check text-[15px] text-gray-500" /> {t("shell.audit_link")}
+              </Link>
             </>
           )}
         </>
