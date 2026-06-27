@@ -96,6 +96,8 @@
         "title": "Einstellungen",
         "rpm_label": "Chat-Rate-Limit (Anfragen pro Minute pro Nutzer)",
         "rpm_hint": "0 = unbegrenzt. Standard: 60.",
+        "body_label": "Max. Request-Body-Größe (Bytes)",
+        "body_hint": "0 = unbegrenzt. Standard: 1048576 (1 MB). Gilt für alle Endpunkte.",
         "save_error": "Einstellungen konnten nicht gespeichert werden.",
         "saved": "Gespeichert"
       },

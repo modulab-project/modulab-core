@@ -152,6 +152,21 @@ func chatRPMLimit(ctx context.Context, pool *db.Pool) int {
 	return n
 }
 
+// MaxBodyBytes reads the configured request body size limit from core_settings.
+// Returns 1 MB (1<<20) as the default when the key is absent or unparseable;
+// 0 means unlimited. Exported so main.go's middleware can use it.
+func MaxBodyBytes(ctx context.Context, pool *db.Pool) int64 {
+	val, ok, err := pool.GetSetting(ctx, "max_body_bytes")
+	if err != nil || !ok || val == "" {
+		return 1 << 20 // default: 1 MB
+	}
+	n, err := strconv.ParseInt(val, 10, 64)
+	if err != nil || n < 0 {
+		return 1 << 20
+	}
+	return n
+}
+
 // writeSSE sends a single SSE data line.
 func writeSSE(w http.ResponseWriter, data string) {
 	fmt.Fprintf(w, "data: %s\n\n", data)
@@ -435,22 +450,25 @@ func fetchModels(ctx context.Context, provType, baseURL, apiKey string) ([]strin
 // AdminSettingsHandler handles GET and PATCH /v1/admin/ai/settings.
 // Auth is enforced by the superAdminOnly middleware in main.go.
 //
-// The single configurable setting is chat_rpm_limit: how many POST /v1/ai/chat
-// requests a single user may make per minute (0 = unlimited). The default when
-// the key is absent is 60 RPM (see chatRPMLimit). Changes take effect
-// immediately on the next ChatHandler request - there is no restart needed and
-// no cache to flush, since chatRPMLimit reads from the database on every call.
+// Configurable settings:
+//   - chat_rpm_limit: POST /v1/ai/chat requests per user per minute (0 = unlimited, default 60).
+//   - max_body_bytes: request body size cap in bytes applied to every route (0 = unlimited, default 1 MB).
+//
+// Changes take effect immediately — no restart needed.
 func AdminSettingsHandler(deps auth.Deps) http.HandlerFunc {
 	type aiSettings struct {
-		ChatRPMLimit int `json:"chat_rpm_limit"`
+		ChatRPMLimit int   `json:"chat_rpm_limit"`
+		MaxBodyBytes int64 `json:"max_body_bytes"`
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			limit := chatRPMLimit(r.Context(), deps.Pool)
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(aiSettings{ChatRPMLimit: limit})
+			_ = json.NewEncoder(w).Encode(aiSettings{
+				ChatRPMLimit: chatRPMLimit(r.Context(), deps.Pool),
+				MaxBodyBytes: MaxBodyBytes(r.Context(), deps.Pool),
+			})
 
 		case http.MethodPatch:
 			var body aiSettings
@@ -462,12 +480,23 @@ func AdminSettingsHandler(deps auth.Deps) http.HandlerFunc {
 				http.Error(w, "chat_rpm_limit must be >= 0 (0 = unlimited)", http.StatusBadRequest)
 				return
 			}
+			if body.MaxBodyBytes < 0 {
+				http.Error(w, "max_body_bytes must be >= 0 (0 = unlimited)", http.StatusBadRequest)
+				return
+			}
 			if err := deps.Pool.SetSetting(r.Context(), "ai_chat_rpm_limit", strconv.Itoa(body.ChatRPMLimit)); err != nil {
 				http.Error(w, "database error", http.StatusInternalServerError)
 				return
 			}
+			if err := deps.Pool.SetSetting(r.Context(), "max_body_bytes", strconv.FormatInt(body.MaxBodyBytes, 10)); err != nil {
+				http.Error(w, "database error", http.StatusInternalServerError)
+				return
+			}
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(aiSettings{ChatRPMLimit: body.ChatRPMLimit})
+			_ = json.NewEncoder(w).Encode(aiSettings{
+				ChatRPMLimit: body.ChatRPMLimit,
+				MaxBodyBytes: body.MaxBodyBytes,
+			})
 
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

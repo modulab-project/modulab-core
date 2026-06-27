@@ -702,19 +702,24 @@ export async function adminFetchAIProviderModels(token: string, id: string): Pro
   return result.models ?? [];
 }
 
+export interface AISettings {
+  chat_rpm_limit: number;
+  max_body_bytes: number;
+}
+
 // GET /v1/admin/ai/settings — super-admin only.
-export function adminGetAISettings(token: string): Promise<{ chat_rpm_limit: number }> {
-  return request<{ chat_rpm_limit: number }>("/v1/admin/ai/settings", {
+export function adminGetAISettings(token: string): Promise<AISettings> {
+  return request<AISettings>("/v1/admin/ai/settings", {
     headers: bearerHeaders(token),
   });
 }
 
 // PATCH /v1/admin/ai/settings — super-admin only.
-export function adminPatchAISettings(token: string, chatRPMLimit: number): Promise<{ chat_rpm_limit: number }> {
-  return request<{ chat_rpm_limit: number }>("/v1/admin/ai/settings", {
+export function adminPatchAISettings(token: string, settings: Partial<AISettings>): Promise<AISettings> {
+  return request<AISettings>("/v1/admin/ai/settings", {
     method: "PATCH",
     headers: bearerHeaders(token),
-    body: JSON.stringify({ chat_rpm_limit: chatRPMLimit }),
+    body: JSON.stringify(settings),
   });
 }
 

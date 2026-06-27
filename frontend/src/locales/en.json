@@ -96,6 +96,8 @@
         "title": "Settings",
         "rpm_label": "Chat rate limit (requests per minute per user)",
         "rpm_hint": "0 = unlimited. Default: 60.",
+        "body_label": "Max request body size (bytes)",
+        "body_hint": "0 = unlimited. Default: 1048576 (1 MB). Applies to all endpoints.",
         "save_error": "Failed to save settings.",
         "saved": "Saved"
       },

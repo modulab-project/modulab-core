@@ -397,20 +397,23 @@ func main() {
 	}
 	log.Printf("modulab-core listening on %s (group prefix %q, frontend origin %q)", cfg.HTTPAddr, effectiveGroupPrefix, cfg.FrontendBaseURL)
 	handler := corsMiddleware(cfg.FrontendBaseURL, mux)
-	handler = maxBodyMiddleware(handler)
+	handler = maxBodyMiddleware(pool, handler)
 	handler = secHeadersMiddleware(handler)
 	if err := http.ListenAndServe(cfg.HTTPAddr, handler); err != nil {
 		log.Fatalf("server: %v", err)
 	}
 }
 
-// maxBodyMiddleware caps every request body at 1 MB. Bodies larger than this
-// cause json.Decoder.Decode to return an error, which each handler already
-// treats as a 400. The cap prevents a malicious client from sending an
-// arbitrarily large body to exhaust server memory.
-func maxBodyMiddleware(next http.Handler) http.Handler {
+// maxBodyMiddleware caps every request body using the max_body_bytes setting
+// stored in core_settings (default 1 MB; 0 = unlimited). The limit is read
+// from the database on every request so changes via PATCH /v1/admin/ai/settings
+// take effect immediately without a restart.
+func maxBodyMiddleware(pool *db.Pool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB
+		limit := ai.MaxBodyBytes(r.Context(), pool)
+		if limit > 0 {
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
+		}
 		next.ServeHTTP(w, r)
 	})
 }
