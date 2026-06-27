@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { Tile } from "../lib/quicklinks";
 import { createUserQuickLink, deleteUserQuickLink, saveOrder } from "../lib/quicklinks";
 
@@ -25,6 +26,7 @@ function AddTileModal({
   onClose: () => void;
   onAdded: (tile: Tile) => void;
 }) {
+  const { t } = useTranslation();
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
   const [icon, setIcon] = useState("ti-link");
@@ -42,7 +44,7 @@ function AddTileModal({
       onAdded(newTile);
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Fehler beim Speichern");
+      setError(err instanceof Error ? err.message : t("home.quick_links_error"));
     } finally {
       setSaving(false);
     }
@@ -58,12 +60,12 @@ function AddTileModal({
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">
-          Kachel hinzufügen
+          {t("home.quick_links_add_modal_title")}
         </h2>
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-              Titel *
+              {t("home.quick_links_tile_title")} *
             </label>
             <input
               type="text"
@@ -76,7 +78,7 @@ function AddTileModal({
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-              URL *
+              {t("home.quick_links_tile_url")} *
             </label>
             <input
               type="url"
@@ -89,7 +91,7 @@ function AddTileModal({
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-              Icon{" "}
+              {t("home.quick_links_tile_icon")}{" "}
               <span className="text-gray-400">(Tabler-Icon-Name, z. B. ti-cloud)</span>
             </label>
             <input
@@ -101,7 +103,7 @@ function AddTileModal({
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-              Beschreibung
+              {t("home.quick_links_tile_desc")}
             </label>
             <input
               type="text"
@@ -117,14 +119,14 @@ function AddTileModal({
               onClick={onClose}
               className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
             >
-              Abbrechen
+              {t("home.quick_links_cancel")}
             </button>
             <button
               type="submit"
               disabled={saving}
               className="rounded-md bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50 dark:bg-teal-500 dark:hover:bg-teal-400"
             >
-              {saving ? "Speichern…" : "Hinzufügen"}
+              {saving ? t("home.quick_links_saving") : t("home.quick_links_add_submit")}
             </button>
           </div>
         </form>
@@ -154,6 +156,7 @@ function TileCard({
   onDrop: () => void;
   onDelete?: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div
       draggable
@@ -184,7 +187,7 @@ function TileCard({
             e.stopPropagation();
             onDelete();
           }}
-          title="Kachel entfernen"
+          title={t("home.quick_links_remove")}
           className="absolute right-2 top-2 hidden rounded-full p-0.5 text-gray-400 hover:bg-red-100 hover:text-red-600 group-hover:flex dark:hover:bg-red-900/40 dark:hover:text-red-400"
         >
           <i className="ti ti-x text-sm" />
@@ -229,6 +232,7 @@ export function QuickLinksGrid({
   initialTiles: Tile[];
   token: string;
 }) {
+  const { t } = useTranslation();
   const [tiles, setTiles] = useState<Tile[]>(initialTiles);
   const [showAdd, setShowAdd] = useState(false);
   const dragSrcIdx = useRef<number | null>(null);
@@ -313,14 +317,14 @@ export function QuickLinksGrid({
           className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-gray-300 p-4 text-gray-400 transition-colors hover:border-teal-400 hover:text-teal-600 dark:border-gray-600 dark:hover:border-teal-500 dark:hover:text-teal-400"
         >
           <i className="ti ti-plus text-2xl" />
-          <span className="text-xs font-medium">Hinzufügen</span>
+          <span className="text-xs font-medium">{t("home.quick_links_add")}</span>
         </button>
       </div>
 
       {/* Empty state */}
       {tiles.length === 0 && (
         <p className="mt-2 text-sm text-gray-400 dark:text-gray-500">
-          Noch keine Kacheln — klicke auf „+" um deine erste Verknüpfung anzulegen.
+          {t("home.quick_links_empty")}
         </p>
       )}
 

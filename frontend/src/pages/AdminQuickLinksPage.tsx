@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { getSessionToken } from "../lib/session";
 import { AppShell, isAdminRole } from "../components/AppShell";
@@ -28,6 +29,7 @@ function QuickLinkForm({
   }) => Promise<void>;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const [title, setTitle] = useState(initial?.title ?? "");
   const [url, setUrl] = useState(initial?.url ?? "");
   const [icon, setIcon] = useState(initial?.icon ?? "ti-link");
@@ -44,7 +46,7 @@ function QuickLinkForm({
     try {
       await onSave({ title, url, icon, description, sort_order: sortOrder });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Fehler");
+      setError(err instanceof Error ? err.message : t("admin.quick_links.form.error"));
     } finally {
       setSaving(false);
     }
@@ -55,7 +57,7 @@ function QuickLinkForm({
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
-            Titel *
+            {t("admin.quick_links.form.title_label")} *
           </label>
           <input
             type="text"
@@ -67,7 +69,7 @@ function QuickLinkForm({
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
-            URL *
+            {t("admin.quick_links.form.url_label")} *
           </label>
           <input
             type="url"
@@ -81,7 +83,8 @@ function QuickLinkForm({
       <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2">
           <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
-            Icon <span className="text-gray-400">(Tabler, z. B. ti-server)</span>
+            {t("admin.quick_links.form.icon_label")}{" "}
+            <span className="text-gray-400">{t("admin.quick_links.form.icon_hint")}</span>
           </label>
           <div className="flex items-center gap-2">
             <i className={`ti ${icon || "ti-link"} text-xl text-teal-600 dark:text-teal-400`} />
@@ -95,7 +98,7 @@ function QuickLinkForm({
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
-            Reihenfolge
+            {t("admin.quick_links.form.order_label")}
           </label>
           <input
             type="number"
@@ -107,7 +110,7 @@ function QuickLinkForm({
       </div>
       <div>
         <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
-          Beschreibung
+          {t("admin.quick_links.form.desc_label")}
         </label>
         <input
           type="text"
@@ -123,14 +126,18 @@ function QuickLinkForm({
           onClick={onCancel}
           className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
         >
-          Abbrechen
+          {t("admin.quick_links.form.cancel")}
         </button>
         <button
           type="submit"
           disabled={saving}
           className="rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50 dark:bg-teal-500"
         >
-          {saving ? "Speichern…" : initial ? "Speichern" : "Erstellen"}
+          {saving
+            ? t("admin.quick_links.form.saving")
+            : initial
+              ? t("admin.quick_links.form.save")
+              : t("admin.quick_links.form.create")}
         </button>
       </div>
     </form>
@@ -140,6 +147,7 @@ function QuickLinkForm({
 // ---- Page -------------------------------------------------------------------
 
 export default function AdminQuickLinksPage() {
+  const { t } = useTranslation();
   const { session, loading } = useAuthenticatedSession();
   const navigate = useNavigate();
   const [links, setLinks] = useState<AdminTile[]>([]);
@@ -161,7 +169,7 @@ export default function AdminQuickLinksPage() {
       .finally(() => setFetching(false));
   }, [session, token, navigate]);
 
-  if (loading || !session) return null;
+  if (loading || !session || fetching) return null;
 
   async function handleCreate(data: {
     title: string;
@@ -197,10 +205,10 @@ export default function AdminQuickLinksPage() {
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
-            Schnellzugriff-Kacheln
+            {t("admin.quick_links.title")}
           </h1>
           <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
-            Globale Kacheln, die für alle Nutzer sichtbar sind
+            {t("admin.quick_links.subtitle")}
           </p>
         </div>
         {!showCreate && (
@@ -209,7 +217,7 @@ export default function AdminQuickLinksPage() {
             className="flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-2 text-sm font-medium text-white hover:bg-teal-700 dark:bg-teal-500 dark:hover:bg-teal-400"
           >
             <i className="ti ti-plus" />
-            Neu
+            {t("admin.quick_links.new_button")}
           </button>
         )}
       </div>
@@ -218,7 +226,7 @@ export default function AdminQuickLinksPage() {
       {showCreate && (
         <div className="mb-6 rounded-2xl border border-teal-200 bg-teal-50/50 p-5 dark:border-teal-800 dark:bg-teal-950/20">
           <h2 className="mb-4 text-sm font-semibold text-gray-800 dark:text-gray-200">
-            Neue Kachel
+            {t("admin.quick_links.new_tile")}
           </h2>
           <QuickLinkForm
             onSave={handleCreate}
@@ -230,7 +238,7 @@ export default function AdminQuickLinksPage() {
       {/* List */}
       {links.length === 0 && !showCreate ? (
         <p className="text-sm text-gray-400 dark:text-gray-500">
-          Noch keine globalen Kacheln angelegt.
+          {t("admin.quick_links.empty")}
         </p>
       ) : (
         <div className="space-y-2">
@@ -266,14 +274,14 @@ export default function AdminQuickLinksPage() {
                   <div className="flex items-center gap-1">
                     <button
                       onClick={() => setEditId(link.id)}
-                      title="Bearbeiten"
+                      title={t("admin.quick_links.edit_title")}
                       className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
                     >
                       <i className="ti ti-pencil text-sm" />
                     </button>
                     <button
                       onClick={() => handleDelete(link.id)}
-                      title="Löschen"
+                      title={t("admin.quick_links.delete_title")}
                       className="rounded-lg p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/30 dark:hover:text-red-400"
                     >
                       <i className="ti ti-trash text-sm" />

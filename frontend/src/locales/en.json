@@ -188,6 +188,28 @@
         "removing": "Removing…",
         "remove": "Remove configuration"
       }
+    },
+    "quick_links": {
+      "title": "Quick Access Tiles",
+      "subtitle": "Global tiles visible to all users",
+      "new_button": "New",
+      "new_tile": "New tile",
+      "empty": "No global tiles created yet.",
+      "form": {
+        "title_label": "Title",
+        "url_label": "URL",
+        "icon_label": "Icon",
+        "icon_hint": "(Tabler, e.g. ti-server)",
+        "order_label": "Order",
+        "desc_label": "Description",
+        "cancel": "Cancel",
+        "save": "Save",
+        "create": "Create",
+        "saving": "Saving…",
+        "error": "Error"
+      },
+      "edit_title": "Edit",
+      "delete_title": "Delete"
     }
   },
   "home": {
@@ -199,6 +221,18 @@
     "no_modules_title": "No modules installed yet",
     "no_modules_body": "Module support is part of Phase 3 of the project - once it ships, your installed apps and bookmarks will show up here.",
     "quick_links": "Quick Access",
+    "quick_links_add": "Add tile",
+    "quick_links_add_modal_title": "Add tile",
+    "quick_links_tile_title": "Title",
+    "quick_links_tile_url": "URL",
+    "quick_links_tile_icon": "Icon",
+    "quick_links_tile_desc": "Description",
+    "quick_links_cancel": "Cancel",
+    "quick_links_add_submit": "Add",
+    "quick_links_saving": "Saving…",
+    "quick_links_remove": "Remove tile",
+    "quick_links_empty": "No tiles yet — click \"+\" to add your first link.",
+    "quick_links_error": "Error saving",
     "search": {
       "tab_web": "Web",
       "tab_images": "Images",
