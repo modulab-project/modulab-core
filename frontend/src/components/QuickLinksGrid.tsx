@@ -137,6 +137,36 @@ function AddTileModal({
 
 // ---- Single tile card -------------------------------------------------------
 
+function TileIcon({ tile }: { tile: Tile }) {
+  const [failed, setFailed] = useState(false);
+
+  let faviconUrl: string | null = null;
+  try {
+    faviconUrl = new URL(tile.url).origin + "/favicon.ico";
+  } catch {
+    // invalid URL — fall through to Tabler icon
+  }
+
+  if (faviconUrl && !failed) {
+    return (
+      <span className="flex h-12 w-12 items-center justify-center rounded-xl border border-gray-200 bg-white p-1.5 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+        <img
+          src={faviconUrl}
+          alt=""
+          onError={() => setFailed(true)}
+          className="h-full w-full object-contain"
+        />
+      </span>
+    );
+  }
+
+  return (
+    <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-teal-500 to-teal-700 text-white shadow-sm">
+      <i className={`ti ${tile.icon || "ti-link"} text-2xl`} />
+    </span>
+  );
+}
+
 function TileCard({
   tile,
   dragging,
@@ -203,9 +233,7 @@ function TileCard({
         onClick={(e) => e.stopPropagation()}
         className="flex flex-col items-center gap-2 text-inherit no-underline"
       >
-        <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-teal-500 to-teal-700 text-white shadow-sm">
-          <i className={`ti ${tile.icon || "ti-link"} text-2xl`} />
-        </span>
+        <TileIcon tile={tile} />
 
         {/* Title */}
         <span className="line-clamp-2 text-sm font-medium text-gray-800 dark:text-gray-100">
