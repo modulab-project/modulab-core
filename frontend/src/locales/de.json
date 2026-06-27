@@ -222,7 +222,8 @@
     },
     "system": {
       "title": "Systemkonfiguration",
-      "subtitle": "OIDC- und DNS-Challenge-Einstellungen aus dem Setup-Wizard bearbeiten.",
+      "subtitle": "Alle system­weiten Einstellungen an einem Ort: OIDC, DNS-Challenge, SMTP, SearXNG und KI-Anbieter.",
+      "ai_manage_link": "KI-Anbieter verwalten →",
       "load_error": "Systemstatus konnte nicht geladen werden.",
       "save_error": "Speichern fehlgeschlagen.",
       "saved": "Erfolgreich gespeichert.",
@@ -362,7 +363,7 @@
     "admin_section": "Admin",
     "users_link": "Benutzer",
     "news_feeds_link": "News-Feeds",
-    "quick_links_link": "Schnellzugriff-Kacheln",
+    "quick_links_link": "Schnellzugriff",
     "smtp_link": "SMTP",
     "searxng_link": "SearXNG",
     "system_link": "Systemkonfiguration",

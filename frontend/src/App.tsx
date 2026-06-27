@@ -9,9 +9,7 @@ import ProfilePage from "./pages/ProfilePage";
 import UserFeedsPage from "./pages/UserFeedsPage";
 import UserSearchPrefsPage from "./pages/UserSearchPrefsPage";
 import AdminUsersPage from "./pages/AdminUsersPage";
-import AdminSmtpPage from "./pages/AdminSmtpPage";
 import AdminFeedsPage from "./pages/AdminFeedsPage";
-import AdminSearxngPage from "./pages/AdminSearxngPage";
 import AdminAIPage from "./pages/AdminAIPage";
 import AdminQuickLinksPage from "./pages/AdminQuickLinksPage";
 import AdminSystemPage from "./pages/AdminSystemPage";
@@ -46,9 +44,10 @@ export default function App() {
       <Route path="/user/search-prefs" element={<UserSearchPrefsPage />} />
       <Route path="/user/ai-keys" element={<UserAIKeysPage />} />
       <Route path="/admin/users" element={<AdminUsersPage />} />
-      <Route path="/admin/smtp" element={<AdminSmtpPage />} />
+      {/* Legacy direct routes redirect to the unified system config page */}
+      <Route path="/admin/smtp" element={<Navigate to="/admin/system" replace />} />
+      <Route path="/admin/searxng" element={<Navigate to="/admin/system" replace />} />
       <Route path="/admin/feeds" element={<AdminFeedsPage />} />
-      <Route path="/admin/searxng" element={<AdminSearxngPage />} />
       <Route path="/admin/ai" element={<AdminAIPage />} />
       <Route path="/admin/quick-links" element={<AdminQuickLinksPage />} />
       <Route path="/admin/system" element={<AdminSystemPage />} />

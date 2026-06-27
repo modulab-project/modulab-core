@@ -222,7 +222,8 @@
     },
     "system": {
       "title": "System configuration",
-      "subtitle": "Edit OIDC and DNS-challenge settings configured during setup.",
+      "subtitle": "All system-wide settings in one place: OIDC, DNS-challenge, SMTP, SearXNG, and AI providers.",
+      "ai_manage_link": "Manage AI providers →",
       "load_error": "Failed to load system status.",
       "save_error": "Failed to save.",
       "saved": "Saved successfully.",
@@ -362,7 +363,7 @@
     "admin_section": "Admin",
     "users_link": "Users",
     "news_feeds_link": "News Feeds",
-    "quick_links_link": "Quick Access Tiles",
+    "quick_links_link": "Quick Access",
     "smtp_link": "SMTP",
     "searxng_link": "SearXNG",
     "system_link": "System config",

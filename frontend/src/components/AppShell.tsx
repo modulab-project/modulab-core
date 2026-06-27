@@ -487,25 +487,11 @@ function ProfilePanelContent({
           {session.role === "super-admin" && (
             <>
               <Link
-                to="/admin/smtp"
+                to="/admin/audit"
                 onClick={onClose}
                 className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
               >
-                <i className="ti ti-mail text-[15px] text-gray-500" /> {t("shell.smtp_link")}
-              </Link>
-              <Link
-                to="/admin/searxng"
-                onClick={onClose}
-                className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
-              >
-                <i className="ti ti-search text-[15px] text-gray-500" /> {t("shell.searxng_link")}
-              </Link>
-              <Link
-                to="/admin/ai"
-                onClick={onClose}
-                className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
-              >
-                <i className="ti ti-sparkles text-[15px] text-gray-500" /> {t("shell.ai_providers")}
+                <i className="ti ti-shield-check text-[15px] text-gray-500" /> {t("shell.audit_link")}
               </Link>
               <Link
                 to="/admin/system"
@@ -513,13 +499,6 @@ function ProfilePanelContent({
                 className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
               >
                 <i className="ti ti-settings text-[15px] text-gray-500" /> {t("shell.system_link")}
-              </Link>
-              <Link
-                to="/admin/audit"
-                onClick={onClose}
-                className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
-              >
-                <i className="ti ti-shield-check text-[15px] text-gray-500" /> {t("shell.audit_link")}
               </Link>
             </>
           )}
