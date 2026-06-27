@@ -58,6 +58,7 @@ import { listQuickLinks, type Tile } from "../lib/quicklinks";
 //   poll if we used useEffect([session]) directly. We guard with a ref so
 //   news only loads once on initial mount and on explicit user actions.
 export default function Home() {
+  const { t } = useTranslation();
   const { session, loading } = useAuthenticatedSession();
   const location = useLocation();
   const navigate = useNavigate();
