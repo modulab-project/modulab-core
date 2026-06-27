@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { AppShell } from "../components/AppShell";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { getSearchPrefs, updateSearchPrefs, type SearchPrefs } from "../lib/api";
@@ -22,6 +23,7 @@ const SEARCH_LANGUAGES = [
 // Changes are saved immediately on interaction (same optimistic pattern as
 // news prefs). Reachable from the profile panel on every page.
 export default function UserSearchPrefsPage() {
+  const { t } = useTranslation();
   const { session, loading } = useAuthenticatedSession();
   const [prefs, setPrefs] = useState<SearchPrefs>({ safesearch: 0, language: "all" });
   const [fetching, setFetching] = useState(true);
@@ -64,14 +66,14 @@ export default function UserSearchPrefsPage() {
       <div className="mx-auto max-w-xl px-4 py-10">
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h1 className="mb-1 text-xl font-semibold">Search settings</h1>
+            <h1 className="mb-1 text-xl font-semibold">{t("user.search.title")}</h1>
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              These preferences apply to all your web searches.
+              {t("user.search.subtitle")}
             </p>
           </div>
           {saved && (
             <span className="flex items-center gap-1.5 text-[13px] text-teal-600 dark:text-teal-400">
-              <i className="ti ti-check text-[14px]" /> Saved
+              <i className="ti ti-check text-[14px]" /> {t("user.search.saved")}
             </span>
           )}
         </div>
@@ -86,9 +88,9 @@ export default function UserSearchPrefsPage() {
           <div className="flex flex-col gap-4">
             {/* SafeSearch */}
             <div className="rounded-2xl border border-gray-100 px-5 py-4 dark:border-gray-800">
-              <p className="mb-1 text-sm font-medium">SafeSearch</p>
+              <p className="mb-1 text-sm font-medium">{t("home.search.safesearch")}</p>
               <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
-                Filter explicit content from your web and image search results.
+                {t("user.search.safesearch_desc")}
               </p>
               <div className="flex gap-2">
                 {([0, 1, 2] as const).map((v) => (
@@ -103,7 +105,7 @@ export default function UserSearchPrefsPage() {
                         : "border border-gray-200 text-gray-600 hover:border-teal-400 dark:border-gray-700 dark:text-gray-300"
                     }`}
                   >
-                    {v === 0 ? "Off" : v === 1 ? "Moderate" : "Strict"}
+                    {v === 0 ? t("home.search.safe_off") : v === 1 ? t("home.search.safe_moderate") : t("home.search.safe_strict")}
                   </button>
                 ))}
               </div>
@@ -111,9 +113,9 @@ export default function UserSearchPrefsPage() {
 
             {/* Language */}
             <div className="rounded-2xl border border-gray-100 px-5 py-4 dark:border-gray-800">
-              <p className="mb-1 text-sm font-medium">Language</p>
+              <p className="mb-1 text-sm font-medium">{t("home.search.language")}</p>
               <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
-                Prefer results in a specific language.
+                {t("user.search.language_desc")}
               </p>
               <select
                 value={prefs.language}

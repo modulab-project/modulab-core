@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { configureSmtp, deleteSmtpConfig, smtpStatus, type SMTPStatus } from "../lib/api";
 import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
@@ -24,6 +25,7 @@ import { AppShell } from "../components/AppShell";
 // re-entering it.
 export default function AdminSmtpPage() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { session, loading } = useAuthenticatedSession();
   const [status, setStatus] = useState<SMTPStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -82,7 +84,7 @@ export default function AdminSmtpPage() {
           setEncryption(s.encryption ?? "starttls");
         }
       })
-      .catch(() => setError("Could not load SMTP settings."));
+      .catch(() => setError(t("admin.smtp.load_error")));
   }, [session, navigate]);
 
   if (loading || !session || session.role !== "super-admin") {
@@ -97,7 +99,7 @@ export default function AdminSmtpPage() {
     }
     const parsedPort = parseInt(port, 10);
     if (!host.trim() || !fromAddress.trim() || Number.isNaN(parsedPort) || parsedPort <= 0) {
-      setError("Host, port, and from address are all required.");
+      setError(t("admin.smtp.validation_error"));
       return;
     }
     setSaving(true);
@@ -115,7 +117,7 @@ export default function AdminSmtpPage() {
       setPassword("");
       setSavedAt(Date.now());
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Saving failed.";
+      const message = err instanceof Error ? err.message : t("admin.smtp.save_error");
       setError(message);
     } finally {
       setSaving(false);
@@ -127,7 +129,7 @@ export default function AdminSmtpPage() {
     if (!token) {
       return;
     }
-    if (!window.confirm("Remove the SMTP configuration? Account notification emails will stop going out until it is set up again.")) {
+    if (!window.confirm(t("admin.smtp.remove_confirm"))) {
       return;
     }
     setRemoving(true);
@@ -143,7 +145,7 @@ export default function AdminSmtpPage() {
       setEncryption("starttls");
       setSavedAt(null);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Removing the configuration failed.";
+      const message = err instanceof Error ? err.message : t("admin.smtp.remove_error");
       setError(message);
     } finally {
       setRemoving(false);
@@ -154,30 +156,30 @@ export default function AdminSmtpPage() {
     <AppShell session={session}>
       <div className="mx-auto w-full max-w-md py-10">
         <div className="mb-1 flex items-center gap-2">
-          <h1 className="text-xl font-semibold">SMTP</h1>
+          <h1 className="text-xl font-semibold">{t("admin.smtp.title")}</h1>
           {status && (
             <span className="flex items-center gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
               <span className={`h-2 w-2 rounded-full ${status.configured ? "bg-green-600" : "bg-red-600"}`} />
-              {status.configured ? "Configured" : "Not configured"}
+              {status.configured ? t("admin.smtp.status_configured") : t("admin.smtp.status_not_configured")}
             </span>
           )}
         </div>
         <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">
-          Outbound mail for account notifications.
+          {t("admin.smtp.subtitle")}
         </p>
 
         {status && !status.configured && (
           <p className="mb-4 text-sm text-amber-600 dark:text-amber-400">
-            Not configured yet - queued notifications are dropped until this is set up.
+            {t("admin.smtp.warning_not_configured")}
           </p>
         )}
         {error && <p className="mb-4 text-sm text-red-600 dark:text-red-400">{error}</p>}
         {savedAt && !error && (
-          <p className="mb-4 text-sm text-green-700 dark:text-green-400">Saved.</p>
+          <p className="mb-4 text-sm text-green-700 dark:text-green-400">{t("admin.smtp.saved")}</p>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <Field label="Host">
+          <Field label={t("setup.step6.host")}>
             <input
               type="text"
               value={host}
@@ -186,7 +188,7 @@ export default function AdminSmtpPage() {
               className={inputClass}
             />
           </Field>
-          <Field label="Port">
+          <Field label={t("setup.step6.port")}>
             <input
               type="number"
               value={port}
@@ -194,25 +196,25 @@ export default function AdminSmtpPage() {
               className={inputClass}
             />
           </Field>
-          <Field label="Username">
+          <Field label={t("setup.step6.username")}>
             <input
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="leave empty for an unauthenticated relay"
+              placeholder={t("admin.smtp.username_placeholder")}
               className={inputClass}
             />
           </Field>
-          <Field label="Password">
+          <Field label={t("setup.step6.password")}>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder={status?.configured ? "leave empty to keep using no/empty password" : ""}
+              placeholder={status?.configured ? t("admin.smtp.password_placeholder_existing") : ""}
               className={inputClass}
             />
           </Field>
-          <Field label="From address">
+          <Field label={t("setup.step6.from_address")}>
             <input
               type="email"
               value={fromAddress}
@@ -221,15 +223,15 @@ export default function AdminSmtpPage() {
               className={inputClass}
             />
           </Field>
-          <Field label="Encryption">
+          <Field label={t("setup.step6.encryption")}>
             <select
               value={encryption}
               onChange={(e) => setEncryption(e.target.value)}
               className={inputClass}
             >
-              <option value="none">None</option>
-              <option value="starttls">STARTTLS (e.g. port 587)</option>
-              <option value="tls">SSL/TLS (e.g. port 465)</option>
+              <option value="none">{t("setup.step6.enc_none")}</option>
+              <option value="starttls">{t("setup.step6.enc_starttls")}</option>
+              <option value="tls">{t("setup.step6.enc_tls")}</option>
             </select>
           </Field>
 
@@ -238,7 +240,7 @@ export default function AdminSmtpPage() {
             disabled={saving}
             className="w-full rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-teal-500 dark:hover:bg-teal-400"
           >
-            {saving ? "Saving…" : "Save"}
+            {saving ? t("admin.smtp.saving") : t("admin.smtp.save")}
           </button>
 
           {status?.configured && (
@@ -248,7 +250,7 @@ export default function AdminSmtpPage() {
               onClick={handleRemove}
               className="w-full rounded-lg border border-red-300 px-4 py-2.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
             >
-              {removing ? "Removing…" : "Remove configuration"}
+              {removing ? t("admin.smtp.action.removing") : t("admin.smtp.action.remove")}
             </button>
           )}
         </form>

@@ -7,6 +7,7 @@
 // client-side we additionally redirect non-admins to / via isAdminRole.
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import {
   adminListFeeds,
   adminCreateFeed,
@@ -23,6 +24,7 @@ import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell, isAdminRole } from "../components/AppShell";
 
 export default function AdminFeedsPage() {
+  const { t } = useTranslation();
   const { session, loading } = useAuthenticatedSession();
   const navigate = useNavigate();
 
@@ -79,7 +81,7 @@ export default function AdminFeedsPage() {
       const updated = await adminUpdateNewsSettings(token, patch);
       setSettings(updated);
     } catch {
-      setSettingsError("Failed to save settings.");
+      setSettingsError(t("admin.feeds.settings_save_error"));
     } finally {
       setSettingsSaving(false);
     }
@@ -96,14 +98,14 @@ export default function AdminFeedsPage() {
   }
 
   async function handleDelete(feed: Feed) {
-    if (!confirm(`Delete "${feed.label}"? This removes it for all users.`)) return;
+    if (!confirm(t("admin.feeds.delete_confirm", { label: feed.label }))) return;
     const token = getSessionToken();
     if (!token) return;
     try {
       await adminDeleteFeed(token, feed.id);
       setFeeds((prev) => prev.filter((f) => f.id !== feed.id));
     } catch (e: unknown) {
-      setError((e as ApiError).message ?? "Delete failed");
+      setError((e as ApiError).message ?? t("admin.feeds.delete_error"));
     }
   }
 
@@ -115,9 +117,9 @@ export default function AdminFeedsPage() {
 
         {/* ── News display settings ────────────────────────────────── */}
         <div className="mb-8">
-          <h1 className="text-xl font-semibold">News Settings</h1>
+          <h1 className="text-xl font-semibold">{t("admin.feeds.settings_title")}</h1>
           <p className="mt-0.5 mb-4 text-sm text-gray-500 dark:text-gray-400">
-            Global display settings applied to all users.
+            {t("admin.feeds.settings_subtitle")}
           </p>
 
           {settings && (
@@ -125,9 +127,9 @@ export default function AdminFeedsPage() {
               {/* Articles on home page */}
               <div className="flex items-center justify-between px-4 py-3">
                 <div>
-                  <p className="text-sm font-medium">Articles on home page</p>
+                  <p className="text-sm font-medium">{t("admin.feeds.home_count_label")}</p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
-                    How many articles each user sees in the compact home preview.
+                    {t("admin.feeds.home_count_desc")}
                   </p>
                 </div>
                 <div className="flex gap-1 ml-4 shrink-0">
@@ -152,9 +154,9 @@ export default function AdminFeedsPage() {
               {/* Max articles total */}
               <div className="flex items-center justify-between px-4 py-3">
                 <div>
-                  <p className="text-sm font-medium">Max articles total</p>
+                  <p className="text-sm font-medium">{t("admin.feeds.max_articles_label")}</p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
-                    Maximum number of articles returned by /v1/news across all feeds.
+                    {t("admin.feeds.max_articles_desc")}
                   </p>
                 </div>
                 <div className="flex gap-1 ml-4 shrink-0">
@@ -179,15 +181,15 @@ export default function AdminFeedsPage() {
               {/* Show images */}
               <div className="flex items-center justify-between px-4 py-3">
                 <div>
-                  <p className="text-sm font-medium">Show images</p>
+                  <p className="text-sm font-medium">{t("admin.feeds.show_images_label")}</p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
-                    Display article preview images in the news panel.
+                    {t("admin.feeds.show_images_desc")}
                   </p>
                 </div>
                 <button
                   type="button"
                   disabled={settingsSaving}
-                  aria-label={settings.show_images ? "Disable images" : "Enable images"}
+                  aria-label={settings.show_images ? t("admin.feeds.disable_images") : t("admin.feeds.enable_images")}
                   onClick={() => handleSettingChange({ show_images: !settings.show_images })}
                   className={`relative h-[22px] w-10 flex-none rounded-full border transition-colors disabled:opacity-50 ml-4 ${
                     settings.show_images
@@ -213,9 +215,9 @@ export default function AdminFeedsPage() {
         {/* ── Feed pool ───────────────────────────────────────────── */}
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h2 className="text-xl font-semibold">News Feeds</h2>
+            <h2 className="text-xl font-semibold">{t("admin.feeds.title")}</h2>
             <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
-              Manage the global RSS/Atom feed pool users can subscribe to.
+              {t("admin.feeds.subtitle")}
             </p>
           </div>
           <button
@@ -223,7 +225,7 @@ export default function AdminFeedsPage() {
             onClick={openCreate}
             className="flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-2 text-sm font-medium text-white hover:bg-teal-700"
           >
-            <i className="ti ti-plus text-[14px]" /> Add feed
+            <i className="ti ti-plus text-[14px]" /> {t("admin.feeds.action.add")}
           </button>
         </div>
 
@@ -234,12 +236,12 @@ export default function AdminFeedsPage() {
         )}
 
         {fetching ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">Loading…</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{t("admin.feeds.loading")}</p>
         ) : feeds.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-gray-300 px-6 py-10 text-center dark:border-gray-700">
-            <p className="text-sm font-medium text-gray-700 dark:text-gray-200">No feeds yet</p>
+            <p className="text-sm font-medium text-gray-700 dark:text-gray-200">{t("admin.feeds.empty_title")}</p>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              Add an RSS or Atom feed URL to get started.
+              {t("admin.feeds.empty_body")}
             </p>
           </div>
         ) : (
@@ -262,7 +264,7 @@ export default function AdminFeedsPage() {
                   <button
                     type="button"
                     onClick={() => openEdit(feed)}
-                    aria-label={`Edit ${feed.label}`}
+                    aria-label={t("admin.feeds.action.edit_aria", { name: feed.label })}
                     className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
                   >
                     <i className="ti ti-pencil text-[14px] text-gray-500" />
@@ -270,7 +272,7 @@ export default function AdminFeedsPage() {
                   <button
                     type="button"
                     onClick={() => handleDelete(feed)}
-                    aria-label={`Delete ${feed.label}`}
+                    aria-label={t("admin.feeds.action.delete_aria", { name: feed.label })}
                     className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-red-50 dark:hover:bg-red-950"
                   >
                     <i className="ti ti-trash text-[14px] text-red-500" />
@@ -311,6 +313,7 @@ function FeedModal({
   onClose: () => void;
   onSaved: (saved: Feed) => void;
 }) {
+  const { t } = useTranslation();
   const [url, setUrl] = useState(feed?.url ?? "");
   const [label, setLabel] = useState(feed?.label ?? "");
   const [saving, setSaving] = useState(false);
@@ -331,7 +334,7 @@ function FeedModal({
         onSaved(created);
       }
     } catch (e: unknown) {
-      setError((e as ApiError).message ?? "Save failed");
+      setError((e as ApiError).message ?? t("admin.feeds.modal.save_error"));
       setSaving(false);
     }
   }
@@ -346,11 +349,11 @@ function FeedModal({
       {/* Dialog */}
       <div className="fixed inset-x-4 top-[20%] z-50 mx-auto max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-gray-800 dark:bg-gray-950">
         <h2 className="mb-4 text-base font-semibold">
-          {feed ? "Edit feed" : "Add feed"}
+          {feed ? t("admin.feeds.modal.title_edit") : t("admin.feeds.modal.title_add")}
         </h2>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="mb-1 block text-sm font-medium">Label</label>
+            <label className="mb-1 block text-sm font-medium">{t("admin.feeds.modal.label")}</label>
             <input
               type="text"
               value={label}
@@ -361,7 +364,7 @@ function FeedModal({
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium">RSS / Atom URL</label>
+            <label className="mb-1 block text-sm font-medium">{t("admin.feeds.modal.url")}</label>
             <input
               type="url"
               value={url}
@@ -380,14 +383,14 @@ function FeedModal({
               onClick={onClose}
               className="rounded-lg px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-800"
             >
-              Cancel
+              {t("admin.feeds.modal.cancel")}
             </button>
             <button
               type="submit"
               disabled={saving}
               className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
             >
-              {saving ? "Saving…" : "Save"}
+              {saving ? t("admin.feeds.modal.saving") : t("admin.feeds.modal.save")}
             </button>
           </div>
         </form>

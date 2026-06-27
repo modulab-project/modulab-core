@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { AppShell } from "../components/AppShell";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { listFeeds, setFeedSubscription, type Feed } from "../lib/api";
@@ -8,6 +9,7 @@ import { getSessionToken } from "../lib/session";
 // Mirrors the FeedsPanel slide panel on the homepage but as a standalone
 // page so it's reachable from the profile panel on any route.
 export default function UserFeedsPage() {
+  const { t } = useTranslation();
   const { session, loading } = useAuthenticatedSession();
   const [feeds, setFeeds] = useState<Feed[]>([]);
   const [fetching, setFetching] = useState(true);
@@ -43,9 +45,9 @@ export default function UserFeedsPage() {
   return (
     <AppShell session={session}>
       <div className="mx-auto max-w-xl px-4 py-10">
-        <h1 className="mb-1 text-xl font-semibold">My feeds</h1>
+        <h1 className="mb-1 text-xl font-semibold">{t("user.feeds.title")}</h1>
         <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">
-          Enable or disable news feeds to personalise your home page.
+          {t("user.feeds.subtitle")}
         </p>
 
         {fetching ? (
@@ -60,7 +62,7 @@ export default function UserFeedsPage() {
         ) : feeds.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-gray-300 px-6 py-10 text-center dark:border-gray-700">
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              No feeds available yet. An admin needs to add some first.
+              {t("user.feeds.empty")}
             </p>
           </div>
         ) : (
@@ -77,7 +79,7 @@ export default function UserFeedsPage() {
                 </div>
                 <button
                   type="button"
-                  aria-label={feed.enabled ? `Disable ${feed.label}` : `Enable ${feed.label}`}
+                  aria-label={feed.enabled ? t("home.feeds.disable_label", { name: feed.label }) : t("home.feeds.enable_label", { name: feed.label })}
                   disabled={toggling === feed.id}
                   onClick={() => handleToggle(feed)}
                   className={`relative h-[22px] w-10 flex-none rounded-full border transition-colors disabled:opacity-50 ${

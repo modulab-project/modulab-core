@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { getHealth } from "../lib/api";
 import { storeSessionToken } from "../lib/session";
 
@@ -37,6 +38,7 @@ const STORAGE_KEY = "modulab_auth_result";
 //     straight to /pending or / based on role - no detour through /setup.
 export default function AuthComplete() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   // Guards against React 18 StrictMode's dev-only double-invocation of
   // effects. Without this, the second invocation re-reads
   // window.location.hash *after* the first invocation already cleared it
@@ -86,7 +88,7 @@ export default function AuthComplete() {
       .catch(() => navigate("/setup", { replace: true }));
   }, [navigate]);
 
-  return <p className="p-8 text-center text-sm text-gray-500">Finishing login…</p>;
+  return <p className="p-8 text-center text-sm text-gray-500">{t("auth_complete.finishing")}</p>;
 }
 
 // consumeAuthResult reads and clears the stashed result - "consume" because

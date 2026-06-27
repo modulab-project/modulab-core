@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { AppShell } from "../components/AppShell";
 import { useAuthenticatedSession } from "../lib/useSession";
 import {
@@ -15,6 +16,7 @@ import { getSessionToken } from "../lib/session";
 // using their own key, choose which model to use. Users using the admin key
 // cannot change the model (the admin's default_model is used, fixed).
 export default function UserAIKeysPage() {
+  const { t } = useTranslation();
   const { session, loading } = useAuthenticatedSession();
   const [providers, setProviders] = useState<AIUserProvider[] | null>(null);
   const [editingKeyId, setEditingKeyId] = useState<string | null>(null);
@@ -47,7 +49,7 @@ export default function UserAIKeysPage() {
       setKeyInput("");
       refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save key.");
+      setError(e instanceof Error ? e.message : t("user.ai.save_key_error"));
     } finally {
       setBusy(false);
     }
@@ -62,7 +64,7 @@ export default function UserAIKeysPage() {
       await deleteAIUserKey(token, providerId);
       refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to remove key.");
+      setError(e instanceof Error ? e.message : t("user.ai.remove_key_error"));
     } finally {
       setBusy(false);
     }
@@ -71,16 +73,16 @@ export default function UserAIKeysPage() {
   return (
     <AppShell session={session}>
       <div className="mx-auto w-full max-w-md py-10">
-        <h1 className="mb-1 text-xl font-semibold">AI providers</h1>
+        <h1 className="mb-1 text-xl font-semibold">{t("user.ai.title")}</h1>
         <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">
-          Add your own API key to override the ModuLab key. With your own API key you also choose which model to use.
+          {t("user.ai.subtitle")}
         </p>
 
         {error && <p className="mb-4 text-sm text-red-600 dark:text-red-400">{error}</p>}
 
         {providers === null ? null : providers.length === 0 ? (
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            No AI providers configured yet.
+            {t("user.ai.empty")}
           </p>
         ) : (
           <div className="rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
@@ -100,7 +102,7 @@ export default function UserAIKeysPage() {
                     <div className="flex items-center gap-1.5">
                       {!p.enabled && (
                         <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400">
-                          Not enabled
+                          {t("user.ai.status.not_enabled")}
                         </span>
                       )}
                       <span
@@ -112,7 +114,7 @@ export default function UserAIKeysPage() {
                             : "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400"
                         }`}
                       >
-                        {p.has_user_key ? "Your key" : p.has_admin_key ? "ModuLab API key" : "No key"}
+                        {p.has_user_key ? t("user.ai.status.your_key") : p.has_admin_key ? t("user.ai.status.modulab_key") : t("user.ai.status.no_key")}
                       </span>
                     </div>
                   </div>
@@ -120,8 +122,8 @@ export default function UserAIKeysPage() {
                   {/* Model line */}
                   <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
                     {p.has_user_key
-                      ? `Model: ${p.preferred_model || p.default_model}`
-                      : `Model: ${p.default_model} · managed by ModuLab`}
+                      ? t("user.ai.model_own", { model: p.preferred_model || p.default_model })
+                      : t("user.ai.model_managed", { model: p.default_model })}
                   </p>
 
                   {/* Key edit row */}
@@ -146,14 +148,14 @@ export default function UserAIKeysPage() {
                         onClick={() => handleSaveKey(p.id)}
                         className="rounded-md bg-teal-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-700 disabled:opacity-50"
                       >
-                        {busy ? "…" : "Save"}
+                        {busy ? "…" : t("user.ai.action.save")}
                       </button>
                       <button
                         type="button"
                         onClick={() => { setEditingKeyId(null); setKeyInput(""); }}
                         className="rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300"
                       >
-                        Cancel
+                        {t("user.ai.action.cancel")}
                       </button>
                     </div>
                   ) : (
@@ -165,7 +167,7 @@ export default function UserAIKeysPage() {
                           onClick={() => { setEditingKeyId(p.id); setKeyInput(""); }}
                           className="rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
                         >
-                          {p.has_user_key ? "Update key" : "Add your own API key"}
+                          {p.has_user_key ? t("user.ai.action.update_key") : t("user.ai.action.add_key")}
                         </button>
                       )}
                       {p.has_user_key && (
@@ -175,11 +177,11 @@ export default function UserAIKeysPage() {
                           onClick={() => handleRemove(p.id)}
                           className="rounded-md border border-red-300 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
                         >
-                          Remove key
+                          {t("user.ai.action.remove_key")}
                         </button>
                       )}
                       {!p.can_override && (
-                        <span className="text-xs text-gray-400 dark:text-gray-600">Override not allowed</span>
+                        <span className="text-xs text-gray-400 dark:text-gray-600">{t("user.ai.override_not_allowed")}</span>
                       )}
                     </div>
                   )}
@@ -213,6 +215,7 @@ function ModelSelector({
   onChanged: () => void;
   onError: (e: string | null) => void;
 }) {
+  const { t } = useTranslation();
   const [models, setModels] = useState<string[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -227,7 +230,7 @@ function ModelSelector({
       const list = await fetchUserAIProviderModels(token, provider.id);
       setModels(list);
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Could not fetch models.");
+      onError(e instanceof Error ? e.message : t("user.ai.fetch_models_error"));
     } finally {
       setLoading(false);
     }
@@ -242,7 +245,7 @@ function ModelSelector({
       await setAIUserPreferredModel(token, provider.id, model);
       onChanged();
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Could not save model.");
+      onError(e instanceof Error ? e.message : t("user.ai.save_model_error"));
     } finally {
       setSaving(false);
     }
@@ -251,7 +254,7 @@ function ModelSelector({
   return (
     <div className="mt-2 border-t border-gray-100 pt-2 dark:border-gray-800">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs text-gray-500 dark:text-gray-400">Your model</span>
+        <span className="text-xs text-gray-500 dark:text-gray-400">{t("user.ai.your_model")}</span>
         {models === null ? (
           <button
             type="button"
@@ -259,7 +262,7 @@ function ModelSelector({
             onClick={handleLoad}
             className="text-xs text-teal-600 hover:underline disabled:opacity-50 dark:text-teal-400"
           >
-            {loading ? "Loading…" : "Load available models"}
+            {loading ? t("common.loading") : t("user.ai.load_models")}
           </button>
         ) : (
           <select

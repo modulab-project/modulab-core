@@ -64,6 +64,130 @@
         "unlock": "Unlock",
         "delete": "Delete"
       }
+    },
+    "ai": {
+      "title": "AI providers",
+      "subtitle": "Manage API keys for built-in providers and add custom OpenAI-compatible endpoints. Users with their own key always override the admin key for that provider.",
+      "load_error": "Could not load AI providers.",
+      "delete_confirm": "Delete \"{{name}}\"? This removes the provider and all user keys for it.",
+      "clear_key_error": "Failed to clear key.",
+      "delete_error": "Failed to delete provider.",
+      "update_error": "Failed to update provider.",
+      "save_error": "Failed to save.",
+      "builtin_title": "Built-in providers",
+      "custom_title": "Custom providers (OpenAI-compatible)",
+      "custom_empty": "No custom providers yet. Add Ollama, Groq, Mistral, or any OpenAI-compatible endpoint.",
+      "no_key_suffix": " · no key",
+      "model_label": "Model",
+      "status": {
+        "active": "Active",
+        "disabled": "Disabled",
+        "no_key": "No key"
+      },
+      "action": {
+        "edit": "Edit",
+        "disable": "Disable",
+        "enable": "Enable",
+        "clear_key": "Clear key",
+        "add_provider": "Add provider",
+        "delete": "Delete"
+      },
+      "modal": {
+        "edit_builtin_title": "Edit — {{name}}",
+        "default_model": "Default model",
+        "load_models": "Load available models",
+        "fetch_models_error": "Could not fetch models.",
+        "save_key_first": "Save an API key first to load available models.",
+        "api_key": "API key",
+        "api_key_keep": "API key (leave empty to keep existing)",
+        "api_key_optional": "API key (optional)",
+        "custom_title_edit": "Edit custom provider",
+        "custom_title_add": "Add custom provider",
+        "name": "Name",
+        "id": "ID (auto-generated from name if empty)",
+        "base_url": "Base URL",
+        "user_override": "Allow users to override with their own key",
+        "save_provider_error": "Failed to save provider.",
+        "save_changes": "Save changes",
+        "add_provider": "Add provider"
+      }
+    },
+    "feeds": {
+      "settings_title": "News Settings",
+      "settings_subtitle": "Global display settings applied to all users.",
+      "settings_save_error": "Failed to save settings.",
+      "home_count_label": "Articles on home page",
+      "home_count_desc": "How many articles each user sees in the compact home preview.",
+      "max_articles_label": "Max articles total",
+      "max_articles_desc": "Maximum number of articles returned by /v1/news across all feeds.",
+      "show_images_label": "Show images",
+      "show_images_desc": "Display article preview images in the news panel.",
+      "disable_images": "Disable images",
+      "enable_images": "Enable images",
+      "title": "News Feeds",
+      "subtitle": "Manage the global RSS/Atom feed pool users can subscribe to.",
+      "delete_confirm": "Delete \"{{label}}\"? This removes it for all users.",
+      "delete_error": "Delete failed",
+      "empty_title": "No feeds yet",
+      "empty_body": "Add an RSS or Atom feed URL to get started.",
+      "loading": "Loading…",
+      "action": {
+        "add": "Add feed",
+        "edit_aria": "Edit {{name}}",
+        "delete_aria": "Delete {{name}}"
+      },
+      "modal": {
+        "title_edit": "Edit feed",
+        "title_add": "Add feed",
+        "label": "Label",
+        "url": "RSS / Atom URL",
+        "save_error": "Save failed",
+        "cancel": "Cancel",
+        "saving": "Saving…",
+        "save": "Save"
+      }
+    },
+    "searxng": {
+      "title": "SearXNG",
+      "subtitle": "Configure the SearXNG instance that powers ModuLab's home-page web search. When set, the search box shows inline results instead of opening an external search engine.",
+      "status_configured": "Configured",
+      "status_not_configured": "Not configured — web search is disabled",
+      "url_label": "SearXNG URL",
+      "url_hint": "Base URL without trailing slash. ModuLab calls /search?format=json server-side.",
+      "max_results_label": "Max results",
+      "max_results_hint": "Results shown per search (1–100).",
+      "fetch_pages_label": "Pages fetched",
+      "fetch_pages_hint": "SearXNG pages fetched in parallel (1–5). More = more results, same latency.",
+      "saved": "Saved successfully.",
+      "saving": "Saving…",
+      "save": "Save",
+      "no_instance_title": "Don't have SearXNG yet?",
+      "no_instance_body": "Start it alongside ModuLab with the search profile:",
+      "action": {
+        "removing": "Removing…",
+        "remove": "Remove configuration"
+      }
+    },
+    "smtp": {
+      "title": "SMTP",
+      "subtitle": "Outbound mail for account notifications.",
+      "status_configured": "Configured",
+      "status_not_configured": "Not configured",
+      "load_error": "Could not load SMTP settings.",
+      "warning_not_configured": "Not configured yet — queued notifications are dropped until this is set up.",
+      "saved": "Saved.",
+      "validation_error": "Host, port, and from address are all required.",
+      "save_error": "Saving failed.",
+      "remove_error": "Removing the configuration failed.",
+      "remove_confirm": "Remove the SMTP configuration? Account notification emails will stop going out until it is set up again.",
+      "username_placeholder": "leave empty for an unauthenticated relay",
+      "password_placeholder_existing": "leave empty to keep using no/empty password",
+      "saving": "Saving…",
+      "save": "Save",
+      "action": {
+        "removing": "Removing…",
+        "remove": "Remove configuration"
+      }
     }
   },
   "home": {
@@ -261,6 +385,57 @@
       "done_message": "Setup complete. ModuLab Core is now in normal operation.",
       "done_button": "Continue to ModuLab",
       "missing": "Not yet complete, missing: {{items}}"
+    }
+  },
+  "auth_complete": {
+    "finishing": "Finishing login…"
+  },
+  "common": {
+    "cancel": "Cancel",
+    "save": "Save",
+    "saving": "Saving…",
+    "loading": "Loading…",
+    "saved": "Saved"
+  },
+  "user": {
+    "ai": {
+      "title": "AI providers",
+      "subtitle": "Add your own API key to override the ModuLab key. With your own API key you also choose which model to use.",
+      "empty": "No AI providers configured yet.",
+      "save_key_error": "Failed to save key.",
+      "remove_key_error": "Failed to remove key.",
+      "fetch_models_error": "Could not fetch models.",
+      "save_model_error": "Could not save model.",
+      "status": {
+        "not_enabled": "Not enabled",
+        "your_key": "Your key",
+        "modulab_key": "ModuLab API key",
+        "no_key": "No key"
+      },
+      "model_own": "Model: {{model}}",
+      "model_managed": "Model: {{model}} · managed by ModuLab",
+      "your_model": "Your model",
+      "load_models": "Load available models",
+      "override_not_allowed": "Override not allowed",
+      "action": {
+        "update_key": "Update key",
+        "add_key": "Add your own API key",
+        "remove_key": "Remove key",
+        "save": "Save",
+        "cancel": "Cancel"
+      }
+    },
+    "feeds": {
+      "title": "My feeds",
+      "subtitle": "Enable or disable news feeds to personalise your home page.",
+      "empty": "No feeds available yet. An admin needs to add some first."
+    },
+    "search": {
+      "title": "Search settings",
+      "subtitle": "These preferences apply to all your web searches.",
+      "safesearch_desc": "Filter explicit content from your web and image search results.",
+      "language_desc": "Prefer results in a specific language.",
+      "saved": "Saved"
     }
   }
 }

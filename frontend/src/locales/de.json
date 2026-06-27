@@ -64,6 +64,130 @@
         "unlock": "Entsperren",
         "delete": "Löschen"
       }
+    },
+    "ai": {
+      "title": "KI-Anbieter",
+      "subtitle": "API-Schlüssel für integrierte Anbieter verwalten und benutzerdefinierte OpenAI-kompatible Endpunkte hinzufügen. Benutzer mit eigenem Schlüssel überschreiben immer den Admin-Schlüssel für diesen Anbieter.",
+      "load_error": "KI-Anbieter konnten nicht geladen werden.",
+      "delete_confirm": "\"{{name}}\" löschen? Damit werden der Anbieter und alle Benutzerschlüssel entfernt.",
+      "clear_key_error": "Schlüssel konnte nicht gelöscht werden.",
+      "delete_error": "Anbieter konnte nicht gelöscht werden.",
+      "update_error": "Anbieter konnte nicht aktualisiert werden.",
+      "save_error": "Speichern fehlgeschlagen.",
+      "builtin_title": "Integrierte Anbieter",
+      "custom_title": "Benutzerdefinierte Anbieter (OpenAI-kompatibel)",
+      "custom_empty": "Noch keine benutzerdefinierten Anbieter. Füge Ollama, Groq, Mistral oder einen anderen OpenAI-kompatiblen Endpunkt hinzu.",
+      "no_key_suffix": " · kein Schlüssel",
+      "model_label": "Modell",
+      "status": {
+        "active": "Aktiv",
+        "disabled": "Deaktiviert",
+        "no_key": "Kein Schlüssel"
+      },
+      "action": {
+        "edit": "Bearbeiten",
+        "disable": "Deaktivieren",
+        "enable": "Aktivieren",
+        "clear_key": "Schlüssel löschen",
+        "add_provider": "Anbieter hinzufügen",
+        "delete": "Löschen"
+      },
+      "modal": {
+        "edit_builtin_title": "Bearbeiten — {{name}}",
+        "default_model": "Standardmodell",
+        "load_models": "Verfügbare Modelle laden",
+        "fetch_models_error": "Modelle konnten nicht geladen werden.",
+        "save_key_first": "Zuerst einen API-Schlüssel speichern, um verfügbare Modelle zu laden.",
+        "api_key": "API-Schlüssel",
+        "api_key_keep": "API-Schlüssel (leer lassen, um bestehenden zu behalten)",
+        "api_key_optional": "API-Schlüssel (optional)",
+        "custom_title_edit": "Benutzerdefinierten Anbieter bearbeiten",
+        "custom_title_add": "Benutzerdefinierten Anbieter hinzufügen",
+        "name": "Name",
+        "id": "ID (wird automatisch aus dem Namen generiert, wenn leer)",
+        "base_url": "Basis-URL",
+        "user_override": "Benutzern erlauben, eigenen Schlüssel zu verwenden",
+        "save_provider_error": "Anbieter konnte nicht gespeichert werden.",
+        "save_changes": "Änderungen speichern",
+        "add_provider": "Anbieter hinzufügen"
+      }
+    },
+    "feeds": {
+      "settings_title": "News-Einstellungen",
+      "settings_subtitle": "Globale Anzeigeeinstellungen für alle Benutzer.",
+      "settings_save_error": "Einstellungen konnten nicht gespeichert werden.",
+      "home_count_label": "Artikel auf der Startseite",
+      "home_count_desc": "Wie viele Artikel jeder Benutzer in der kompakten Startseiten-Vorschau sieht.",
+      "max_articles_label": "Maximale Artikel gesamt",
+      "max_articles_desc": "Maximale Anzahl von Artikeln, die /v1/news über alle Feeds zurückgibt.",
+      "show_images_label": "Bilder anzeigen",
+      "show_images_desc": "Artikelvorschaubilder im News-Panel anzeigen.",
+      "disable_images": "Bilder deaktivieren",
+      "enable_images": "Bilder aktivieren",
+      "title": "News-Feeds",
+      "subtitle": "Den globalen RSS/Atom-Feed-Pool verwalten, den Benutzer abonnieren können.",
+      "delete_confirm": "\"{{label}}\" löschen? Dies entfernt den Feed für alle Benutzer.",
+      "delete_error": "Löschen fehlgeschlagen",
+      "empty_title": "Noch keine Feeds",
+      "empty_body": "Füge eine RSS- oder Atom-Feed-URL hinzu, um zu beginnen.",
+      "loading": "Wird geladen…",
+      "action": {
+        "add": "Feed hinzufügen",
+        "edit_aria": "{{name}} bearbeiten",
+        "delete_aria": "{{name}} löschen"
+      },
+      "modal": {
+        "title_edit": "Feed bearbeiten",
+        "title_add": "Feed hinzufügen",
+        "label": "Bezeichnung",
+        "url": "RSS / Atom URL",
+        "save_error": "Speichern fehlgeschlagen",
+        "cancel": "Abbrechen",
+        "saving": "Wird gespeichert…",
+        "save": "Speichern"
+      }
+    },
+    "searxng": {
+      "title": "SearXNG",
+      "subtitle": "Die SearXNG-Instanz konfigurieren, die ModuLabs Startseiten-Websuche antreibt. Wenn gesetzt, zeigt die Suchleiste direkte Ergebnisse statt einer externen Suchmaschine.",
+      "status_configured": "Konfiguriert",
+      "status_not_configured": "Nicht konfiguriert — Websuche ist deaktiviert",
+      "url_label": "SearXNG-URL",
+      "url_hint": "Basis-URL ohne abschließenden Schrägstrich. ModuLab ruft /search?format=json serverseitig auf.",
+      "max_results_label": "Max. Ergebnisse",
+      "max_results_hint": "Ergebnisse pro Suche (1–100).",
+      "fetch_pages_label": "Geladene Seiten",
+      "fetch_pages_hint": "SearXNG-Seiten, die parallel abgerufen werden (1–5). Mehr = mehr Ergebnisse, gleiche Latenz.",
+      "saved": "Erfolgreich gespeichert.",
+      "saving": "Wird gespeichert…",
+      "save": "Speichern",
+      "no_instance_title": "Noch kein SearXNG?",
+      "no_instance_body": "Starte es zusammen mit ModuLab mit dem search-Profil:",
+      "action": {
+        "removing": "Wird entfernt…",
+        "remove": "Konfiguration entfernen"
+      }
+    },
+    "smtp": {
+      "title": "SMTP",
+      "subtitle": "Ausgehende E-Mails für Kontobenachrichtigungen.",
+      "status_configured": "Konfiguriert",
+      "status_not_configured": "Nicht konfiguriert",
+      "load_error": "SMTP-Einstellungen konnten nicht geladen werden.",
+      "warning_not_configured": "Noch nicht konfiguriert – wartende Benachrichtigungen werden verworfen, bis dies eingerichtet ist.",
+      "saved": "Gespeichert.",
+      "validation_error": "Host, Port und Absenderadresse sind erforderlich.",
+      "save_error": "Speichern fehlgeschlagen.",
+      "remove_error": "Konfiguration konnte nicht entfernt werden.",
+      "remove_confirm": "SMTP-Konfiguration entfernen? Kontobenachrichtigungen werden nicht mehr gesendet, bis sie neu eingerichtet wird.",
+      "username_placeholder": "leer lassen für einen nicht authentifizierten Relay",
+      "password_placeholder_existing": "leer lassen, um kein/leeres Passwort beizubehalten",
+      "saving": "Wird gespeichert…",
+      "save": "Speichern",
+      "action": {
+        "removing": "Wird entfernt…",
+        "remove": "Konfiguration entfernen"
+      }
     }
   },
   "home": {
@@ -261,6 +385,57 @@
       "done_message": "Einrichtung abgeschlossen. ModuLab Core ist jetzt in Betrieb.",
       "done_button": "Zu ModuLab",
       "missing": "Noch nicht vollständig, fehlend: {{items}}"
+    }
+  },
+  "auth_complete": {
+    "finishing": "Anmeldung wird abgeschlossen…"
+  },
+  "common": {
+    "cancel": "Abbrechen",
+    "save": "Speichern",
+    "saving": "Wird gespeichert…",
+    "loading": "Wird geladen…",
+    "saved": "Gespeichert"
+  },
+  "user": {
+    "ai": {
+      "title": "KI-Anbieter",
+      "subtitle": "Eigenen API-Schlüssel hinzufügen, um den ModuLab-Schlüssel zu überschreiben. Mit eigenem Schlüssel kannst du auch das Modell wählen.",
+      "empty": "Noch keine KI-Anbieter konfiguriert.",
+      "save_key_error": "Schlüssel konnte nicht gespeichert werden.",
+      "remove_key_error": "Schlüssel konnte nicht entfernt werden.",
+      "fetch_models_error": "Modelle konnten nicht geladen werden.",
+      "save_model_error": "Modell konnte nicht gespeichert werden.",
+      "status": {
+        "not_enabled": "Nicht aktiviert",
+        "your_key": "Dein Schlüssel",
+        "modulab_key": "ModuLab API-Schlüssel",
+        "no_key": "Kein Schlüssel"
+      },
+      "model_own": "Modell: {{model}}",
+      "model_managed": "Modell: {{model}} · von ModuLab verwaltet",
+      "your_model": "Dein Modell",
+      "load_models": "Verfügbare Modelle laden",
+      "override_not_allowed": "Überschreiben nicht erlaubt",
+      "action": {
+        "update_key": "Schlüssel aktualisieren",
+        "add_key": "Eigenen API-Schlüssel hinzufügen",
+        "remove_key": "Schlüssel entfernen",
+        "save": "Speichern",
+        "cancel": "Abbrechen"
+      }
+    },
+    "feeds": {
+      "title": "Meine Feeds",
+      "subtitle": "News-Feeds aktivieren oder deaktivieren, um deine Startseite anzupassen.",
+      "empty": "Noch keine Feeds verfügbar. Ein Admin muss zuerst welche hinzufügen."
+    },
+    "search": {
+      "title": "Sucheinstellungen",
+      "subtitle": "Diese Einstellungen gelten für alle deine Websuchen.",
+      "safesearch_desc": "Explizite Inhalte aus deinen Web- und Bildersuchen filtern.",
+      "language_desc": "Ergebnisse in einer bestimmten Sprache bevorzugen.",
+      "saved": "Gespeichert"
     }
   }
 }

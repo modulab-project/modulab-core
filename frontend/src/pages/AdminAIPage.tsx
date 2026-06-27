@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import {
   adminListAIProviders,
   adminCreateAIProvider,
@@ -31,6 +32,7 @@ type ModalState =
 
 export default function AdminAIPage() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { session, loading } = useAuthenticatedSession();
   const [providers, setProviders] = useState<AIProvider[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +44,7 @@ export default function AdminAIPage() {
     if (!token) return;
     adminListAIProviders(token)
       .then((p) => { setProviders(p); setError(null); })
-      .catch(() => setError("Could not load AI providers."));
+      .catch(() => setError(t("admin.ai.load_error")));
   }, []);
 
   useEffect(() => {
@@ -69,14 +71,14 @@ export default function AdminAIPage() {
       await adminClearAIProviderKey(token, id);
       refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to clear key.");
+      setError(e instanceof Error ? e.message : t("admin.ai.clear_key_error"));
     } finally {
       setBusy(false);
     }
   }
 
   async function handleDelete(p: AIProvider) {
-    if (!window.confirm(`Delete "${p.name}"? This removes the provider and all user keys for it.`)) return;
+    if (!window.confirm(t("admin.ai.delete_confirm", { name: p.name }))) return;
     const token = getSessionToken();
     if (!token) return;
     setBusy(true);
@@ -85,7 +87,7 @@ export default function AdminAIPage() {
       await adminDeleteAIProvider(token, p.id);
       refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to delete provider.");
+      setError(e instanceof Error ? e.message : t("admin.ai.delete_error"));
     } finally {
       setBusy(false);
     }
@@ -99,7 +101,7 @@ export default function AdminAIPage() {
       await adminPatchAIProvider(token, p.id, { enabled: !p.enabled });
       refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to update provider.");
+      setError(e instanceof Error ? e.message : t("admin.ai.update_error"));
     } finally {
       setBusy(false);
     }
@@ -108,17 +110,16 @@ export default function AdminAIPage() {
   return (
     <AppShell session={session}>
       <div className="mx-auto w-full max-w-2xl py-10">
-        <h1 className="mb-1 text-xl font-semibold">AI providers</h1>
+        <h1 className="mb-1 text-xl font-semibold">{t("admin.ai.title")}</h1>
         <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">
-          Manage API keys for built-in providers and add custom OpenAI-compatible endpoints.
-          Users with their own key always override the admin key for that provider.
+          {t("admin.ai.subtitle")}
         </p>
 
         {error && <p className="mb-4 text-sm text-red-600 dark:text-red-400">{error}</p>}
 
         {/* Built-in providers */}
         <h2 className="mb-2 text-sm font-semibold text-gray-700 dark:text-gray-300">
-          Built-in providers
+          {t("admin.ai.builtin_title")}
         </h2>
         <div className="mb-6 rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
           {BUILTIN_PROVIDERS.map((def, i) => {
@@ -145,12 +146,12 @@ export default function AdminAIPage() {
                         : "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400"
                     }`}
                   >
-                    {hasKey && enabled ? "Active" : hasKey ? "Disabled" : "No key"}
+                    {hasKey && enabled ? t("admin.ai.status.active") : hasKey ? t("admin.ai.status.disabled") : t("admin.ai.status.no_key")}
                   </span>
                 </div>
                 <div className="mt-1.5 flex items-center justify-between gap-2">
                   <p className="text-xs text-gray-500 dark:text-gray-400">
-                    Model: <span className="font-medium text-gray-700 dark:text-gray-300">{p?.default_model ?? def.defaultModel}</span>
+                    {t("admin.ai.model_label")}: <span className="font-medium text-gray-700 dark:text-gray-300">{p?.default_model ?? def.defaultModel}</span>
                   </p>
                   <div className="flex flex-none items-center gap-1.5">
                     <ActionButton
@@ -172,7 +173,7 @@ export default function AdminAIPage() {
                         })
                       }
                     >
-                      Edit
+                      {t("admin.ai.action.edit")}
                     </ActionButton>
                     {p && (
                       <ActionButton
@@ -180,7 +181,7 @@ export default function AdminAIPage() {
                         busy={busy}
                         onClick={() => handleToggleEnabled(p)}
                       >
-                        {enabled ? "Disable" : "Enable"}
+                        {enabled ? t("admin.ai.action.disable") : t("admin.ai.action.enable")}
                       </ActionButton>
                     )}
                     {hasKey && (
@@ -189,7 +190,7 @@ export default function AdminAIPage() {
                         busy={busy}
                         onClick={() => handleClearKey(def.id)}
                       >
-                        Clear key
+                        {t("admin.ai.action.clear_key")}
                       </ActionButton>
                     )}
                   </div>
@@ -202,21 +203,21 @@ export default function AdminAIPage() {
         {/* Custom providers */}
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">
-            Custom providers (OpenAI-compatible)
+            {t("admin.ai.custom_title")}
           </h2>
           <ActionButton
             variant="primary"
             busy={false}
             onClick={() => setModal({ kind: "create-custom" })}
           >
-            Add provider
+            {t("admin.ai.action.add_provider")}
           </ActionButton>
         </div>
 
         {customProviders.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-gray-300 px-6 py-8 text-center dark:border-gray-700">
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              No custom providers yet. Add Ollama, Groq, Mistral, or any OpenAI-compatible endpoint.
+              {t("admin.ai.custom_empty")}
             </p>
           </div>
         ) : (
@@ -239,13 +240,13 @@ export default function AdminAIPage() {
                         : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"
                     }`}
                   >
-                    {p.enabled ? "Active" : "Disabled"}
+                    {p.enabled ? t("admin.ai.status.active") : t("admin.ai.status.disabled")}
                   </span>
                 </div>
                 <div className="mt-1.5 flex items-center justify-between gap-2">
                   <p className="min-w-0 truncate text-xs text-gray-500 dark:text-gray-400">
                     {p.base_url} · {p.default_model}
-                    {p.has_admin_key ? "" : " · no key"}
+                    {p.has_admin_key ? "" : t("admin.ai.no_key_suffix")}
                   </p>
                   <div className="flex flex-none items-center gap-1.5">
                     <ActionButton
@@ -253,21 +254,21 @@ export default function AdminAIPage() {
                       busy={busy}
                       onClick={() => setModal({ kind: "edit-custom", provider: p })}
                     >
-                      Edit
+                      {t("admin.ai.action.edit")}
                     </ActionButton>
                     <ActionButton
                       variant="secondary"
                       busy={busy}
                       onClick={() => handleToggleEnabled(p)}
                     >
-                      {p.enabled ? "Disable" : "Enable"}
+                      {p.enabled ? t("admin.ai.action.disable") : t("admin.ai.action.enable")}
                     </ActionButton>
                     <ActionButton
                       variant="danger"
                       busy={busy}
                       onClick={() => handleDelete(p)}
                     >
-                      Delete
+                      {t("admin.ai.action.delete")}
                     </ActionButton>
                   </div>
                 </div>
@@ -321,6 +322,7 @@ function EditBuiltinModal({
   onSaved: () => void;
   setError: (e: string | null) => void;
 }) {
+  const { t } = useTranslation();
   const [model, setModel] = useState(provider.default_model);
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
@@ -337,7 +339,7 @@ function EditBuiltinModal({
       const list = await adminFetchAIProviderModels(token, provider.id);
       setModels(list);
     } catch (e) {
-      setModelsError(e instanceof Error ? e.message : "Could not fetch models.");
+      setModelsError(e instanceof Error ? e.message : t("admin.ai.modal.fetch_models_error"));
     } finally {
       setLoadingModels(false);
     }
@@ -374,7 +376,7 @@ function EditBuiltinModal({
       onSaved();
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save.");
+      setError(e instanceof Error ? e.message : t("admin.ai.save_error"));
     } finally {
       setBusy(false);
     }
@@ -383,12 +385,12 @@ function EditBuiltinModal({
   return (
     <Overlay onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
-        <h2 className="text-base font-semibold">Edit — {provider.name}</h2>
+        <h2 className="text-base font-semibold">{t("admin.ai.modal.edit_builtin_title", { name: provider.name })}</h2>
         <div className="space-y-3">
           <div>
             <div className="mb-1 flex items-center justify-between">
               <label className="text-xs text-gray-500 dark:text-gray-400">
-                Default model <span className="ml-0.5 text-red-500">*</span>
+                {t("admin.ai.modal.default_model")} <span className="ml-0.5 text-red-500">*</span>
               </label>
               {provider.has_admin_key && (
                 <button
@@ -397,7 +399,7 @@ function EditBuiltinModal({
                   onClick={handleLoadModels}
                   className="text-xs text-teal-600 hover:underline disabled:opacity-50 dark:text-teal-400"
                 >
-                  {loadingModels ? "Loading…" : "Load available models"}
+                  {loadingModels ? t("common.loading") : t("admin.ai.modal.load_models")}
                 </button>
               )}
             </div>
@@ -424,11 +426,11 @@ function EditBuiltinModal({
             )}
             {!provider.has_admin_key && (
               <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-                Save an API key first to load available models.
+                {t("admin.ai.modal.save_key_first")}
               </p>
             )}
           </div>
-          <Field label={provider.has_admin_key ? "API key (leave empty to keep existing)" : "API key"}>
+          <Field label={provider.has_admin_key ? t("admin.ai.modal.api_key_keep") : t("admin.ai.modal.api_key")}>
             <input
               type="password"
               autoComplete="off"
@@ -445,14 +447,14 @@ function EditBuiltinModal({
             onClick={onClose}
             className="rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
           <button
             type="submit"
             disabled={busy || !model.trim()}
             className="rounded-md bg-teal-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-700 disabled:opacity-50"
           >
-            {busy ? "Saving…" : "Save"}
+            {busy ? t("common.saving") : t("common.save")}
           </button>
         </div>
       </form>
@@ -473,6 +475,7 @@ function CustomProviderModal({
   onSaved: () => void;
   setError: (e: string | null) => void;
 }) {
+  const { t } = useTranslation();
   const [id, setId] = useState(existing?.id ?? "");
   const [name, setName] = useState(existing?.name ?? "");
   const [baseURL, setBaseURL] = useState(existing?.base_url ?? "");
@@ -496,7 +499,7 @@ function CustomProviderModal({
       const list = await adminFetchAIProviderModels(token, existing.id);
       setModels(list);
     } catch (e) {
-      setModelsError(e instanceof Error ? e.message : "Could not fetch models.");
+      setModelsError(e instanceof Error ? e.message : t("admin.ai.modal.fetch_models_error"));
     } finally {
       setLoadingModels(false);
     }
@@ -535,7 +538,7 @@ function CustomProviderModal({
       onSaved();
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save provider.");
+      setError(e instanceof Error ? e.message : t("admin.ai.modal.save_provider_error"));
     } finally {
       setBusy(false);
     }
@@ -545,10 +548,10 @@ function CustomProviderModal({
     <Overlay onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <h2 className="text-base font-semibold">
-          {existing ? "Edit" : "Add"} custom provider
+          {existing ? t("admin.ai.modal.custom_title_edit") : t("admin.ai.modal.custom_title_add")}
         </h2>
         <div className="space-y-3">
-          <Field label="Name" required>
+          <Field label={t("admin.ai.modal.name")} required>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -557,7 +560,7 @@ function CustomProviderModal({
             />
           </Field>
           {!existing && (
-            <Field label="ID (auto-generated from name if empty)">
+            <Field label={t("admin.ai.modal.id")}>
               <input
                 value={id}
                 onChange={(e) => setId(e.target.value.toLowerCase().replace(/\s+/g, "-"))}
@@ -566,7 +569,7 @@ function CustomProviderModal({
               />
             </Field>
           )}
-          <Field label="Base URL" required>
+          <Field label={t("admin.ai.modal.base_url")} required>
             <input
               value={baseURL}
               onChange={(e) => setBaseURL(e.target.value)}
@@ -586,7 +589,7 @@ function CustomProviderModal({
                   onClick={handleLoadModels}
                   className="text-xs text-teal-600 hover:underline disabled:opacity-50 dark:text-teal-400"
                 >
-                  {loadingModels ? "Loading…" : "Load available models"}
+                  {loadingModels ? t("common.loading") : t("admin.ai.modal.load_models")}
                 </button>
               )}
             </div>
@@ -612,7 +615,7 @@ function CustomProviderModal({
               <p className="mt-1 text-xs text-red-500">{modelsError}</p>
             )}
           </div>
-          <Field label={existing ? "API key (leave empty to keep existing)" : "API key (optional)"}>
+          <Field label={existing ? t("admin.ai.modal.api_key_keep") : t("admin.ai.modal.api_key_optional")}>
             <input
               type="password"
               autoComplete="off"
@@ -629,19 +632,19 @@ function CustomProviderModal({
               onChange={(e) => setUserCanOverride(e.target.checked)}
               className="h-4 w-4 rounded accent-teal-600"
             />
-            <span>Allow users to override with their own key</span>
+            <span>{t("admin.ai.modal.user_override")}</span>
           </label>
         </div>
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" onClick={onClose} className="rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">
-            Cancel
+            {t("common.cancel")}
           </button>
           <button
             type="submit"
             disabled={busy || !name.trim() || !baseURL.trim() || !model.trim()}
             className="rounded-md bg-teal-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-700 disabled:opacity-50"
           >
-            {busy ? "Saving…" : existing ? "Save changes" : "Add provider"}
+            {busy ? t("common.saving") : existing ? t("admin.ai.modal.save_changes") : t("admin.ai.modal.add_provider")}
           </button>
         </div>
       </form>
@@ -684,7 +687,7 @@ function ActionButton({
   busy,
   variant = "primary",
 }: {
-  children: string;
+  children: React.ReactNode;
   onClick: () => void;
   busy: boolean;
   variant?: "primary" | "secondary" | "danger";

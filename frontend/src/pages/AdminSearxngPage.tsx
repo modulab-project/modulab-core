@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import {
   searxngStatus,
   configureSearxng,
@@ -15,6 +16,7 @@ import { AppShell } from "../components/AppShell";
 // and how many SearXNG pages are fetched in parallel per query.
 export default function AdminSearxngPage() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { session, loading } = useAuthenticatedSession();
   const [status, setStatus] = useState<SearXNGStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -94,10 +96,9 @@ export default function AdminSearxngPage() {
   return (
     <AppShell session={session}>
       <div className="mx-auto max-w-xl py-10">
-        <h1 className="mb-1 text-xl font-semibold">SearXNG</h1>
+        <h1 className="mb-1 text-xl font-semibold">{t("admin.searxng.title")}</h1>
         <p className="mb-8 text-sm text-gray-500 dark:text-gray-400">
-          Configure the SearXNG instance that powers ModuLab's home-page web search. When set, the
-          search box shows inline results instead of opening an external search engine.
+          {t("admin.searxng.subtitle")}
         </p>
 
         {status && (
@@ -108,7 +109,7 @@ export default function AdminSearxngPage() {
               }`}
             />
             <span className="text-sm text-gray-600 dark:text-gray-400">
-              {status.configured ? "Configured" : "Not configured — web search is disabled"}
+              {status.configured ? t("admin.searxng.status_configured") : t("admin.searxng.status_not_configured")}
             </span>
           </div>
         )}
@@ -117,7 +118,7 @@ export default function AdminSearxngPage() {
           {/* URL */}
           <div className="flex flex-col gap-1.5">
             <label htmlFor="searxng-url" className="text-sm font-medium">
-              SearXNG URL
+              {t("admin.searxng.url_label")}
             </label>
             <input
               id="searxng-url"
@@ -129,9 +130,7 @@ export default function AdminSearxngPage() {
               className="rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-900"
             />
             <p className="text-[12px] text-gray-500 dark:text-gray-400">
-              Base URL without trailing slash. ModuLab calls{" "}
-              <code className="rounded bg-gray-100 px-1 dark:bg-gray-800">/search?format=json</code>{" "}
-              server-side.
+              {t("admin.searxng.url_hint")}
             </p>
           </div>
 
@@ -139,7 +138,7 @@ export default function AdminSearxngPage() {
           <div className="grid grid-cols-2 gap-4">
             <div className="flex flex-col gap-1.5">
               <label htmlFor="max-results" className="text-sm font-medium">
-                Max results
+                {t("admin.searxng.max_results_label")}
               </label>
               <input
                 id="max-results"
@@ -151,13 +150,13 @@ export default function AdminSearxngPage() {
                 className="rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-900"
               />
               <p className="text-[12px] text-gray-500 dark:text-gray-400">
-                Results shown per search (1–100).
+                {t("admin.searxng.max_results_hint")}
               </p>
             </div>
 
             <div className="flex flex-col gap-1.5">
               <label htmlFor="fetch-pages" className="text-sm font-medium">
-                Pages fetched
+                {t("admin.searxng.fetch_pages_label")}
               </label>
               <input
                 id="fetch-pages"
@@ -169,7 +168,7 @@ export default function AdminSearxngPage() {
                 className="rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-900"
               />
               <p className="text-[12px] text-gray-500 dark:text-gray-400">
-                SearXNG pages fetched in parallel (1–5). More = more results, same latency.
+                {t("admin.searxng.fetch_pages_hint")}
               </p>
             </div>
           </div>
@@ -181,7 +180,7 @@ export default function AdminSearxngPage() {
           )}
 
           {savedAt && (
-            <p className="text-sm text-green-700 dark:text-green-400">Saved successfully.</p>
+            <p className="text-sm text-green-700 dark:text-green-400">{t("admin.searxng.saved")}</p>
           )}
 
           <div className="flex items-center gap-3">
@@ -190,7 +189,7 @@ export default function AdminSearxngPage() {
               disabled={saving}
               className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
             >
-              {saving ? "Saving…" : "Save"}
+              {saving ? t("admin.searxng.saving") : t("admin.searxng.save")}
             </button>
 
             {status?.configured && (
@@ -200,7 +199,7 @@ export default function AdminSearxngPage() {
                 onClick={handleRemove}
                 className="rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
               >
-                {removing ? "Removing…" : "Remove configuration"}
+                {removing ? t("admin.searxng.action.removing") : t("admin.searxng.action.remove")}
               </button>
             )}
           </div>
@@ -208,10 +207,9 @@ export default function AdminSearxngPage() {
 
         {!status?.configured && (
           <div className="mt-10 rounded-xl border border-gray-200 p-5 dark:border-gray-800">
-            <p className="mb-2 text-sm font-medium">Don't have SearXNG yet?</p>
+            <p className="mb-2 text-sm font-medium">{t("admin.searxng.no_instance_title")}</p>
             <p className="mb-3 text-[13px] text-gray-500 dark:text-gray-400">
-              Start it alongside ModuLab with the{" "}
-              <code className="rounded bg-gray-100 px-1 dark:bg-gray-800">search</code> profile:
+              {t("admin.searxng.no_instance_body")}
             </p>
             <pre className="overflow-x-auto rounded-lg bg-gray-900 px-4 py-3 text-[12px] text-gray-100">
               {"docker compose --profile search up -d"}
