@@ -140,7 +140,7 @@ export default function UserAIKeysPage() {
                           if (e.key === "Escape") { setEditingKeyId(null); setKeyInput(""); }
                         }}
                         placeholder="sk-..."
-                        className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-800"
+                        className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-base outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-800"
                       />
                       <button
                         type="button"
@@ -269,7 +269,7 @@ function ModelSelector({
             value={current}
             disabled={saving}
             onChange={(e) => handleSelect(e.target.value)}
-            className="rounded-md border border-gray-200 bg-white px-2 py-1 text-xs outline-none focus:border-teal-500 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800"
+            className="rounded-md border border-gray-200 bg-white px-2 py-1 text-base outline-none focus:border-teal-500 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800"
           >
             {models.map((m) => (
               <option key={m} value={m}>{m}</option>

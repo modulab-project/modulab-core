@@ -345,7 +345,7 @@ function StepDNSChallenge({
           id="dns-provider"
           value={provider}
           onChange={(e) => setProvider(e.target.value)}
-          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
         >
           {DNS_PROVIDER_OPTIONS.map((p) => (
             <option key={p} value={p}>
@@ -570,7 +570,7 @@ function StepSMTP({ onDone }: { onDone: () => void }) {
           id="smtp-encryption"
           value={encryption}
           onChange={(e) => setEncryption(e.target.value)}
-          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
         >
           <option value="none">{t("setup.step6.enc_none")}</option>
           <option value="starttls">{t("setup.step6.enc_starttls")}</option>

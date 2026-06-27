@@ -970,7 +970,7 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
           placeholder={providers.length === 0 ? t("shell.chat.no_providers_available") : t("shell.chat.placeholder")}
           disabled={streaming || providers.length === 0}
           rows={1}
-          className="flex-1 resize-none rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs outline-none placeholder:text-gray-400 focus:border-teal-400 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+          className="flex-1 resize-none rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-base outline-none placeholder:text-gray-400 focus:border-teal-400 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
           style={{ minHeight: "36px", maxHeight: "120px" }}
           onInput={(e) => {
             const el = e.currentTarget;

@@ -360,7 +360,7 @@ function FeedModal({
               onChange={(e) => setLabel(e.target.value)}
               placeholder="e.g. Hacker News"
               required
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-900"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-base outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-900"
             />
           </div>
           <div>
@@ -371,7 +371,7 @@ function FeedModal({
               onChange={(e) => setUrl(e.target.value)}
               placeholder="https://example.com/feed.xml"
               required
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-900"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-base outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-900"
             />
           </div>
           {error && (

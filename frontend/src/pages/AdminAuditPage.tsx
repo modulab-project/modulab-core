@@ -127,7 +127,7 @@ export default function AdminAuditPage() {
             <select
               value={eventTypeFilter}
               onChange={(e) => handleFilterChange(e.target.value)}
-              className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+              className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
             >
               <option value="">{t("admin.audit.filter_all")}</option>
               {EVENT_TYPES.map((et) => (

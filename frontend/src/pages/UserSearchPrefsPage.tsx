@@ -121,7 +121,7 @@ export default function UserSearchPrefsPage() {
                 value={prefs.language}
                 disabled={saving}
                 onChange={(e) => handleChange({ language: e.target.value })}
-                className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+                className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-base text-gray-700 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
               >
                 {SEARCH_LANGUAGES.map((l) => (
                   <option key={l.value} value={l.value}>

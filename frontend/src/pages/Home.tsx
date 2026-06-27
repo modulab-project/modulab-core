@@ -587,7 +587,7 @@ function WebResultsPanel({
               <select
                 value={searchPrefs.language}
                 onChange={(e) => onPrefsChange({ language: e.target.value })}
-                className="w-full rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-[12px] text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+                className="w-full rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-base text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
               >
                 {SEARCH_LANGUAGES.map((l) => (
                   <option key={l.value} value={l.value}>

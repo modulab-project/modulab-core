@@ -127,7 +127,7 @@ export default function AdminSearxngPage() {
               placeholder="https://search.example.com"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              className="rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-900"
+              className="rounded-lg border border-gray-300 px-3 py-2 text-base outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-900"
             />
             <p className="text-[12px] text-gray-500 dark:text-gray-400">
               {t("admin.searxng.url_hint")}
@@ -147,7 +147,7 @@ export default function AdminSearxngPage() {
                 max={100}
                 value={maxResults}
                 onChange={(e) => setMaxResults(Math.max(1, Math.min(100, Number(e.target.value))))}
-                className="rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-900"
+                className="rounded-lg border border-gray-300 px-3 py-2 text-base outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-900"
               />
               <p className="text-[12px] text-gray-500 dark:text-gray-400">
                 {t("admin.searxng.max_results_hint")}
@@ -165,7 +165,7 @@ export default function AdminSearxngPage() {
                 max={5}
                 value={fetchPages}
                 onChange={(e) => setFetchPages(Math.max(1, Math.min(5, Number(e.target.value))))}
-                className="rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-900"
+                className="rounded-lg border border-gray-300 px-3 py-2 text-base outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-900"
               />
               <p className="text-[12px] text-gray-500 dark:text-gray-400">
                 {t("admin.searxng.fetch_pages_hint")}
