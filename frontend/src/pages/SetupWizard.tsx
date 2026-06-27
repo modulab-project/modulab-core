@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import {
   setupInit,
   configureOIDC,
@@ -10,7 +11,7 @@ import {
   loginRedirectUrl,
   getHealth,
 } from "../lib/api";
-import { describeAuthError } from "../lib/authErrors";
+import { authErrorKey } from "../lib/authErrors";
 import { consumeAuthResult } from "./AuthComplete";
 import { getSessionToken } from "../lib/session";
 import { AuthButton, AuthField, AuthSecondaryButton, AuthShell } from "../components/AuthShell";
@@ -57,6 +58,7 @@ function saveStep(step: StepNumber) {
 // and splitting them across files would mostly add import boilerplate
 // without making any one step easier to follow on its own.
 export default function SetupWizard() {
+  const { t } = useTranslation();
   const [step, setStep] = useState<StepNumber>(() => loadStep());
   const [bootstrapToken, setBootstrapToken] = useState(
     () => sessionStorage.getItem(TOKEN_KEY) ?? "",
@@ -91,7 +93,7 @@ export default function SetupWizard() {
       return;
     }
     if (result.error) {
-      setLoginError(describeAuthError(result.error));
+      setLoginError(authErrorKey(result.error));
       return;
     }
     if (result.role) {
@@ -126,7 +128,7 @@ export default function SetupWizard() {
   }
 
   return (
-    <AuthShell title="ModuLab Core – Initial Setup" subtitle={`Step ${step} of 7`}>
+    <AuthShell title={t("setup.title")} subtitle={t("setup.step_of", { step })}>
       {step === 1 && (
         <StepBootstrapToken
           initialValue={bootstrapToken}
@@ -160,7 +162,7 @@ export default function SetupWizard() {
       {step === 5 && (
         <StepSuperAdminLogin
           role={loginRole}
-          error={loginError}
+          error={loginError ? t(loginError) : null}
           onRetry={() => {
             setLoginError(null);
             setLoginRole(null);
@@ -183,6 +185,7 @@ function StepBootstrapToken({
   initialValue: string;
   onSuccess: (token: string) => void;
 }) {
+  const { t } = useTranslation();
   const [token, setToken] = useState(initialValue);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -195,7 +198,7 @@ function StepBootstrapToken({
       await setupInit(token.trim());
       onSuccess(token.trim());
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      setError(err instanceof Error ? err.message : t("setup.unknown_error"));
     } finally {
       setBusy(false);
     }
@@ -204,10 +207,10 @@ function StepBootstrapToken({
   return (
     <form onSubmit={submit} className="space-y-4">
       <p className="text-sm text-gray-600 dark:text-gray-400">
-        You'll find the bootstrap token once in ModuLab Core's startup log.
+        {t("setup.step1.hint")}
       </p>
       <AuthField
-        label="Bootstrap Token"
+        label={t("setup.step1.label")}
         id="bootstrap-token"
         value={token}
         onChange={setToken}
@@ -216,7 +219,7 @@ function StepBootstrapToken({
       />
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       <AuthButton type="submit" disabled={busy || token.trim() === ""} className="w-full">
-        {busy ? "Checking…" : "Next"}
+        {busy ? t("setup.step1.checking") : t("setup.step1.next")}
       </AuthButton>
     </form>
   );
@@ -233,6 +236,7 @@ function StepOIDCCredentials({
   onSuccess: () => void;
   onBack: () => void;
 }) {
+  const { t } = useTranslation();
   const [issuerUrl, setIssuerUrl] = useState("");
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
@@ -251,7 +255,7 @@ function StepOIDCCredentials({
       });
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      setError(err instanceof Error ? err.message : t("setup.unknown_error"));
     } finally {
       setBusy(false);
     }
@@ -260,20 +264,19 @@ function StepOIDCCredentials({
   return (
     <form onSubmit={submit} className="space-y-4">
       <p className="text-sm text-gray-600 dark:text-gray-400">
-        Enter your OIDC provider's details. ModuLab Core talks to any standard OIDC provider the
-        same way (Pocket ID, Authentik, Keycloak, Authelia, or anything else that speaks OIDC).
+        {t("setup.step2.hint")}
       </p>
       <AuthField
-        label="Issuer URL"
+        label={t("setup.step2.issuer_url")}
         id="issuer-url"
         value={issuerUrl}
         onChange={setIssuerUrl}
         placeholder="https://auth.example.com"
         required
       />
-      <AuthField label="Client ID" id="client-id" value={clientId} onChange={setClientId} required />
+      <AuthField label={t("setup.step2.client_id")} id="client-id" value={clientId} onChange={setClientId} required />
       <AuthField
-        label="Client Secret"
+        label={t("setup.step2.client_secret")}
         id="client-secret"
         value={clientSecret}
         onChange={setClientSecret}
@@ -283,10 +286,10 @@ function StepOIDCCredentials({
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       <div className="flex gap-2">
         <AuthSecondaryButton onClick={onBack} type="button" className="flex-1">
-          Back
+          {t("setup.step2.back")}
         </AuthSecondaryButton>
         <AuthButton type="submit" disabled={busy} className="flex-1">
-          {busy ? "Saving…" : "Next"}
+          {busy ? t("setup.step2.saving") : t("setup.step2.next")}
         </AuthButton>
       </div>
     </form>
@@ -306,6 +309,7 @@ function StepDNSChallenge({
   onSuccess: () => void;
   onBack: () => void;
 }) {
+  const { t } = useTranslation();
   const [provider, setProvider] = useState(DNS_PROVIDER_OPTIONS[0]);
   const [credentials, setCredentials] = useState("");
   const [busy, setBusy] = useState(false);
@@ -319,7 +323,7 @@ function StepDNSChallenge({
       await configureDNSChallenge(bootstrapToken, { provider, credentials });
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      setError(err instanceof Error ? err.message : t("setup.unknown_error"));
     } finally {
       setBusy(false);
     }
@@ -328,14 +332,14 @@ function StepDNSChallenge({
   return (
     <form onSubmit={submit} className="space-y-4">
       <p className="text-sm text-gray-600 dark:text-gray-400">
-        Required for automatic TLS certificates via Traefik/Let&apos;s Encrypt.
+        {t("setup.step3.hint")}
       </p>
       <div>
         <label
           htmlFor="dns-provider"
           className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
         >
-          DNS Provider
+          {t("setup.step3.dns_provider")}
         </label>
         <select
           id="dns-provider"
@@ -351,21 +355,21 @@ function StepDNSChallenge({
         </select>
       </div>
       <AuthField
-        label="API Credentials"
+        label={t("setup.step3.api_credentials")}
         id="dns-credentials"
         value={credentials}
         onChange={setCredentials}
         type="password"
-        placeholder="e.g. API token"
+        placeholder={t("setup.step3.api_credentials_placeholder")}
         required
       />
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       <div className="flex gap-2">
         <AuthSecondaryButton onClick={onBack} type="button" className="flex-1">
-          Back
+          {t("setup.step3.back")}
         </AuthSecondaryButton>
         <AuthButton type="submit" disabled={busy || credentials.trim() === ""} className="flex-1">
-          {busy ? "Saving…" : "Next"}
+          {busy ? t("setup.step3.saving") : t("setup.step3.next")}
         </AuthButton>
       </div>
     </form>
@@ -383,6 +387,7 @@ function StepGroupPrefix({
   onSuccess: () => void;
   onBack: () => void;
 }) {
+  const { t } = useTranslation();
   const [prefix, setPrefix] = useState("modulab_");
   const [groups, setGroups] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -396,7 +401,7 @@ function StepGroupPrefix({
       const status = await configureGroupPrefix(bootstrapToken, prefix.trim());
       setGroups(status.groups ?? null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      setError(err instanceof Error ? err.message : t("setup.unknown_error"));
     } finally {
       setBusy(false);
     }
@@ -406,7 +411,7 @@ function StepGroupPrefix({
     <div className="space-y-4">
       <form onSubmit={submit} className="space-y-4">
         <AuthField
-          label="Group Prefix"
+          label={t("setup.step4.group_prefix")}
           id="group-prefix"
           value={prefix}
           onChange={setPrefix}
@@ -416,10 +421,10 @@ function StepGroupPrefix({
         {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
         <div className="flex gap-2">
           <AuthSecondaryButton onClick={onBack} type="button" className="flex-1">
-            Back
+            {t("setup.step4.back")}
           </AuthSecondaryButton>
           <AuthButton type="submit" disabled={busy || prefix.trim() === ""} className="flex-1">
-            {busy ? "Saving…" : "Save"}
+            {busy ? t("setup.step4.saving") : t("setup.step4.save")}
           </AuthButton>
         </div>
       </form>
@@ -427,8 +432,7 @@ function StepGroupPrefix({
       {groups && (
         <div className="rounded-md border border-gray-200 bg-gray-50 p-4 text-sm dark:border-gray-700 dark:bg-gray-800">
           <p className="mb-2 font-medium text-gray-700 dark:text-gray-200">
-            Create these three groups in your OIDC provider and assign your account to the
-            super-admin group before continuing:
+            {t("setup.step4.groups_intro")}
           </p>
           <ul className="list-disc space-y-1 pl-5 font-mono text-gray-600 dark:text-gray-400">
             {groups.map((g) => (
@@ -436,7 +440,7 @@ function StepGroupPrefix({
             ))}
           </ul>
           <AuthButton onClick={onSuccess} type="button" className="mt-4">
-            Continue to login
+            {t("setup.step4.continue")}
           </AuthButton>
         </div>
       )}
@@ -455,21 +459,21 @@ function StepSuperAdminLogin({
   error: string | null;
   onRetry: () => void;
 }) {
+  const { t } = useTranslation();
   const notSuperAdmin = role !== null && role !== "super-admin";
   return (
     <div className="space-y-4">
       <p className="text-sm text-gray-600 dark:text-gray-400">
-        Log in now with your OIDC account to bind it as super-admin.
+        {t("setup.step5.hint")}
       </p>
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       {notSuperAdmin && (
         <p className="text-sm text-red-600 dark:text-red-400">
-          This user is not a member of the super-admin group. Please assign it in your OIDC
-          provider and log in again.
+          {t("setup.step5.not_super_admin")}
         </p>
       )}
       <AuthButton onClick={onRetry} type="button" className="w-full">
-        Log in with OIDC
+        {t("setup.step5.login_button")}
       </AuthButton>
     </div>
   );
@@ -485,6 +489,7 @@ function StepSuperAdminLogin({
 // editable from there afterwards - this step has no state of its own
 // beyond what that endpoint already persists.
 function StepSMTP({ onDone }: { onDone: () => void }) {
+  const { t } = useTranslation();
   const [host, setHost] = useState("");
   const [port, setPort] = useState("587");
   const [username, setUsername] = useState("");
@@ -506,7 +511,7 @@ function StepSMTP({ onDone }: { onDone: () => void }) {
     }
     const parsedPort = parseInt(port, 10);
     if (!host.trim() || !fromAddress.trim() || Number.isNaN(parsedPort) || parsedPort <= 0) {
-      setError("Host, port, and from address are all required - or use Skip below.");
+      setError(t("setup.step6.validation_error"));
       return;
     }
     setBusy(true);
@@ -522,7 +527,7 @@ function StepSMTP({ onDone }: { onDone: () => void }) {
       });
       onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      setError(err instanceof Error ? err.message : t("setup.unknown_error"));
     } finally {
       setBusy(false);
     }
@@ -531,27 +536,26 @@ function StepSMTP({ onDone }: { onDone: () => void }) {
   return (
     <form onSubmit={submit} className="space-y-4">
       <p className="text-sm text-gray-600 dark:text-gray-400">
-        Optional: outbound mail for account notifications (approved, locked, unlocked). Skip this
-        and set it up later from Admin → SMTP any time, or fill it in now.
+        {t("setup.step6.hint")}
       </p>
-      <AuthField label="Host" id="smtp-host" value={host} onChange={setHost} placeholder="mail.example.com" />
-      <AuthField label="Port" id="smtp-port" value={port} onChange={setPort} />
+      <AuthField label={t("setup.step6.host")} id="smtp-host" value={host} onChange={setHost} placeholder="mail.example.com" />
+      <AuthField label={t("setup.step6.port")} id="smtp-port" value={port} onChange={setPort} />
       <AuthField
-        label="Username"
+        label={t("setup.step6.username")}
         id="smtp-username"
         value={username}
         onChange={setUsername}
         placeholder="leave empty for an unauthenticated relay"
       />
       <AuthField
-        label="Password"
+        label={t("setup.step6.password")}
         id="smtp-password"
         value={password}
         onChange={setPassword}
         type="password"
       />
       <AuthField
-        label="From address"
+        label={t("setup.step6.from_address")}
         id="smtp-from"
         value={fromAddress}
         onChange={setFromAddress}
@@ -560,7 +564,7 @@ function StepSMTP({ onDone }: { onDone: () => void }) {
       />
       <div>
         <label htmlFor="smtp-encryption" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-          Encryption
+          {t("setup.step6.encryption")}
         </label>
         <select
           id="smtp-encryption"
@@ -568,18 +572,18 @@ function StepSMTP({ onDone }: { onDone: () => void }) {
           onChange={(e) => setEncryption(e.target.value)}
           className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
         >
-          <option value="none">None</option>
-          <option value="starttls">STARTTLS (e.g. port 587)</option>
-          <option value="tls">SSL/TLS (e.g. port 465)</option>
+          <option value="none">{t("setup.step6.enc_none")}</option>
+          <option value="starttls">{t("setup.step6.enc_starttls")}</option>
+          <option value="tls">{t("setup.step6.enc_tls")}</option>
         </select>
       </div>
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       <div className="flex gap-2">
         <AuthSecondaryButton onClick={onDone} type="button" disabled={busy} className="flex-1">
-          Skip
+          {t("setup.step6.skip")}
         </AuthSecondaryButton>
         <AuthButton type="submit" disabled={busy} className="flex-1">
-          {busy ? "Saving…" : "Save & continue"}
+          {busy ? t("setup.step6.saving") : t("setup.step6.save_continue")}
         </AuthButton>
       </div>
     </form>
@@ -589,6 +593,7 @@ function StepSMTP({ onDone }: { onDone: () => void }) {
 // --- Step 7: completion -----------------------------------------------------
 
 function StepComplete({ bootstrapToken }: { bootstrapToken: string }) {
+  const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
@@ -603,10 +608,10 @@ function StepComplete({ bootstrapToken }: { bootstrapToken: string }) {
         sessionStorage.removeItem(TOKEN_KEY);
         sessionStorage.removeItem(STEP_KEY);
       } else {
-        setError(`Not yet complete, missing: ${(res.missing ?? []).join(", ")}`);
+        setError(t("setup.step7.missing", { items: (res.missing ?? []).join(", ") }));
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      setError(err instanceof Error ? err.message : t("setup.unknown_error"));
     } finally {
       setBusy(false);
     }
@@ -619,11 +624,11 @@ function StepComplete({ bootstrapToken }: { bootstrapToken: string }) {
   return (
     <div className="space-y-4">
       <p className="text-sm text-gray-600 dark:text-gray-400">
-        Last step: permanently disable the bootstrap token.
+        {t("setup.step7.hint")}
       </p>
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       <AuthButton onClick={finish} disabled={busy} type="button" className="w-full">
-        {busy ? "Finishing…" : "Complete setup"}
+        {busy ? t("setup.step7.finishing") : t("setup.step7.complete_button")}
       </AuthButton>
     </div>
   );
@@ -633,14 +638,15 @@ function StepComplete({ bootstrapToken }: { bootstrapToken: string }) {
 // AuthComplete.tsx's storeSessionToken call), so there is no need to send
 // them through /login again - straight to / works immediately.
 function StepCompleteDone() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   return (
     <div className="space-y-4">
       <p className="text-sm font-medium text-green-700 dark:text-green-400">
-        Setup complete. ModuLab Core is now in normal operation.
+        {t("setup.step7.done_message")}
       </p>
       <AuthButton type="button" onClick={() => navigate("/")} className="w-full">
-        Continue to ModuLab
+        {t("setup.step7.done_button")}
       </AuthButton>
     </div>
   );

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import {
   approveUser,
   deleteUser,
@@ -34,6 +35,7 @@ function statusOf(u: AdminUser): RowStatus {
 
 export default function AdminUsersPage() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { session, loading } = useAuthenticatedSession();
   const [users, setUsers] = useState<AdminUser[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -49,7 +51,7 @@ export default function AdminUsersPage() {
         setUsers(u);
         setError(null);
       })
-      .catch(() => setError("Could not load users."));
+      .catch(() => setError(t("admin.users.load_error")));
   }, []);
 
   useEffect(() => {
@@ -86,7 +88,7 @@ export default function AdminUsersPage() {
       // here as a 400 with a human-readable message (see admin.go's
       // guardAgainstSelfOrLastSuperAdmin) - shown as-is rather than a
       // generic "something went wrong".
-      const message = err instanceof Error ? err.message : "That action failed.";
+      const message = err instanceof Error ? err.message : t("admin.users.action_error");
       setError(message);
     } finally {
       setBusySubject(null);
@@ -95,7 +97,7 @@ export default function AdminUsersPage() {
 
   function handleDelete(u: AdminUser) {
     const displayName = u.name.trim() || u.email;
-    if (!window.confirm(`Delete ${displayName}? This cannot be undone.`)) {
+    if (!window.confirm(t("admin.users.delete_confirm", { name: displayName }))) {
       return;
     }
     runAction(u.subject, deleteUser);
@@ -104,16 +106,16 @@ export default function AdminUsersPage() {
   return (
     <AppShell session={session}>
       <div className="mx-auto w-full max-w-2xl py-10">
-        <h1 className="mb-1 text-xl font-semibold">Users</h1>
+        <h1 className="mb-1 text-xl font-semibold">{t("admin.users.title")}</h1>
         <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">
-          Approve people waiting for access, or lock/delete anyone who already has it.
+          {t("admin.users.subtitle")}
         </p>
 
         {error && <p className="mb-4 text-sm text-red-600 dark:text-red-400">{error}</p>}
 
         {users === null ? null : users.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-gray-300 px-6 py-10 text-center dark:border-gray-700">
-            <p className="text-sm font-medium text-gray-700 dark:text-gray-200">No users yet</p>
+            <p className="text-sm font-medium text-gray-700 dark:text-gray-200">{t("admin.users.empty")}</p>
           </div>
         ) : (
           <div className="rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
@@ -132,7 +134,7 @@ export default function AdminUsersPage() {
                   <div className="flex items-center justify-between gap-2">
                     <p className="min-w-0 truncate font-medium">
                       {u.name.trim() || u.email}
-                      {isSelf && <span className="ml-1.5 text-xs text-gray-400">(you)</span>}
+                      {isSelf && <span className="ml-1.5 text-xs text-gray-400">{t("admin.users.you")}</span>}
                     </p>
                     <StatusBadge status={status} />
                   </div>
@@ -140,12 +142,12 @@ export default function AdminUsersPage() {
                   <div className="mt-1.5 flex items-end justify-between gap-2">
                     <div className="min-w-0 text-xs text-gray-500 dark:text-gray-400">
                       <p className="truncate">{u.email} · {u.role}</p>
-                      <p className="truncate">joined {new Date(u.created_at).toLocaleDateString()} · last login {new Date(u.last_login_at).toLocaleDateString()}</p>
+                      <p className="truncate">{t("admin.users.joined")} {new Date(u.created_at).toLocaleDateString()} · {t("admin.users.last_login")} {new Date(u.last_login_at).toLocaleDateString()}</p>
                     </div>
                     <div className="flex flex-none items-center gap-1.5">
                       {status === "pending" && (
                         <ActionButton busy={busy} onClick={() => runAction(u.subject, approveUser)}>
-                          Approve
+                          {t("admin.users.action.approve")}
                         </ActionButton>
                       )}
                       {status === "active" && !isSelf && (
@@ -155,20 +157,20 @@ export default function AdminUsersPage() {
                             busy={busy}
                             onClick={() => runAction(u.subject, lockUser)}
                           >
-                            Lock
+                            {t("admin.users.action.lock")}
                           </ActionButton>
                           <ActionButton variant="danger" busy={busy} onClick={() => handleDelete(u)}>
-                            Delete
+                            {t("admin.users.action.delete")}
                           </ActionButton>
                         </>
                       )}
                       {status === "locked" && (
                         <>
                           <ActionButton busy={busy} onClick={() => runAction(u.subject, unlockUser)}>
-                            Unlock
+                            {t("admin.users.action.unlock")}
                           </ActionButton>
                           <ActionButton variant="danger" busy={busy} onClick={() => handleDelete(u)}>
-                            Delete
+                            {t("admin.users.action.delete")}
                           </ActionButton>
                         </>
                       )}
@@ -185,19 +187,15 @@ export default function AdminUsersPage() {
 }
 
 function StatusBadge({ status }: { status: RowStatus }) {
+  const { t } = useTranslation();
   const styles: Record<RowStatus, string> = {
     pending: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400",
     active: "bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-400",
     locked: "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-400",
   };
-  const labels: Record<RowStatus, string> = {
-    pending: "Pending",
-    active: "Active",
-    locked: "Locked",
-  };
   return (
     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${styles[status]}`}>
-      {labels[status]}
+      {t(`admin.users.status.${status}`)}
     </span>
   );
 }
@@ -208,7 +206,7 @@ function ActionButton({
   busy,
   variant = "primary",
 }: {
-  children: string;
+  children: React.ReactNode;
   onClick: () => void;
   busy: boolean;
   variant?: "primary" | "secondary" | "danger";

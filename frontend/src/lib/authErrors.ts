@@ -4,21 +4,19 @@
 // page, since both can land on the same error codes via the same
 // /auth/complete redirect - previously this lived duplicated in
 // SetupWizard.tsx only, before /login existed.
-export function describeAuthError(code: string): string {
-  switch (code) {
-    case "missing_state_or_code":
-      return "The login attempt was incomplete. Please try again.";
-    case "invalid_or_expired_state":
-      return "The login attempt expired. Please try again.";
-    case "provider_unavailable":
-      return "OIDC is not fully configured yet.";
-    case "exchange_failed":
-      return "Login with the identity provider failed.";
-    case "group_prefix_unavailable":
-      return "The group prefix is not configured yet.";
-    case "access_denied":
-      return "Your account is not authorized to access ModuLab. Contact your administrator.";
-    default:
-      return "An unexpected error occurred during login.";
-  }
+//
+// Returns a translation key rather than a hardcoded string - callers pass
+// it through t() from react-i18next.
+export function authErrorKey(code: string): string {
+  const known = [
+    "missing_state_or_code",
+    "invalid_or_expired_state",
+    "provider_unavailable",
+    "exchange_failed",
+    "group_prefix_unavailable",
+    "access_denied",
+  ];
+  return known.includes(code)
+    ? `auth.error.${code}`
+    : "auth.error.unknown";
 }

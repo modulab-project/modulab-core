@@ -1,0 +1,266 @@
+{
+  "auth": {
+    "error": {
+      "missing_state_or_code": "The login attempt was incomplete. Please try again.",
+      "invalid_or_expired_state": "The login attempt expired. Please try again.",
+      "provider_unavailable": "OIDC is not fully configured yet.",
+      "exchange_failed": "Login with the identity provider failed.",
+      "group_prefix_unavailable": "The group prefix is not configured yet.",
+      "access_denied": "Your account is not authorized to access ModuLab. Contact your administrator.",
+      "unknown": "An unexpected error occurred during login."
+    }
+  },
+  "login": {
+    "title": "Sign in to ModuLab",
+    "subtitle": "Access ModuLab securely using your SSO login.",
+    "button": "Log in with SSO"
+  },
+  "pending": {
+    "title_locked": "Your account has been locked",
+    "title_pending": "Your account is pending approval",
+    "signed_in_as": "Signed in as {{email}}. ",
+    "message_locked": "An administrator has locked your account. Contact your administrator if you believe this is a mistake.",
+    "message_pending": "An Admin needs to approve your account before you can continue. You'll be redirected automatically once approved - no need to sign in again.",
+    "sign_out": "Sign out"
+  },
+  "profile": {
+    "title": "Profile",
+    "subtitle": "Managed by your identity provider - Core only displays what it received at login.",
+    "name": "Name",
+    "username": "Username",
+    "email": "Email",
+    "email_verified": "Email verified",
+    "subject": "Subject (sub)",
+    "verified": "Verified",
+    "not_verified": "Not verified",
+    "not_available": "Not available",
+    "manage_account": "Manage account in OIDC",
+    "delete_section_title": "Delete account",
+    "delete_section_body": "Permanently removes your ModuLab account and revokes access. Your identity provider account is not affected.",
+    "delete_confirm": "Delete your account? This cannot be undone.",
+    "delete_button": "Delete my account",
+    "deleting": "Deleting…",
+    "delete_error_fallback": "Could not delete your account."
+  },
+  "admin": {
+    "users": {
+      "title": "Users",
+      "subtitle": "Approve people waiting for access, or lock/delete anyone who already has it.",
+      "empty": "No users yet",
+      "load_error": "Could not load users.",
+      "action_error": "That action failed.",
+      "you": "(you)",
+      "delete_confirm": "Delete {{name}}? This cannot be undone.",
+      "joined": "joined",
+      "last_login": "last login",
+      "status": {
+        "pending": "Pending",
+        "active": "Active",
+        "locked": "Locked"
+      },
+      "action": {
+        "approve": "Approve",
+        "lock": "Lock",
+        "unlock": "Unlock",
+        "delete": "Delete"
+      }
+    }
+  },
+  "home": {
+    "greeting_morning": "Good morning",
+    "greeting_afternoon": "Good afternoon",
+    "greeting_evening": "Good evening",
+    "search_placeholder": "Search the web…",
+    "search_clear": "Clear search",
+    "no_modules_title": "No modules installed yet",
+    "no_modules_body": "Module support is part of Phase 3 of the project - once it ships, your installed apps and bookmarks will show up here.",
+    "search": {
+      "tab_web": "Web",
+      "tab_images": "Images",
+      "filter": "Filter",
+      "time_label": "Time",
+      "time_any": "Any time",
+      "time_day": "Last 24 hours",
+      "time_week": "Last week",
+      "time_month": "Last month",
+      "time_year": "Last year",
+      "safesearch": "SafeSearch",
+      "safe_off": "Off",
+      "safe_moderate": "Moderate",
+      "safe_strict": "Strict",
+      "language": "Language",
+      "language_all": "All languages",
+      "no_results": "No results found."
+    },
+    "news": {
+      "section_title": "News",
+      "loading": "Loading…",
+      "empty_title": "No articles yet",
+      "empty_body": "Enable some feeds to see news here.",
+      "choose_feeds": "Choose feeds",
+      "show_all": "Show all {{count}} articles",
+      "empty_panel": "No articles yet.",
+      "choose_feeds_link": "Choose feeds"
+    },
+    "feeds": {
+      "panel_title": "My feeds",
+      "no_feeds": "No feeds available yet. An admin needs to add some first.",
+      "loading": "Loading…",
+      "enable_label": "Enable {{name}}",
+      "disable_label": "Disable {{name}}"
+    },
+    "weather": {
+      "panel_title": "Weather",
+      "next_24h": "Next 24 hours",
+      "forecast_16d": "16-day forecast",
+      "now": "now",
+      "today": "Today",
+      "feels": "feels {{temp}}°",
+      "source": "Open-Meteo · updated every 15 min",
+      "desc": {
+        "clear": "Clear sky",
+        "mainly_clear": "Mainly clear",
+        "partly_cloudy": "Partly cloudy",
+        "overcast": "Overcast",
+        "fog": "Fog",
+        "drizzle": "Drizzle",
+        "heavy_drizzle": "Heavy drizzle",
+        "freezing_drizzle": "Freezing drizzle",
+        "rain": "Rain",
+        "heavy_rain": "Heavy rain",
+        "freezing_rain": "Freezing rain",
+        "snow": "Snow",
+        "heavy_snow": "Heavy snow",
+        "snow_grains": "Snow grains",
+        "rain_showers": "Rain showers",
+        "heavy_showers": "Heavy showers",
+        "snow_showers": "Snow showers",
+        "thunderstorm": "Thunderstorm",
+        "thunderstorm_hail": "Thunderstorm with hail",
+        "unknown": "Unknown"
+      }
+    }
+  },
+  "shell": {
+    "go_home": "Go to home",
+    "notifications": "Notifications",
+    "ai_chat": "AI Chat",
+    "all_ok": "All systems normal",
+    "attention": "Attention needed",
+    "versions": "Core {{core}} · Frontend {{frontend}}",
+    "close": "Close",
+    "close_chat": "Close chat",
+    "system_status": "System status",
+    "view_profile": "View profile",
+    "my_feeds": "My feeds",
+    "search_settings": "Search settings",
+    "ai_providers": "AI providers",
+    "admin_section": "Admin",
+    "users_link": "Users",
+    "news_feeds_link": "News Feeds",
+    "smtp_link": "SMTP",
+    "searxng_link": "SearXNG",
+    "dark_mode": "Dark mode",
+    "toggle_dark": "Toggle dark mode",
+    "language": "Language",
+    "sign_out": "Sign out",
+    "status": {
+      "backend_version": "Backend version",
+      "frontend_version": "Frontend version",
+      "uptime": "Uptime",
+      "postgres": "PostgreSQL",
+      "valkey": "Valkey",
+      "searxng": "SearXNG",
+      "reachable": "Reachable",
+      "unreachable": "Unreachable",
+      "not_configured": "Not configured"
+    },
+    "notifications_panel": {
+      "checking": "Checking pending approvals…",
+      "none_waiting": "No one waiting for approval",
+      "waiting_one": "{{count}} person waiting for approval",
+      "waiting_many": "{{count}} people waiting for approval",
+      "recent_activity": "Recent activity",
+      "nothing_yet": "Nothing yet - this only shows what arrived while this tab was open.",
+      "review": "Review",
+      "waiting_toast": "{{name}} is waiting for approval."
+    },
+    "chat": {
+      "no_provider": "No provider",
+      "no_providers_configured": "No AI providers configured yet.",
+      "ask_anything": "Ask anything — session is not saved.",
+      "no_providers_available": "No providers available",
+      "placeholder": "Message… (Enter to send)",
+      "own_key": "own key",
+      "managed_by": "· managed by ModuLab",
+      "error": "Error — could not reach the AI provider."
+    }
+  },
+  "setup": {
+    "title": "ModuLab Core – Initial Setup",
+    "step_of": "Step {{step}} of 7",
+    "unknown_error": "Unknown error",
+    "step1": {
+      "hint": "You'll find the bootstrap token once in ModuLab Core's startup log.",
+      "label": "Bootstrap Token",
+      "checking": "Checking…",
+      "next": "Next"
+    },
+    "step2": {
+      "hint": "Enter your OIDC provider's details. ModuLab Core talks to any standard OIDC provider the same way (Pocket ID, Authentik, Keycloak, Authelia, or anything else that speaks OIDC).",
+      "issuer_url": "Issuer URL",
+      "client_id": "Client ID",
+      "client_secret": "Client Secret",
+      "back": "Back",
+      "saving": "Saving…",
+      "next": "Next"
+    },
+    "step3": {
+      "hint": "Required for automatic TLS certificates via Traefik/Let's Encrypt.",
+      "dns_provider": "DNS Provider",
+      "api_credentials": "API Credentials",
+      "api_credentials_placeholder": "e.g. API token",
+      "back": "Back",
+      "saving": "Saving…",
+      "next": "Next"
+    },
+    "step4": {
+      "group_prefix": "Group Prefix",
+      "back": "Back",
+      "saving": "Saving…",
+      "save": "Save",
+      "groups_intro": "Create these three groups in your OIDC provider and assign your account to the super-admin group before continuing:",
+      "continue": "Continue to login",
+      "missing": "Not yet complete, missing: {{items}}"
+    },
+    "step5": {
+      "hint": "Log in now with your OIDC account to bind it as super-admin.",
+      "not_super_admin": "This user is not a member of the super-admin group. Please assign it in your OIDC provider and log in again.",
+      "login_button": "Log in with OIDC"
+    },
+    "step6": {
+      "hint": "Optional: outbound mail for account notifications (approved, locked, unlocked). Skip this and set it up later from Admin → SMTP any time, or fill it in now.",
+      "host": "Host",
+      "port": "Port",
+      "username": "Username",
+      "password": "Password",
+      "from_address": "From address",
+      "encryption": "Encryption",
+      "enc_none": "None",
+      "enc_starttls": "STARTTLS (e.g. port 587)",
+      "enc_tls": "SSL/TLS (e.g. port 465)",
+      "validation_error": "Host, port, and from address are all required - or use Skip below.",
+      "skip": "Skip",
+      "saving": "Saving…",
+      "save_continue": "Save & continue"
+    },
+    "step7": {
+      "hint": "Last step: permanently disable the bootstrap token.",
+      "finishing": "Finishing…",
+      "complete_button": "Complete setup",
+      "done_message": "Setup complete. ModuLab Core is now in normal operation.",
+      "done_button": "Continue to ModuLab",
+      "missing": "Not yet complete, missing: {{items}}"
+    }
+  }
+}

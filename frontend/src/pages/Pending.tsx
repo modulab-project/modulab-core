@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { getMe, logoutRequest } from "../lib/api";
 import { clearSessionToken, getSessionToken } from "../lib/session";
 import { useNotificationEvents, type ServerEvent } from "../lib/useEvents";
@@ -32,6 +33,7 @@ const POLL_INTERVAL_MS = 15_000;
 // not have to wait for the next POLL_INTERVAL_MS tick.
 export default function Pending() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [email, setEmail] = useState<string | null>(null);
   const [locked, setLocked] = useState(false);
 
@@ -118,22 +120,20 @@ export default function Pending() {
 
   return (
     <AuthShell
-      title={locked ? "Your account has been locked" : "Your account is pending approval"}
+      title={locked ? t("pending.title_locked") : t("pending.title_pending")}
       centerText
     >
       <div className="text-center">
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          {email ? `Signed in as ${email}. ` : ""}
-          {locked
-            ? "An administrator has locked your account. Contact your administrator if you believe this is a mistake."
-            : "An Admin needs to approve your account before you can continue. You'll be redirected automatically once approved - no need to sign in again."}
+          {email ? t("pending.signed_in_as", { email }) : ""}
+          {locked ? t("pending.message_locked") : t("pending.message_pending")}
         </p>
         <button
           type="button"
           onClick={handleLogout}
           className="mt-6 text-sm text-gray-500 underline hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
         >
-          Sign out
+          {t("pending.sign_out")}
         </button>
       </div>
     </AuthShell>

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate, Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import i18n from "../lib/i18n";
 import {
   getHealth,
   listAIProviders,
@@ -70,6 +72,7 @@ export function AppShell({
   session: Session;
   children: ReactNode;
 }) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [openPanel, setOpenPanel] = useState<OpenPanel>(null);
@@ -157,9 +160,11 @@ export function AppShell({
       const data = (event.data ?? {}) as { email?: string; name?: string };
       const who = data.name?.trim() || data.email || "Someone";
       const goReview = () => navigate("/admin/users");
-      push({ message: `${who} is waiting for approval.`, actionLabel: "Review", onAction: goReview });
+      const waitingMsg = t("shell.notifications_panel.waiting_toast", { name: who });
+      const reviewLabel = t("shell.notifications_panel.review");
+      push({ message: waitingMsg, actionLabel: reviewLabel, onAction: goReview });
       setFeed((prev) => [
-        { id: nextFeedItemID++, message: `${who} is waiting for approval.`, at: Date.now(), actionLabel: "Review", onAction: goReview },
+        { id: nextFeedItemID++, message: waitingMsg, at: Date.now(), actionLabel: reviewLabel, onAction: goReview },
         ...prev,
       ].slice(0, FEED_LIMIT));
       refreshPendingCount();
@@ -203,7 +208,7 @@ export function AppShell({
           onClick={() => setOpenPanel(null)}
         />
       )}
-      <SlidePanel open={openPanel === "profile"} onClose={() => setOpenPanel(null)} title="Profile">
+      <SlidePanel open={openPanel === "profile"} onClose={() => setOpenPanel(null)} title={t("profile.title")}>
         <ProfilePanelContent
           session={session}
           isAdmin={isAdmin}
@@ -213,13 +218,13 @@ export function AppShell({
           onClose={() => setOpenPanel(null)}
         />
       </SlidePanel>
-      <SlidePanel open={openPanel === "status"} onClose={() => setOpenPanel(null)} title="System status">
+      <SlidePanel open={openPanel === "status"} onClose={() => setOpenPanel(null)} title={t("shell.system_status")}>
         {health && <StatusPanelContent health={health} />}
       </SlidePanel>
       <SlidePanel
         open={openPanel === "notifications"}
         onClose={() => setOpenPanel(null)}
-        title="Notifications"
+        title={t("shell.notifications")}
       >
         <NotificationsPanelContent
           pendingCount={pendingCount}
@@ -253,12 +258,13 @@ function Header({
   chatOpen: boolean;
   onToggleChat: () => void;
 }) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   return (
     <header className="flex h-[60px] flex-none items-center justify-between border-b border-gray-200 px-3 sm:px-6 dark:border-gray-800">
       <button
         type="button"
-        aria-label="Go to home"
+        aria-label={t("shell.go_home")}
         onClick={() => navigate("/")}
         className="flex items-center gap-2 rounded-lg p-1 hover:bg-gray-100 dark:hover:bg-gray-900"
       >
@@ -272,7 +278,7 @@ function Header({
         {isAdmin && (
           <button
             type="button"
-            aria-label="Notifications"
+            aria-label={t("shell.notifications")}
             aria-haspopup="true"
             aria-expanded={openPanel === "notifications"}
             onClick={() => onTogglePanel("notifications")}
@@ -288,7 +294,7 @@ function Header({
         )}
         <button
           type="button"
-          aria-label="AI Chat"
+          aria-label={t("shell.ai_chat")}
           aria-expanded={chatOpen}
           onClick={onToggleChat}
           className={`flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-900 ${
@@ -322,6 +328,7 @@ function FooterBar({
   health: HealthResponse | null;
   onTogglePanel: (panel: Exclude<OpenPanel, null>) => void;
 }) {
+  const { t } = useTranslation();
   const allOk = !!health && health.postgres_reachable && health.valkey_reachable;
 
   return (
@@ -339,11 +346,11 @@ function FooterBar({
           <span
             className={`h-1.5 w-1.5 animate-pulse rounded-full ${allOk ? "bg-green-700 dark:bg-green-400" : "bg-red-700 dark:bg-red-400"}`}
           />
-          {allOk ? "All systems normal" : "Attention needed"}
+          {allOk ? t("shell.all_ok") : t("shell.attention")}
         </button>
       )}
       <span>
-        Core {health?.version ?? "…"} · Frontend {FRONTEND_VERSION}
+        {t("shell.versions", { core: health?.version ?? "…", frontend: FRONTEND_VERSION })}
       </span>
       <span className="flex items-center gap-3">
         <a href={PROJECT_URL} className="hover:text-gray-700 dark:hover:text-gray-200">
@@ -370,6 +377,7 @@ function SlidePanel({
   title?: string;
   children: ReactNode;
 }) {
+  const { t } = useTranslation();
   return (
     <div
       className={`fixed top-[60px] bottom-[44px] right-0 z-20 flex w-full flex-col border-l border-gray-200 bg-white shadow-xl transition-transform duration-200 sm:w-[420px] dark:border-gray-800 dark:bg-gray-950 ${
@@ -381,7 +389,7 @@ function SlidePanel({
           <h2 className="text-base font-semibold">{title}</h2>
           <button
             type="button"
-            aria-label="Close"
+            aria-label={t("shell.close")}
             onClick={onClose}
             className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-900"
           >
@@ -409,6 +417,7 @@ function ProfilePanelContent({
   onLogout: () => void;
   onClose: () => void;
 }) {
+  const { t, i18n: i18nInstance } = useTranslation();
   const displayName = session.name.trim() || session.email;
 
   return (
@@ -425,48 +434,48 @@ function ProfilePanelContent({
         onClick={onClose}
         className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
       >
-        <i className="ti ti-user text-[15px] text-gray-500" /> View profile
+        <i className="ti ti-user text-[15px] text-gray-500" /> {t("shell.view_profile")}
       </Link>
       <Link
         to="/user/feeds"
         onClick={onClose}
         className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
       >
-        <i className="ti ti-rss text-[15px] text-gray-500" /> My feeds
+        <i className="ti ti-rss text-[15px] text-gray-500" /> {t("shell.my_feeds")}
       </Link>
       <Link
         to="/user/search-prefs"
         onClick={onClose}
         className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
       >
-        <i className="ti ti-search text-[15px] text-gray-500" /> Search settings
+        <i className="ti ti-search text-[15px] text-gray-500" /> {t("shell.search_settings")}
       </Link>
       <Link
         to="/user/ai-keys"
         onClick={onClose}
         className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
       >
-        <i className="ti ti-sparkles text-[15px] text-gray-500" /> AI providers
+        <i className="ti ti-sparkles text-[15px] text-gray-500" /> {t("shell.ai_providers")}
       </Link>
       {isAdmin && (
         <>
           <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />
           <p className="px-2.5 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-            Admin
+            {t("shell.admin_section")}
           </p>
           <Link
             to="/admin/users"
             onClick={onClose}
             className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
           >
-            <i className="ti ti-users text-[15px] text-gray-500" /> Users
+            <i className="ti ti-users text-[15px] text-gray-500" /> {t("shell.users_link")}
           </Link>
           <Link
             to="/admin/feeds"
             onClick={onClose}
             className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
           >
-            <i className="ti ti-rss text-[15px] text-gray-500" /> News Feeds
+            <i className="ti ti-rss text-[15px] text-gray-500" /> {t("shell.news_feeds_link")}
           </Link>
           {session.role === "super-admin" && (
             <>
@@ -475,21 +484,21 @@ function ProfilePanelContent({
                 onClick={onClose}
                 className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
               >
-                <i className="ti ti-mail text-[15px] text-gray-500" /> SMTP
+                <i className="ti ti-mail text-[15px] text-gray-500" /> {t("shell.smtp_link")}
               </Link>
               <Link
                 to="/admin/searxng"
                 onClick={onClose}
                 className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
               >
-                <i className="ti ti-search text-[15px] text-gray-500" /> SearXNG
+                <i className="ti ti-search text-[15px] text-gray-500" /> {t("shell.searxng_link")}
               </Link>
               <Link
                 to="/admin/ai"
                 onClick={onClose}
                 className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
               >
-                <i className="ti ti-sparkles text-[15px] text-gray-500" /> AI providers
+                <i className="ti ti-sparkles text-[15px] text-gray-500" /> {t("shell.ai_providers")}
               </Link>
             </>
           )}
@@ -498,11 +507,11 @@ function ProfilePanelContent({
       <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />
       <div className="flex items-center justify-between px-2.5 py-2.5 text-sm">
         <span className="flex items-center gap-2.5">
-          <i className="ti ti-moon text-[15px] text-gray-500" /> Dark mode
+          <i className="ti ti-moon text-[15px] text-gray-500" /> {t("shell.dark_mode")}
         </span>
         <button
           type="button"
-          aria-label="Toggle dark mode"
+          aria-label={t("shell.toggle_dark")}
           onClick={() => setDark(!dark)}
           className={`relative h-[22px] w-10 rounded-full border transition-colors ${
             dark ? "border-teal-600 bg-teal-600" : "border-gray-300 bg-gray-100"
@@ -515,13 +524,34 @@ function ProfilePanelContent({
           />
         </button>
       </div>
+      <div className="flex items-center justify-between px-2.5 py-2.5 text-sm">
+        <span className="flex items-center gap-2.5">
+          <i className="ti ti-language text-[15px] text-gray-500" /> {t("shell.language")}
+        </span>
+        <div className="flex gap-1">
+          {(["en", "de"] as const).map((lang) => (
+            <button
+              key={lang}
+              type="button"
+              onClick={() => i18n.changeLanguage(lang)}
+              className={`rounded-md px-2 py-0.5 text-xs font-medium transition-colors ${
+                i18nInstance.language.startsWith(lang)
+                  ? "bg-teal-600 text-white"
+                  : "border border-gray-300 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+              }`}
+            >
+              {lang.toUpperCase()}
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />
       <button
         type="button"
         onClick={onLogout}
         className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-left text-sm text-red-600 hover:bg-gray-50 dark:hover:bg-gray-900"
       >
-        <i className="ti ti-logout" /> Sign out
+        <i className="ti ti-logout" /> {t("shell.sign_out")}
       </button>
     </div>
   );
@@ -543,6 +573,7 @@ function NotificationsPanelContent({
   feed: FeedItem[];
   onReviewPending: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div>
       <button
@@ -553,20 +584,22 @@ function NotificationsPanelContent({
         <span className="flex items-center gap-2.5">
           <i className="ti ti-user-check text-[15px] text-gray-500" />
           {pendingCount === null
-            ? "Checking pending approvals…"
+            ? t("shell.notifications_panel.checking")
             : pendingCount === 0
-              ? "No one waiting for approval"
-              : `${pendingCount} ${pendingCount === 1 ? "person" : "people"} waiting for approval`}
+              ? t("shell.notifications_panel.none_waiting")
+              : pendingCount === 1
+                ? t("shell.notifications_panel.waiting_one", { count: pendingCount })
+                : t("shell.notifications_panel.waiting_many", { count: pendingCount })}
         </span>
         {!!pendingCount && pendingCount > 0 && <i className="ti ti-chevron-right text-gray-400" />}
       </button>
       <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />
       <p className="px-2.5 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-        Recent activity
+        {t("shell.notifications_panel.recent_activity")}
       </p>
       {feed.length === 0 ? (
         <p className="px-2.5 py-3 text-sm text-gray-500 dark:text-gray-400">
-          Nothing yet - this only shows what arrived while this tab was open.
+          {t("shell.notifications_panel.nothing_yet")}
         </p>
       ) : (
         feed.map((item) => (
@@ -608,17 +641,18 @@ function relativeTime(at: number): string {
 }
 
 function StatusPanelContent({ health }: { health: HealthResponse }) {
+  const { t } = useTranslation();
   return (
     <div className="text-sm">
-      <StatusRow icon="ti-server" label="Backend version" value={health.version} />
-      <StatusRow icon="ti-browser" label="Frontend version" value={FRONTEND_VERSION} />
-      <StatusRow icon="ti-clock" label="Uptime" value={formatUptime(health.uptime_seconds)} />
-      <StatusRow icon="ti-database" label="PostgreSQL" ok={health.postgres_reachable} />
-      <StatusRow icon="ti-bolt" label="Valkey" ok={health.valkey_reachable} />
+      <StatusRow icon="ti-server" label={t("shell.status.backend_version")} value={health.version} />
+      <StatusRow icon="ti-browser" label={t("shell.status.frontend_version")} value={FRONTEND_VERSION} />
+      <StatusRow icon="ti-clock" label={t("shell.status.uptime")} value={formatUptime(health.uptime_seconds)} />
+      <StatusRow icon="ti-database" label={t("shell.status.postgres")} ok={health.postgres_reachable} />
+      <StatusRow icon="ti-bolt" label={t("shell.status.valkey")} ok={health.valkey_reachable} />
       {health.searxng_configured ? (
-        <StatusRow icon="ti-search" label="SearXNG" ok={health.searxng_reachable} />
+        <StatusRow icon="ti-search" label={t("shell.status.searxng")} ok={health.searxng_reachable} />
       ) : (
-        <StatusRow icon="ti-search" label="SearXNG" value="Not configured" />
+        <StatusRow icon="ti-search" label={t("shell.status.searxng")} value={t("shell.status.not_configured")} />
       )}
     </div>
   );
@@ -629,14 +663,13 @@ function StatusRow({
   label,
   value,
   ok,
-  okLabel,
 }: {
   icon: string;
   label: string;
   value?: string;
   ok?: boolean;
-  okLabel?: string;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center justify-between border-b border-gray-100 px-1 py-2.5 last:border-0 dark:border-gray-800">
       <span className="flex items-center gap-2.5">
@@ -649,7 +682,7 @@ function StatusRow({
           className={`flex items-center gap-1.5 text-xs font-medium ${ok ? "text-green-700 dark:text-green-400" : "text-red-600"}`}
         >
           <span className={`h-1.5 w-1.5 rounded-full ${ok ? "bg-green-600" : "bg-red-600"}`} />
-          {ok ? okLabel ?? "Reachable" : "Unreachable"}
+          {ok ? t("shell.status.reachable") : t("shell.status.unreachable")}
         </span>
       )}
     </div>
@@ -722,6 +755,7 @@ function formatUptime(seconds: number): string {
 // messages live only in component state for the lifetime of this mount.
 
 function ChatPanel({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation();
   const [providers, setProviders] = useState<AIUserProvider[]>([]);
   const [selectedProvider, setSelectedProvider] = useState<AIUserProvider | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -797,7 +831,7 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
           const copy = [...prev];
           const last = copy[copy.length - 1];
           if (last?.role === "assistant" && last.content === "") {
-            copy[copy.length - 1] = { ...last, content: "Error — could not reach the AI provider." };
+            copy[copy.length - 1] = { ...last, content: t("shell.chat.error") };
           }
           return copy;
         });
@@ -832,7 +866,7 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
         <div className="flex min-w-0 items-center gap-2">
           <i className="ti ti-sparkles flex-none text-[16px] text-teal-600 dark:text-teal-400" />
           <div className="min-w-0">
-            <span className="text-sm font-semibold">AI Chat</span>
+            <span className="text-sm font-semibold">{t("shell.ai_chat")}</span>
             {activeModel && (
               <span className="ml-1.5 text-[11px] text-gray-400 dark:text-gray-500 truncate">
                 {activeModel}
@@ -848,7 +882,7 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
               onClick={() => setModelPickerOpen((v) => !v)}
               className="flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
             >
-              <span className="max-w-[80px] truncate">{selectedProvider?.name ?? "No provider"}</span>
+              <span className="max-w-[80px] truncate">{selectedProvider?.name ?? t("shell.chat.no_provider")}</span>
               <i className="ti ti-chevron-down text-[10px]" />
             </button>
             {modelPickerOpen && providers.length > 0 && (
@@ -871,13 +905,13 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
                         <span className="flex-1 truncate font-medium">{p.name}</span>
                         {p.has_user_key && (
                           <span className="rounded-full bg-teal-50 px-1.5 py-0.5 text-[10px] text-teal-600 dark:bg-teal-950 dark:text-teal-400">
-                            own key
+                            {t("shell.chat.own_key")}
                           </span>
                         )}
                       </div>
                       <span className="mt-0.5 truncate text-[10px] text-gray-400 dark:text-gray-500">
                         {modelLabel}
-                        {!p.has_user_key && " · managed by ModuLab"}
+                        {!p.has_user_key && ` ${t("shell.chat.managed_by")}`}
                       </span>
                     </button>
                   );
@@ -887,7 +921,7 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
           </div>
           <button
             type="button"
-            aria-label="Close chat"
+            aria-label={t("shell.close_chat")}
             onClick={onClose}
             className="flex h-7 w-7 items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-800"
           >
@@ -901,8 +935,8 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
         {messages.length === 0 ? (
           <p className="mt-8 text-center text-xs text-gray-400 dark:text-gray-600">
             {providers.length === 0
-              ? "No AI providers configured yet."
-              : "Ask anything — session is not saved."}
+              ? t("shell.chat.no_providers_configured")
+              : t("shell.chat.ask_anything")}
           </p>
         ) : (
           <div className="space-y-3">
@@ -933,7 +967,7 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={providers.length === 0 ? "No providers available" : "Message… (Enter to send)"}
+          placeholder={providers.length === 0 ? t("shell.chat.no_providers_available") : t("shell.chat.placeholder")}
           disabled={streaming || providers.length === 0}
           rows={1}
           className="flex-1 resize-none rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs outline-none placeholder:text-gray-400 focus:border-teal-400 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"

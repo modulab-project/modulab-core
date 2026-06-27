@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuthenticatedSession } from "../lib/useSession";
 import {
   getWeather,
@@ -321,21 +322,6 @@ function useClock() {
   return now;
 }
 
-const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-const MONTHS = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-];
 
 function Hero({
   name,
@@ -350,11 +336,14 @@ function Hero({
   onSearch: (q: string) => void;
   initialQuery: string;
 }) {
+  const { t, i18n: i18nInstance } = useTranslation();
   const now = useClock();
   const hours = String(now.getHours()).padStart(2, "0");
   const minutes = String(now.getMinutes()).padStart(2, "0");
   const hour = now.getHours();
-  const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  const greeting = hour < 12 ? t("home.greeting_morning") : hour < 18 ? t("home.greeting_afternoon") : t("home.greeting_evening");
+  const weekday = new Intl.DateTimeFormat(i18nInstance.language, { weekday: "long" }).format(now);
+  const month = new Intl.DateTimeFormat(i18nInstance.language, { month: "long" }).format(now);
 
   // Controlled input so we can clear it programmatically (e.g. when the user
   // navigates back to the blank home page state).
@@ -382,7 +371,7 @@ function Hero({
         {minutes}
       </p>
       <p className="mt-2 text-center text-[13.5px] text-gray-500 dark:text-gray-400">
-        {WEEKDAYS[now.getDay()]}, {now.getDate()} {MONTHS[now.getMonth()]} · {greeting}, {name}
+        {weekday}, {now.getDate()} {month} · {greeting}, {name}
       </p>
 
       {/* Inline weather — only rendered once geolocation + fetch succeed */}
@@ -401,7 +390,7 @@ function Hero({
             {Math.round(weather.current.temperature)}°C
           </span>
           <span>·</span>
-          <span>{wmoDesc(weather.current.weather_code)}</span>
+          <span>{t(wmoKey(weather.current.weather_code))}</span>
           <i className="ti ti-chevron-right text-[11px] text-gray-400" aria-hidden="true" />
         </button>
       )}
@@ -416,13 +405,13 @@ function Hero({
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleSearchKeyDown}
-          placeholder="Search the web…"
+          placeholder={t("home.search_placeholder")}
           className="w-full flex-1 bg-transparent text-base outline-none placeholder:text-gray-400 md:text-sm"
         />
         {value && (
           <button
             type="button"
-            aria-label="Clear search"
+            aria-label={t("home.search_clear")}
             onClick={() => {
               setValue("");
               onSearch("");
@@ -455,14 +444,14 @@ const SEARCH_LANGUAGES = [
 ];
 
 // Inline results panel that appears directly below the Hero when a search
-// is active. Includes a Web/Bilder tab switcher and a filter dropdown for
+// is active. Includes a Web/Images tab switcher and a filter dropdown for
 // safesearch and language.
-const TIME_RANGE_OPTIONS: { value: SearchTimeRange; label: string }[] = [
-  { value: "", label: "Any time" },
-  { value: "day", label: "Last 24 hours" },
-  { value: "week", label: "Last week" },
-  { value: "month", label: "Last month" },
-  { value: "year", label: "Last year" },
+const TIME_RANGE_OPTIONS: { value: SearchTimeRange; key: string }[] = [
+  { value: "", key: "home.search.time_any" },
+  { value: "day", key: "home.search.time_day" },
+  { value: "week", key: "home.search.time_week" },
+  { value: "month", key: "home.search.time_month" },
+  { value: "year", key: "home.search.time_year" },
 ];
 
 function WebResultsPanel({
@@ -484,6 +473,7 @@ function WebResultsPanel({
   searchPrefs: SearchPrefs;
   onPrefsChange: (patch: Partial<SearchPrefs>) => void;
 }) {
+  const { t } = useTranslation();
   const [filterOpen, setFilterOpen] = useState(false);
 
   return (
@@ -502,7 +492,7 @@ function WebResultsPanel({
                   : "text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
               }`}
             >
-              {cat === "general" ? "Web" : "Bilder"}
+              {cat === "general" ? t("home.search.tab_web") : t("home.search.tab_images")}
             </button>
           ))}
         </div>
@@ -520,18 +510,18 @@ function WebResultsPanel({
           >
             <i className="ti ti-adjustments-horizontal text-[13px]" aria-hidden="true" />
             {timeRange
-              ? TIME_RANGE_OPTIONS.find((o) => o.value === timeRange)?.label ?? "Filter"
-              : "Filter"}
+              ? t(TIME_RANGE_OPTIONS.find((o) => o.value === timeRange)?.key ?? "home.search.filter")
+              : t("home.search.filter")}
           </button>
 
           {filterOpen && (
             <div className="absolute right-0 z-10 mt-1 w-56 rounded-xl border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-700 dark:bg-gray-900">
               {/* Time range */}
               <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                Time
+                {t("home.search.time_label")}
               </p>
               <div className="mb-3 flex flex-col gap-0.5">
-                {TIME_RANGE_OPTIONS.map(({ value, label }) => (
+                {TIME_RANGE_OPTIONS.map(({ value, key }) => (
                   <button
                     key={value}
                     type="button"
@@ -542,14 +532,14 @@ function WebResultsPanel({
                         : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
                     }`}
                   >
-                    {label}
+                    {t(key)}
                   </button>
                 ))}
               </div>
 
               {/* Safesearch */}
               <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                SafeSearch
+                {t("home.search.safesearch")}
               </p>
               <div className="mb-3 flex gap-1">
                 {([0, 1, 2] as const).map((v) => (
@@ -563,14 +553,14 @@ function WebResultsPanel({
                         : "border border-gray-200 text-gray-600 hover:border-teal-400 dark:border-gray-700 dark:text-gray-300"
                     }`}
                   >
-                    {v === 0 ? "Off" : v === 1 ? "Moderate" : "Strict"}
+                    {v === 0 ? t("home.search.safe_off") : v === 1 ? t("home.search.safe_moderate") : t("home.search.safe_strict")}
                   </button>
                 ))}
               </div>
 
               {/* Language */}
               <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                Language
+                {t("home.search.language")}
               </p>
               <select
                 value={searchPrefs.language}
@@ -579,7 +569,7 @@ function WebResultsPanel({
               >
                 {SEARCH_LANGUAGES.map((l) => (
                   <option key={l.value} value={l.value}>
-                    {l.label}
+                    {l.value === "all" ? t("home.search.language_all") : l.label}
                   </option>
                 ))}
               </select>
@@ -629,7 +619,7 @@ function WebResultsPanel({
         )
       ) : (
         <div className="rounded-2xl border border-dashed border-gray-300 px-6 py-8 text-center dark:border-gray-700">
-          <p className="text-sm text-gray-500 dark:text-gray-400">No results found.</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{t("home.search.no_results")}</p>
         </div>
       )}
     </div>
@@ -698,13 +688,13 @@ function ImageResultCard({ result }: { result: WebResult }) {
 // out and replaced once that API exists - everything else here (hero) is
 // already real, and the header/footer chrome lives in AppShell now.
 function EmptyModulesNotice() {
+  const { t } = useTranslation();
   return (
     <div className="mx-auto max-w-xl pb-14">
       <div className="rounded-2xl border border-dashed border-gray-300 px-6 py-10 text-center dark:border-gray-700">
-        <p className="text-sm font-medium text-gray-700 dark:text-gray-200">No modules installed yet</p>
+        <p className="text-sm font-medium text-gray-700 dark:text-gray-200">{t("home.no_modules_title")}</p>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          Module support is part of Phase 3 of the project - once it ships, your installed apps
-          and bookmarks will show up here.
+          {t("home.no_modules_body")}
         </p>
       </div>
     </div>
@@ -722,6 +712,7 @@ function WeatherPanel({
   weather: WeatherResponse;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   // Close on Escape key.
   useEffect(() => {
     if (!open) return;
@@ -749,10 +740,10 @@ function WeatherPanel({
         }`}
       >
         <div className="flex flex-none items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-800">
-          <h2 className="text-base font-semibold">Weather</h2>
+          <h2 className="text-base font-semibold">{t("home.weather.panel_title")}</h2>
           <button
             type="button"
-            aria-label="Close"
+            aria-label={t("shell.close")}
             onClick={onClose}
             className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-900"
           >
@@ -769,6 +760,7 @@ function WeatherPanel({
 }
 
 function WeatherPanelContent({ weather }: { weather: WeatherResponse }) {
+  const { t, i18n: i18nInstance } = useTranslation();
   const { current, hourly, daily } = weather;
 
   return (
@@ -785,12 +777,12 @@ function WeatherPanelContent({ weather }: { weather: WeatherResponse }) {
             {Math.round(current.temperature)}°C
           </p>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            {wmoDesc(current.weather_code)}
+            {t(wmoKey(current.weather_code))}
           </p>
           <div className="mt-1.5 flex gap-3 text-xs text-gray-500 dark:text-gray-400">
             <span className="flex items-center gap-1">
               <i className="ti ti-thermometer" aria-hidden="true" />
-              feels {Math.round(current.apparent_temperature)}°
+              {t("home.weather.feels", { temp: Math.round(current.apparent_temperature) })}
             </span>
             <span className="flex items-center gap-1">
               <i className="ti ti-droplet" aria-hidden="true" />
@@ -806,14 +798,14 @@ function WeatherPanelContent({ weather }: { weather: WeatherResponse }) {
 
       {/* Hourly — next 24 hours */}
       <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
-        Next 24 hours
+        {t("home.weather.next_24h")}
       </p>
       <div
         className="mb-5 flex overflow-x-auto rounded-xl border border-gray-100 dark:border-gray-800"
         style={{ scrollbarWidth: "none" }}
       >
         {hourly.map((h, i) => {
-          const timeLabel = i === 0 ? "now" : formatHourLabel(h.time);
+          const timeLabel = i === 0 ? t("home.weather.now") : formatHourLabel(h.time);
           return (
             <div
               key={h.time}
@@ -846,7 +838,7 @@ function WeatherPanelContent({ weather }: { weather: WeatherResponse }) {
 
       {/* 16-day daily forecast */}
       <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
-        16-day forecast
+        {t("home.weather.forecast_16d")}
       </p>
       <div className="rounded-xl border border-gray-100 dark:border-gray-800">
         {daily.map((d, i) => {
@@ -865,7 +857,7 @@ function WeatherPanelContent({ weather }: { weather: WeatherResponse }) {
                     : "text-gray-500 dark:text-gray-400"
                 }`}
               >
-                {isToday ? "Today" : formatDayLabel(d.time)}
+                {isToday ? t("home.weather.today") : formatDayLabel(d.time, i18nInstance.language)}
               </span>
               <i
                 className={`ti ${wmoIcon(d.weather_code)} shrink-0 text-teal-600 dark:text-teal-400`}
@@ -891,7 +883,7 @@ function WeatherPanelContent({ weather }: { weather: WeatherResponse }) {
       </div>
 
       <p className="mt-3 text-center text-[11px] text-gray-400 dark:text-gray-600">
-        Open-Meteo · updated every 15 min
+        {t("home.weather.source")}
       </p>
     </>
   );
@@ -915,28 +907,28 @@ function wmoIcon(code: number): string {
   return "ti-cloud";
 }
 
-// Maps WMO codes to short human-readable descriptions.
-function wmoDesc(code: number): string {
-  if (code === 0) return "Clear sky";
-  if (code === 1) return "Mainly clear";
-  if (code === 2) return "Partly cloudy";
-  if (code === 3) return "Overcast";
-  if (code === 45 || code === 48) return "Fog";
-  if (code === 51 || code === 53) return "Drizzle";
-  if (code === 55) return "Heavy drizzle";
-  if (code === 56 || code === 57) return "Freezing drizzle";
-  if (code === 61 || code === 63) return "Rain";
-  if (code === 65) return "Heavy rain";
-  if (code === 66 || code === 67) return "Freezing rain";
-  if (code === 71 || code === 73) return "Snow";
-  if (code === 75) return "Heavy snow";
-  if (code === 77) return "Snow grains";
-  if (code === 80 || code === 81) return "Rain showers";
-  if (code === 82) return "Heavy showers";
-  if (code === 85 || code === 86) return "Snow showers";
-  if (code === 95) return "Thunderstorm";
-  if (code === 96 || code === 99) return "Thunderstorm with hail";
-  return "Unknown";
+// Maps WMO codes to i18n translation keys under home.weather.desc.*
+function wmoKey(code: number): string {
+  if (code === 0) return "home.weather.desc.clear";
+  if (code === 1) return "home.weather.desc.mainly_clear";
+  if (code === 2) return "home.weather.desc.partly_cloudy";
+  if (code === 3) return "home.weather.desc.overcast";
+  if (code === 45 || code === 48) return "home.weather.desc.fog";
+  if (code === 51 || code === 53) return "home.weather.desc.drizzle";
+  if (code === 55) return "home.weather.desc.heavy_drizzle";
+  if (code === 56 || code === 57) return "home.weather.desc.freezing_drizzle";
+  if (code === 61 || code === 63) return "home.weather.desc.rain";
+  if (code === 65) return "home.weather.desc.heavy_rain";
+  if (code === 66 || code === 67) return "home.weather.desc.freezing_rain";
+  if (code === 71 || code === 73) return "home.weather.desc.snow";
+  if (code === 75) return "home.weather.desc.heavy_snow";
+  if (code === 77) return "home.weather.desc.snow_grains";
+  if (code === 80 || code === 81) return "home.weather.desc.rain_showers";
+  if (code === 82) return "home.weather.desc.heavy_showers";
+  if (code === 85 || code === 86) return "home.weather.desc.snow_showers";
+  if (code === 95) return "home.weather.desc.thunderstorm";
+  if (code === 96 || code === 99) return "home.weather.desc.thunderstorm_hail";
+  return "home.weather.desc.unknown";
 }
 
 // --- Time/date formatting ------------------------------------------------
@@ -948,11 +940,10 @@ function formatHourLabel(isoTime: string): string {
   return `${parseInt(hour, 10)}h`;
 }
 
-// Formats an ISO date string ("2026-06-23") to a short weekday name ("Mon").
-const SHORT_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-function formatDayLabel(isoDate: string): string {
+// Formats an ISO date string ("2026-06-23") to a locale-aware short weekday.
+function formatDayLabel(isoDate: string, locale: string): string {
   const d = new Date(isoDate + "T12:00:00"); // noon avoids DST edge cases
-  return SHORT_DAYS[d.getDay()];
+  return new Intl.DateTimeFormat(locale, { weekday: "short" }).format(d);
 }
 
 // --- News preview (compact, home page) -----------------------------------
@@ -972,32 +963,33 @@ function NewsPreview({
   onOpenAll: () => void;
   onOpenFeeds: () => void;
 }) {
+  const { t } = useTranslation();
   const preview = articles.slice(0, prefs.home_count);
 
   return (
     <div className="mx-auto max-w-3xl pb-14">
       <div className="mb-3 px-1">
         <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-          News
+          {t("home.news.section_title")}
         </p>
       </div>
 
       {loading ? (
         <div className="rounded-2xl border border-gray-100 px-6 py-8 text-center dark:border-gray-800">
-          <p className="text-sm text-gray-400 dark:text-gray-500">Loading…</p>
+          <p className="text-sm text-gray-400 dark:text-gray-500">{t("home.news.loading")}</p>
         </div>
       ) : articles.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-gray-300 px-6 py-10 text-center dark:border-gray-700">
-          <p className="text-sm font-medium text-gray-700 dark:text-gray-200">No articles yet</p>
+          <p className="text-sm font-medium text-gray-700 dark:text-gray-200">{t("home.news.empty_title")}</p>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Enable some feeds to see news here.
+            {t("home.news.empty_body")}
           </p>
           <button
             type="button"
             onClick={onOpenFeeds}
             className="mt-3 rounded-lg border border-gray-300 px-4 py-1.5 text-sm hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-900"
           >
-            Choose feeds
+            {t("home.news.choose_feeds")}
           </button>
         </div>
       ) : (
@@ -1013,7 +1005,7 @@ function NewsPreview({
               onClick={onOpenAll}
               className="mt-3 w-full rounded-xl border border-gray-100 py-2.5 text-[13px] text-gray-500 hover:bg-gray-50 dark:border-gray-800 dark:text-gray-400 dark:hover:bg-gray-900"
             >
-              Show all {articles.length} articles
+              {t("home.news.show_all", { count: articles.length })}
             </button>
           )}
         </>
@@ -1037,6 +1029,7 @@ function NewsAllPanel({
   onOpenFeeds: () => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   useEffect(() => {
     if (!open) return;
     function onKey(e: globalThis.KeyboardEvent) {
@@ -1061,10 +1054,10 @@ function NewsAllPanel({
       >
         {/* Header */}
         <div className="flex flex-none items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-800">
-          <h2 className="text-base font-semibold">News</h2>
+          <h2 className="text-base font-semibold">{t("home.news.section_title")}</h2>
           <button
             type="button"
-            aria-label="Close"
+            aria-label={t("shell.close")}
             onClick={onClose}
             className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-900"
           >
@@ -1076,13 +1069,13 @@ function NewsAllPanel({
         <div className="flex-1 overflow-y-auto p-3">
           {articles.length === 0 ? (
             <div className="px-2 py-10 text-center">
-              <p className="text-sm text-gray-500 dark:text-gray-400">No articles yet.</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{t("home.news.empty_panel")}</p>
               <button
                 type="button"
                 onClick={onOpenFeeds}
                 className="mt-2 text-[13px] text-teal-600 hover:underline dark:text-teal-400"
               >
-                Choose feeds
+                {t("home.news.choose_feeds_link")}
               </button>
             </div>
           ) : (
@@ -1204,6 +1197,7 @@ function relativeNewsTime(date: Date): string {
 // --- Feeds selection panel -----------------------------------------------
 
 function FeedsPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { t } = useTranslation();
   const [feeds, setFeeds] = useState<Feed[]>([]);
   const [fetching, setFetching] = useState(false);
   const [toggling, setToggling] = useState<number | null>(null);
@@ -1251,10 +1245,10 @@ function FeedsPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
         }`}
       >
         <div className="flex flex-none items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-800">
-          <h2 className="text-base font-semibold">My feeds</h2>
+          <h2 className="text-base font-semibold">{t("home.feeds.panel_title")}</h2>
           <button
             type="button"
-            aria-label="Close"
+            aria-label={t("shell.close")}
             onClick={onClose}
             className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-900"
           >
@@ -1263,10 +1257,10 @@ function FeedsPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
         </div>
         <div className="flex-1 overflow-y-auto p-2.5">
           {fetching ? (
-            <p className="px-2.5 py-4 text-sm text-gray-500 dark:text-gray-400">Loading…</p>
+            <p className="px-2.5 py-4 text-sm text-gray-500 dark:text-gray-400">{t("home.feeds.loading")}</p>
           ) : feeds.length === 0 ? (
             <p className="px-2.5 py-4 text-sm text-gray-500 dark:text-gray-400">
-              No feeds available yet. An admin needs to add some first.
+              {t("home.feeds.no_feeds")}
             </p>
           ) : (
             feeds.map((feed) => (
@@ -1282,7 +1276,7 @@ function FeedsPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
                 {/* Toggle */}
                 <button
                   type="button"
-                  aria-label={feed.enabled ? `Disable ${feed.label}` : `Enable ${feed.label}`}
+                  aria-label={feed.enabled ? t("home.feeds.disable_label", { name: feed.label }) : t("home.feeds.enable_label", { name: feed.label })}
                   disabled={toggling === feed.id}
                   onClick={() => handleToggle(feed)}
                   className={`relative h-[22px] w-10 flex-none rounded-full border transition-colors disabled:opacity-50 ${

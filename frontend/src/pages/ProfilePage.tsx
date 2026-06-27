@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell, Avatar } from "../components/AppShell";
 import { AuthButton } from "../components/AuthShell";
@@ -28,6 +29,7 @@ import { clearSessionToken, getSessionToken } from "../lib/session";
 // not a one-off detour you have to explicitly back out of.
 export default function ProfilePage() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { session, loading } = useAuthenticatedSession();
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -46,7 +48,7 @@ export default function ProfilePage() {
   // as deleteError, same as AdminUsersPage's runAction does for its own
   // guard violations.
   async function handleDeleteAccount() {
-    if (!window.confirm("Delete your account? This cannot be undone.")) {
+    if (!window.confirm(t("profile.delete_confirm"))) {
       return;
     }
     const token = getSessionToken();
@@ -60,7 +62,7 @@ export default function ProfilePage() {
       clearSessionToken();
       navigate("/login", { replace: true });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Could not delete your account.";
+      const message = err instanceof Error ? err.message : t("profile.delete_error_fallback");
       setDeleteError(message);
       setDeleting(false);
     }
@@ -72,19 +74,19 @@ export default function ProfilePage() {
         <div className="mb-6 flex items-center gap-4">
           <Avatar session={session} className="h-16 w-16 text-lg" />
           <div>
-            <h1 className="text-xl font-semibold">Profile</h1>
+            <h1 className="text-xl font-semibold">{t("profile.title")}</h1>
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              Managed by your identity provider - Core only displays what it received at login.
+              {t("profile.subtitle")}
             </p>
           </div>
         </div>
 
         <div className="rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
-          <ProfileRow label="Name" value={displayName} />
-          <ProfileRow label="Username" value={<ClaimValue value={session.preferred_username} />} />
-          <ProfileRow label="Email" value={session.email} />
+          <ProfileRow label={t("profile.name")} value={displayName} />
+          <ProfileRow label={t("profile.username")} value={<ClaimValue value={session.preferred_username} />} />
+          <ProfileRow label={t("profile.email")} value={session.email} />
           <ProfileRow
-            label="Email verified"
+            label={t("profile.email_verified")}
             value={
               <span
                 className={`flex items-center gap-1.5 text-xs font-medium ${
@@ -98,12 +100,12 @@ export default function ProfilePage() {
                     session.email_verified ? "bg-green-600" : "bg-gray-400"
                   }`}
                 />
-                {session.email_verified ? "Verified" : "Not verified"}
+                {session.email_verified ? t("profile.verified") : t("profile.not_verified")}
               </span>
             }
           />
           <ProfileRow
-            label="Subject (sub)"
+            label={t("profile.subject")}
             value={<span className="font-mono text-xs">{session.user_id}</span>}
             last
           />
@@ -117,15 +119,14 @@ export default function ProfilePage() {
             }}
             className="mt-6 w-full"
           >
-            Manage account in OIDC
+            {t("profile.manage_account")}
           </AuthButton>
         )}
 
         <div className="mt-10 rounded-2xl border border-red-200 p-4 dark:border-red-900">
-          <p className="text-sm font-medium text-red-700 dark:text-red-400">Delete account</p>
+          <p className="text-sm font-medium text-red-700 dark:text-red-400">{t("profile.delete_section_title")}</p>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Permanently removes your ModuLab account and revokes access. Your identity provider
-            account is not affected.
+            {t("profile.delete_section_body")}
           </p>
           {deleteError && (
             <p className="mt-2 text-sm text-red-600 dark:text-red-400">{deleteError}</p>
@@ -136,7 +137,7 @@ export default function ProfilePage() {
             onClick={handleDeleteAccount}
             className="mt-3 rounded-md border border-red-300 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
           >
-            {deleting ? "Deleting…" : "Delete my account"}
+            {deleting ? t("profile.deleting") : t("profile.delete_button")}
           </button>
         </div>
       </div>
@@ -153,8 +154,9 @@ export default function ProfilePage() {
 // this claim" apart from "something is broken", which a silently empty
 // cell would not communicate.
 function ClaimValue({ value }: { value: string }) {
+  const { t } = useTranslation();
   if (!value) {
-    return <span className="text-gray-400 dark:text-gray-500">Not available</span>;
+    return <span className="text-gray-400 dark:text-gray-500">{t("profile.not_available")}</span>;
   }
   return <>{value}</>;
 }

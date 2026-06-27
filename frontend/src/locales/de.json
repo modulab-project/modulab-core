@@ -1,0 +1,266 @@
+{
+  "auth": {
+    "error": {
+      "missing_state_or_code": "Der Anmeldeversuch war unvollständig. Bitte versuche es erneut.",
+      "invalid_or_expired_state": "Der Anmeldeversuch ist abgelaufen. Bitte versuche es erneut.",
+      "provider_unavailable": "OIDC ist noch nicht vollständig konfiguriert.",
+      "exchange_failed": "Anmeldung beim Identitätsprovider fehlgeschlagen.",
+      "group_prefix_unavailable": "Das Gruppen-Präfix ist noch nicht konfiguriert.",
+      "access_denied": "Dein Konto ist nicht für den Zugriff auf ModuLab autorisiert. Kontaktiere deinen Administrator.",
+      "unknown": "Beim Anmelden ist ein unerwarteter Fehler aufgetreten."
+    }
+  },
+  "login": {
+    "title": "Bei ModuLab anmelden",
+    "subtitle": "Melde dich sicher mit deinem SSO-Login an.",
+    "button": "Mit SSO anmelden"
+  },
+  "pending": {
+    "title_locked": "Dein Konto wurde gesperrt",
+    "title_pending": "Dein Konto wartet auf Freischaltung",
+    "signed_in_as": "Angemeldet als {{email}}. ",
+    "message_locked": "Ein Administrator hat dein Konto gesperrt. Kontaktiere deinen Administrator, wenn du glaubst, dass dies ein Fehler ist.",
+    "message_pending": "Ein Admin muss dein Konto freischalten, bevor du fortfahren kannst. Du wirst automatisch weitergeleitet, sobald es freigegeben ist – kein erneutes Anmelden nötig.",
+    "sign_out": "Abmelden"
+  },
+  "profile": {
+    "title": "Profil",
+    "subtitle": "Verwaltet von deinem Identitätsprovider – Core zeigt nur an, was beim Login übermittelt wurde.",
+    "name": "Name",
+    "username": "Benutzername",
+    "email": "E-Mail",
+    "email_verified": "E-Mail bestätigt",
+    "subject": "Subject (sub)",
+    "verified": "Bestätigt",
+    "not_verified": "Nicht bestätigt",
+    "not_available": "Nicht verfügbar",
+    "manage_account": "Konto im OIDC verwalten",
+    "delete_section_title": "Konto löschen",
+    "delete_section_body": "Entfernt dein ModuLab-Konto dauerhaft und widerruft den Zugriff. Dein Identitätsprovider-Konto bleibt unberührt.",
+    "delete_confirm": "Konto löschen? Das kann nicht rückgängig gemacht werden.",
+    "delete_button": "Mein Konto löschen",
+    "deleting": "Wird gelöscht…",
+    "delete_error_fallback": "Konto konnte nicht gelöscht werden."
+  },
+  "admin": {
+    "users": {
+      "title": "Benutzer",
+      "subtitle": "Personen genehmigen, die auf Zugang warten, oder bestehende Konten sperren/löschen.",
+      "empty": "Noch keine Benutzer",
+      "load_error": "Benutzer konnten nicht geladen werden.",
+      "action_error": "Diese Aktion ist fehlgeschlagen.",
+      "you": "(du)",
+      "delete_confirm": "{{name}} löschen? Das kann nicht rückgängig gemacht werden.",
+      "joined": "beigetreten",
+      "last_login": "letzter Login",
+      "status": {
+        "pending": "Ausstehend",
+        "active": "Aktiv",
+        "locked": "Gesperrt"
+      },
+      "action": {
+        "approve": "Genehmigen",
+        "lock": "Sperren",
+        "unlock": "Entsperren",
+        "delete": "Löschen"
+      }
+    }
+  },
+  "home": {
+    "greeting_morning": "Guten Morgen",
+    "greeting_afternoon": "Guten Tag",
+    "greeting_evening": "Guten Abend",
+    "search_placeholder": "Im Web suchen…",
+    "search_clear": "Suche leeren",
+    "no_modules_title": "Noch keine Module installiert",
+    "no_modules_body": "Modul-Unterstützung ist Teil von Phase 3 des Projekts – sobald sie verfügbar ist, erscheinen deine installierten Apps und Lesezeichen hier.",
+    "search": {
+      "tab_web": "Web",
+      "tab_images": "Bilder",
+      "filter": "Filter",
+      "time_label": "Zeitraum",
+      "time_any": "Beliebige Zeit",
+      "time_day": "Letzte 24 Stunden",
+      "time_week": "Letzte Woche",
+      "time_month": "Letzter Monat",
+      "time_year": "Letztes Jahr",
+      "safesearch": "SafeSearch",
+      "safe_off": "Aus",
+      "safe_moderate": "Moderat",
+      "safe_strict": "Streng",
+      "language": "Sprache",
+      "language_all": "Alle Sprachen",
+      "no_results": "Keine Ergebnisse gefunden."
+    },
+    "news": {
+      "section_title": "Nachrichten",
+      "loading": "Wird geladen…",
+      "empty_title": "Noch keine Artikel",
+      "empty_body": "Aktiviere einige Feeds, um hier Nachrichten zu sehen.",
+      "choose_feeds": "Feeds auswählen",
+      "show_all": "Alle {{count}} Artikel anzeigen",
+      "empty_panel": "Noch keine Artikel.",
+      "choose_feeds_link": "Feeds auswählen"
+    },
+    "feeds": {
+      "panel_title": "Meine Feeds",
+      "no_feeds": "Noch keine Feeds verfügbar. Ein Admin muss zuerst welche hinzufügen.",
+      "loading": "Wird geladen…",
+      "enable_label": "{{name}} aktivieren",
+      "disable_label": "{{name}} deaktivieren"
+    },
+    "weather": {
+      "panel_title": "Wetter",
+      "next_24h": "Nächste 24 Stunden",
+      "forecast_16d": "16-Tage-Vorhersage",
+      "now": "jetzt",
+      "today": "Heute",
+      "feels": "fühlt sich an wie {{temp}}°",
+      "source": "Open-Meteo · alle 15 Min. aktualisiert",
+      "desc": {
+        "clear": "Klarer Himmel",
+        "mainly_clear": "Überwiegend klar",
+        "partly_cloudy": "Teils bewölkt",
+        "overcast": "Bedeckt",
+        "fog": "Nebel",
+        "drizzle": "Nieselregen",
+        "heavy_drizzle": "Starker Nieselregen",
+        "freezing_drizzle": "Gefrierender Nieselregen",
+        "rain": "Regen",
+        "heavy_rain": "Starker Regen",
+        "freezing_rain": "Gefrierender Regen",
+        "snow": "Schnee",
+        "heavy_snow": "Starker Schneefall",
+        "snow_grains": "Schneegriesel",
+        "rain_showers": "Regenschauer",
+        "heavy_showers": "Starke Schauer",
+        "snow_showers": "Schneeschauer",
+        "thunderstorm": "Gewitter",
+        "thunderstorm_hail": "Gewitter mit Hagel",
+        "unknown": "Unbekannt"
+      }
+    }
+  },
+  "shell": {
+    "go_home": "Zur Startseite",
+    "notifications": "Benachrichtigungen",
+    "ai_chat": "KI-Chat",
+    "all_ok": "Alle Systeme normal",
+    "attention": "Aufmerksamkeit erforderlich",
+    "versions": "Core {{core}} · Frontend {{frontend}}",
+    "close": "Schließen",
+    "close_chat": "Chat schließen",
+    "system_status": "Systemstatus",
+    "view_profile": "Profil anzeigen",
+    "my_feeds": "Meine Feeds",
+    "search_settings": "Sucheinstellungen",
+    "ai_providers": "KI-Anbieter",
+    "admin_section": "Admin",
+    "users_link": "Benutzer",
+    "news_feeds_link": "News-Feeds",
+    "smtp_link": "SMTP",
+    "searxng_link": "SearXNG",
+    "dark_mode": "Dunkelmodus",
+    "toggle_dark": "Dunkelmodus umschalten",
+    "language": "Sprache",
+    "sign_out": "Abmelden",
+    "status": {
+      "backend_version": "Backend-Version",
+      "frontend_version": "Frontend-Version",
+      "uptime": "Laufzeit",
+      "postgres": "PostgreSQL",
+      "valkey": "Valkey",
+      "searxng": "SearXNG",
+      "reachable": "Erreichbar",
+      "unreachable": "Nicht erreichbar",
+      "not_configured": "Nicht konfiguriert"
+    },
+    "notifications_panel": {
+      "checking": "Ausstehende Genehmigungen werden geprüft…",
+      "none_waiting": "Niemand wartet auf Genehmigung",
+      "waiting_one": "{{count}} Person wartet auf Genehmigung",
+      "waiting_many": "{{count}} Personen warten auf Genehmigung",
+      "recent_activity": "Letzte Aktivität",
+      "nothing_yet": "Noch nichts – hier erscheint nur, was in dieser Tab-Sitzung ankam.",
+      "review": "Überprüfen",
+      "waiting_toast": "{{name}} wartet auf Genehmigung."
+    },
+    "chat": {
+      "no_provider": "Kein Anbieter",
+      "no_providers_configured": "Noch keine KI-Anbieter konfiguriert.",
+      "ask_anything": "Frag alles – die Sitzung wird nicht gespeichert.",
+      "no_providers_available": "Keine Anbieter verfügbar",
+      "placeholder": "Nachricht… (Enter zum Senden)",
+      "own_key": "eigener Key",
+      "managed_by": "· von ModuLab verwaltet",
+      "error": "Fehler – KI-Anbieter nicht erreichbar."
+    }
+  },
+  "setup": {
+    "title": "ModuLab Core – Ersteinrichtung",
+    "step_of": "Schritt {{step}} von 7",
+    "unknown_error": "Unbekannter Fehler",
+    "step1": {
+      "hint": "Den Bootstrap-Token findest du einmalig im Startprotokoll von ModuLab Core.",
+      "label": "Bootstrap-Token",
+      "checking": "Wird geprüft…",
+      "next": "Weiter"
+    },
+    "step2": {
+      "hint": "Gib die Daten deines OIDC-Providers ein. ModuLab Core funktioniert mit jedem Standard-OIDC-Provider (Pocket ID, Authentik, Keycloak, Authelia oder anderen).",
+      "issuer_url": "Issuer-URL",
+      "client_id": "Client-ID",
+      "client_secret": "Client-Secret",
+      "back": "Zurück",
+      "saving": "Wird gespeichert…",
+      "next": "Weiter"
+    },
+    "step3": {
+      "hint": "Erforderlich für automatische TLS-Zertifikate über Traefik/Let's Encrypt.",
+      "dns_provider": "DNS-Provider",
+      "api_credentials": "API-Zugangsdaten",
+      "api_credentials_placeholder": "z. B. API-Token",
+      "back": "Zurück",
+      "saving": "Wird gespeichert…",
+      "next": "Weiter"
+    },
+    "step4": {
+      "group_prefix": "Gruppen-Präfix",
+      "back": "Zurück",
+      "saving": "Wird gespeichert…",
+      "save": "Speichern",
+      "groups_intro": "Erstelle diese drei Gruppen in deinem OIDC-Provider und weise deinen Account der Super-Admin-Gruppe zu, bevor du fortfährst:",
+      "continue": "Weiter zur Anmeldung",
+      "missing": "Noch nicht vollständig, fehlend: {{items}}"
+    },
+    "step5": {
+      "hint": "Melde dich jetzt mit deinem OIDC-Konto an, um es als Super-Admin zu registrieren.",
+      "not_super_admin": "Dieser Benutzer ist kein Mitglied der Super-Admin-Gruppe. Weise ihn in deinem OIDC-Provider zu und melde dich erneut an.",
+      "login_button": "Mit OIDC anmelden"
+    },
+    "step6": {
+      "hint": "Optional: ausgehende E-Mails für Kontobenachrichtigungen (genehmigt, gesperrt, entsperrt). Überspringe dies und richte es später unter Admin → SMTP ein, oder fülle es jetzt aus.",
+      "host": "Host",
+      "port": "Port",
+      "username": "Benutzername",
+      "password": "Passwort",
+      "from_address": "Absenderadresse",
+      "encryption": "Verschlüsselung",
+      "enc_none": "Keine",
+      "enc_starttls": "STARTTLS (z. B. Port 587)",
+      "enc_tls": "SSL/TLS (z. B. Port 465)",
+      "validation_error": "Host, Port und Absenderadresse sind erforderlich – oder überspringe diesen Schritt.",
+      "skip": "Überspringen",
+      "saving": "Wird gespeichert…",
+      "save_continue": "Speichern & weiter"
+    },
+    "step7": {
+      "hint": "Letzter Schritt: Bootstrap-Token dauerhaft deaktivieren.",
+      "finishing": "Wird abgeschlossen…",
+      "complete_button": "Einrichtung abschließen",
+      "done_message": "Einrichtung abgeschlossen. ModuLab Core ist jetzt in Betrieb.",
+      "done_button": "Zu ModuLab",
+      "missing": "Noch nicht vollständig, fehlend: {{items}}"
+    }
+  }
+}

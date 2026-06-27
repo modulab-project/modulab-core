@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { loginRedirectUrl } from "../lib/api";
-import { describeAuthError } from "../lib/authErrors";
+import { authErrorKey } from "../lib/authErrors";
 import { consumeAuthResult } from "./AuthComplete";
 import { AuthButton, AuthShell } from "../components/AuthShell";
 
@@ -16,22 +17,23 @@ import { AuthButton, AuthShell } from "../components/AuthShell";
 // consumeAuthResult() picks up the stashed error so it can be shown here
 // rather than silently dropped.
 export default function Login() {
+  const { t } = useTranslation();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const result = consumeAuthResult();
     if (result?.error) {
-      setError(describeAuthError(result.error));
+      setError(authErrorKey(result.error));
     }
   }, []);
 
   return (
     <AuthShell
-      title="Sign in to ModuLab"
-      subtitle="Access ModuLab securely using your SSO login."
+      title={t("login.title")}
+      subtitle={t("login.subtitle")}
       centerText
     >
-      {error && <p className="mb-4 text-center text-sm text-red-600 dark:text-red-400">{error}</p>}
+      {error && <p className="mb-4 text-center text-sm text-red-600 dark:text-red-400">{t(error)}</p>}
       <AuthButton
         type="button"
         onClick={() => {
@@ -39,7 +41,7 @@ export default function Login() {
         }}
         className="w-full"
       >
-        Log in with SSO
+        {t("login.button")}
       </AuthButton>
     </AuthShell>
   );
