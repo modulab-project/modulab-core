@@ -877,7 +877,7 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
                       </div>
                       <span className="mt-0.5 truncate text-[10px] text-gray-400 dark:text-gray-500">
                         {modelLabel}
-                        {!p.has_user_key && " · fixed by admin"}
+                        {!p.has_user_key && " · managed by ModuLab"}
                       </span>
                     </button>
                   );

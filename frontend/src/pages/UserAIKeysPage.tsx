@@ -73,7 +73,7 @@ export default function UserAIKeysPage() {
       <div className="mx-auto w-full max-w-md py-10">
         <h1 className="mb-1 text-xl font-semibold">AI providers</h1>
         <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">
-          Add your own API key to override the admin key. With your own key you also choose which model to use.
+          Add your own API key to override the ModuLab key. With your own API key you also choose which model to use.
         </p>
 
         {error && <p className="mb-4 text-sm text-red-600 dark:text-red-400">{error}</p>}
@@ -112,7 +112,7 @@ export default function UserAIKeysPage() {
                             : "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400"
                         }`}
                       >
-                        {p.has_user_key ? "Your key" : p.has_admin_key ? "Admin key" : "No key"}
+                        {p.has_user_key ? "Your key" : p.has_admin_key ? "ModuLab API key" : "No key"}
                       </span>
                     </div>
                   </div>
@@ -121,7 +121,7 @@ export default function UserAIKeysPage() {
                   <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
                     {p.has_user_key
                       ? `Model: ${p.preferred_model || p.default_model}`
-                      : `Model: ${p.default_model} (fixed by admin)`}
+                      : `Model: ${p.default_model} · managed by ModuLab`}
                   </p>
 
                   {/* Key edit row */}
@@ -165,7 +165,7 @@ export default function UserAIKeysPage() {
                           onClick={() => { setEditingKeyId(p.id); setKeyInput(""); }}
                           className="rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
                         >
-                          {p.has_user_key ? "Update key" : "Add own key"}
+                          {p.has_user_key ? "Update key" : "Add your own API key"}
                         </button>
                       )}
                       {p.has_user_key && (
