@@ -299,9 +299,11 @@ func main() {
 			http.Error(w, err.Error(), http.StatusPreconditionFailed)
 			return
 		}
-		// Buffer the body so we can (a) pass it to the handler and (b) read
-		// the non-sensitive fields for the audit log without decrypting them
-		// from the DB after the fact.
+		// Read current config before the handler overwrites it - needed to
+		// build a "field: old → new" diff for the audit log.
+		oldSMTP, _ := setup.ResolveSMTPConfig(r.Context(), pool, masterKey)
+
+		// Buffer the body so the handler can still read it after we peek.
 		bodyBytes, _ := io.ReadAll(r.Body)
 		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
@@ -309,19 +311,14 @@ func main() {
 		setup.SMTPConfigureHandler(pool, masterKey)(rw, r)
 		if rw.code < 400 {
 			if sess, ok := auth.SessionFromContext(r.Context()); ok {
-				// Extract non-sensitive fields for the audit detail blob.
-				// Password is deliberately excluded.
-				var smtpReq struct {
+				var newReq struct {
 					Host        string `json:"host"`
 					Port        int    `json:"port"`
 					FromAddress string `json:"from_address"`
 					Encryption  string `json:"encryption"`
 				}
-				_ = json.Unmarshal(bodyBytes, &smtpReq)
-				details := fmt.Sprintf(
-					`{"host":%q,"port":%d,"from":%q,"encryption":%q}`,
-					smtpReq.Host, smtpReq.Port, smtpReq.FromAddress, smtpReq.Encryption,
-				)
+				_ = json.Unmarshal(bodyBytes, &newReq)
+				details := smtpDiff(oldSMTP, newReq.Host, newReq.Port, newReq.FromAddress, newReq.Encryption)
 				if err := audit.Log(r.Context(), pool, masterKey, audit.LogParams{
 					EventType:  audit.EventConfigSMTP,
 					ActorID:    sess.UserID,
@@ -460,6 +457,41 @@ func main() {
 	if err := http.ListenAndServe(cfg.HTTPAddr, handler); err != nil {
 		log.Fatalf("server: %v", err)
 	}
+}
+
+// smtpDiff builds a JSON object containing only the SMTP fields that changed
+// between old (the previously persisted config) and the new values submitted
+// by the admin. Fields that did not change are omitted so the audit entry
+// only shows what actually happened. Password is never included.
+// Returns "{}" when nothing changed (e.g. saving without modifications).
+func smtpDiff(old setup.SMTPRuntimeConfig, newHost string, newPort int, newFrom, newEnc string) string {
+	type kv struct {
+		key      string
+		oldVal   string
+		newVal   string
+	}
+	changes := []kv{
+		{"host", old.Host, newHost},
+		{"port", fmt.Sprintf("%d", old.Port), fmt.Sprintf("%d", newPort)},
+		{"from", old.FromAddress, newFrom},
+		{"encryption", old.Encryption, newEnc},
+	}
+	buf := bytes.NewBufferString("{")
+	first := true
+	for _, c := range changes {
+		if c.oldVal == c.newVal {
+			continue
+		}
+		if !first {
+			buf.WriteByte(',')
+		}
+		first = false
+		// Format: "field":"old → new"
+		enc, _ := json.Marshal(fmt.Sprintf("%s → %s", c.oldVal, c.newVal))
+		fmt.Fprintf(buf, "%q:%s", c.key, enc)
+	}
+	buf.WriteByte('}')
+	return buf.String()
 }
 
 // responseRecorder wraps http.ResponseWriter and captures the status code
