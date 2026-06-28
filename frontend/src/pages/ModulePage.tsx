@@ -12,6 +12,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import i18n from "../lib/i18n";
 import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { moduleApiUrl, type InstalledModule } from "../lib/api";
@@ -57,6 +58,41 @@ export default function ModulePage() {
       .catch((e) => setLoadError(String(e)))
       .finally(() => setFetching(false));
   }, [session, moduleName, t]);
+
+  // Load the module's own locale files and register them in i18next under the
+  // "mod_{name}" namespace. This runs before the bundle is imported so that
+  // the module component can call useTranslation("mod_{name}") immediately.
+  useEffect(() => {
+    if (!mod || mod.status !== "active") return;
+    const token = getSessionToken();
+    if (!token) return;
+
+    const ns = `mod_${mod.name}`;
+    const lng = i18n.language?.slice(0, 2) ?? "en"; // "en-US" → "en"
+    const fallback = "en";
+
+    async function loadLocale(language: string): Promise<Record<string, unknown> | null> {
+      try {
+        const r = await fetch(`/v1/modules/${encodeURIComponent(mod!.name)}/locales/${language}.json`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!r.ok) return null;
+        return r.json();
+      } catch {
+        return null;
+      }
+    }
+
+    (async () => {
+      // Always load the fallback (en) first, then overlay the active language.
+      const [fbData, lngData] = await Promise.all([
+        loadLocale(fallback),
+        lng !== fallback ? loadLocale(lng) : Promise.resolve(null),
+      ]);
+      if (fbData) i18n.addResourceBundle(fallback, ns, fbData, true, true);
+      if (lngData) i18n.addResourceBundle(lng, ns, lngData, true, true);
+    })();
+  }, [mod]);
 
   // Dynamically import the module's UI bundle (ui/bundle.js served from Core's
   // static file path). If the bundle is absent (Tier 1 or not yet built),

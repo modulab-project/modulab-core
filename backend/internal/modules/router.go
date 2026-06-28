@@ -157,14 +157,51 @@ func saveUploadedFile(r *http.Request, dataDir, moduleName string) (string, erro
 	return dst, nil
 }
 
-// RegisterModuleRoutes wires the module proxy into mux under the standard
-// /v1/modules/{name}/* pattern. Called from main.go after module install and
-// at startup for each already-installed Tier 2/3 module.
+// ModuleLocaleHandler serves a module's locale file from its installed
+// directory. Path: GET /v1/modules/{name}/locales/{lng}.json
+//
+// Auth is required (any active session) to prevent locale enumeration by
+// unauthenticated clients. The file is served with Cache-Control: no-store
+// so the frontend always gets the version matching the installed module.
+func ModuleLocaleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := auth.RequireActiveSession(authDeps, w, r); !ok {
+			return
+		}
+		moduleName := r.PathValue("name")
+		lng := r.PathValue("lng")
+		if moduleName == "" || lng == "" {
+			http.Error(w, "missing module name or language", http.StatusBadRequest)
+			return
+		}
+		// Sanitise: only allow simple language codes like "en", "de", "en-US".
+		for _, c := range lng {
+			if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '-') {
+				http.Error(w, "invalid language code", http.StatusBadRequest)
+				return
+			}
+		}
+		localePath := filepath.Join(d.DataDir, moduleName, "locales", lng+".json")
+		info, err := os.Stat(localePath)
+		if err != nil || info.IsDir() {
+			http.Error(w, "locale not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		http.ServeFile(w, r, localePath)
+	}
+}
+
+// RegisterModuleRoutes wires the module proxy and locale handler into mux.
+// Called from main.go after module install and at startup for each
+// already-installed Tier 2/3 module.
 //
 // Note: the literal /v1/modules and /v1/modules/install etc. routes that
 // handle the lifecycle API are registered first in main.go and take
 // precedence over this wildcard because Go's 1.22 ServeMux gives more-
 // specific paths priority over less-specific ones.
 func RegisterModuleRoutes(mux *http.ServeMux, d Deps, authDeps auth.Deps) {
+	mux.HandleFunc("GET /v1/modules/{name}/locales/{lng}.json", ModuleLocaleHandler(d, authDeps))
 	mux.HandleFunc("/v1/modules/{name}/api/", ModuleProxyHandler(d, authDeps))
 }
