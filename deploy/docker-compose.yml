@@ -62,26 +62,6 @@ services:
       timeout: 5s
       retries: 10
 
-  # ── PgBouncer ────────────────────────────────────────────────────────────────
-  pgbouncer:
-    image: bitnami/pgbouncer:latest
-    restart: unless-stopped
-    environment:
-      POSTGRESQL_HOST: postgres
-      POSTGRESQL_PORT: "5432"
-      POSTGRESQL_DATABASE: ${POSTGRES_DB}
-      POSTGRESQL_USERNAME: ${POSTGRES_USER}
-      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD}
-      PGBOUNCER_AUTH_TYPE: scram-sha-256
-      PGBOUNCER_POOL_MODE: transaction
-      PGBOUNCER_MAX_CLIENT_CONN: "100"
-      PGBOUNCER_DEFAULT_POOL_SIZE: "20"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - modulab-internal
-
   # ── Valkey ───────────────────────────────────────────────────────────────────
   valkey:
     image: valkey/valkey:8-alpine
@@ -110,8 +90,6 @@ services:
         condition: service_healthy
       valkey:
         condition: service_healthy
-      pgbouncer:
-        condition: service_started
     networks:
       - modulab-internal
 
