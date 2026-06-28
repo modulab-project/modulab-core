@@ -124,11 +124,10 @@ export default function ModulePage() {
 function ModuleFallback({
   mod,
   apiBase,
-  token,
 }: {
   mod: InstalledModule;
   apiBase: string;
-  token: string;
+  token?: string;
 }) {
   const { t } = useTranslation();
   const manifest = mod.manifest as {
