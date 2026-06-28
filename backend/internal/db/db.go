@@ -1743,21 +1743,21 @@ const (
 
 // InstalledModuleRow is a full row from installed_modules.
 type InstalledModuleRow struct {
-	Name             string
-	Version          string
-	Tier             int
-	Scope            string
-	Source           string
-	ReleaseURL       string
-	SHA256           string
-	Manifest         []byte // raw JSONB
-	Status           string
-	Pinned           bool
-	CachedZipPath    *string
-	AvailableVersion *string
-	LastUpdateCheck  *time.Time
-	InstalledAt      time.Time
-	UpdatedAt        time.Time
+	Name             string     `json:"name"`
+	Version          string     `json:"version"`
+	Tier             int        `json:"tier"`
+	Scope            string     `json:"scope"`
+	Source           string     `json:"source"`
+	ReleaseURL       string     `json:"release_url"`
+	SHA256           string     `json:"sha256"`
+	Manifest         []byte     `json:"manifest,omitempty"` // raw JSONB
+	Status           string     `json:"status"`
+	Pinned           bool       `json:"pinned"`
+	CachedZipPath    *string    `json:"cached_zip_path,omitempty"`
+	AvailableVersion *string    `json:"available_version,omitempty"`
+	LastUpdateCheck  *time.Time `json:"last_update_check,omitempty"`
+	InstalledAt      time.Time  `json:"installed_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
 // InsertInstalledModule writes a new module row with status "installing".

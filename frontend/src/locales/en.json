@@ -368,10 +368,12 @@
     "my_feeds": "My feeds",
     "search_settings": "Search settings",
     "ai_providers": "AI providers",
+    "store_link": "Module Store",
     "admin_section": "Admin",
     "users_link": "Users",
     "news_feeds_link": "News Feeds",
     "quick_links_link": "Quick Access",
+    "modules_link": "Modules",
     "smtp_link": "SMTP",
     "searxng_link": "SearXNG",
     "system_link": "System",
@@ -529,6 +531,59 @@
       "safesearch_desc": "Filter explicit content from your web and image search results.",
       "language_desc": "Prefer results in a specific language.",
       "saved": "Saved"
+    }
+  },
+  "store": {
+    "title": "Module Store",
+    "subtitle": "Browse and install modules from the official registry and community.",
+    "load_error": "Could not load the module registry.",
+    "empty": "No modules found. Try syncing the registry.",
+    "sync": "Sync registry",
+    "syncing": "Syncing…",
+    "sync_ok": "Registry synced successfully.",
+    "sync_partial": "Registry synced with some errors — check the server log.",
+    "sync_error": "Sync failed.",
+    "last_synced": "Last synced: {{time}}",
+    "source": "Source",
+    "install": "Install",
+    "installing": "Installing…",
+    "installed": "Installed",
+    "update_available": "update",
+    "filter": {
+      "all": "All",
+      "official": "Official",
+      "community": "Community"
+    },
+    "install_error": "Installation failed"
+  },
+  "modules": {
+    "title": "Installed Modules",
+    "subtitle": "Manage modules installed on this ModuLab instance.",
+    "load_error": "Could not load installed modules.",
+    "empty": "No modules installed yet.",
+    "go_to_store": "Browse Module Store",
+    "browse_store": "Module Store",
+    "check_updates": "Check for updates",
+    "checking": "Checking…",
+    "no_updates": "All modules are up to date.",
+    "updates_found": "{{count}} update(s) available.",
+    "check_updates_error": "Update check failed.",
+    "update": "Update",
+    "update_error": "Update failed",
+    "uninstall": "Uninstall",
+    "uninstall_confirm": "Uninstall {{name}}? Module files will be removed.",
+    "uninstall_error": "Uninstall failed",
+    "pinned_uninstall_blocked": "This module is pinned. Unpin it first.",
+    "pin": "Pin module",
+    "unpin": "Unpin module",
+    "pin_error": "Could not change pin state.",
+    "pinned": "Pinned",
+    "status": {
+      "installing": "Installing",
+      "active": "Active",
+      "degraded": "Degraded",
+      "failed": "Failed",
+      "isolated": "Isolated"
     }
   }
 }

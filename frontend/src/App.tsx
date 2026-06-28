@@ -19,6 +19,8 @@ import AdminQuickLinksPage from "./pages/AdminQuickLinksPage";
 import AdminSystemPage from "./pages/AdminSystemPage";
 import AdminAuditPage from "./pages/AdminAuditPage";
 import UserAIKeysPage from "./pages/UserAIKeysPage";
+import StorePage from "./pages/StorePage";
+import ModulesPage from "./pages/ModulesPage";
 import Footer from "./components/Footer";
 
 // Two different page shapes share this router:
@@ -47,6 +49,8 @@ export default function App() {
       <Route path="/user/feeds" element={<UserFeedsPage />} />
       <Route path="/user/search-prefs" element={<UserSearchPrefsPage />} />
       <Route path="/user/ai-keys" element={<UserAIKeysPage />} />
+      <Route path="/store" element={<StorePage />} />
+      <Route path="/modules" element={<ModulesPage />} />
       <Route path="/admin/users" element={<AdminUsersPage />} />
       {/* Legacy direct routes redirect to the sub-pages under /admin/system */}
       <Route path="/admin/smtp" element={<Navigate to="/admin/system/smtp" replace />} />

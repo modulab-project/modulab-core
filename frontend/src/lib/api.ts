@@ -928,6 +928,134 @@ export function updateUserPrefs(token: string, prefs: Partial<UserPrefs>): Promi
   });
 }
 
+// ---- Module Store -----------------------------------------------------------
+
+// Mirrors store.Entry in backend/internal/store/registry.go.
+export interface StoreEntry {
+  name: string;
+  source: "official" | "community";
+  source_repo: string;
+  release_asset: string;
+  category: string;
+  latest_version: string;
+  manifest?: Record<string, unknown>;
+  synced_at: string;
+}
+
+export interface StoreListResponse {
+  entries: StoreEntry[];
+  total_count: number;
+  last_synced_at?: string;
+}
+
+// Mirrors db.InstalledModuleRow (with json tags) in backend/internal/db/db.go.
+export interface InstalledModule {
+  name: string;
+  version: string;
+  tier: number;
+  scope: string;
+  source: string;
+  release_url: string;
+  sha256: string;
+  manifest?: Record<string, unknown>;
+  status: "installing" | "active" | "degraded" | "failed" | "isolated";
+  pinned: boolean;
+  cached_zip_path?: string;
+  available_version?: string;
+  last_update_check?: string;
+  installed_at: string;
+  updated_at: string;
+}
+
+export interface ModuleUpdateInfo {
+  name: string;
+  installed_version: string;
+  available_version: string;
+  source: string;
+  last_checked: string;
+}
+
+// GET /v1/store — any active session; optional ?source= and ?category= filters.
+export function listStore(
+  token: string,
+  source?: string,
+  category?: string,
+): Promise<StoreListResponse> {
+  const params = new URLSearchParams();
+  if (source) params.set("source", source);
+  if (category) params.set("category", category);
+  const qs = params.toString();
+  return request<StoreListResponse>(`/v1/store${qs ? `?${qs}` : ""}`, {
+    headers: bearerHeaders(token),
+  });
+}
+
+// POST /v1/store/sync — org-admin/super-admin only; triggers registry refresh.
+export function syncStore(token: string): Promise<{ ok: boolean; error?: string }> {
+  return request<{ ok: boolean; error?: string }>("/v1/store/sync", {
+    method: "POST",
+    headers: bearerHeaders(token),
+  });
+}
+
+// GET /v1/modules — any active session.
+export function listInstalledModules(token: string): Promise<InstalledModule[]> {
+  return request<InstalledModule[]>("/v1/modules", { headers: bearerHeaders(token) });
+}
+
+// GET /v1/modules/updates — org-admin/super-admin only; runs a fresh update check.
+export function checkModuleUpdates(
+  token: string,
+): Promise<{ updates: ModuleUpdateInfo[]; count: number }> {
+  return request<{ updates: ModuleUpdateInfo[]; count: number }>("/v1/modules/updates", {
+    headers: bearerHeaders(token),
+  });
+}
+
+// POST /v1/modules/install — org-admin/super-admin only.
+export function installModule(token: string, name: string): Promise<InstalledModule> {
+  return request<InstalledModule>("/v1/modules/install", {
+    method: "POST",
+    headers: bearerHeaders(token),
+    body: JSON.stringify({ name }),
+  });
+}
+
+// DELETE /v1/modules/{name} — org-admin/super-admin only.
+export function uninstallModule(token: string, name: string): Promise<void> {
+  return request<void>(`/v1/modules/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+    headers: bearerHeaders(token),
+  });
+}
+
+// POST /v1/modules/{name}/update — org-admin/super-admin only.
+export function updateModule(token: string, name: string): Promise<InstalledModule> {
+  return request<InstalledModule>(`/v1/modules/${encodeURIComponent(name)}/update`, {
+    method: "POST",
+    headers: bearerHeaders(token),
+  });
+}
+
+// POST /v1/modules/{name}/pin — org-admin/super-admin only.
+export function pinModule(token: string, name: string): Promise<{ name: string; pinned: boolean }> {
+  return request<{ name: string; pinned: boolean }>(
+    `/v1/modules/${encodeURIComponent(name)}/pin`,
+    { method: "POST", headers: bearerHeaders(token) },
+  );
+}
+
+// DELETE /v1/modules/{name}/pin — org-admin/super-admin only.
+export function unpinModule(
+  token: string,
+  name: string,
+): Promise<{ name: string; pinned: boolean }> {
+  return request<{ name: string; pinned: boolean }>(
+    `/v1/modules/${encodeURIComponent(name)}/pin`,
+    { method: "DELETE", headers: bearerHeaders(token) },
+  );
+}
+
 // ---- DSGVO / data export ----------------------------------------------------
 
 // GET /v1/auth/me/export — triggers a JSON file download of all personal data.

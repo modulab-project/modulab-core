@@ -368,10 +368,12 @@
     "my_feeds": "Meine Feeds",
     "search_settings": "Sucheinstellungen",
     "ai_providers": "KI-Anbieter",
+    "store_link": "Modul-Store",
     "admin_section": "Admin",
     "users_link": "Benutzer",
     "news_feeds_link": "News-Feeds",
     "quick_links_link": "Schnellzugriff",
+    "modules_link": "Module",
     "smtp_link": "SMTP",
     "searxng_link": "SearXNG",
     "system_link": "System",
@@ -529,6 +531,59 @@
       "safesearch_desc": "Explizite Inhalte aus deinen Web- und Bildersuchen filtern.",
       "language_desc": "Ergebnisse in einer bestimmten Sprache bevorzugen.",
       "saved": "Gespeichert"
+    }
+  },
+  "store": {
+    "title": "Modul-Store",
+    "subtitle": "Module aus dem offiziellen Verzeichnis und der Community durchsuchen und installieren.",
+    "load_error": "Das Modulverzeichnis konnte nicht geladen werden.",
+    "empty": "Keine Module gefunden. Registry synchronisieren.",
+    "sync": "Registry synchronisieren",
+    "syncing": "Synchronisiere…",
+    "sync_ok": "Registry erfolgreich synchronisiert.",
+    "sync_partial": "Registry synchronisiert – einige Fehler aufgetreten (Serverlog prüfen).",
+    "sync_error": "Synchronisierung fehlgeschlagen.",
+    "last_synced": "Zuletzt synchronisiert: {{time}}",
+    "source": "Quelle",
+    "install": "Installieren",
+    "installing": "Installiere…",
+    "installed": "Installiert",
+    "update_available": "Update",
+    "filter": {
+      "all": "Alle",
+      "official": "Offiziell",
+      "community": "Community"
+    },
+    "install_error": "Installation fehlgeschlagen"
+  },
+  "modules": {
+    "title": "Installierte Module",
+    "subtitle": "Module auf dieser ModuLab-Instanz verwalten.",
+    "load_error": "Installierte Module konnten nicht geladen werden.",
+    "empty": "Noch keine Module installiert.",
+    "go_to_store": "Zum Modul-Store",
+    "browse_store": "Modul-Store",
+    "check_updates": "Updates prüfen",
+    "checking": "Prüfe…",
+    "no_updates": "Alle Module sind aktuell.",
+    "updates_found": "{{count}} Update(s) verfügbar.",
+    "check_updates_error": "Update-Prüfung fehlgeschlagen.",
+    "update": "Aktualisieren",
+    "update_error": "Aktualisierung fehlgeschlagen",
+    "uninstall": "Deinstallieren",
+    "uninstall_confirm": "{{name}} deinstallieren? Die Moduldateien werden entfernt.",
+    "uninstall_error": "Deinstallation fehlgeschlagen",
+    "pinned_uninstall_blocked": "Dieses Modul ist angepinnt. Zuerst lösen.",
+    "pin": "Modul anpinnen",
+    "unpin": "Modul lösen",
+    "pin_error": "Pin-Status konnte nicht geändert werden.",
+    "pinned": "Angepinnt",
+    "status": {
+      "installing": "Wird installiert",
+      "active": "Aktiv",
+      "degraded": "Beeinträchtigt",
+      "failed": "Fehlgeschlagen",
+      "isolated": "Isoliert"
     }
   }
 }
