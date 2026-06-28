@@ -190,7 +190,7 @@
       "remove_error": "Konfiguration konnte nicht entfernt werden.",
       "remove_confirm": "SMTP-Konfiguration entfernen? Kontobenachrichtigungen werden nicht mehr gesendet, bis sie neu eingerichtet wird.",
       "username_placeholder": "leer lassen für einen nicht authentifizierten Relay",
-      "password_placeholder_existing": "leer lassen, um kein/leeres Passwort beizubehalten",
+      "password_placeholder_existing": "leer lassen, um bestehendes Passwort zu behalten",
       "saving": "Wird gespeichert…",
       "save": "Speichern",
       "action": {

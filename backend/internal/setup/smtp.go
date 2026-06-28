@@ -342,23 +342,26 @@ func SMTPConfigureHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		encryptedPassword := ""
-		if req.Password != "" {
-			encryptedPassword, err = crypto.Encrypt(masterKey, req.Password)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-		}
-
 		ctx := r.Context()
 		settings := map[string]string{
 			smtpHostSettingKey:        encHost,
 			smtpPortSettingKey:        strconv.Itoa(req.Port),
 			smtpUsernameSettingKey:    encUsername,
-			smtpPasswordSettingKey:    encryptedPassword,
 			smtpFromAddressSettingKey: encFromAddress,
 			smtpEncryptionSettingKey:  req.Encryption,
+		}
+		// Only overwrite the stored password when a new one was submitted.
+		// An empty field means "keep the existing password" — identical to
+		// how OIDCConfigureHandler treats ClientSecret. An admin who wants
+		// to switch to an unauthenticated relay must delete the SMTP config
+		// and re-add it without a password.
+		if req.Password != "" {
+			encryptedPassword, err := crypto.Encrypt(masterKey, req.Password)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			settings[smtpPasswordSettingKey] = encryptedPassword
 		}
 		for key, value := range settings {
 			if err := pool.SetSetting(ctx, key, value); err != nil {

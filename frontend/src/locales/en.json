@@ -190,7 +190,7 @@
       "remove_error": "Removing the configuration failed.",
       "remove_confirm": "Remove the SMTP configuration? Account notification emails will stop going out until it is set up again.",
       "username_placeholder": "leave empty for an unauthenticated relay",
-      "password_placeholder_existing": "leave empty to keep using no/empty password",
+      "password_placeholder_existing": "leave empty to keep existing password",
       "saving": "Saving…",
       "save": "Save",
       "action": {
