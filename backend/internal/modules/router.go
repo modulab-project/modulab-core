@@ -122,8 +122,18 @@ func ModuleProxyHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	}
 }
 
-// saveUploadedFile extracts the "file" field from a multipart upload and saves
-// it to {dataDir}/{moduleName}/storage/uploads/. Returns the absolute path.
+// allowedImageTypes lists the MIME types accepted for module image uploads.
+var allowedImageTypes = map[string]bool{
+	"image/jpeg": true,
+	"image/png":  true,
+	"image/webp": true,
+	"image/gif":  true,
+	"image/avif": true,
+}
+
+// saveUploadedFile extracts the "file" field from a multipart upload, validates
+// that it is an image, and saves it to {dataDir}/{moduleName}/storage/uploads/.
+// Returns the absolute path.
 func saveUploadedFile(r *http.Request, dataDir, moduleName string) (string, error) {
 	r.Body = http.MaxBytesReader(nil, r.Body, maxUploadBytes)
 	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
@@ -136,6 +146,22 @@ func saveUploadedFile(r *http.Request, dataDir, moduleName string) (string, erro
 	}
 	defer file.Close()
 
+	// Validate MIME type by reading the first 512 bytes (content sniffing).
+	buf := make([]byte, 512)
+	n, _ := file.Read(buf)
+	detectedType := http.DetectContentType(buf[:n])
+	// Seek back to start so the full file is written.
+	if seeker, ok := file.(io.Seeker); ok {
+		if _, err := seeker.Seek(0, io.SeekStart); err != nil {
+			return "", fmt.Errorf("seek file: %w", err)
+		}
+	}
+	// Strip parameters (e.g. "image/jpeg; charset=...") before lookup.
+	mediaType, _, _ := mime.ParseMediaType(detectedType)
+	if !allowedImageTypes[mediaType] {
+		return "", fmt.Errorf("only image files are allowed (got %s)", detectedType)
+	}
+
 	// Sanitise filename — keep only the base name, no path traversal.
 	safeName := filepath.Base(header.Filename)
 	if safeName == "." || safeName == "/" {
@@ -147,7 +173,6 @@ func saveUploadedFile(r *http.Request, dataDir, moduleName string) (string, erro
 		return "", fmt.Errorf("create upload dir: %w", err)
 	}
 
-	// Prefix with a timestamp to avoid collisions without a full UUID import.
 	dst := filepath.Join(uploadDir, safeName)
 	out, err := os.Create(dst)
 	if err != nil {
