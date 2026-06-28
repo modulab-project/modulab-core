@@ -1750,7 +1750,7 @@ type InstalledModuleRow struct {
 	Source           string     `json:"source"`
 	ReleaseURL       string     `json:"release_url"`
 	SHA256           string     `json:"sha256"`
-	Manifest         []byte     `json:"manifest,omitempty"` // raw JSONB
+	Manifest         json.RawMessage `json:"manifest,omitempty"` // raw JSONB — RawMessage serialises as-is, not base64
 	Status           string     `json:"status"`
 	Pinned           bool       `json:"pinned"`
 	CachedZipPath    *string    `json:"cached_zip_path,omitempty"`
