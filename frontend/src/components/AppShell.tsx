@@ -6,6 +6,7 @@ import {
   getHealth,
   getUserPrefs,
   listAIProviders,
+  listInstalledModules,
   listUsers,
   logoutRequest,
   streamAIChat,
@@ -13,6 +14,7 @@ import {
   type AIUserProvider,
   type ChatMessage,
   type HealthResponse,
+  type InstalledModule,
   type Session,
 } from "../lib/api";
 import { clearSessionToken, getSessionToken } from "../lib/session";
@@ -79,6 +81,7 @@ export function AppShell({
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [openPanel, setOpenPanel] = useState<OpenPanel>(null);
   const [dark, setDark] = useState(() => localStorage.getItem(THEME_KEY) === "dark");
+  const [activeModules, setActiveModules] = useState<InstalledModule[]>([]);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
@@ -93,6 +96,15 @@ export function AppShell({
     getHealth()
       .then(setHealth)
       .catch(() => setHealth(null));
+  }, []);
+
+  // Load active modules for navigation links.
+  useEffect(() => {
+    const token = getSessionToken();
+    if (!token) return;
+    listInstalledModules(token)
+      .then((list) => setActiveModules((list ?? []).filter((m) => m.status === "active")))
+      .catch(() => {});
   }, []);
 
   // Load the stored UI language on first render for this user and apply it
@@ -234,6 +246,7 @@ export function AppShell({
           setDark={setDark}
           onLogout={handleLogout}
           onClose={() => setOpenPanel(null)}
+          activeModules={activeModules}
         />
       </SlidePanel>
       <SlidePanel open={openPanel === "status"} onClose={() => setOpenPanel(null)} title={t("shell.system_status")}>
@@ -427,6 +440,7 @@ function ProfilePanelContent({
   setDark,
   onLogout,
   onClose,
+  activeModules,
 }: {
   session: Session;
   isAdmin: boolean;
@@ -434,6 +448,7 @@ function ProfilePanelContent({
   setDark: (d: boolean) => void;
   onLogout: () => void;
   onClose: () => void;
+  activeModules: InstalledModule[];
 }) {
   const { t, i18n: i18nInstance } = useTranslation();
   const displayName = session.name.trim() || session.email;
@@ -475,6 +490,27 @@ function ProfilePanelContent({
       >
         <i className="ti ti-sparkles text-[15px] text-gray-500" /> {t("shell.ai_providers")}
       </Link>
+      {activeModules.length > 0 && (
+        <>
+          <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />
+          <p className="px-2.5 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+            {t("shell.modules_section")}
+          </p>
+          {activeModules.map((mod) => (
+            <Link
+              key={mod.name}
+              to={`/modules/${mod.name}`}
+              onClick={onClose}
+              className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
+            >
+              <i className="ti ti-puzzle text-[15px] text-gray-500" />
+              {(mod.manifest as { description?: string } | undefined)?.description
+                ? (mod.manifest as { name?: string }).name ?? mod.name
+                : mod.name}
+            </Link>
+          ))}
+        </>
+      )}
       {isAdmin && (
         <>
           <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />

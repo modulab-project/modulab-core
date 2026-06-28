@@ -384,6 +384,7 @@
     "news_feeds_link": "News-Feeds",
     "quick_links_link": "Schnellzugriff",
     "modules_link": "Module",
+    "modules_section": "Module",
     "smtp_link": "SMTP",
     "searxng_link": "SearXNG",
     "system_link": "System",
@@ -595,5 +596,11 @@
       "failed": "Fehlgeschlagen",
       "isolated": "Isoliert"
     }
+  },
+  "module_page": {
+    "not_active": "Dieses Modul ist nicht aktiv (Status: {{status}}).",
+    "no_ui_bundle": "Dieses Modul hat kein eigenes Frontend. Die API ist direkt erreichbar.",
+    "no_default_export": "Das Modul-Bundle hat keinen Standard-Export.",
+    "api_base": "API-Basis"
   }
 }

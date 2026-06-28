@@ -472,11 +472,37 @@ func main() {
 	// List/detail: any active session. Install/uninstall/update/pin: org-admin+.
 	// Note: GET /v1/modules/updates is registered before GET /v1/modules/{name}
 	// so the literal path wins over the wildcard in Go's 1.22 ServeMux.
+	workerPool := modules.NewWorkerPool(cfg.ModuleDataDir)
+	defer workerPool.StopAll()
+
 	moduleDeps := modules.Deps{
 		DB:        pool,
 		DataDir:   cfg.ModuleDataDir,
 		CosignBin: cfg.CosignBinaryPath,
+		Workers:   workerPool,
 	}
+
+	// At startup, restart Deno workers for all Tier 2/3 modules that were
+	// active before the last shutdown.
+	if installedAtBoot, err := pool.ListInstalledModules(ctx); err == nil {
+		for _, row := range installedAtBoot {
+			if row.Tier >= 2 && row.Status == "active" {
+				entrypoint := ""
+				if row.Manifest != nil {
+					var mf struct{ Handler string `json:"handler"` }
+					if json.Unmarshal(row.Manifest, &mf) == nil {
+						entrypoint = cfg.ModuleDataDir + "/" + row.Name + "/" + mf.Handler
+					}
+				}
+				if entrypoint != "" {
+					if err := workerPool.Start(row.Name, entrypoint); err != nil {
+						log.Printf("main: startup: could not start worker for %q: %v", row.Name, err)
+					}
+				}
+			}
+		}
+	}
+
 	mux.HandleFunc("GET /v1/modules", modules.ListInstalledHandler(moduleDeps, authDeps))
 	mux.HandleFunc("GET /v1/modules/updates", modules.CheckUpdatesHandler(moduleDeps, storeDeps, authDeps))
 	mux.HandleFunc("GET /v1/modules/{name}", modules.GetInstalledHandler(moduleDeps, authDeps))
@@ -485,6 +511,11 @@ func main() {
 	mux.HandleFunc("POST /v1/modules/{name}/update", modules.UpdateModuleHandler(moduleDeps, storeDeps, authDeps))
 	mux.HandleFunc("POST /v1/modules/{name}/pin", modules.PinHandler(moduleDeps, authDeps))
 	mux.HandleFunc("DELETE /v1/modules/{name}/pin", modules.UnpinHandler(moduleDeps, authDeps))
+
+	// Module API proxy: /v1/modules/{name}/api/* → Deno worker for that module.
+	// Registered after all specific lifecycle routes so the wildcard does not
+	// shadow /install, /update, /pin, etc.
+	modules.RegisterModuleRoutes(mux, moduleDeps, authDeps)
 
 	// The mail worker (internal/mail) runs for Core's entire lifetime as a
 	// single background goroutine, draining whatever

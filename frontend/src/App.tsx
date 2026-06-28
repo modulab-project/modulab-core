@@ -22,6 +22,7 @@ import UserAIKeysPage from "./pages/UserAIKeysPage";
 import StorePage from "./pages/StorePage";
 import ModulesPage from "./pages/ModulesPage";
 import AdminModulesPage from "./pages/AdminModulesPage";
+import ModulePage from "./pages/ModulePage";
 import Footer from "./components/Footer";
 
 // Two different page shapes share this router:
@@ -50,6 +51,8 @@ export default function App() {
       <Route path="/user/feeds" element={<UserFeedsPage />} />
       <Route path="/user/search-prefs" element={<UserSearchPrefsPage />} />
       <Route path="/user/ai-keys" element={<UserAIKeysPage />} />
+      {/* Installed module pages — one route per module, using the module name */}
+      <Route path="/modules/:moduleName" element={<ModulePage />} />
       <Route path="/admin/modules" element={<AdminModulesPage />} />
       <Route path="/admin/modules/store" element={<StorePage />} />
       <Route path="/admin/modules/installed" element={<ModulesPage />} />

@@ -1058,6 +1058,38 @@ export function unpinModule(
 
 // ---- DSGVO / data export ----------------------------------------------------
 
+// ---- Module API proxy -------------------------------------------------------
+
+// moduleApiUrl returns the base URL for a module's Deno API.
+// Callers append their own path, e.g. moduleApiUrl("rezepte") + "/recipes".
+export function moduleApiUrl(moduleName: string): string {
+  return `${API_BASE_URL}/v1/modules/${encodeURIComponent(moduleName)}/api`;
+}
+
+// moduleApiFetch sends an authenticated request to a module's Deno API.
+export async function moduleApiFetch<T = unknown>(
+  token: string,
+  moduleName: string,
+  path: string,
+  init?: RequestInit,
+): Promise<T> {
+  const url = moduleApiUrl(moduleName) + path;
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...init?.headers,
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new ApiError(res.status, text || res.statusText);
+  }
+  if (res.status === 204) return undefined as unknown as T;
+  return res.json() as Promise<T>;
+}
+
 // GET /v1/auth/me/export — triggers a JSON file download of all personal data.
 // Returns the raw Response so the caller can blob it and create an object URL.
 export async function exportMyData(token: string): Promise<Blob> {

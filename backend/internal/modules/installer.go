@@ -22,21 +22,28 @@ import (
 // Constructed once in main.go and shared by Install, Uninstall, and Updater.
 type Deps struct {
 	DB        *db.Pool
-	DataDir   string // base dir for module files, e.g. /var/lib/modulab/modules
-	CosignBin string // "" = use "cosign" on $PATH
+	DataDir   string      // base dir for module files, e.g. /var/lib/modulab/modules
+	CosignBin string      // "" = use "cosign" on $PATH
+	Workers   *WorkerPool // Deno worker lifecycle manager (tier 2/3 modules)
 }
 
 // Manifest is the parsed content of manifest.yaml inside a module ZIP.
 // Every module must ship this file at the archive root.
 type Manifest struct {
-	Name        string `yaml:"name"        json:"name"`
-	Version     string `yaml:"version"     json:"version"`
-	Tier        int    `yaml:"tier"        json:"tier"`
-	Scope       string `yaml:"scope"       json:"scope"`
-	Description string `yaml:"description" json:"description"`
-	Author      string `yaml:"author"      json:"author,omitempty"`
-	License     string `yaml:"license"     json:"license,omitempty"`
-	MinCore     string `yaml:"min_core"    json:"min_core,omitempty"`
+	Name        string   `yaml:"name"        json:"name"`
+	Version     string   `yaml:"version"     json:"version"`
+	Tier        int      `yaml:"tier"        json:"tier"`
+	Scope       string   `yaml:"scope"       json:"scope"`
+	Description string   `yaml:"description" json:"description"`
+	Author      string   `yaml:"author"      json:"author,omitempty"`
+	License     string   `yaml:"license"     json:"license,omitempty"`
+	MinCore     string   `yaml:"min_core"    json:"min_core,omitempty"`
+	// Handler is the Deno entrypoint (relative path inside the ZIP), required
+	// for Tier 2 and 3 modules.
+	Handler         string   `yaml:"handler"          json:"handler,omitempty"`
+	// EgressAllowlist lists the hostnames the Deno worker may connect to
+	// (mapped to --allow-net). Empty = no outbound network.
+	EgressAllowlist []string `yaml:"egress_allowlist" json:"egress_allowlist,omitempty"`
 }
 
 const (
@@ -199,14 +206,20 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 		return fmt.Errorf("modules: install %q: copy files: %w", entry.Name, err)
 	}
 
-	// ── 10. Module SQL migrations ──────────────────────────────────────────
-	// TODO(post-v1): Run migrations/up/*.sql files from extractDir against the
-	// module's own Postgres schema. Requires a per-module schema + migration
-	// runner. Skipped for v1 since no modules with migrations exist yet.
+	// ── 10. Module SQL migrations ─────────────────────────────────────────
+	migrationsDir := filepath.Join(extractDir, "migrations")
+	if err := runModuleMigrations(ctx, d, mf.Name, migrationsDir); err != nil {
+		_, _ = d.DB.UpdateModuleStatus(ctx, entry.Name, db.ModuleStatusFailed)
+		return fmt.Errorf("modules: install %q: migrations: %w", entry.Name, err)
+	}
 
 	// ── 11. Deno worker registration ──────────────────────────────────────
-	// TODO(post-v1): For Tier 2/3 modules, register and start the Deno Worker
-	// (internal/modules/deno.go). Skipped for v1.
+	if mf.Tier >= 2 {
+		if err := d.Workers.Start(mf.Name, filepath.Join(destDir, mf.Handler)); err != nil {
+			_, _ = d.DB.UpdateModuleStatus(ctx, entry.Name, db.ModuleStatusFailed)
+			return fmt.Errorf("modules: install %q: start deno worker: %w", entry.Name, err)
+		}
+	}
 
 	// ── 12. Mark active ───────────────────────────────────────────────────
 	if _, err := d.DB.UpdateModuleStatus(ctx, entry.Name, db.ModuleStatusActive); err != nil {

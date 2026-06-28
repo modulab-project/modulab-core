@@ -173,7 +173,11 @@ func Update(ctx context.Context, d Deps, entry store.Entry) error {
 	_ = os.RemoveAll(oldDir) // best-effort cleanup of superseded files
 
 	// ── 9. Module migrations ──────────────────────────────────────────────
-	// TODO(post-v1): run new SQL migration files from extractDir/migrations/up/.
+	newMigrationsDir := filepath.Join(extractDir, "migrations")
+	if err := runModuleUpdateMigrations(ctx, d, entry.Name, newMigrationsDir); err != nil {
+		return d.rollback(ctx, entry.Name, cachedZip,
+			fmt.Errorf("migrations: %w", err))
+	}
 
 	// ── 10. Update DB row ─────────────────────────────────────────────────
 	if err := d.updateInstalledModuleRecord(ctx, entry.Name, mf.Version, gotHex, zipURL, manifestJSON); err != nil {
