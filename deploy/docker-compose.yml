@@ -1,85 +1,165 @@
-# Production stack (spec section 2.1, Zero-Expose-Policy).
-# Only Traefik is exposed externally; everything else is on an internal
-# Docker bridge network.
+# ModuLab Core — self-hosted Docker stack
+#
+# Usage:
+#   cd deploy/
+#   cp .env.example .env   # fill in all required values
+#   docker compose up -d --build
+#   docker compose logs -f core
 
 services:
+
+  # ── Traefik (edge proxy + TLS) ───────────────────────────────────────────────
   traefik:
     image: traefik:v3
+    restart: unless-stopped
     command:
+      - "--log.level=INFO"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=modulab-internal"
+      # HTTPS entrypoint
       - "--entrypoints.websecure.address=:443"
+      # Redirect plain HTTP → HTTPS
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      # Let's Encrypt via Cloudflare DNS-Challenge.
+      # External resolvers bypass Docker's internal DNS which cannot resolve
+      # public ACME challenge records (_acme-challenge.<domain>).
       - "--certificatesresolvers.le.acme.dnschallenge=true"
+      - "--certificatesresolvers.le.acme.dnschallenge.provider=cloudflare"
+      - "--certificatesresolvers.le.acme.dnschallenge.resolvers=1.1.1.1:53,8.8.8.8:53"
+      - "--certificatesresolvers.le.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.le.acme.storage=/letsencrypt/acme.json"
     ports:
+      - "80:80"
       - "443:443"
+    environment:
+      # Cloudflare API token — needs Zone:DNS:Edit permission for your domain.
+      # Must be exactly 40 characters with no surrounding whitespace.
+      - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - traefik-acme:/letsencrypt
     networks:
       - modulab-internal
 
-  core:
-    image: ghcr.io/modulab-project/modulab-core:latest
-    env_file: ../.env
-    environment:
-      - MODULAB_MODULE_DATA_DIR=/var/lib/modulab/modules
-    volumes:
-      - modulab-modules-data:/var/lib/modulab/modules
-    depends_on:
-      - pgbouncer
-      - valkey
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.core.rule=Host(`modulab.example.com`)"
-      - "traefik.http.routers.core.tls.certresolver=le"
-    networks:
-      - modulab-internal
-
+  # ── PostgreSQL ───────────────────────────────────────────────────────────────
+  # password_encryption=md5 is required: PgBouncer's auth_type=md5 cannot
+  # negotiate SCRAM-SHA-256 (the Postgres 16 default) with the backend.
+  # If you later switch PgBouncer to auth_type=scram-sha-256 you can remove
+  # this flag, but you must also recreate the postgres volume.
   postgres:
     image: postgres:16-alpine
-    env_file: ../.env
+    restart: unless-stopped
+    command: ["postgres", "-c", "password_encryption=md5"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     networks:
       - modulab-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
+  # ── PgBouncer ────────────────────────────────────────────────────────────────
   pgbouncer:
     image: edoburu/pgbouncer:latest
-    env_file: ../.env
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "100"
+      DEFAULT_POOL_SIZE: "20"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     networks:
       - modulab-internal
 
+  # ── Valkey ───────────────────────────────────────────────────────────────────
   valkey:
     image: valkey/valkey:8-alpine
+    restart: unless-stopped
     volumes:
       - valkey-data:/data
     networks:
       - modulab-internal
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
-  # SearXNG is optional - only started when the "search" profile is active.
+  # ── ModuLab Core ─────────────────────────────────────────────────────────────
+  core:
+    image: ghcr.io/modulab-project/modulab-core:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MODULAB_MODULE_DATA_DIR: /var/lib/modulab/modules
+    volumes:
+      - modulab-modules-data:/var/lib/modulab/modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_started
+    networks:
+      - modulab-internal
+
+  # ── Nginx (frontend + API proxy) ─────────────────────────────────────────────
+  # Serves the pre-built frontend from the core image and proxies /v1/ to Core.
+  # Core does not serve static files itself; nginx bridges that gap so that
+  # frontend and API share the same origin without an extra subdomain.
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile.nginx
+    restart: unless-stopped
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - core
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.modulab.rule=Host(`${MODULAB_DOMAIN}`)"
+      - "traefik.http.routers.modulab.entrypoints=websecure"
+      - "traefik.http.routers.modulab.tls.certresolver=le"
+      - "traefik.http.services.modulab.loadbalancer.server.port=80"
+    networks:
+      - modulab-internal
+
+  # ── SearXNG (optional, --profile search) ─────────────────────────────────────
   # To enable: docker compose --profile search up -d
   # Operators who already run their own SearXNG instance can skip this and
-  # just enter the external URL in Admin → SearXNG.
+  # enter the external URL in Admin → SearXNG.
   #
-  # SearXNG uses Valkey (Redis-compatible) for its internal rate-limiting
-  # cache. We reuse ModuLab's own Valkey instance to avoid adding a second
-  # in-memory store - SearXNG's keys are namespaced by SearXNG itself so
-  # there is no collision risk.
+  # SearXNG reuses ModuLab's Valkey instance (database index 1) to avoid a
+  # second in-memory store. SearXNG namespaces its own keys so there is no
+  # collision risk.
   searxng:
     profiles: ["search"]
     image: searxng/searxng:latest
+    restart: unless-stopped
     environment:
-      - SEARXNG_BASE_URL=https://${MODULAB_DOMAIN:-modulab.example.com}/searxng/
-      - SEARXNG_REDIS_URL=redis://valkey:6379/1
+      SEARXNG_BASE_URL: https://${MODULAB_DOMAIN}/searxng/
+      SEARXNG_REDIS_URL: redis://valkey:6379/1
     volumes:
       - searxng-data:/etc/searxng
     depends_on:
       - valkey
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.searxng.rule=Host(`${MODULAB_DOMAIN:-modulab.example.com}`) && PathPrefix(`/searxng`)"
+      - "traefik.http.routers.searxng.rule=Host(`${MODULAB_DOMAIN}`) && PathPrefix(`/searxng`)"
+      - "traefik.http.routers.searxng.entrypoints=websecure"
       - "traefik.http.routers.searxng.tls.certresolver=le"
       - "traefik.http.middlewares.searxng-strip.stripprefix.prefixes=/searxng"
       - "traefik.http.routers.searxng.middlewares=searxng-strip"
@@ -89,7 +169,10 @@ services:
 
 networks:
   modulab-internal:
-    internal: true
+    # Explicit name prevents Docker Compose from prepending the project
+    # directory name, which would break Traefik's --providers.docker.network.
+    name: modulab-internal
+    internal: false
 
 volumes:
   postgres-data:

@@ -1,0 +1,7 @@
+# Copies the pre-built frontend dist out of the core image into a minimal
+# nginx image so both frontend and API are served from the same origin.
+# Core does not serve static files itself; this stage bridges that gap.
+FROM ghcr.io/modulab-project/modulab-core:latest AS core-source
+
+FROM nginx:alpine
+COPY --from=core-source /app/frontend/dist/ /usr/share/nginx/html/
