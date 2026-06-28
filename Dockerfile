@@ -23,11 +23,20 @@ FROM debian:bookworm-slim
 # Install Deno (required for Tier 2/3 module handlers).
 # Pinned to a specific version for reproducible builds.
 ENV DENO_VERSION=2.3.6
+# Detect CPU arch at build time so the image works on both x86_64 and arm64
+# (Apple Silicon via `docker buildx build --platform linux/arm64` or plain
+# `docker build` on an M-series Mac with the default linux/arm64 platform).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
         unzip \
-    && curl -fsSL "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-x86_64-unknown-linux-gnu.zip" \
+    && ARCH="$(dpkg --print-architecture)" \
+    && case "$ARCH" in \
+         amd64) DENO_ARCH="x86_64-unknown-linux-gnu" ;; \
+         arm64) DENO_ARCH="aarch64-unknown-linux-gnu" ;; \
+         *) echo "Unsupported arch: $ARCH" && exit 1 ;; \
+       esac \
+    && curl -fsSL "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-${DENO_ARCH}.zip" \
         -o /tmp/deno.zip \
     && unzip /tmp/deno.zip -d /usr/local/bin \
     && rm /tmp/deno.zip \
