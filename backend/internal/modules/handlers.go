@@ -2,7 +2,9 @@ package modules
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
+	"path/filepath"
 
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
@@ -187,7 +189,24 @@ func UpdateModuleHandler(d Deps, storeDeps store.Deps, authDeps auth.Deps) http.
 			return
 		}
 
+		// Restart the Deno worker so it picks up the new handler code.
+		_ = d.Workers.Stop(name)
 		row, _, _ := d.DB.GetInstalledModule(r.Context(), name)
+		if row.Tier >= 2 {
+			var mf struct {
+				Handler string `json:"handler"`
+			}
+			if row.Manifest != nil {
+				_ = json.Unmarshal(row.Manifest, &mf)
+			}
+			if mf.Handler != "" {
+				entrypoint := filepath.Join(d.DataDir, name, mf.Handler)
+				if err := d.Workers.Start(name, entrypoint); err != nil {
+					log.Printf("modules: update %q: restart worker: %v", name, err)
+				}
+			}
+		}
+
 		writeModuleJSON(w, http.StatusOK, row)
 	}
 }
