@@ -1,7 +1,7 @@
 // Installed modules management page (/admin/modules/installed).
 // Admin-only. Lists all installed modules with status, version, and admin actions.
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   listInstalledModules,
@@ -128,6 +128,13 @@ export default function ModulesPage() {
   return (
     <AppShell session={session}>
       <div className="mx-auto max-w-4xl py-6 px-2">
+        <Link
+          to="/admin/modules"
+          className="mb-6 flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
+        >
+          <i className="ti ti-arrow-left text-[14px]" />
+          {t("admin.modules.title")}
+        </Link>
         {/* Header */}
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>

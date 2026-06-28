@@ -2,7 +2,7 @@
 // Admin-only. Shows all known modules from the registry cache (official + community).
 // Only org-admin/super-admin can access, install, or sync.
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   listStore,
@@ -102,6 +102,13 @@ export default function StorePage() {
   return (
     <AppShell session={session}>
       <div className="mx-auto max-w-4xl py-6 px-2">
+        <Link
+          to="/admin/modules"
+          className="mb-6 flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
+        >
+          <i className="ti ti-arrow-left text-[14px]" />
+          {t("admin.modules.title")}
+        </Link>
         {/* Header */}
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
