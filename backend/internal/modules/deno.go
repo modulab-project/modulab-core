@@ -178,27 +178,39 @@ type denoWorker struct {
 const workerBootstrapScript = `
 import handler from "%s";
 
+const enc = new TextEncoder();
+const dec = new TextDecoder();
+
 // Remove stale socket file from a previous (crashed) worker before binding.
 try { Deno.removeSync("%s"); } catch { /* doesn't exist, that's fine */ }
 
 const listener = Deno.listen({ path: "%s", transport: "unix" });
 console.log("[modulab-worker] listening on %s");
 
-for await (const conn of listener) {
-  handleConn(conn);
+// Accept loop using explicit accept() — avoids Deno 2.x for-await regression
+// on UnixListener (os error 22 when iterating the listener as async iterable).
+async function acceptLoop() {
+  while (true) {
+    let conn: Deno.Conn;
+    try {
+      conn = await listener.accept();
+    } catch {
+      break; // listener closed
+    }
+    handleConn(conn);
+  }
 }
 
+acceptLoop();
+
 async function handleConn(conn: Deno.Conn) {
-  const buf = new TextDecoder();
-  const enc = new TextEncoder();
-  const reader = conn.readable.getReader();
-  const writer = conn.writable.getWriter();
   let partial = "";
+  const chunk = new Uint8Array(4096);
   try {
     while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      partial += buf.decode(value);
+      const n = await conn.read(chunk);
+      if (n === null) break;
+      partial += dec.decode(chunk.subarray(0, n));
       const lines = partial.split("\n");
       partial = lines.pop() ?? "";
       for (const line of lines) {
@@ -210,13 +222,11 @@ async function handleConn(conn: Deno.Conn) {
         } catch (e) {
           resp = { status: 500, body: { error: String(e) } };
         }
-        await writer.write(enc.encode(JSON.stringify(resp) + "\n"));
+        await conn.write(enc.encode(JSON.stringify(resp) + "\n"));
       }
     }
-  } catch { /* connection closed */ } finally {
-    reader.releaseLock();
-    writer.releaseLock();
-    conn.close();
+  } catch { /* connection reset / closed */ } finally {
+    try { conn.close(); } catch { /* already closed */ }
   }
 }
 `
