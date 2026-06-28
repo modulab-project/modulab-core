@@ -21,6 +21,10 @@ services:
   core:
     image: ghcr.io/modulab-project/modulab-core:latest
     env_file: ../.env
+    environment:
+      - MODULAB_MODULE_DATA_DIR=/var/lib/modulab/modules
+    volumes:
+      - modulab-modules-data:/var/lib/modulab/modules
     depends_on:
       - pgbouncer
       - valkey
@@ -92,3 +96,4 @@ volumes:
   valkey-data:
   traefik-acme:
   searxng-data:
+  modulab-modules-data:
