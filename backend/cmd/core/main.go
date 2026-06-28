@@ -472,7 +472,12 @@ func main() {
 	// List/detail: any active session. Install/uninstall/update/pin: org-admin+.
 	// Note: GET /v1/modules/updates is registered before GET /v1/modules/{name}
 	// so the literal path wins over the wildcard in Go's 1.22 ServeMux.
-	workerPool := modules.NewWorkerPool(cfg.ModuleDataDir)
+	// dbURL for Deno workers: no sslmode param here because postgres.js
+	// (npm:postgres@3) uses its own TLS defaults. The search_path is added
+	// per-module in WorkerPool.Start so each worker sees only its own schema.
+	dbURL := fmt.Sprintf("postgres://%s:%s@%s:%s/%s",
+		cfg.DBUser, cfg.DBPassword, cfg.DBHost, cfg.DBPort, cfg.DBName)
+	workerPool := modules.NewWorkerPool(cfg.ModuleDataDir, dbURL)
 	defer workerPool.StopAll()
 
 	moduleDeps := modules.Deps{

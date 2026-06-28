@@ -25,16 +25,19 @@ import (
 // All public methods are safe for concurrent use.
 type WorkerPool struct {
 	dataDir string // /var/lib/modulab/modules — used to resolve socket paths
+	dbURL   string // postgres:// URL passed to Deno workers for DB access
 
 	mu      sync.RWMutex
 	workers map[string]*denoWorker
 }
 
 // NewWorkerPool creates an empty WorkerPool. Call Start for each installed
-// Tier 2/3 module at startup.
-func NewWorkerPool(dataDir string) *WorkerPool {
+// Tier 2/3 module at startup. dbURL is the PostgreSQL connection string that
+// will be passed to each Deno worker so modules can query the database.
+func NewWorkerPool(dataDir, dbURL string) *WorkerPool {
 	return &WorkerPool{
 		dataDir: dataDir,
+		dbURL:   dbURL,
 		workers: make(map[string]*denoWorker),
 	}
 }
@@ -57,10 +60,18 @@ func (p *WorkerPool) Start(name, entrypoint string) error {
 	// Remove stale socket file from a previous crash.
 	_ = os.Remove(sockPath)
 
+	// Build a module-scoped DB URL with search_path set to the module's schema
+	// first, then public. This means unqualified table names like "recipes"
+	// resolve to "module_recipes.recipes" without the handler needing to
+	// schema-qualify every query.
+	moduleSchema := "module_" + name
+	dbURL := p.dbURL + "?search_path=" + moduleSchema + ",public"
+
 	w := &denoWorker{
 		name:       name,
 		entrypoint: entrypoint,
 		sockPath:   sockPath,
+		dbURL:      dbURL,
 	}
 	if err := w.start(); err != nil {
 		return fmt.Errorf("worker %q: start: %w", name, err)
@@ -158,6 +169,7 @@ type denoWorker struct {
 	name       string
 	entrypoint string
 	sockPath   string
+	dbURL      string
 
 	cmd    *exec.Cmd
 	cancel context.CancelFunc
@@ -177,9 +189,21 @@ type denoWorker struct {
 // is simple and correct for a single-instance homelab.
 const workerBootstrapScript = `
 import handler from "%s";
+import postgres from "npm:postgres@3";
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
+
+// DB client — shared across all requests in this worker process.
+const sql = postgres(Deno.env.get("MODULAB_DB_URL") ?? "");
+
+// ModuleDbClient adapter that wraps the postgres.js client.
+const db = {
+  async query(sqlStr: string, params: unknown[] = []): Promise<unknown[]> {
+    const rows = await sql.unsafe(sqlStr, params as never[]);
+    return rows as unknown[];
+  },
+};
 
 // Remove stale socket file from a previous (crashed) worker before binding.
 try { Deno.removeSync("%s"); } catch { /* doesn't exist, that's fine */ }
@@ -218,7 +242,7 @@ async function handleConn(conn: Deno.Conn) {
         let resp: { status: number; body: unknown };
         try {
           const req = JSON.parse(line);
-          resp = await handler(req);
+          resp = await handler({ ...req, db });
         } catch (e) {
           resp = { status: 500, body: { error: String(e) } };
         }
@@ -257,6 +281,7 @@ func (w *denoWorker) start() error {
 	}
 
 	w.cmd = exec.CommandContext(ctx, "deno", args...)
+	w.cmd.Env = append(os.Environ(), "MODULAB_DB_URL="+w.dbURL)
 	w.cmd.Stdout = &prefixWriter{prefix: "[" + w.name + "] ", w: os.Stdout}
 	w.cmd.Stderr = &prefixWriter{prefix: "[" + w.name + "] ", w: os.Stderr}
 
