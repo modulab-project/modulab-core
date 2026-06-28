@@ -115,20 +115,23 @@ func Update(ctx context.Context, d Deps, entry store.Entry) error {
 	}
 
 	// ── 5. Cosign verification ─────────────────────────────────────────────
-	if entry.Source == "official" {
-		if err := downloadFile(dlCtx, sigURL, sigPath, maxSigFileBytes); err != nil {
+	if entry.CosignSigURL != "" {
+		if err := downloadFile(dlCtx, entry.CosignSigURL, sigPath, maxSigFileBytes); err != nil {
 			return fmt.Errorf("modules: update %q: download sig: %w", entry.Name, err)
 		}
 		if _, err := VerifyCosign(zipPath, sigPath, d.CosignBin); err != nil {
 			return fmt.Errorf("modules: update %q: cosign verify: %w", entry.Name, err)
 		}
-	} else {
-		// Community: best-effort
+	} else if entry.Source != "official" {
+		// Community: best-effort with conventional .sig path
 		if dlErr := downloadFile(dlCtx, sigURL, sigPath, maxSigFileBytes); dlErr == nil {
 			if _, err := VerifyCosign(zipPath, sigPath, d.CosignBin); err != nil {
 				log.Printf("modules: update %q: cosign skipped: %v", entry.Name, err)
 			}
 		}
+	} else {
+		// Official without sig URL: skip with log
+		log.Printf("modules: update %q: cosign skipped (no sig URL in registry)", entry.Name)
 	}
 
 	// ── 6. Extract new ZIP ────────────────────────────────────────────────
