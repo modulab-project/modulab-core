@@ -236,12 +236,13 @@ func (w *denoWorker) start() error {
 	}
 	tmpScript.Close()
 
+	sockDir := filepath.Dir(w.sockPath)
 	args := []string{
 		"run",
 		"--no-prompt",
-		"--allow-read=" + filepath.Dir(w.entrypoint),
-		"--allow-net", // restricted per egress_allowlist at network layer (Traefik / iptables)
-		"--allow-unix=" + w.sockPath,
+		"--allow-read=" + filepath.Dir(w.entrypoint) + "," + sockDir,
+		"--allow-write=" + sockDir, // Unix-domain socket (Deno 2.x: --allow-unix was removed)
+		"--allow-net",              // restricted per egress_allowlist at network layer (Traefik / iptables)
 		tmpScript.Name(),
 	}
 
