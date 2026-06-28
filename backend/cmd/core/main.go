@@ -121,6 +121,12 @@ func main() {
 		log.Printf("valkey: reachable at %s:%s", cfg.ValkeyHost, cfg.ValkeyPort)
 	}
 
+	// Pre-seed the SearXNG URL so Docker deployments work out of the box.
+	// EnsureDefault is a no-op when a URL is already configured.
+	if err := searxng.EnsureDefault(ctx, pool, cfg.MasterKey); err != nil {
+		log.Printf("searxng: could not seed default URL: %v", err)
+	}
+
 	// No master-key check here anymore: MODULAB_MASTER_KEY is mandatory and
 	// already validated by config.Load above, so by this point it is
 	// guaranteed present - see validateMasterKey in config.go and

@@ -174,8 +174,6 @@
       "saved": "Erfolgreich gespeichert.",
       "saving": "Wird gespeichert…",
       "save": "Speichern",
-      "no_instance_title": "Noch kein SearXNG?",
-      "no_instance_body": "Starte es zusammen mit ModuLab mit dem search-Profil:",
       "action": {
         "removing": "Wird entfernt…",
         "remove": "Konfiguration entfernen"

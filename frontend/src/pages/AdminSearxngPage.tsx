@@ -205,17 +205,6 @@ export default function AdminSearxngPage() {
           </div>
         </form>
 
-        {!status?.configured && (
-          <div className="mt-10 rounded-xl border border-gray-200 p-5 dark:border-gray-800">
-            <p className="mb-2 text-sm font-medium">{t("admin.searxng.no_instance_title")}</p>
-            <p className="mb-3 text-[13px] text-gray-500 dark:text-gray-400">
-              {t("admin.searxng.no_instance_body")}
-            </p>
-            <pre className="overflow-x-auto rounded-lg bg-gray-900 px-4 py-3 text-[12px] text-gray-100">
-              {"docker compose --profile search up -d"}
-            </pre>
-          </div>
-        )}
       </div>
     </AppShell>
   );

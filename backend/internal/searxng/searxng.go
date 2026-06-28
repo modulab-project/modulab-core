@@ -55,6 +55,11 @@ const (
 	defaultMaxResults = 25
 	defaultFetchPages = 2
 
+	// defaultURL is pre-seeded on first boot so Docker deployments that
+	// bundle SearXNG in the same Compose stack work out of the box.
+	// Admins can override it at any time via POST /v1/admin/searxng/configure.
+	defaultURL = "http://searxng:8080"
+
 	// Hard limits to prevent accidental DoS of the SearXNG instance.
 	limitMaxResults = 100
 	limitFetchPages = 5
@@ -81,6 +86,24 @@ type SearXNGConfigRequest struct {
 func IsConfigured(ctx context.Context, pool *db.Pool, masterKey string) (bool, error) {
 	_, ok, err := resolveURL(ctx, pool, masterKey)
 	return ok, err
+}
+
+// EnsureDefault pre-seeds the SearXNG URL with defaultURL when no URL has
+// been configured yet. Called once at startup so Docker deployments that
+// bundle SearXNG in the same Compose stack work without manual admin setup.
+func EnsureDefault(ctx context.Context, pool *db.Pool, masterKey string) error {
+	_, ok, err := resolveURL(ctx, pool, masterKey)
+	if err != nil || ok {
+		return err // already configured (or DB error — skip)
+	}
+	enc, err := crypto.Encrypt(masterKey, defaultURL)
+	if err != nil {
+		return fmt.Errorf("searxng: seed default url: %w", err)
+	}
+	if err := pool.SetSetting(ctx, settingKeyURL, enc); err != nil {
+		return fmt.Errorf("searxng: seed default url: %w", err)
+	}
+	return nil
 }
 
 // ResolveURLPublic is the exported counterpart of resolveURL, used by
