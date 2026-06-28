@@ -85,10 +85,17 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 	}
 
 	// ── 2. Resolve URLs ───────────────────────────────────────────────────
-	// URL pattern:  {source_repo}/releases/download/{tag}/{asset}
+	// ReleaseAsset may be either:
+	//   a) a full URL  (official registry: release_url stored verbatim)
+	//   b) a bare filename  (community entries: reconstructed from source_repo + tag)
 	// SHA256 asset: {zip_url}.sha256
 	// Cosign sig:   {zip_url}.sig
-	zipURL := entry.SourceRepo + "/releases/download/" + entry.LatestVersion + "/" + entry.ReleaseAsset
+	var zipURL string
+	if strings.HasPrefix(entry.ReleaseAsset, "https://") || strings.HasPrefix(entry.ReleaseAsset, "http://") {
+		zipURL = entry.ReleaseAsset
+	} else {
+		zipURL = entry.SourceRepo + "/releases/download/" + entry.LatestVersion + "/" + entry.ReleaseAsset
+	}
 	sha256URL := zipURL + ".sha256"
 	sigURL := zipURL + ".sig"
 
