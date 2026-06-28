@@ -193,9 +193,44 @@ func ModuleLocaleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	}
 }
 
-// RegisterModuleRoutes wires the module proxy and locale handler into mux.
-// Called from main.go after module install and at startup for each
-// already-installed Tier 2/3 module.
+// ModuleBundleHandler serves a module's compiled UI bundle.
+// Path: GET /modules/{name}/ui/bundle.js
+//
+// Note: intentionally NOT under /v1/ — the bundle is a static asset loaded
+// directly by the browser via a dynamic import(), not an API call.
+// Auth is required (any active session) so bundles are not publicly accessible.
+func ModuleBundleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := auth.RequireActiveSession(authDeps, w, r); !ok {
+			return
+		}
+		moduleName := r.PathValue("name")
+		if moduleName == "" {
+			http.Error(w, "missing module name", http.StatusBadRequest)
+			return
+		}
+		// Sanitise: only allow simple module names (alphanumeric, dash, underscore).
+		for _, c := range moduleName {
+			if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
+				http.Error(w, "invalid module name", http.StatusBadRequest)
+				return
+			}
+		}
+		bundlePath := filepath.Join(d.DataDir, moduleName, "bundle", "bundle.js")
+		info, err := os.Stat(bundlePath)
+		if err != nil || info.IsDir() {
+			http.Error(w, "bundle not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		http.ServeFile(w, r, bundlePath)
+	}
+}
+
+// RegisterModuleRoutes wires the module proxy, locale, and bundle handlers
+// into mux. Called from main.go after module install and at startup for each
+// already-installed module.
 //
 // Note: the literal /v1/modules and /v1/modules/install etc. routes that
 // handle the lifecycle API are registered first in main.go and take
@@ -204,4 +239,5 @@ func ModuleLocaleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 func RegisterModuleRoutes(mux *http.ServeMux, d Deps, authDeps auth.Deps) {
 	mux.HandleFunc("GET /v1/modules/{name}/locales/{lng}", ModuleLocaleHandler(d, authDeps))
 	mux.HandleFunc("/v1/modules/{name}/api/", ModuleProxyHandler(d, authDeps))
+	mux.HandleFunc("GET /modules/{name}/ui/bundle.js", ModuleBundleHandler(d, authDeps))
 }
