@@ -30,14 +30,18 @@ type Deps struct {
 // Manifest is the parsed content of manifest.yaml inside a module ZIP.
 // Every module must ship this file at the archive root.
 type Manifest struct {
-	Name        string   `yaml:"name"        json:"name"`
-	Version     string   `yaml:"version"     json:"version"`
-	Tier        int      `yaml:"tier"        json:"tier"`
-	Scope       string   `yaml:"scope"       json:"scope"`
-	Description string   `yaml:"description" json:"description"`
-	Author      string   `yaml:"author"      json:"author,omitempty"`
-	License     string   `yaml:"license"     json:"license,omitempty"`
-	MinCore     string   `yaml:"min_core"    json:"min_core,omitempty"`
+	Name        string            `yaml:"name"         json:"name"`
+	Version     string            `yaml:"version"      json:"version"`
+	Tier        int               `yaml:"tier"         json:"tier"`
+	Scope       string            `yaml:"scope"        json:"scope"`
+	Description string            `yaml:"description"  json:"description"`
+	Author      string            `yaml:"author"       json:"author,omitempty"`
+	License     string            `yaml:"license"      json:"license,omitempty"`
+	MinCore     string            `yaml:"min_core"     json:"min_core,omitempty"`
+	// DisplayName is an optional map of language code → human-readable name,
+	// e.g. {"en": "Recipes", "de": "Rezepte"}. Used by the AppShell to show
+	// a localized module name instead of the raw module identifier.
+	DisplayName map[string]string `yaml:"display_name" json:"display_name,omitempty"`
 	// Handler is the Deno entrypoint (relative path inside the ZIP), required
 	// for Tier 2 and 3 modules.
 	Handler         string   `yaml:"handler"          json:"handler,omitempty"`
