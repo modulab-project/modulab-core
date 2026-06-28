@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -189,9 +190,7 @@ func httpGet(ctx context.Context, url string) ([]byte, error) {
 		return nil, fmt.Errorf("unexpected status %d for %s", resp.StatusCode, url)
 	}
 
-	var buf [4 << 20]byte // 4 MB cap — more than enough for any registry file
-	n, _ := resp.Body.Read(buf[:])
-	return buf[:n], nil
+	return io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 }
 
 // officialSourceRepo extracts the repo base URL from a release_url.
