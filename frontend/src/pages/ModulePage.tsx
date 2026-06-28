@@ -73,7 +73,7 @@ export default function ModulePage() {
 
     async function loadLocale(language: string): Promise<Record<string, unknown> | null> {
       try {
-        const r = await fetch(`/v1/modules/${encodeURIComponent(mod!.name)}/locales/${language}.json`, {
+        const r = await fetch(`/v1/modules/${encodeURIComponent(mod!.name)}/locales/${language}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!r.ok) return null;

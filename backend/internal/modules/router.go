@@ -202,6 +202,6 @@ func ModuleLocaleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 // precedence over this wildcard because Go's 1.22 ServeMux gives more-
 // specific paths priority over less-specific ones.
 func RegisterModuleRoutes(mux *http.ServeMux, d Deps, authDeps auth.Deps) {
-	mux.HandleFunc("GET /v1/modules/{name}/locales/{lng}.json", ModuleLocaleHandler(d, authDeps))
+	mux.HandleFunc("GET /v1/modules/{name}/locales/{lng}", ModuleLocaleHandler(d, authDeps))
 	mux.HandleFunc("/v1/modules/{name}/api/", ModuleProxyHandler(d, authDeps))
 }
