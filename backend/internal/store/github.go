@@ -76,13 +76,14 @@ func FetchOfficialRegistry(ctx context.Context) ([]Entry, error) {
 		// separate field: trim everything from /releases/ onwards.
 		sourceRepo := officialSourceRepo(r.ReleaseURL)
 		out = append(out, Entry{
-			Name: r.Name,
-			Source: "official",
+			Name:       r.Name,
+			Source:     "official",
 			SourceRepo: sourceRepo,
 			// Store the full release_url as ReleaseAsset so the installer can
 			// use it verbatim. The tag in the URL may differ from LatestVersion
 			// (e.g. tag "recipes-v0.1.0" vs version "0.1.0").
 			ReleaseAsset:  r.ReleaseURL,
+			CosignSigURL:  r.CosignSigURL,
 			Category:      r.Category,
 			LatestVersion: r.Version,
 		})

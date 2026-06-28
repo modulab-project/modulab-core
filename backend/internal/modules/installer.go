@@ -141,9 +141,9 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 	// ── 5. Cosign verification ────────────────────────────────────────────
 	cosignVerified := false
 	cosignSkipped := false
-	if entry.Source == "official" {
-		// Official modules: signature is mandatory.
-		if err := downloadFile(dlCtx, sigURL, sigPath, maxSigFileBytes); err != nil {
+	if entry.CosignSigURL != "" {
+		// Signature URL explicitly provided — download and verify.
+		if err := downloadFile(dlCtx, entry.CosignSigURL, sigPath, maxSigFileBytes); err != nil {
 			return fmt.Errorf("modules: install %q: download cosign sig: %w", entry.Name, err)
 		}
 		ok, err := VerifyCosign(zipPath, sigPath, d.CosignBin)
@@ -151,8 +151,9 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 			return fmt.Errorf("modules: install %q: cosign verify: %w", entry.Name, err)
 		}
 		cosignVerified = ok
-	} else {
-		// Community modules: try to verify, proceed even if sig is absent.
+	} else if entry.Source != "official" {
+		// Community modules without explicit sig URL: try the conventional .sig
+		// path as a best-effort, proceed even if absent.
 		if dlErr := downloadFile(dlCtx, sigURL, sigPath, maxSigFileBytes); dlErr == nil {
 			ok, err := VerifyCosign(zipPath, sigPath, d.CosignBin)
 			if err == nil {
@@ -164,6 +165,10 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 		} else {
 			cosignSkipped = true
 		}
+	} else {
+		// Official module without cosign_sig_url → skip (not yet signed).
+		cosignSkipped = true
+		log.Printf("modules: install %q: cosign skipped (no sig URL in registry)", entry.Name)
 	}
 	_ = cosignSkipped // badge logic lives in handlers — stored in VerifyResult if needed
 

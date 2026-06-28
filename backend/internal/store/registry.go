@@ -32,6 +32,9 @@ type Entry struct {
 	Source         string          `json:"source"` // "official" | "community"
 	SourceRepo     string          `json:"source_repo"`
 	ReleaseAsset   string          `json:"release_asset"`
+	// CosignSigURL is the URL of the Cosign signature file. Empty string means
+	// no signature is available and Cosign verification should be skipped.
+	CosignSigURL   string          `json:"cosign_sig_url,omitempty"`
 	Category       string          `json:"category"`
 	LatestVersion  string          `json:"latest_version,omitempty"`
 	ManifestCache  json.RawMessage `json:"manifest,omitempty"`
