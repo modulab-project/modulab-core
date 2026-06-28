@@ -1,7 +1,8 @@
-// Module Store browse page (/store).
-// Shows all known modules from the registry cache (official + community).
-// Any approved user can browse; only org-admin/super-admin can install or sync.
+// Module Store browse page (/admin/modules/store).
+// Admin-only. Shows all known modules from the registry cache (official + community).
+// Only org-admin/super-admin can access, install, or sync.
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   listStore,
@@ -20,6 +21,7 @@ type SourceFilter = "all" | "official" | "community";
 export default function StorePage() {
   const { t } = useTranslation();
   const { session, loading } = useAuthenticatedSession();
+  const navigate = useNavigate();
 
   const [entries, setEntries] = useState<StoreEntry[]>([]);
   const [installed, setInstalled] = useState<Map<string, InstalledModule>>(new Map());
@@ -33,8 +35,12 @@ export default function StorePage() {
 
   useEffect(() => {
     if (!session) return;
+    if (!isAdminRole(session.role)) {
+      navigate("/", { replace: true });
+      return;
+    }
     load();
-  }, [session]);
+  }, [session, navigate]);
 
   function load() {
     const token = getSessionToken();
@@ -86,7 +92,7 @@ export default function StorePage() {
     }
   }
 
-  if (loading || !session) return null;
+  if (loading || !session || !isAdminRole(session.role)) return null;
 
   const isAdmin = isAdminRole(session.role);
   const visible = sourceFilter === "all"

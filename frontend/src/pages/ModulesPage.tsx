@@ -1,6 +1,5 @@
-// Installed modules management page (/modules).
-// Lists all installed modules with status, version, and admin actions.
-// Browsing is open to all active users; install/uninstall/update/pin is admin-only.
+// Installed modules management page (/admin/modules/installed).
+// Admin-only. Lists all installed modules with status, version, and admin actions.
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -31,8 +30,12 @@ export default function ModulesPage() {
 
   useEffect(() => {
     if (!session) return;
+    if (!isAdminRole(session.role)) {
+      navigate("/", { replace: true });
+      return;
+    }
     load();
-  }, [session]);
+  }, [session, navigate]);
 
   function load() {
     const token = getSessionToken();
@@ -136,7 +139,7 @@ export default function ModulesPage() {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => navigate("/store")}
+              onClick={() => navigate("/admin/modules/store")}
               className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-900"
             >
               <i className="ti ti-building-store text-[14px]" />
@@ -176,7 +179,7 @@ export default function ModulesPage() {
             </p>
             <button
               type="button"
-              onClick={() => navigate("/store")}
+              onClick={() => navigate("/admin/modules/store")}
               className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
             >
               <i className="ti ti-building-store text-[14px]" />

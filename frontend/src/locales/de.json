@@ -264,6 +264,16 @@
       "col_actor": "Akteur",
       "col_target": "Ziel",
       "col_details": "Details"
+    },
+    "modules": {
+      "title": "Modulverwaltung",
+      "subtitle": "Module auf dieser ModuLab-Instanz installieren, aktualisieren und verwalten.",
+      "store_title": "Modul-Store",
+      "store_desc": "Module aus dem offiziellen Verzeichnis und der Community durchsuchen und installieren.",
+      "store_count": "{{count}} Module verfügbar",
+      "installed_title": "Installierte Module",
+      "installed_desc": "Aktive Module verwalten, Updates prüfen, Installationen anpinnen oder entfernen.",
+      "installed_count": "{{count}} installiert"
     }
   },
   "home": {

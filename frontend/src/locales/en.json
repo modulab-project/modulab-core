@@ -264,6 +264,16 @@
       "col_actor": "Actor",
       "col_target": "Target",
       "col_details": "Details"
+    },
+    "modules": {
+      "title": "Module Management",
+      "subtitle": "Install, update, and manage modules on this ModuLab instance.",
+      "store_title": "Module Store",
+      "store_desc": "Browse and install modules from the official registry and community.",
+      "store_count": "{{count}} modules available",
+      "installed_title": "Installed Modules",
+      "installed_desc": "Manage active modules, check for updates, pin or remove installations.",
+      "installed_count": "{{count}} installed"
     }
   },
   "home": {
