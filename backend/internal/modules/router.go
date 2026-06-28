@@ -46,10 +46,15 @@ func ModuleProxyHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 			return
 		}
 
-		// The sub-path is everything after /v1/modules/{name}.
-		subPath := strings.TrimPrefix(r.URL.Path, "/v1/modules/"+moduleName)
+		// The sub-path is everything after /v1/modules/{name}/api.
+		// Strip both the module prefix and the /api segment so the Deno handler
+		// receives clean paths like "/recipes" instead of "/api/recipes".
+		subPath := strings.TrimPrefix(r.URL.Path, "/v1/modules/"+moduleName+"/api")
 		if subPath == "" {
 			subPath = "/"
+		}
+		if q := r.URL.RawQuery; q != "" {
+			subPath += "?" + q
 		}
 
 		// ── Check module is active ─────────────────────────────────────────
