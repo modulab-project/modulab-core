@@ -735,10 +735,15 @@ func LogoutHandler(d Deps) http.HandlerFunc {
 func bearerToken(r *http.Request) string {
 	const prefix = "Bearer "
 	h := r.Header.Get("Authorization")
-	if !strings.HasPrefix(h, prefix) {
-		return ""
+	if strings.HasPrefix(h, prefix) {
+		return strings.TrimPrefix(h, prefix)
 	}
-	return strings.TrimPrefix(h, prefix)
+	// Fall back to ?t= query parameter for contexts where an Authorization
+	// header cannot be sent (e.g. <img src> tags for module storage files).
+	if t := r.URL.Query().Get("t"); t != "" {
+		return t
+	}
+	return ""
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

@@ -258,9 +258,50 @@ func ModuleBundleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	}
 }
 
-// RegisterModuleRoutes wires the module proxy, locale, and bundle handlers
-// into mux. Called from main.go after module install and at startup for each
-// already-installed module.
+// ModuleStorageHandler serves files from a module's storage/uploads directory.
+// Path: GET /v1/modules/{name}/storage/{path...}
+//
+// Auth is required. Only files within the module's own storage directory are
+// served; path traversal attempts are rejected by filepath.Clean.
+func ModuleStorageHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := auth.RequireActiveSession(authDeps, w, r); !ok {
+			return
+		}
+		moduleName := r.PathValue("name")
+		filePath := r.PathValue("path")
+		if moduleName == "" || filePath == "" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		// Sanitise module name.
+		for _, c := range moduleName {
+			if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
+				http.Error(w, "invalid module name", http.StatusBadRequest)
+				return
+			}
+		}
+		// Build the absolute path and verify it stays within the storage directory.
+		storageRoot := filepath.Join(d.DataDir, moduleName, "storage")
+		absPath := filepath.Clean(filepath.Join(storageRoot, filePath))
+		if !strings.HasPrefix(absPath, storageRoot+string(filepath.Separator)) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		info, err := os.Stat(absPath)
+		if err != nil || info.IsDir() {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		// Cache uploaded images for a day; they are content-addressed by filename.
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		http.ServeFile(w, r, absPath)
+	}
+}
+
+// RegisterModuleRoutes wires the module proxy, locale, bundle, and storage
+// handlers into mux. Called from main.go after module install and at startup
+// for each already-installed module.
 //
 // Note: the literal /v1/modules and /v1/modules/install etc. routes that
 // handle the lifecycle API are registered first in main.go and take
@@ -270,4 +311,5 @@ func RegisterModuleRoutes(mux *http.ServeMux, d Deps, authDeps auth.Deps) {
 	mux.HandleFunc("GET /v1/modules/{name}/locales/{lng}", ModuleLocaleHandler(d, authDeps))
 	mux.HandleFunc("/v1/modules/{name}/api/", ModuleProxyHandler(d, authDeps))
 	mux.HandleFunc("GET /v1/modules/{name}/ui/bundle.js", ModuleBundleHandler(d, authDeps))
+	mux.HandleFunc("GET /v1/modules/{name}/storage/{path...}", ModuleStorageHandler(d, authDeps))
 }
