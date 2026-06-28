@@ -36,7 +36,11 @@ export default function ModulePage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [fetching, setFetching] = useState(true);
 
-  // Fetch module metadata
+  // Fetch module metadata.
+  // NOTE: `t` is intentionally NOT in the dependency array — same reason as
+  // the bundle-load effect below: locale loading fires a re-render with a new
+  // `t` reference, which would re-fetch metadata, set a new `mod` object, and
+  // cascade into a full bundle re-import mid-interaction.
   useEffect(() => {
     if (!session || !moduleName) return;
     const token = getSessionToken();
@@ -52,12 +56,13 @@ export default function ModulePage() {
       .then((m) => {
         setMod(m);
         if (m.status !== "active") {
-          setLoadError(t("module_page.not_active", { status: m.status }));
+          setLoadError(`module_page.not_active:${m.status}`);
         }
       })
       .catch((e) => setLoadError(String(e)))
       .finally(() => setFetching(false));
-  }, [session, moduleName, t]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, moduleName]);
 
   // Load the module's own locale files and register them in i18next under the
   // "mod_{name}" namespace. This runs before the bundle is imported so that
@@ -100,6 +105,11 @@ export default function ModulePage() {
   //   1. fetch() the bundle JS with the Bearer token (authenticated)
   //   2. wrap it in a Blob URL so the browser can import() it
   //   3. revoke the Blob URL after import to free memory
+  //
+  // NOTE: `t` is intentionally NOT in the dependency array. Adding it would
+  // cause a re-import every time the locale finishes loading (i18n fires a
+  // re-render after addResourceBundle), which unmounts the module component
+  // mid-interaction and loses all unsaved user input.
   useEffect(() => {
     if (!mod || mod.status !== "active") return;
 
@@ -129,7 +139,7 @@ export default function ModulePage() {
         if (m.default) {
           setModuleComponent(() => m.default as React.ComponentType<ModuleComponentProps>);
         } else {
-          setLoadError(t("module_page.no_default_export"));
+          setLoadError("module_page.no_default_export");
         }
       })
       .catch((e) => {
@@ -138,7 +148,8 @@ export default function ModulePage() {
       .finally(() => {
         if (blobUrl) URL.revokeObjectURL(blobUrl);
       });
-  }, [mod, t]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mod]);
 
   if (loading || !session) return null;
   if (!moduleName) {
@@ -158,7 +169,9 @@ export default function ModulePage() {
 
         {loadError && (
           <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
-            {loadError}
+            {loadError.startsWith("module_page.")
+              ? t(loadError.split(":")[0], { status: loadError.split(":")[1] })
+              : loadError}
           </div>
         )}
 
