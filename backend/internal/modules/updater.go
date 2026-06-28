@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/modulab-project/modulab-core/backend/internal/db"
@@ -66,7 +67,13 @@ func Update(ctx context.Context, d Deps, entry store.Entry) error {
 	}
 
 	// ── 3. Download new ZIP + SHA256 in parallel ───────────────────────────
-	zipURL := entry.SourceRepo + "/releases/download/" + entry.LatestVersion + "/" + entry.ReleaseAsset
+	// ReleaseAsset may be a full URL (official modules) or a bare filename.
+	var zipURL string
+	if strings.HasPrefix(entry.ReleaseAsset, "https://") || strings.HasPrefix(entry.ReleaseAsset, "http://") {
+		zipURL = entry.ReleaseAsset
+	} else {
+		zipURL = entry.SourceRepo + "/releases/download/" + entry.LatestVersion + "/" + entry.ReleaseAsset
+	}
 	sha256URL := zipURL + ".sha256"
 	sigURL := zipURL + ".sig"
 
