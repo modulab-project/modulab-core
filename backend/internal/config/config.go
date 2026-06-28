@@ -40,6 +40,16 @@ type Config struct {
 	DenoSocketPath string
 	DenoBinaryPath string
 
+	// ModuleDataDir (MODULAB_MODULE_DATA_DIR) is where installed module files
+	// are stored on disk. Each module gets a sub-directory: {ModuleDataDir}/{name}.
+	// Default: /var/lib/modulab/modules
+	ModuleDataDir string
+
+	// CosignBinaryPath (MODULAB_COSIGN_BINARY_PATH) is the path to the cosign
+	// binary used to verify official module signatures. Defaults to searching
+	// $PATH for "cosign". Set to "" to use the default.
+	CosignBinaryPath string
+
 	// PublicBaseURL is what Core tells the OIDC provider to redirect back
 	// to after login (".../v1/auth/callback") - it has to be the externally
 	// reachable URL, not HTTPAddr, since those differ behind a reverse
@@ -104,6 +114,9 @@ func Load() (Config, error) {
 
 		DenoSocketPath: getEnvDefault("MODULAB_DENO_SOCKET_PATH", "/tmp/modulab-deno.sock"),
 		DenoBinaryPath: getEnvDefault("MODULAB_DENO_BINARY_PATH", "/usr/local/bin/deno"),
+
+		ModuleDataDir:    getEnvDefault("MODULAB_MODULE_DATA_DIR", "/var/lib/modulab/modules"),
+		CosignBinaryPath: os.Getenv("MODULAB_COSIGN_BINARY_PATH"), // "" = search $PATH
 
 		PublicBaseURL: getEnvDefault("MODULAB_PUBLIC_BASE_URL", "http://localhost:8080"),
 

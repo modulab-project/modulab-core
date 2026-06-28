@@ -1,2 +1,16 @@
+# Environment
 .env
+.env.local
+
+# macOS
 .DS_Store
+
+# Cosign keys — never commit the private key.
+# cosign.pub is the raw output of `cosign generate-key-pair`;
+# its contents go into backend/internal/modules/cosign_pubkey.pem instead.
+cosign.key
+cosign.pub
+
+# Go build artifacts
+backend/cmd/core/core
+core

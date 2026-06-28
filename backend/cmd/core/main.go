@@ -30,11 +30,13 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/config"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
 	"github.com/modulab-project/modulab-core/backend/internal/mail"
+	"github.com/modulab-project/modulab-core/backend/internal/modules"
 	"github.com/modulab-project/modulab-core/backend/internal/news"
 	ntpcheck "github.com/modulab-project/modulab-core/backend/internal/ntp"
 	"github.com/modulab-project/modulab-core/backend/internal/quicklinks"
 	"github.com/modulab-project/modulab-core/backend/internal/searxng"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
+	"github.com/modulab-project/modulab-core/backend/internal/store"
 	"github.com/modulab-project/modulab-core/backend/internal/valkey"
 	"github.com/modulab-project/modulab-core/backend/internal/version"
 	"github.com/modulab-project/modulab-core/backend/internal/weather"
@@ -453,6 +455,36 @@ func main() {
 	mux.HandleFunc("POST /v1/admin/quick-links", quicklinks.AdminCreateHandler(authDeps))
 	mux.HandleFunc("PATCH /v1/admin/quick-links/{id}", quicklinks.AdminUpdateHandler(authDeps))
 	mux.HandleFunc("DELETE /v1/admin/quick-links/{id}", quicklinks.AdminDeleteHandler(authDeps))
+
+	// Module Store registry sync (internal/store): fetches official + community
+	// registry on startup and every 24 hours. Errors are logged, never fatal.
+	storeDeps := store.Deps{Pool: pool, Valkey: valkeyClient}
+	go store.RunSync(ctx, storeDeps)
+
+	// Store browse endpoints (spec section 4.10).
+	// GET /v1/store and GET /v1/store/{name} require any active session.
+	// POST /v1/store/sync requires org-admin or super-admin.
+	mux.HandleFunc("GET /v1/store", store.ListHandler(storeDeps, authDeps))
+	mux.HandleFunc("GET /v1/store/{name}", store.DetailHandler(storeDeps, authDeps))
+	mux.HandleFunc("POST /v1/store/sync", store.SyncHandler(storeDeps, authDeps))
+
+	// Module management endpoints (spec section 4.6–4.9).
+	// List/detail: any active session. Install/uninstall/update/pin: org-admin+.
+	// Note: GET /v1/modules/updates is registered before GET /v1/modules/{name}
+	// so the literal path wins over the wildcard in Go's 1.22 ServeMux.
+	moduleDeps := modules.Deps{
+		DB:        pool,
+		DataDir:   cfg.ModuleDataDir,
+		CosignBin: cfg.CosignBinaryPath,
+	}
+	mux.HandleFunc("GET /v1/modules", modules.ListInstalledHandler(moduleDeps, authDeps))
+	mux.HandleFunc("GET /v1/modules/updates", modules.CheckUpdatesHandler(moduleDeps, storeDeps, authDeps))
+	mux.HandleFunc("GET /v1/modules/{name}", modules.GetInstalledHandler(moduleDeps, authDeps))
+	mux.HandleFunc("POST /v1/modules/install", modules.InstallHandler(moduleDeps, storeDeps, authDeps))
+	mux.HandleFunc("DELETE /v1/modules/{name}", modules.UninstallHandler(moduleDeps, authDeps))
+	mux.HandleFunc("POST /v1/modules/{name}/update", modules.UpdateModuleHandler(moduleDeps, storeDeps, authDeps))
+	mux.HandleFunc("POST /v1/modules/{name}/pin", modules.PinHandler(moduleDeps, authDeps))
+	mux.HandleFunc("DELETE /v1/modules/{name}/pin", modules.UnpinHandler(moduleDeps, authDeps))
 
 	// The mail worker (internal/mail) runs for Core's entire lifetime as a
 	// single background goroutine, draining whatever

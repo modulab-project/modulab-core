@@ -142,6 +142,10 @@ func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
 		return err
 	}
 
+	if err := p.EnsureModuleStoreSchema(ctx); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -1625,4 +1629,262 @@ func (p *Pool) SetUserTileOrder(ctx context.Context, userID string, refs []TileR
 		return fmt.Errorf("db: set user tile order: %w", err)
 	}
 	return nil
+}
+
+// ---- Module Store -----------------------------------------------------------
+
+// EnsureModuleStoreSchema extends the installed_modules stub (created above in
+// EnsureCoreSchema) with the full column set needed for the module lifecycle
+// pipeline (spec section 4.3/4.9/4.10), and creates the module_registry table
+// for the daily registry-sync cache (spec section 4.10).
+//
+// Mirrors migrations/0004_add_module_store.up.sql — both must be kept in sync.
+// All ALTERs use ADD COLUMN IF NOT EXISTS so this is safe to run on every boot.
+func (p *Pool) EnsureModuleStoreSchema(ctx context.Context) error {
+	// ── installed_modules: extend the stub with new columns ──────────────────
+
+	// source: official | community | direct
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE installed_modules
+		    ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'direct'
+		    CHECK (source IN ('official', 'community', 'direct'))
+	`); err != nil {
+		return fmt.Errorf("db: ensure installed_modules.source: %w", err)
+	}
+
+	// release_url: exact URL the module.zip was downloaded from.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE installed_modules ADD COLUMN IF NOT EXISTS release_url TEXT NOT NULL DEFAULT ''
+	`); err != nil {
+		return fmt.Errorf("db: ensure installed_modules.release_url: %w", err)
+	}
+
+	// sha256: verified checksum at install/update time.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE installed_modules ADD COLUMN IF NOT EXISTS sha256 TEXT NOT NULL DEFAULT ''
+	`); err != nil {
+		return fmt.Errorf("db: ensure installed_modules.sha256: %w", err)
+	}
+
+	// manifest: full manifest.yaml as JSONB for the detail endpoint.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE installed_modules ADD COLUMN IF NOT EXISTS manifest JSONB NOT NULL DEFAULT '{}'
+	`); err != nil {
+		return fmt.Errorf("db: ensure installed_modules.manifest: %w", err)
+	}
+
+	// pinned: when true, update suggestions are suppressed for this module.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE installed_modules ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT FALSE
+	`); err != nil {
+		return fmt.Errorf("db: ensure installed_modules.pinned: %w", err)
+	}
+
+	// cached_zip_path: old ZIP kept during an in-progress update for rollback.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE installed_modules ADD COLUMN IF NOT EXISTS cached_zip_path TEXT
+	`); err != nil {
+		return fmt.Errorf("db: ensure installed_modules.cached_zip_path: %w", err)
+	}
+
+	// available_version: set by the update-check when a newer version exists.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE installed_modules ADD COLUMN IF NOT EXISTS available_version TEXT
+	`); err != nil {
+		return fmt.Errorf("db: ensure installed_modules.available_version: %w", err)
+	}
+
+	// last_update_check: timestamp of the most recent update check.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE installed_modules ADD COLUMN IF NOT EXISTS last_update_check TIMESTAMPTZ
+	`); err != nil {
+		return fmt.Errorf("db: ensure installed_modules.last_update_check: %w", err)
+	}
+
+	// updated_at: bumped on every status change, update, pin toggle, etc.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE installed_modules ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	`); err != nil {
+		return fmt.Errorf("db: ensure installed_modules.updated_at: %w", err)
+	}
+
+	// ── module_registry ───────────────────────────────────────────────────────
+
+	// Local cache of official registry.json + modulab-community index.
+	// No PII, no credentials → no GCM encryption needed (spec section 2.4).
+	if _, err := p.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS module_registry (
+		    name            TEXT        PRIMARY KEY,
+		    source          TEXT        NOT NULL CHECK (source IN ('official', 'community')),
+		    source_repo     TEXT        NOT NULL,
+		    release_asset   TEXT        NOT NULL,
+		    category        TEXT        NOT NULL,
+		    latest_version  TEXT,
+		    manifest_cache  JSONB,
+		    synced_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`); err != nil {
+		return fmt.Errorf("db: ensure module_registry: %w", err)
+	}
+
+	return nil
+}
+
+// ---- Installed Modules CRUD -------------------------------------------------
+
+// ModuleStatus constants mirror the CHECK constraint on installed_modules.status.
+const (
+	ModuleStatusInstalling = "installing"
+	ModuleStatusActive     = "active"
+	ModuleStatusDegraded   = "degraded"
+	ModuleStatusFailed     = "failed"
+	ModuleStatusIsolated   = "isolated"
+)
+
+// InstalledModuleRow is a full row from installed_modules.
+type InstalledModuleRow struct {
+	Name             string
+	Version          string
+	Tier             int
+	Scope            string
+	Source           string
+	ReleaseURL       string
+	SHA256           string
+	Manifest         []byte // raw JSONB
+	Status           string
+	Pinned           bool
+	CachedZipPath    *string
+	AvailableVersion *string
+	LastUpdateCheck  *time.Time
+	InstalledAt      time.Time
+	UpdatedAt        time.Time
+}
+
+// InsertInstalledModule writes a new module row with status "installing".
+// Called at the start of the install transaction so the UI can show progress
+// via the modul.state_change SSE event before migrations finish.
+func (p *Pool) InsertInstalledModule(ctx context.Context, name, version string, tier int, scope, source, releaseURL, sha256 string, manifest []byte) error {
+	_, err := p.Exec(ctx, `
+		INSERT INTO installed_modules
+		    (name, version, tier, scope, source, release_url, sha256, manifest, status, installed_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'installing', now(), now())
+	`, name, version, tier, scope, source, releaseURL, sha256, manifest)
+	if err != nil {
+		return fmt.Errorf("db: insert installed_module %q: %w", name, err)
+	}
+	return nil
+}
+
+// UpdateModuleStatus sets the status (and bumps updated_at) for the named module.
+// Returns false when no such module exists.
+func (p *Pool) UpdateModuleStatus(ctx context.Context, name, status string) (bool, error) {
+	tag, err := p.Exec(ctx, `
+		UPDATE installed_modules SET status = $2, updated_at = now() WHERE name = $1
+	`, name, status)
+	if err != nil {
+		return false, fmt.Errorf("db: update module status %q → %q: %w", name, status, err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// GetInstalledModule returns the row for name, or (row{}, false, nil) if absent.
+func (p *Pool) GetInstalledModule(ctx context.Context, name string) (InstalledModuleRow, bool, error) {
+	var r InstalledModuleRow
+	err := p.QueryRow(ctx, `
+		SELECT name, version, tier, scope, source, release_url, sha256, manifest,
+		       status, pinned, cached_zip_path, available_version, last_update_check,
+		       installed_at, updated_at
+		FROM installed_modules WHERE name = $1
+	`, name).Scan(
+		&r.Name, &r.Version, &r.Tier, &r.Scope, &r.Source, &r.ReleaseURL, &r.SHA256, &r.Manifest,
+		&r.Status, &r.Pinned, &r.CachedZipPath, &r.AvailableVersion, &r.LastUpdateCheck,
+		&r.InstalledAt, &r.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return InstalledModuleRow{}, false, nil
+		}
+		return InstalledModuleRow{}, false, fmt.Errorf("db: get installed_module %q: %w", name, err)
+	}
+	return r, true, nil
+}
+
+// ListInstalledModules returns all installed module rows, ordered by name.
+func (p *Pool) ListInstalledModules(ctx context.Context) ([]InstalledModuleRow, error) {
+	rows, err := p.Query(ctx, `
+		SELECT name, version, tier, scope, source, release_url, sha256, manifest,
+		       status, pinned, cached_zip_path, available_version, last_update_check,
+		       installed_at, updated_at
+		FROM installed_modules ORDER BY name ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("db: list installed_modules: %w", err)
+	}
+	defer rows.Close()
+
+	var out []InstalledModuleRow
+	for rows.Next() {
+		var r InstalledModuleRow
+		if err := rows.Scan(
+			&r.Name, &r.Version, &r.Tier, &r.Scope, &r.Source, &r.ReleaseURL, &r.SHA256, &r.Manifest,
+			&r.Status, &r.Pinned, &r.CachedZipPath, &r.AvailableVersion, &r.LastUpdateCheck,
+			&r.InstalledAt, &r.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("db: scan installed_module: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// DeleteInstalledModule removes the module row. Schema/storage cleanup is
+// handled separately by the uninstaller (internal/modules/uninstaller.go).
+func (p *Pool) DeleteInstalledModule(ctx context.Context, name string) (bool, error) {
+	tag, err := p.Exec(ctx, `DELETE FROM installed_modules WHERE name = $1`, name)
+	if err != nil {
+		return false, fmt.Errorf("db: delete installed_module %q: %w", name, err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// SetModuleCachedZip stores the rollback ZIP path during an in-progress update.
+func (p *Pool) SetModuleCachedZip(ctx context.Context, name, path string) error {
+	_, err := p.Exec(ctx, `
+		UPDATE installed_modules SET cached_zip_path = $2, updated_at = now() WHERE name = $1
+	`, name, path)
+	return err
+}
+
+// ClearModuleCachedZip removes the rollback ZIP path after a successful update.
+func (p *Pool) ClearModuleCachedZip(ctx context.Context, name string) error {
+	_, err := p.Exec(ctx, `
+		UPDATE installed_modules SET cached_zip_path = NULL, updated_at = now() WHERE name = $1
+	`, name)
+	return err
+}
+
+// SetModuleAvailableVersion records that a newer version is available.
+// Pass "" to clear after an update.
+func (p *Pool) SetModuleAvailableVersion(ctx context.Context, name, version string) error {
+	var v any
+	if version != "" {
+		v = version
+	}
+	_, err := p.Exec(ctx, `
+		UPDATE installed_modules
+		SET available_version = $2, last_update_check = now(), updated_at = now()
+		WHERE name = $1
+	`, name, v)
+	return err
+}
+
+// SetModulePinned sets or clears the pinned flag for the named module.
+func (p *Pool) SetModulePinned(ctx context.Context, name string, pinned bool) (bool, error) {
+	tag, err := p.Exec(ctx, `
+		UPDATE installed_modules SET pinned = $2, updated_at = now() WHERE name = $1
+	`, name, pinned)
+	if err != nil {
+		return false, fmt.Errorf("db: set module pinned %q: %w", name, err)
+	}
+	return tag.RowsAffected() > 0, nil
 }

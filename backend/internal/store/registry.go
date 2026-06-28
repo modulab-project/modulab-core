@@ -1,0 +1,141 @@
+// Package store manages the Modul-Store registry: discovery, caching and
+// browsing of all known modules from the official (modulab-modules) and
+// community (modulab-community) sources (spec section 4.10).
+//
+// The registry is a local DB cache (module_registry table) populated by the
+// daily sync goroutine in sync.go. Browsing the store always reads from this
+// cache, so it works offline with the last-known data. Installation itself
+// (internal/modules) fetches the actual ZIP at install time.
+package store
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/valkey"
+)
+
+// Deps bundles what the store package needs from the outside world.
+type Deps struct {
+	Pool   *db.Pool
+	Valkey *valkey.Client
+}
+
+// Entry is one row of the module_registry table, ready for the API response.
+type Entry struct {
+	Name           string          `json:"name"`
+	Source         string          `json:"source"` // "official" | "community"
+	SourceRepo     string          `json:"source_repo"`
+	ReleaseAsset   string          `json:"release_asset"`
+	Category       string          `json:"category"`
+	LatestVersion  string          `json:"latest_version,omitempty"`
+	ManifestCache  json.RawMessage `json:"manifest,omitempty"`
+	SyncedAt       time.Time       `json:"synced_at"`
+}
+
+// UpsertEntry inserts or fully replaces a registry entry. Called by the sync
+// goroutine (sync.go) after fetching fresh data from GitHub.
+func UpsertEntry(ctx context.Context, pool *db.Pool, e Entry) error {
+	manifest := []byte("{}")
+	if len(e.ManifestCache) > 0 {
+		manifest = e.ManifestCache
+	}
+	_, err := pool.Exec(ctx, `
+		INSERT INTO module_registry
+		    (name, source, source_repo, release_asset, category, latest_version, manifest_cache, synced_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+		ON CONFLICT (name) DO UPDATE SET
+		    source         = EXCLUDED.source,
+		    source_repo    = EXCLUDED.source_repo,
+		    release_asset  = EXCLUDED.release_asset,
+		    category       = EXCLUDED.category,
+		    latest_version = EXCLUDED.latest_version,
+		    manifest_cache = EXCLUDED.manifest_cache,
+		    synced_at      = now()
+	`, e.Name, e.Source, e.SourceRepo, e.ReleaseAsset, e.Category,
+		nullableString(e.LatestVersion), manifest)
+	if err != nil {
+		return fmt.Errorf("store: upsert entry %q: %w", e.Name, err)
+	}
+	return nil
+}
+
+// ListEntries returns all registry entries, newest sync first.
+// Optional filter: source ("official" | "community" | "" for all),
+// category ("" for all).
+func ListEntries(ctx context.Context, pool *db.Pool, source, category string) ([]Entry, error) {
+	query := `
+		SELECT name, source, source_repo, release_asset, category,
+		       COALESCE(latest_version, ''), manifest_cache, synced_at
+		FROM module_registry
+		WHERE ($1 = '' OR source = $1)
+		  AND ($2 = '' OR category = $2)
+		ORDER BY name ASC
+	`
+	rows, err := pool.Query(ctx, query, source, category)
+	if err != nil {
+		return nil, fmt.Errorf("store: list entries: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Entry
+	for rows.Next() {
+		var e Entry
+		var manifest []byte
+		if err := rows.Scan(&e.Name, &e.Source, &e.SourceRepo, &e.ReleaseAsset,
+			&e.Category, &e.LatestVersion, &manifest, &e.SyncedAt); err != nil {
+			return nil, fmt.Errorf("store: scan entry: %w", err)
+		}
+		e.ManifestCache = json.RawMessage(manifest)
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// GetEntry returns a single registry entry by name.
+// Returns (Entry{}, false, nil) when the name is not found.
+func GetEntry(ctx context.Context, pool *db.Pool, name string) (Entry, bool, error) {
+	var e Entry
+	var manifest []byte
+	err := pool.QueryRow(ctx, `
+		SELECT name, source, source_repo, release_asset, category,
+		       COALESCE(latest_version, ''), manifest_cache, synced_at
+		FROM module_registry
+		WHERE name = $1
+	`, name).Scan(&e.Name, &e.Source, &e.SourceRepo, &e.ReleaseAsset,
+		&e.Category, &e.LatestVersion, &manifest, &e.SyncedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Entry{}, false, nil
+		}
+		return Entry{}, false, fmt.Errorf("store: get entry %q: %w", name, err)
+	}
+	e.ManifestCache = json.RawMessage(manifest)
+	return e, true, nil
+}
+
+// LastSyncedAt returns when any entry was last synced, or the zero time if
+// the registry is empty (never synced). Used by the /v1/store response to
+// show the admin when the cache was last refreshed.
+func LastSyncedAt(ctx context.Context, pool *db.Pool) (time.Time, error) {
+	var t time.Time
+	err := pool.QueryRow(ctx, `SELECT MAX(synced_at) FROM module_registry`).Scan(&t)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return time.Time{}, fmt.Errorf("store: last synced at: %w", err)
+	}
+	return t, nil
+}
+
+// nullableString returns nil when s is empty so Postgres stores NULL instead
+// of an empty string in nullable TEXT columns (latest_version).
+func nullableString(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
