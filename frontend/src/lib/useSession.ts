@@ -57,7 +57,23 @@ export function useAuthenticatedSession(): { session: Session | null; loading: b
             navigate("/pending", { replace: true });
             return;
           }
-          setSession(s);
+          // Only update state when something actually changed — avoids
+          // producing a new object reference every 15 s, which would
+          // cascade into re-running useEffect([session, ...]) consumers
+          // (e.g. ModulePage) and cause visible re-mounts mid-interaction.
+          setSession((prev) => {
+            if (
+              prev &&
+              prev.user_id === s.user_id &&
+              prev.role === s.role &&
+              prev.email === s.email &&
+              prev.name === s.name &&
+              prev.locked === s.locked
+            ) {
+              return prev; // same reference → no re-render
+            }
+            return s;
+          });
           setLoading(false);
         })
         .catch(() => {
