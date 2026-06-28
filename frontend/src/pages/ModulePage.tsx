@@ -94,28 +94,49 @@ export default function ModulePage() {
     })();
   }, [mod]);
 
-  // Dynamically import the module's UI bundle (ui/bundle.js served from Core's
-  // static file path). If the bundle is absent (Tier 1 or not yet built),
-  // we fall back to a placeholder.
+  // Dynamically import the module's UI bundle with auth.
+  //
+  // dynamic import() cannot send Authorization headers, so we:
+  //   1. fetch() the bundle JS with the Bearer token (authenticated)
+  //   2. wrap it in a Blob URL so the browser can import() it
+  //   3. revoke the Blob URL after import to free memory
   useEffect(() => {
     if (!mod || mod.status !== "active") return;
 
-    // The bundle is served by Core at /modules/{name}/ui/bundle.js.
-    // (Core's static file handler serves files from DataDir/{name}/ui/.)
-    const bundleUrl = `/modules/${encodeURIComponent(mod.name)}/ui/bundle.js`;
+    const token = getSessionToken();
+    if (!token) return;
 
-    import(/* @vite-ignore */ bundleUrl)
-      .then((m: { default?: React.ComponentType<ModuleComponentProps> }) => {
+    let blobUrl: string | null = null;
+
+    fetch(`/v1/modules/${encodeURIComponent(mod.name)}/ui/bundle.js`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => {
+        if (!r.ok) {
+          // 404 = no bundle (Tier 1 or not yet built) — show fallback silently.
+          if (r.status === 404) return null;
+          throw new Error(`HTTP ${r.status}`);
+        }
+        return r.blob();
+      })
+      .then((blob) => {
+        if (!blob) return null;
+        blobUrl = URL.createObjectURL(blob);
+        return import(/* @vite-ignore */ blobUrl);
+      })
+      .then((m) => {
+        if (!m) return; // 404 path
         if (m.default) {
-          setModuleComponent(() => m.default!);
+          setModuleComponent(() => m.default as React.ComponentType<ModuleComponentProps>);
         } else {
           setLoadError(t("module_page.no_default_export"));
         }
       })
-      .catch(() => {
-        // No bundle — use built-in fallback (acceptable for Tier 1 or dev).
-        setModuleComponent(null);
-        setLoadError(null); // not an error, just no custom UI
+      .catch((e) => {
+        setLoadError(String(e));
+      })
+      .finally(() => {
+        if (blobUrl) URL.revokeObjectURL(blobUrl);
       });
   }, [mod, t]);
 

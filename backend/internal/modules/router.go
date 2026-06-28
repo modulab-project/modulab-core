@@ -194,11 +194,11 @@ func ModuleLocaleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 }
 
 // ModuleBundleHandler serves a module's compiled UI bundle.
-// Path: GET /modules/{name}/ui/bundle.js
+// Path: GET /v1/modules/{name}/ui/bundle.js
 //
-// Note: intentionally NOT under /v1/ — the bundle is a static asset loaded
-// directly by the browser via a dynamic import(), not an API call.
-// Auth is required (any active session) so bundles are not publicly accessible.
+// Auth is required. The frontend fetches the bundle via fetch() with a Bearer
+// token, then loads it via a Blob URL — this avoids the limitation of dynamic
+// import() not being able to send Authorization headers.
 func ModuleBundleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := auth.RequireActiveSession(authDeps, w, r); !ok {
@@ -239,5 +239,5 @@ func ModuleBundleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 func RegisterModuleRoutes(mux *http.ServeMux, d Deps, authDeps auth.Deps) {
 	mux.HandleFunc("GET /v1/modules/{name}/locales/{lng}", ModuleLocaleHandler(d, authDeps))
 	mux.HandleFunc("/v1/modules/{name}/api/", ModuleProxyHandler(d, authDeps))
-	mux.HandleFunc("GET /modules/{name}/ui/bundle.js", ModuleBundleHandler(d, authDeps))
+	mux.HandleFunc("GET /v1/modules/{name}/ui/bundle.js", ModuleBundleHandler(d, authDeps))
 }
