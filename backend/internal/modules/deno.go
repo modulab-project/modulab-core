@@ -178,6 +178,9 @@ type denoWorker struct {
 const workerBootstrapScript = `
 import handler from "%s";
 
+// Remove stale socket file from a previous (crashed) worker before binding.
+try { Deno.removeSync("%s"); } catch { /* doesn't exist, that's fine */ }
+
 const listener = Deno.listen({ path: "%s", transport: "unix" });
 console.log("[modulab-worker] listening on %s");
 
@@ -224,7 +227,7 @@ func (w *denoWorker) start() error {
 	w.cancel = cancel
 
 	// Write the bootstrap script to a temp file so we can pass it to deno run.
-	bootstrap := fmt.Sprintf(workerBootstrapScript, w.entrypoint, w.sockPath, w.sockPath)
+	bootstrap := fmt.Sprintf(workerBootstrapScript, w.entrypoint, w.sockPath, w.sockPath, w.sockPath)
 	tmpScript, err := os.CreateTemp("", "modulab-worker-"+w.name+"-*.ts")
 	if err != nil {
 		cancel()
