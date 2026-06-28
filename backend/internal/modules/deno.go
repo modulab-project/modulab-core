@@ -355,18 +355,15 @@ func (w *denoWorker) dispatch(ctx context.Context, req WorkerRequest) (WorkerRes
 }
 
 // waitForSocket polls until the Unix socket file appears or the timeout expires.
+// We only stat the file — not dial — because an immediate open+close confuses
+// the Deno 2.x UnixListener and causes the next accept() to fail with os error 22.
 func (w *denoWorker) waitForSocket(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(w.sockPath); err == nil {
-			// Socket file exists — try to connect to confirm it's listening.
-			conn, err := net.Dial("unix", w.sockPath)
-			if err == nil {
-				conn.Close()
-				return nil
-			}
+			return nil
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 	return fmt.Errorf("timeout after %s waiting for %s", timeout, w.sockPath)
 }
