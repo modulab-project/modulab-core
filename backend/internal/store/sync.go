@@ -7,15 +7,15 @@ import (
 	"time"
 )
 
-const syncInterval = 24 * time.Hour
+const syncInterval = 1 * time.Hour
 
 // RunSync is the long-running background goroutine for registry synchronisation.
-// It runs once immediately on startup, then again every 24 hours. Designed to
+// It runs once immediately on startup, then again every hour. Designed to
 // be started with `go store.RunSync(ctx, deps)` from main.go, mirroring the
 // same pattern as mail.RunWorker. Stopping ctx stops the goroutine cleanly.
 func RunSync(ctx context.Context, d Deps) {
 	// Run immediately on first start so the store is populated before any
-	// admin opens the UI, rather than showing an empty list for up to 24h.
+	// admin opens the UI, rather than showing an empty list for up to 1h.
 	runSync(ctx, d)
 
 	ticker := time.NewTicker(syncInterval)
@@ -49,7 +49,7 @@ func TriggerSync(ctx context.Context, d Deps) error {
 }
 
 // runSync is the internal sync driver. Errors are logged but never fatal —
-// the daily goroutine must keep running regardless of transient GitHub outages.
+// the hourly goroutine must keep running regardless of transient GitHub outages.
 func runSync(ctx context.Context, d Deps) {
 	offErr, comErr := syncBoth(ctx, d)
 	if offErr != nil {
