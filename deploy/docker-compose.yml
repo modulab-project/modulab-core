@@ -137,6 +137,7 @@ services:
       SEARXNG_SECRET_KEY: ${SEARXNG_SECRET_KEY}
     volumes:
       - searxng-data:/etc/searxng
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
     depends_on:
       - valkey
     labels:

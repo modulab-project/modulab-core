@@ -2,6 +2,15 @@ use_default_settings: true
 
 server:
   secret_key: "modulab-dev-secret-key-not-for-production"
+  # Disable rate limiting — ModuLab Core calls SearXNG directly over the
+  # Docker network without a reverse proxy, so there is no X-Forwarded-For
+  # header. The limiter/botdetection would block every request otherwise.
+  limiter: false
+  # Trust Traefik's forwarded headers for browser-facing requests.
+  trusted_proxy_ips:
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+    - 10.0.0.0/8
 
 search:
   formats:
