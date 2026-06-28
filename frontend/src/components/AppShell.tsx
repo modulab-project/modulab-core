@@ -504,9 +504,11 @@ function ProfilePanelContent({
               className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
             >
               <i className="ti ti-puzzle text-[15px] text-gray-500" />
-              {(mod.manifest as { description?: string } | undefined)?.description
-                ? (mod.manifest as { name?: string }).name ?? mod.name
-                : mod.name}
+              {(() => {
+                const mf = mod.manifest as { display_name?: Record<string, string>; name?: string } | null;
+                const lng = i18nInstance.language?.slice(0, 2) ?? "en";
+                return mf?.display_name?.[lng] ?? mf?.display_name?.["en"] ?? mf?.name ?? mod.name;
+              })()}
             </Link>
           ))}
         </>
