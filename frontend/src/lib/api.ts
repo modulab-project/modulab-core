@@ -134,6 +134,9 @@ export interface HealthResponse {
   searxng_configured: boolean;
   // Only present when searxng_configured is true.
   searxng_reachable?: boolean;
+  // Absent when the NTP UDP check timed out or was blocked by the firewall.
+  // true = clock within 30 s of pool.ntp.org; false = dangerous drift.
+  ntp_drift_ok?: boolean;
 }
 
 // /healthz needs no bootstrap token - it's exempt from that gate in main.go
@@ -901,4 +904,41 @@ export function getAuditLog(
   return request<AuditEntry[]>(`/v1/audit-log${qs ? `?${qs}` : ""}`, {
     headers: bearerHeaders(token),
   });
+}
+
+// ---- User preferences -------------------------------------------------------
+
+export interface UserPrefs {
+  ui_language: string; // "en" | "de" | "" (browser default)
+}
+
+// GET /v1/user/preferences — returns the calling user's stored UI language.
+export function getUserPrefs(token: string): Promise<UserPrefs> {
+  return request<UserPrefs>("/v1/user/preferences", {
+    headers: bearerHeaders(token),
+  });
+}
+
+// PATCH /v1/user/preferences — saves the UI language preference.
+export function updateUserPrefs(token: string, prefs: Partial<UserPrefs>): Promise<void> {
+  return request<void>("/v1/user/preferences", {
+    method: "PATCH",
+    headers: bearerHeaders(token),
+    body: JSON.stringify(prefs),
+  });
+}
+
+// ---- DSGVO / data export ----------------------------------------------------
+
+// GET /v1/auth/me/export — triggers a JSON file download of all personal data.
+// Returns the raw Response so the caller can blob it and create an object URL.
+export async function exportMyData(token: string): Promise<Blob> {
+  const res = await fetch(`${API_BASE_URL}/v1/auth/me/export`, {
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new ApiError(res.status, text || res.statusText);
+  }
+  return res.blob();
 }

@@ -4,10 +4,12 @@ import { useTranslation } from "react-i18next";
 import i18n from "../lib/i18n";
 import {
   getHealth,
+  getUserPrefs,
   listAIProviders,
   listUsers,
   logoutRequest,
   streamAIChat,
+  updateUserPrefs,
   type AIUserProvider,
   type ChatMessage,
   type HealthResponse,
@@ -92,6 +94,22 @@ export function AppShell({
       .then(setHealth)
       .catch(() => setHealth(null));
   }, []);
+
+  // Load the stored UI language on first render for this user and apply it
+  // so the preference survives across browsers and devices. Best-effort: a
+  // failed fetch leaves the existing browser/localStorage language in place.
+  useEffect(() => {
+    const token = getSessionToken();
+    if (!token) return;
+    getUserPrefs(token)
+      .then((prefs) => {
+        if (prefs.ui_language && !i18n.language.startsWith(prefs.ui_language)) {
+          i18n.changeLanguage(prefs.ui_language);
+        }
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.user_id]); // re-run if a different user logs in within the same tab
 
   async function handleLogout() {
     const token = getSessionToken();
@@ -534,7 +552,15 @@ function ProfilePanelContent({
             <button
               key={lang}
               type="button"
-              onClick={() => i18n.changeLanguage(lang)}
+              onClick={() => {
+                i18n.changeLanguage(lang);
+                // Persist to DB so the preference survives across devices.
+                // Best-effort: a failed save leaves the in-browser change intact.
+                const token = getSessionToken();
+                if (token) {
+                  updateUserPrefs(token, { ui_language: lang }).catch(() => {});
+                }
+              }}
               className={`rounded-md px-2 py-0.5 text-xs font-medium transition-colors ${
                 i18nInstance.language.startsWith(lang)
                   ? "bg-teal-600 text-white"
@@ -654,6 +680,9 @@ function StatusPanelContent({ health }: { health: HealthResponse }) {
         <StatusRow icon="ti-search" label={t("shell.status.searxng")} ok={health.searxng_reachable} />
       ) : (
         <StatusRow icon="ti-search" label={t("shell.status.searxng")} value={t("shell.status.not_configured")} />
+      )}
+      {health.ntp_drift_ok !== undefined && (
+        <StatusRow icon="ti-clock-check" label={t("shell.status.ntp")} ok={health.ntp_drift_ok} />
       )}
     </div>
   );

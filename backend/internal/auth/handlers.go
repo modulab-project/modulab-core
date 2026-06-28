@@ -508,6 +508,214 @@ func DeleteSelfHandler(d Deps) http.HandlerFunc {
 	}
 }
 
+// UserPrefsResponse is the body of GET /v1/user/preferences.
+type UserPrefsResponse struct {
+	UILanguage string `json:"ui_language"` // "en", "de", or "" (browser default)
+}
+
+// UserPrefsHandler handles GET and PATCH /v1/user/preferences.
+//
+// GET returns the caller's stored UI language preference.
+// PATCH accepts {"ui_language": "en"|"de"|""} and persists it; responds 204.
+//
+// Both methods require a valid non-pending session (validated via Valkey, same
+// pattern as MeHandler). Language is stored as plaintext in users.ui_language -
+// it is not PII and does not need GCM encryption.
+func UserPrefsHandler(d Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token := bearerToken(r)
+		if token == "" {
+			http.Error(w, "missing bearer token", http.StatusUnauthorized)
+			return
+		}
+		ctx := r.Context()
+		sess, ok, err := ValidateSession(ctx, d.Valkey, token)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if !ok {
+			http.Error(w, "invalid or expired session", http.StatusUnauthorized)
+			return
+		}
+
+		switch r.Method {
+		case http.MethodGet:
+			lang, err := d.Pool.GetUserLanguage(ctx, sess.UserID)
+			if err != nil {
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			writeJSON(w, http.StatusOK, UserPrefsResponse{UILanguage: lang})
+
+		case http.MethodPatch:
+			var body struct {
+				UILanguage string `json:"ui_language"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				http.Error(w, "invalid request body", http.StatusBadRequest)
+				return
+			}
+			// Validation is delegated to SetUserLanguage (resets unknown values to "").
+			if err := d.Pool.SetUserLanguage(ctx, sess.UserID, body.UILanguage); err != nil {
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	}
+}
+
+// ExportSelfHandler handles GET /v1/auth/me/export — the DSGVO data portability
+// endpoint (GDPR Article 20). It collects every piece of personal data Core
+// stores for the calling user and returns it as a JSON file download.
+//
+// Intentionally comprehensive: the response includes the user's profile, UI
+// preferences, search preferences, which AI providers they have a key for
+// (never the key material itself), news feed subscriptions, and personal quick
+// links. No admin data (audit log, other users) is included.
+func ExportSelfHandler(d Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		token := bearerToken(r)
+		if token == "" {
+			http.Error(w, "missing bearer token", http.StatusUnauthorized)
+			return
+		}
+		ctx := r.Context()
+		sess, ok, err := ValidateSession(ctx, d.Valkey, token)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if !ok {
+			http.Error(w, "invalid or expired session", http.StatusUnauthorized)
+			return
+		}
+
+		// Profile row (decrypted).
+		user, found, err := d.Pool.GetUserExportRow(ctx, sess.UserID)
+		if err != nil || !found {
+			http.Error(w, "user not found", http.StatusNotFound)
+			return
+		}
+
+		// Search preferences.
+		searchPrefs, _ := d.Pool.GetSearchPrefs(ctx, sess.UserID)
+
+		// AI provider key flags (never key material).
+		aiProviders, _ := d.Pool.ListAIProvidersForUser(ctx, sess.UserID)
+		type aiEntry struct {
+			ProviderID string `json:"provider_id"`
+			Name       string `json:"name"`
+			HasUserKey bool   `json:"has_user_key"`
+		}
+		aiEntries := make([]aiEntry, 0, len(aiProviders))
+		for _, p := range aiProviders {
+			if p.HasUserKey {
+				aiEntries = append(aiEntries, aiEntry{
+					ProviderID: p.ID,
+					Name:       p.Name,
+					HasUserKey: true,
+				})
+			}
+		}
+
+		// Feed subscriptions.
+		feeds, _ := d.Pool.ListFeedsForUser(ctx, sess.UserID)
+		type feedEntry struct {
+			Label   string `json:"label"`
+			URL     string `json:"url"`
+			Enabled bool   `json:"enabled"`
+		}
+		feedEntries := make([]feedEntry, 0)
+		for _, f := range feeds {
+			feedEntries = append(feedEntries, feedEntry{
+				Label:   f.Label,
+				URL:     f.URL,
+				Enabled: f.Enabled,
+			})
+		}
+
+		// Personal quick links.
+		userLinks, _ := d.Pool.ListUserQuickLinks(ctx, sess.UserID)
+		type linkEntry struct {
+			Title       string `json:"title"`
+			URL         string `json:"url"`
+			Description string `json:"description,omitempty"`
+		}
+		linkEntries := make([]linkEntry, 0, len(userLinks))
+		for _, l := range userLinks {
+			linkEntries = append(linkEntries, linkEntry{
+				Title:       l.Title,
+				URL:         l.URL,
+				Description: l.Description,
+			})
+		}
+
+		type profileSection struct {
+			UserID      string `json:"user_id"`
+			Email       string `json:"email"`
+			Name        string `json:"name"`
+			Role        string `json:"role"`
+			Approved    bool   `json:"approved"`
+			UILanguage  string `json:"ui_language"`
+			CreatedAt   string `json:"created_at"`
+			LastLoginAt string `json:"last_login_at"`
+		}
+		type searchSection struct {
+			Language   string `json:"language"`
+			Safesearch int    `json:"safesearch"`
+		}
+		type exportDoc struct {
+			ExportedAt         string         `json:"exported_at"`
+			Profile            profileSection `json:"profile"`
+			SearchPreferences  searchSection  `json:"search_preferences"`
+			AIProviderKeys     []aiEntry      `json:"ai_provider_keys"`
+			FeedSubscriptions  []feedEntry    `json:"feed_subscriptions"`
+			PersonalQuickLinks []linkEntry    `json:"personal_quick_links"`
+		}
+
+		doc := exportDoc{
+			ExportedAt: time.Now().UTC().Format(time.RFC3339),
+			Profile: profileSection{
+				UserID:      user.Subject,
+				Email:       user.Email,
+				Name:        user.Name,
+				Role:        user.Role,
+				Approved:    user.Approved,
+				UILanguage:  user.UILanguage,
+				CreatedAt:   user.CreatedAt.UTC().Format(time.RFC3339),
+				LastLoginAt: user.LastLoginAt.UTC().Format(time.RFC3339),
+			},
+			SearchPreferences: searchSection{
+				Language:   searchPrefs.Language,
+				Safesearch: searchPrefs.Safesearch,
+			},
+			AIProviderKeys:     aiEntries,
+			FeedSubscriptions:  feedEntries,
+			PersonalQuickLinks: linkEntries,
+		}
+
+		// Use the OIDC subject as a filename fragment — it's stable, unique,
+		// and not PII in the filename context (the user is downloading their own
+		// data and already knows their own sub).
+		filename := fmt.Sprintf("modulab-export.json")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+		w.WriteHeader(http.StatusOK)
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(doc)
+	}
+}
+
 // LogoutHandler invalidates the request's Bearer token immediately.
 func LogoutHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

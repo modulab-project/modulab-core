@@ -35,6 +35,10 @@
     "not_verified": "Nicht bestätigt",
     "not_available": "Nicht verfügbar",
     "manage_account": "Konto im OIDC verwalten",
+    "export_data": "Meine Daten herunterladen",
+    "export_data_desc": "Exportiert alle über dich gespeicherten ModuLab-Daten als JSON-Datei (DSGVO Art. 20).",
+    "exporting": "Wird exportiert…",
+    "export_error": "Export fehlgeschlagen.",
     "delete_section_title": "Konto löschen",
     "delete_section_body": "Entfernt dein ModuLab-Konto dauerhaft und widerruft den Zugriff. Dein Identitätsprovider-Konto bleibt unberührt.",
     "delete_confirm": "Konto löschen? Das kann nicht rückgängig gemacht werden.",
@@ -383,6 +387,7 @@
       "postgres": "PostgreSQL",
       "valkey": "Valkey",
       "searxng": "SearXNG",
+      "ntp": "Systemuhr (NTP)",
       "reachable": "Erreichbar",
       "unreachable": "Nicht erreichbar",
       "not_configured": "Nicht konfiguriert"

@@ -117,6 +117,14 @@ func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
 	`); err != nil {
 		return fmt.Errorf("db: ensure users.locked: %w", err)
 	}
+	// ui_language stores the user's preferred UI locale ("en" or "de").
+	// Plaintext — it is not PII (just a locale code) and therefore does not
+	// need GCM encryption. Empty string means "use browser default".
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE users ADD COLUMN IF NOT EXISTS ui_language TEXT NOT NULL DEFAULT ''
+	`); err != nil {
+		return fmt.Errorf("db: ensure users.ui_language: %w", err)
+	}
 
 	if err := p.EnsureNewsSchema(ctx); err != nil {
 		return err
@@ -550,6 +558,72 @@ func (p *Pool) DeleteUser(ctx context.Context, subject string) (int64, error) {
 		return 0, fmt.Errorf("db: delete user %q: %w", subject, err)
 	}
 	return tag.RowsAffected(), nil
+}
+
+// GetUserLanguage returns the stored UI language preference for userID, or ""
+// when no preference has been saved yet. Callers treat "" as "browser default".
+func (p *Pool) GetUserLanguage(ctx context.Context, userID string) (string, error) {
+	var lang string
+	err := p.QueryRow(ctx, `SELECT ui_language FROM users WHERE id = $1`, userID).Scan(&lang)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", nil
+		}
+		return "", fmt.Errorf("db: get ui_language for %q: %w", userID, err)
+	}
+	return lang, nil
+}
+
+// SetUserLanguage persists the UI language preference for userID. Only "en"
+// and "de" are accepted; any other value is stored as "" (reset to default).
+func (p *Pool) SetUserLanguage(ctx context.Context, userID, lang string) error {
+	if lang != "en" && lang != "de" {
+		lang = ""
+	}
+	_, err := p.Exec(ctx, `UPDATE users SET ui_language = $1 WHERE id = $2`, lang, userID)
+	if err != nil {
+		return fmt.Errorf("db: set ui_language for %q: %w", userID, err)
+	}
+	return nil
+}
+
+// UserExportRow collects all personal data stored for one user — used by the
+// DSGVO data-export endpoint (GET /v1/auth/me/export). All encrypted fields
+// are returned as plaintext (already decrypted by this method).
+type UserExportRow struct {
+	Subject     string
+	Email       string
+	Name        string
+	Role        string
+	Approved    bool
+	Locked      bool
+	UILanguage  string
+	CreatedAt   time.Time
+	LastLoginAt time.Time
+}
+
+// GetUserExportRow returns the DSGVO export row for userID, decrypting PII.
+func (p *Pool) GetUserExportRow(ctx context.Context, userID string) (UserExportRow, bool, error) {
+	var u UserExportRow
+	err := p.QueryRow(ctx, `
+		SELECT id, email, name, role, approved, locked, ui_language, created_at, last_login_at
+		FROM users WHERE id = $1
+	`, userID).Scan(&u.Subject, &u.Email, &u.Name, &u.Role, &u.Approved, &u.Locked,
+		&u.UILanguage, &u.CreatedAt, &u.LastLoginAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return UserExportRow{}, false, nil
+		}
+		return UserExportRow{}, false, fmt.Errorf("db: get user export row %q: %w", userID, err)
+	}
+	var decErr error
+	if u.Email, decErr = crypto.DecryptIfNotEmpty(p.masterKey, u.Email); decErr != nil {
+		return UserExportRow{}, false, fmt.Errorf("db: decrypt email for export %q: %w", userID, decErr)
+	}
+	if u.Name, decErr = crypto.DecryptIfNotEmpty(p.masterKey, u.Name); decErr != nil {
+		return UserExportRow{}, false, fmt.Errorf("db: decrypt name for export %q: %w", userID, decErr)
+	}
+	return u, true, nil
 }
 
 // ---- News feeds -------------------------------------------------------------

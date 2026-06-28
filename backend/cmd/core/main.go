@@ -31,6 +31,7 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/db"
 	"github.com/modulab-project/modulab-core/backend/internal/mail"
 	"github.com/modulab-project/modulab-core/backend/internal/news"
+	ntpcheck "github.com/modulab-project/modulab-core/backend/internal/ntp"
 	"github.com/modulab-project/modulab-core/backend/internal/quicklinks"
 	"github.com/modulab-project/modulab-core/backend/internal/searxng"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
@@ -40,17 +41,22 @@ import (
 )
 
 type healthStatus struct {
-	Status             string `json:"status"`
-	Version            string `json:"version"`
-	UptimeSeconds      int64  `json:"uptime_seconds"`
-	PostgresUp         bool   `json:"postgres_reachable"`
-	ValkeyUp           bool   `json:"valkey_reachable"`
-	MasterKeySetUp     bool   `json:"master_key_present"`
-	SetupCompleted     bool   `json:"setup_completed"`
-	SearXNGConfigured  bool   `json:"searxng_configured"`
+	Status            string `json:"status"`
+	Version           string `json:"version"`
+	UptimeSeconds     int64  `json:"uptime_seconds"`
+	PostgresUp        bool   `json:"postgres_reachable"`
+	ValkeyUp          bool   `json:"valkey_reachable"`
+	MasterKeySetUp    bool   `json:"master_key_present"`
+	SetupCompleted    bool   `json:"setup_completed"`
+	SearXNGConfigured bool   `json:"searxng_configured"`
 	// SearXNGUp is nil when SearXNG is not configured (omitted from JSON).
 	// When configured it reflects whether the last ping succeeded.
-	SearXNGUp         *bool  `json:"searxng_reachable,omitempty"`
+	SearXNGUp *bool `json:"searxng_reachable,omitempty"`
+	// NTPDriftOK is nil when the NTP check could not be performed (e.g. no
+	// outbound UDP on port 123). When non-nil, true means the system clock
+	// is within 30 s of pool.ntp.org; false means it is dangerously off and
+	// TLS / JWT / audit-log timestamps may be wrong.
+	NTPDriftOK *bool `json:"ntp_drift_ok,omitempty"`
 }
 
 func main() {
@@ -175,7 +181,7 @@ func main() {
 		}
 		// SearXNG is optional: only check reachability when a URL is saved.
 		// resolveURL is a fast DB lookup; the Ping adds ~1 RTT on the internal
-		// Docker network (same order of magnitude as the Postgres/Valkey checks).
+		// network (same order of magnitude as the Postgres/Valkey checks).
 		if configured, err := searxng.IsConfigured(r.Context(), pool, cfg.MasterKey); err == nil {
 			status.SearXNGConfigured = configured
 			if configured {
@@ -184,6 +190,13 @@ func main() {
 					status.SearXNGUp = &up
 				}
 			}
+		}
+		// NTP drift check: best-effort, 3 s timeout. If pool.ntp.org is not
+		// reachable (firewalled UDP 123), NTPDriftOK stays nil — callers treat
+		// nil as "unknown", not "bad". The 3-second deadline is the only extra
+		// latency /healthz adds beyond the SearXNG ping above.
+		if ok, err := ntpcheck.DriftOK(30 * time.Second); err == nil {
+			status.NTPDriftOK = &ok
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(status)
@@ -259,7 +272,12 @@ func main() {
 	// /v1/admin/users/{id} below, but for the caller's own account, which
 	// that admin-only route explicitly refuses to touch.
 	mux.HandleFunc("DELETE /v1/auth/me", auth.DeleteSelfHandler(authDeps))
+	// DSGVO data-portability export (GDPR Article 20): returns all personal
+	// data stored for the calling user as a JSON attachment.
+	mux.HandleFunc("GET /v1/auth/me/export", auth.ExportSelfHandler(authDeps))
 	mux.HandleFunc("/v1/auth/logout", auth.LogoutHandler(authDeps))
+	// UI language preference: GET returns {"ui_language":"en|de|"}, PATCH updates.
+	mux.HandleFunc("/v1/user/preferences", auth.UserPrefsHandler(authDeps))
 
 	// Spec section 3.5's real-time notification stream (internal/notify):
 	// authenticates its own bearer token from a query parameter rather

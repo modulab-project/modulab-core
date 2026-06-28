@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell, Avatar } from "../components/AppShell";
 import { AuthButton } from "../components/AuthShell";
-import { deleteSelf } from "../lib/api";
+import { deleteSelf, exportMyData } from "../lib/api";
 import { clearSessionToken, getSessionToken } from "../lib/session";
 
 // "/profile" route, linked from the profile panel AppShell renders on every
@@ -33,6 +33,8 @@ export default function ProfilePage() {
   const { session, loading } = useAuthenticatedSession();
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   if (loading || !session) {
     return null;
@@ -47,6 +49,28 @@ export default function ProfilePage() {
   // guard (guardAgainstLastSuperAdmin, admin.go) - that 400 surfaces below
   // as deleteError, same as AdminUsersPage's runAction does for its own
   // guard violations.
+  async function handleExportData() {
+    const token = getSessionToken();
+    if (!token) return;
+    setExporting(true);
+    setExportError(null);
+    try {
+      const blob = await exportMyData(token);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "modulab-export.json";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      setExportError(t("profile.export_error"));
+    } finally {
+      setExporting(false);
+    }
+  }
+
   async function handleDeleteAccount() {
     if (!window.confirm(t("profile.delete_confirm"))) {
       return;
@@ -123,7 +147,25 @@ export default function ProfilePage() {
           </AuthButton>
         )}
 
-        <div className="mt-10 rounded-2xl border border-red-200 p-4 dark:border-red-900">
+        <div className="mt-6 rounded-2xl border border-gray-200 p-4 dark:border-gray-800">
+          <p className="text-sm font-medium">{t("profile.export_data")}</p>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            {t("profile.export_data_desc")}
+          </p>
+          {exportError && (
+            <p className="mt-2 text-sm text-red-600 dark:text-red-400">{exportError}</p>
+          )}
+          <button
+            type="button"
+            disabled={exporting}
+            onClick={handleExportData}
+            className="mt-3 rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+          >
+            {exporting ? t("profile.exporting") : t("profile.export_data")}
+          </button>
+        </div>
+
+        <div className="mt-6 rounded-2xl border border-red-200 p-4 dark:border-red-900">
           <p className="text-sm font-medium text-red-700 dark:text-red-400">{t("profile.delete_section_title")}</p>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             {t("profile.delete_section_body")}
