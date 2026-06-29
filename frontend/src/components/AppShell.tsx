@@ -920,9 +920,9 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
   // Derive the active model label for display: user's preferred model when
   // they have their own key, otherwise the admin-set default.
   const activeModel = selectedProvider
-    ? (selectedProvider.has_user_key && selectedProvider.preferred_model)
+    ? ((selectedProvider.has_user_key && selectedProvider.preferred_model)
       ? selectedProvider.preferred_model
-      : selectedProvider.default_model
+      : selectedProvider.default_model).replace(/^models\//, "")
     : null;
 
   return (
@@ -956,7 +956,8 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
             {modelPickerOpen && providers.length > 0 && (
               <div className="absolute right-0 top-full z-10 mt-1 w-56 rounded-xl border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
                 {providers.map((p) => {
-                  const modelLabel = (p.has_user_key && p.preferred_model) ? p.preferred_model : p.default_model;
+                  const rawModel = (p.has_user_key && p.preferred_model) ? p.preferred_model : p.default_model;
+                  const modelLabel = rawModel.replace(/^models\//, "");
                   return (
                     <button
                       key={p.id}
