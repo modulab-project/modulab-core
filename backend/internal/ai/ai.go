@@ -506,12 +506,44 @@ func fetchModels(ctx context.Context, provType, baseURL, apiKey string) ([]strin
 
 	ids := make([]string, 0, len(result.Data))
 	for _, m := range result.Data {
-		if m.ID != "" && isCompatibleModel(provType, m.ID) {
-			ids = append(ids, m.ID)
+		if m.ID == "" || !isCompatibleModel(provType, m.ID) {
+			continue
 		}
+		ids = append(ids, normalizeModelID(provType, m.ID))
 	}
 	sort.Strings(ids)
 	return ids, nil
+}
+
+// normalizeModelID strips provider-specific noise from model IDs so the
+// cleaned name can be stored in the DB and displayed directly.
+//
+//   - Gemini:    "models/gemini-2.5-flash"  → "gemini-2.5-flash"
+//   - Anthropic: "claude-haiku-4-5-20251001" → "claude-haiku-4-5"
+//     (date suffix YYYYMMDD removed; without it Anthropic always routes to
+//     the latest safe version of that model, which is fine for everyday use)
+//   - All others: unchanged
+func normalizeModelID(provType, id string) string {
+	switch provType {
+	case "gemini":
+		return strings.TrimPrefix(id, "models/")
+	case "anthropic":
+		// Strip trailing -YYYYMMDD suffix (8 digits after the last hyphen).
+		if idx := len(id) - 9; idx > 0 && id[idx] == '-' {
+			suffix := id[idx+1:]
+			allDigits := true
+			for _, c := range suffix {
+				if c < '0' || c > '9' {
+					allDigits = false
+					break
+				}
+			}
+			if allDigits {
+				return id[:idx]
+			}
+		}
+	}
+	return id
 }
 
 // isCompatibleModel returns false for models that are known to be incompatible

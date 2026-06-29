@@ -920,9 +920,9 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
   // Derive the active model label for display: user's preferred model when
   // they have their own key, otherwise the admin-set default.
   const activeModel = selectedProvider
-    ? ((selectedProvider.has_user_key && selectedProvider.preferred_model)
+    ? (selectedProvider.has_user_key && selectedProvider.preferred_model)
       ? selectedProvider.preferred_model
-      : selectedProvider.default_model).replace(/^models\//, "")
+      : selectedProvider.default_model
     : null;
 
   return (
@@ -935,11 +935,6 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
           <i className="ti ti-sparkles flex-none text-[16px] text-teal-600 dark:text-teal-400" />
           <div className="min-w-0">
             <span className="text-sm font-semibold">{t("shell.ai_chat")}</span>
-            {activeModel && (
-              <span className="ml-1.5 text-[11px] text-gray-400 dark:text-gray-500 truncate">
-                {activeModel}
-              </span>
-            )}
           </div>
         </div>
         <div className="flex flex-none items-center gap-1.5">
@@ -956,8 +951,7 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
             {modelPickerOpen && providers.length > 0 && (
               <div className="absolute right-0 top-full z-10 mt-1 w-56 rounded-xl border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
                 {providers.map((p) => {
-                  const rawModel = (p.has_user_key && p.preferred_model) ? p.preferred_model : p.default_model;
-                  const modelLabel = rawModel.replace(/^models\//, "");
+                  const modelLabel = (p.has_user_key && p.preferred_model) ? p.preferred_model : p.default_model;
                   return (
                     <button
                       key={p.id}
