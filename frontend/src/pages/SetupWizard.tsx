@@ -405,11 +405,11 @@ function StepSuperAdminLogin({
 function StepSMTP({ onDone }: { onDone: () => void }) {
   const { t } = useTranslation();
   const [host, setHost] = useState("");
-  const [port, setPort] = useState("587");
+  const [port, setPort] = useState("465");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [fromAddress, setFromAddress] = useState("");
-  const [encryption, setEncryption] = useState("starttls");
+  const [encryption, setEncryption] = useState("tls");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [testAddress, setTestAddress] = useState("");
