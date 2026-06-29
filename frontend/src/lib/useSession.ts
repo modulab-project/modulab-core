@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getMe, type Session } from "./api";
+import { getMe, getHealth, type Session } from "./api";
 import { clearSessionToken, getSessionToken } from "./session";
 
 // Same interval Pending.tsx polls on - kept in sync so "how stale can a
@@ -32,7 +32,12 @@ export function useAuthenticatedSession(): { session: Session | null; loading: b
   useEffect(() => {
     const token = getSessionToken();
     if (!token) {
-      navigate("/login", { replace: true });
+      // Before sending the user to /login, check whether setup has ever been
+      // completed. If not, /login is useless (OIDC isn't configured yet) -
+      // send them to /setup instead so the wizard can run.
+      getHealth()
+        .then((h) => navigate(h.setup_completed ? "/login" : "/setup", { replace: true }))
+        .catch(() => navigate("/login", { replace: true }));
       return;
     }
 
