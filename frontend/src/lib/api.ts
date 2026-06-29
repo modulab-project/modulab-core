@@ -893,6 +893,20 @@ export function updateDNSChallenge(
   });
 }
 
+export function deleteOIDCConfig(token: string): Promise<OIDCStatus> {
+  return request<OIDCStatus>("/v1/admin/oidc", {
+    method: "DELETE",
+    headers: bearerHeaders(token),
+  });
+}
+
+export function deleteDNSConfig(token: string): Promise<DNSChallengeStatus> {
+  return request<DNSChallengeStatus>("/v1/admin/dns-challenge", {
+    method: "DELETE",
+    headers: bearerHeaders(token),
+  });
+}
+
 // ---- Audit log ----------------------------------------------------------------
 
 export interface AuditEntry {

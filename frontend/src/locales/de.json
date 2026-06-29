@@ -260,7 +260,16 @@
       "api_credentials": "API-Zugangsdaten",
       "api_credentials_placeholder": "API-Token, JSON-Credentials o. Ä.",
       "credentials_placeholder_existing": "Leer lassen, um bestehende Credentials zu behalten",
-      "save_dns": "DNS-Challenge speichern"
+      "save_dns": "DNS-Challenge speichern",
+      "save": "Speichern",
+      "oidc": {
+        "removing": "Wird entfernt…",
+        "remove": "Konfiguration entfernen"
+      },
+      "dns": {
+        "removing": "Wird entfernt…",
+        "remove": "Konfiguration entfernen"
+      }
     },
     "audit": {
       "title": "Audit-Log",

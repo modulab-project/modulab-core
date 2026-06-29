@@ -381,7 +381,9 @@ func main() {
 	// All super-admin only (same tier as SMTP above).
 	mux.Handle("GET /v1/admin/system", superAdminOnly(adminapi.SystemStatusHandler(pool, cfg.MasterKey)))
 	mux.Handle("PATCH /v1/admin/oidc", superAdminOnly(adminapi.OIDCUpdateHandler(pool, cfg.MasterKey)))
+	mux.Handle("DELETE /v1/admin/oidc", superAdminOnly(adminapi.OIDCDeleteHandler(pool, cfg.MasterKey)))
 	mux.Handle("PATCH /v1/admin/dns-challenge", superAdminOnly(adminapi.DNSChallengeUpdateHandler(pool, cfg.MasterKey)))
+	mux.Handle("DELETE /v1/admin/dns-challenge", superAdminOnly(adminapi.DNSChallengeDeleteHandler(pool, cfg.MasterKey)))
 	mux.Handle("GET /v1/audit-log", superAdminOnly(adminapi.AuditLogHandler(pool, cfg.MasterKey)))
 
 	// Widget endpoints (spec section 8 / Home page). Not wrapped in any

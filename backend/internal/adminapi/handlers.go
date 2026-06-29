@@ -273,6 +273,76 @@ func DNSChallengeUpdateHandler(pool *db.Pool, masterKeyEnv string) http.HandlerF
 	}
 }
 
+// ---- DELETE /v1/admin/oidc ----------------------------------------------------
+
+// OIDCDeleteHandler clears all OIDC settings from core_settings.
+func OIDCDeleteHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
+		masterKey, err := setup.ResolveMasterKey(ctx, pool, masterKeyEnv)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusPreconditionFailed)
+			return
+		}
+
+		for _, key := range []string{"oidc_issuer_url", "oidc_client_id", "oidc_client_secret_enc"} {
+			if err := pool.DeleteSetting(ctx, key); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		// Audit — best-effort.
+		if sess, ok := auth.SessionFromContext(ctx); ok {
+			if err := audit.Log(ctx, pool, masterKey, audit.LogParams{
+				EventType:  audit.EventConfigOIDCDel,
+				ActorID:    sess.UserID,
+				ActorEmail: sess.Email,
+			}); err != nil {
+				log.Printf("adminapi: audit oidc delete: %v", err)
+			}
+		}
+
+		writeJSON(w, http.StatusOK, OIDCStatus{Configured: false})
+	}
+}
+
+// ---- DELETE /v1/admin/dns-challenge -------------------------------------------
+
+// DNSChallengeDeleteHandler clears all DNS-challenge settings from core_settings.
+func DNSChallengeDeleteHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
+		masterKey, err := setup.ResolveMasterKey(ctx, pool, masterKeyEnv)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusPreconditionFailed)
+			return
+		}
+
+		for _, key := range []string{"dns_challenge_provider", "dns_challenge_credentials_enc"} {
+			if err := pool.DeleteSetting(ctx, key); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		// Audit — best-effort.
+		if sess, ok := auth.SessionFromContext(ctx); ok {
+			if err := audit.Log(ctx, pool, masterKey, audit.LogParams{
+				EventType:  audit.EventConfigDNSDel,
+				ActorID:    sess.UserID,
+				ActorEmail: sess.Email,
+			}); err != nil {
+				log.Printf("adminapi: audit dns delete: %v", err)
+			}
+		}
+
+		writeJSON(w, http.StatusOK, DNSChallengeStatus{Configured: false})
+	}
+}
+
 // ---- GET /v1/audit-log --------------------------------------------------------
 
 // AuditLogHandler serves GET /v1/audit-log with optional query parameters:

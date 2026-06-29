@@ -260,7 +260,16 @@
       "api_credentials": "API credentials",
       "api_credentials_placeholder": "API token, JSON credentials, etc.",
       "credentials_placeholder_existing": "Leave blank to keep existing credentials",
-      "save_dns": "Save DNS-challenge"
+      "save_dns": "Save DNS-challenge",
+      "save": "Save",
+      "oidc": {
+        "removing": "Removing…",
+        "remove": "Remove configuration"
+      },
+      "dns": {
+        "removing": "Removing…",
+        "remove": "Remove configuration"
+      }
     },
     "audit": {
       "title": "Audit log",

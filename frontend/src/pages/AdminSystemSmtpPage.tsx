@@ -136,14 +136,16 @@ export default function AdminSystemSmtpPage() {
               <option value="tls">{t("admin.smtp.enc_tls")}</option>
             </select>
           </Field>
-          <button type="submit" disabled={saving} className={btnPrimary}>
-            {saving ? t("admin.smtp.saving") : t("admin.smtp.save")}
-          </button>
-          {status?.configured && (
-            <button type="button" disabled={removing} onClick={handleRemove} className={btnDanger}>
-              {removing ? t("admin.smtp.action.removing") : t("admin.smtp.action.remove")}
+          <div className="flex gap-3">
+            <button type="submit" disabled={saving} className={`flex-1 ${btnPrimary}`}>
+              {saving ? t("admin.smtp.saving") : t("admin.smtp.save")}
             </button>
-          )}
+            {status?.configured && (
+              <button type="button" disabled={removing} onClick={handleRemove} className={`flex-1 ${btnDanger}`}>
+                {removing ? t("admin.smtp.action.removing") : t("admin.smtp.action.remove")}
+              </button>
+            )}
+          </div>
         </form>
       </div>
     </AppShell>
@@ -182,7 +184,7 @@ const inputClass =
   "w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 placeholder:text-gray-400 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500";
 
 const btnPrimary =
-  "w-full rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-teal-500 dark:hover:bg-teal-400";
+  "rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-teal-500 dark:hover:bg-teal-400";
 
 const btnDanger =
-  "w-full rounded-lg border border-red-300 px-4 py-2.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950";
+  "rounded-lg border border-red-300 px-4 py-2.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950";

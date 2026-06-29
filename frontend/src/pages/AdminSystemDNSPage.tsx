@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { getSystemStatus, updateDNSChallenge } from "../lib/api";
+import { getSystemStatus, updateDNSChallenge, deleteDNSConfig } from "../lib/api";
 import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
@@ -38,6 +38,7 @@ export default function AdminSystemDNSPage() {
   // Derived: is the current provider one of the known list?
   const isCustom = provider === "__custom__";
   const [saving, setSaving] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const hasFetched = useRef(false);
 
@@ -92,6 +93,22 @@ export default function AdminSystemDNSPage() {
     }
   }
 
+  async function handleRemove() {
+    const token = getSessionToken();
+    if (!token || removing) return;
+    setRemoving(true);
+    setMsg(null);
+    try {
+      await deleteDNSConfig(token);
+      setConfigured(false);
+      setProvider(""); setCustomProvider(""); setCredentials("");
+    } catch (err) {
+      setMsg({ ok: false, text: err instanceof Error ? err.message : t("admin.system.save_error") });
+    } finally {
+      setRemoving(false);
+    }
+  }
+
   return (
     <AppShell session={session}>
       <div className="mx-auto w-full max-w-md py-10">
@@ -140,9 +157,17 @@ export default function AdminSystemDNSPage() {
               placeholder={configured ? t("admin.system.credentials_placeholder_existing") : t("admin.system.api_credentials_placeholder")}
               className={`${inputClass} resize-none`} />
           </Field>
-          <button type="submit" disabled={saving} className={btnPrimary}>
-            {saving ? t("admin.system.saving") : t("admin.system.save_dns")}
-          </button>
+          <div className="flex gap-3">
+            <button type="submit" disabled={saving} className={`flex-1 ${btnPrimary}`}>
+              {saving ? t("admin.system.saving") : t("admin.system.save")}
+            </button>
+            {configured && (
+              <button type="button" disabled={removing} onClick={handleRemove}
+                className="flex-1 rounded-lg border border-red-300 px-4 py-2.5 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950">
+                {removing ? t("admin.system.dns.removing") : t("admin.system.dns.remove")}
+              </button>
+            )}
+          </div>
         </form>
       </div>
     </AppShell>
@@ -190,4 +215,4 @@ const inputClass =
   "w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 placeholder:text-gray-400 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500";
 
 const btnPrimary =
-  "w-full rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-teal-500 dark:hover:bg-teal-400";
+  "rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-teal-500 dark:hover:bg-teal-400";
