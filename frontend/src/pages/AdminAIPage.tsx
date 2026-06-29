@@ -429,14 +429,47 @@ function EditBuiltinModal({
   const [loadingModels, setLoadingModels] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
 
+  // The "load models" button is visible when either the provider already has a
+  // stored key OR the user has typed a new key in this session (key.trim() != "").
+  const canLoadModels = provider.has_admin_key || key.trim() !== "";
+
   async function handleLoadModels() {
     const token = getSessionToken();
     if (!token) return;
     setLoadingModels(true);
     setModelsError(null);
+    // If the user typed a new key, save it first so the backend can use it to
+    // fetch the model list, then reload so has_admin_key becomes true.
+    if (key.trim() && !provider.has_admin_key) {
+      try {
+        await adminPatchAIProvider(token, provider.id, {
+          default_model: model.trim(),
+          admin_key: key.trim(),
+        }).catch(async () => {
+          await adminCreateAIProvider(token, {
+            id: provider.id,
+            type: provider.type,
+            name: provider.name,
+            default_model: model.trim(),
+            admin_key: key.trim(),
+            user_can_override: true,
+            enabled: true,
+            sort_order: provider.sort_order,
+          });
+        });
+        onSaved(); // refresh parent list so has_admin_key is updated
+      } catch {
+        // proceed anyway — the backend will use the in-flight key if supported
+      }
+    }
     try {
       const list = await adminFetchAIProviderModels(token, provider.id);
       setModels(list);
+      // If the current model is not in the list, snap to the first entry so
+      // the select and the state stay in sync.
+      if (list.length > 0 && !list.includes(model)) {
+        setModel(list[0]);
+      }
     } catch (e) {
       setModelsError(e instanceof Error ? e.message : t("admin.ai.modal.fetch_models_error"));
     } finally {
@@ -491,7 +524,7 @@ function EditBuiltinModal({
               <label className="text-xs text-gray-500 dark:text-gray-400">
                 {t("admin.ai.modal.default_model")} <span className="ml-0.5 text-red-500">*</span>
               </label>
-              {provider.has_admin_key && (
+              {canLoadModels && (
                 <button
                   type="button"
                   disabled={loadingModels}
