@@ -744,10 +744,24 @@ export function adminPatchAISettings(token: string, settings: Partial<AISettings
   });
 }
 
+export interface AIUserProvidersResponse {
+  providers: AIUserProvider[];
+  preferred_provider_id: string;
+}
+
 // GET /v1/ai/providers — any approved session.
-export function listAIProviders(token: string): Promise<AIUserProvider[]> {
-  return request<AIUserProvider[]>("/v1/ai/providers", {
+export function listAIProviders(token: string): Promise<AIUserProvidersResponse> {
+  return request<AIUserProvidersResponse>("/v1/ai/providers", {
     headers: bearerHeaders(token),
+  });
+}
+
+// PATCH /v1/ai/preference — persist the user's preferred provider cross-device.
+export function setAIPreferredProvider(token: string, providerId: string): Promise<void> {
+  return request<void>("/v1/ai/preference", {
+    method: "PATCH",
+    headers: bearerHeaders(token),
+    body: JSON.stringify({ provider_id: providerId }),
   });
 }
 

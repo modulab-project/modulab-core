@@ -6,6 +6,7 @@ import {
   getHealth,
   getUserPrefs,
   listAIProviders,
+  setAIPreferredProvider,
   listInstalledModules,
   listUsers,
   logoutRequest,
@@ -836,15 +837,19 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Load available providers on mount.
+  // Load available providers on mount and restore the user's last selection.
   useEffect(() => {
     const token = getSessionToken();
     if (!token) return;
     listAIProviders(token)
-      .then((list) => {
+      .then(({ providers: list, preferred_provider_id }) => {
         const available = list.filter((p) => p.available);
         setProviders(available);
-        if (available.length > 0) setSelectedProvider(available[0]);
+        if (available.length === 0) return;
+        const preferred = preferred_provider_id
+          ? available.find((p) => p.id === preferred_provider_id)
+          : null;
+        setSelectedProvider(preferred ?? available[0]);
       })
       .catch(() => {});
   }, []);
@@ -957,6 +962,8 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
                       onClick={() => {
                         setSelectedProvider(p);
                         setModelPickerOpen(false);
+                        const token = getSessionToken();
+                        if (token) setAIPreferredProvider(token, p.id).catch(() => {});
                       }}
                       className={`flex w-full flex-col px-3 py-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-800 ${
                         p.id === selectedProvider?.id ? "text-teal-600 dark:text-teal-400" : "text-gray-700 dark:text-gray-300"

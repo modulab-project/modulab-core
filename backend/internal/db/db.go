@@ -1055,6 +1055,39 @@ func (p *Pool) EnsureAISchema(ctx context.Context) error {
 	`); err != nil {
 		return fmt.Errorf("db: migrate ai_user_keys preferred_model: %w", err)
 	}
+	// Idempotent migration: add preferred_provider_id to users so the last
+	// selected AI provider is remembered cross-device.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE users ADD COLUMN IF NOT EXISTS preferred_provider_id TEXT NOT NULL DEFAULT ''
+	`); err != nil {
+		return fmt.Errorf("db: migrate users preferred_provider_id: %w", err)
+	}
+	return nil
+}
+
+// GetPreferredProvider returns the provider ID the user last selected, or ""
+// if none has been set.
+func (p *Pool) GetPreferredProvider(ctx context.Context, userID string) (string, error) {
+	var id string
+	err := p.QueryRow(ctx,
+		`SELECT preferred_provider_id FROM users WHERE id = $1`, userID,
+	).Scan(&id)
+	if err != nil {
+		return "", fmt.Errorf("db: get preferred provider: %w", err)
+	}
+	return id, nil
+}
+
+// SetPreferredProvider persists the user's preferred AI provider selection.
+// Passing an empty string clears the preference.
+func (p *Pool) SetPreferredProvider(ctx context.Context, userID, providerID string) error {
+	_, err := p.Exec(ctx,
+		`UPDATE users SET preferred_provider_id = $2 WHERE id = $1`,
+		userID, providerID,
+	)
+	if err != nil {
+		return fmt.Errorf("db: set preferred provider: %w", err)
+	}
 	return nil
 }
 

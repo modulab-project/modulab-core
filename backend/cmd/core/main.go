@@ -447,6 +447,7 @@ func main() {
 	mux.HandleFunc("DELETE /v1/ai/keys/{id}", ai.UserDeleteKeyHandler(authDeps))
 	mux.HandleFunc("PATCH /v1/ai/keys/{id}/model", ai.UserSetPreferredModelHandler(authDeps))
 	mux.HandleFunc("GET /v1/ai/keys/{id}/models", ai.UserListModelsHandler(authDeps))
+	mux.HandleFunc("PATCH /v1/ai/preference", ai.UserSetPreferredProviderHandler(authDeps))
 	mux.HandleFunc("POST /v1/ai/chat", ai.ChatHandler(authDeps))
 
 	// Quick links / Schnellzugriff-Grid (internal/quicklinks):

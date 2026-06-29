@@ -624,6 +624,13 @@ func AdminSettingsHandler(deps auth.Deps) http.HandlerFunc {
 
 // ---- user handlers ---------------------------------------------------------
 
+// userProvidersResponse wraps the provider list with the user's preferred
+// provider ID so the frontend can restore the last selection on load.
+type userProvidersResponse struct {
+	Providers           []UserProviderResponse `json:"providers"`
+	PreferredProviderID string                 `json:"preferred_provider_id"`
+}
+
 // UserProvidersHandler handles GET /v1/ai/providers.
 // Returns only enabled providers with availability info for this user.
 func UserProvidersHandler(deps auth.Deps) http.HandlerFunc {
@@ -657,8 +664,39 @@ func UserProvidersHandler(deps auth.Deps) http.HandlerFunc {
 				CanOverride:    row.UserCanOverride,
 			})
 		}
+		preferredProviderID, _ := deps.Pool.GetPreferredProvider(r.Context(), sess.UserID)
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(out)
+		_ = json.NewEncoder(w).Encode(userProvidersResponse{
+			Providers:           out,
+			PreferredProviderID: preferredProviderID,
+		})
+	}
+}
+
+// UserSetPreferredProviderHandler handles PATCH /v1/ai/preference.
+// Persists the user's preferred provider ID cross-device.
+func UserSetPreferredProviderHandler(deps auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		sess, ok := auth.RequireActiveSession(deps, w, r)
+		if !ok {
+			return
+		}
+		var body struct {
+			ProviderID string `json:"provider_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		if err := deps.Pool.SetPreferredProvider(r.Context(), sess.UserID, body.ProviderID); err != nil {
+			http.Error(w, "database error", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
