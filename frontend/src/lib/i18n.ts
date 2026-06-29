@@ -4,16 +4,22 @@ import LanguageDetector from "i18next-browser-languagedetector";
 
 import en from "../locales/en.json";
 import de from "../locales/de.json";
+import fr from "../locales/fr.json";
+import es from "../locales/es.json";
+import nl from "../locales/nl.json";
 
 i18n
   .use(LanguageDetector)
   .use(initReactI18next)
   .init({
     fallbackLng: "en",
-    supportedLngs: ["en", "de"],
+    supportedLngs: ["en", "de", "fr", "es", "nl"],
     resources: {
       en: { translation: en },
       de: { translation: de },
+      fr: { translation: fr },
+      es: { translation: es },
+      nl: { translation: nl },
     },
     interpolation: {
       // React already escapes values

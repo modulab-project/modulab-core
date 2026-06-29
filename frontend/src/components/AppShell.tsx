@@ -608,6 +608,9 @@ function ProfilePanelContent({
         >
           <option value="en">English</option>
           <option value="de">Deutsch</option>
+          <option value="fr">Français</option>
+          <option value="es">Español</option>
+          <option value="nl">Nederlands</option>
         </select>
       </div>
       <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />
