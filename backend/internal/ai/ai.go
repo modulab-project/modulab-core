@@ -506,12 +506,31 @@ func fetchModels(ctx context.Context, provType, baseURL, apiKey string) ([]strin
 
 	ids := make([]string, 0, len(result.Data))
 	for _, m := range result.Data {
-		if m.ID != "" {
+		if m.ID != "" && isCompatibleModel(provType, m.ID) {
 			ids = append(ids, m.ID)
 		}
 	}
 	sort.Strings(ids)
 	return ids, nil
+}
+
+// isCompatibleModel returns false for models that are known to be incompatible
+// with the OpenAI-compat chat/completions endpoint (e.g. Gemini Live/realtime
+// and embedding-only models). For non-Gemini providers every model is passed
+// through unchanged.
+func isCompatibleModel(provType, modelID string) bool {
+	if provType != "gemini" {
+		return true
+	}
+	lower := strings.ToLower(modelID)
+	// Drop live/realtime, embedding, and AQA models — they only support
+	// Gemini's native Interactions or Embeddings API, not chat/completions.
+	for _, skip := range []string{"live", "embedding", "-aqa", "imagen"} {
+		if strings.Contains(lower, skip) {
+			return false
+		}
+	}
+	return true
 }
 
 // AdminSettingsHandler handles GET and PATCH /v1/admin/ai/settings.
