@@ -252,7 +252,7 @@
       "secret_placeholder_existing": "Leer lassen, um bestehendes Secret zu behalten",
       "save_oidc": "OIDC speichern",
       "dns_title": "DNS-Challenge-Konfiguration",
-      "dns_hint": "Wird für die automatische TLS-Zertifikatserneuerung verwendet. Credentials leer lassen, um den bestehenden Wert zu behalten.",
+      "dns_hint": "Hinterlege deinen DNS-Provider und die zugehörigen API-Credentials. Credentials leer lassen, um den bestehenden Wert zu behalten.",
       "dns_validation_error": "Provider ist erforderlich.",
       "dns_provider": "DNS-Provider",
       "dns_provider_custom": "Anderer (manuell eingeben)",

@@ -252,7 +252,7 @@
       "secret_placeholder_existing": "Leave blank to keep existing secret",
       "save_oidc": "Save OIDC",
       "dns_title": "DNS-challenge configuration",
-      "dns_hint": "Used for automatic TLS certificate renewal. Leave credentials blank to keep the existing value.",
+      "dns_hint": "Enter your DNS provider and the corresponding API credentials. Leave credentials blank to keep the existing value.",
       "dns_validation_error": "Provider is required.",
       "dns_provider": "DNS provider",
       "dns_provider_custom": "Other (enter manually)",
