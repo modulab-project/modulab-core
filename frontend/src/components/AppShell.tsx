@@ -919,11 +919,6 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
 
   // Derive the active model label for display: user's preferred model when
   // they have their own key, otherwise the admin-set default.
-  const activeModel = selectedProvider
-    ? (selectedProvider.has_user_key && selectedProvider.preferred_model)
-      ? selectedProvider.preferred_model
-      : selectedProvider.default_model
-    : null;
 
   return (
     <div className="fixed bottom-[52px] right-4 z-40 flex w-[340px] flex-col rounded-2xl border border-gray-200 bg-white shadow-xl dark:border-gray-800 dark:bg-gray-950"
