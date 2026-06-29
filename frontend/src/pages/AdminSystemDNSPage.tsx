@@ -6,6 +6,25 @@ import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
 
+const DNS_PROVIDERS = [
+  "cloudflare",
+  "route53",
+  "digitalocean",
+  "hetzner",
+  "inwx",
+  "namecheap",
+  "gandi",
+  "ovh",
+  "linode",
+  "vultr",
+  "azure",
+  "google",
+  "dnsimple",
+  "porkbun",
+  "njalla",
+  "__custom__",
+] as const;
+
 export default function AdminSystemDNSPage() {
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -13,7 +32,11 @@ export default function AdminSystemDNSPage() {
 
   const [configured, setConfigured] = useState(false);
   const [provider, setProvider] = useState("");
+  const [customProvider, setCustomProvider] = useState("");
   const [credentials, setCredentials] = useState("");
+
+  // Derived: is the current provider one of the known list?
+  const isCustom = provider === "__custom__";
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const hasFetched = useRef(false);
@@ -29,7 +52,13 @@ export default function AdminSystemDNSPage() {
       .then((s) => {
         setConfigured(s.dns_challenge.configured);
         if (s.dns_challenge.configured) {
-          setProvider(s.dns_challenge.provider ?? "");
+          const saved = s.dns_challenge.provider ?? "";
+          if (DNS_PROVIDERS.slice(0, -1).includes(saved as never)) {
+            setProvider(saved);
+          } else if (saved) {
+            setProvider("__custom__");
+            setCustomProvider(saved);
+          }
         }
       })
       .catch(() => setMsg({ ok: false, text: t("admin.system.load_error") }));
@@ -41,7 +70,8 @@ export default function AdminSystemDNSPage() {
     e.preventDefault();
     const token = getSessionToken();
     if (!token) return;
-    if (!provider.trim()) {
+    const effectiveProvider = isCustom ? customProvider.trim() : provider.trim();
+    if (!effectiveProvider) {
       setMsg({ ok: false, text: t("admin.system.dns_validation_error") });
       return;
     }
@@ -49,7 +79,7 @@ export default function AdminSystemDNSPage() {
     setMsg(null);
     try {
       await updateDNSChallenge(token, {
-        provider: provider.trim(),
+        provider: effectiveProvider,
         credentials: credentials.trim() || undefined,
       });
       setConfigured(true);
@@ -73,13 +103,41 @@ export default function AdminSystemDNSPage() {
         <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">{t("admin.system.dns_hint")}</p>
         {msg && <Msg msg={msg} />}
         <form onSubmit={handleSubmit} className="space-y-4">
-          <Field label={t("setup.step3.dns_provider")}>
-            <input type="text" value={provider} onChange={(e) => setProvider(e.target.value)}
-              placeholder="cloudflare" className={inputClass} />
+          <Field label={t("admin.system.dns_provider")}>
+            <select value={provider} onChange={(e) => setProvider(e.target.value)} className={inputClass}>
+              <option value="" disabled>— {t("admin.system.dns_provider")} —</option>
+              <option value="cloudflare">Cloudflare</option>
+              <option value="route53">AWS Route 53</option>
+              <option value="digitalocean">DigitalOcean</option>
+              <option value="hetzner">Hetzner</option>
+              <option value="inwx">INWX</option>
+              <option value="namecheap">Namecheap</option>
+              <option value="gandi">Gandi</option>
+              <option value="ovh">OVH</option>
+              <option value="linode">Linode / Akamai</option>
+              <option value="vultr">Vultr</option>
+              <option value="azure">Azure DNS</option>
+              <option value="google">Google Cloud DNS</option>
+              <option value="dnsimple">DNSimple</option>
+              <option value="porkbun">Porkbun</option>
+              <option value="njalla">Njalla</option>
+              <option value="__custom__">{t("admin.system.dns_provider_custom")}</option>
+            </select>
           </Field>
-          <Field label={t("setup.step3.api_credentials")}>
+          {isCustom && (
+            <Field label="">
+              <input
+                type="text"
+                value={customProvider}
+                onChange={(e) => setCustomProvider(e.target.value)}
+                placeholder={t("admin.system.dns_provider_placeholder")}
+                className={inputClass}
+              />
+            </Field>
+          )}
+          <Field label={t("admin.system.api_credentials")}>
             <textarea value={credentials} onChange={(e) => setCredentials(e.target.value)} rows={4}
-              placeholder={configured ? t("admin.system.credentials_placeholder_existing") : t("setup.step3.api_credentials_placeholder")}
+              placeholder={configured ? t("admin.system.credentials_placeholder_existing") : t("admin.system.api_credentials_placeholder")}
               className={`${inputClass} resize-none`} />
           </Field>
           <button type="submit" disabled={saving} className={btnPrimary}>

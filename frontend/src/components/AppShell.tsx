@@ -592,30 +592,23 @@ function ProfilePanelContent({
         <span className="flex items-center gap-2.5">
           <i className="ti ti-language text-[15px] text-gray-500" /> {t("shell.language")}
         </span>
-        <div className="flex gap-1">
-          {(["en", "de"] as const).map((lang) => (
-            <button
-              key={lang}
-              type="button"
-              onClick={() => {
-                i18n.changeLanguage(lang);
-                // Persist to DB so the preference survives across devices.
-                // Best-effort: a failed save leaves the in-browser change intact.
-                const token = getSessionToken();
-                if (token) {
-                  updateUserPrefs(token, { ui_language: lang }).catch(() => {});
-                }
-              }}
-              className={`rounded-md px-2 py-0.5 text-xs font-medium transition-colors ${
-                i18nInstance.language.startsWith(lang)
-                  ? "bg-teal-600 text-white"
-                  : "border border-gray-300 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-              }`}
-            >
-              {lang.toUpperCase()}
-            </button>
-          ))}
-        </div>
+        <select
+          value={i18nInstance.language.slice(0, 2)}
+          onChange={(e) => {
+            const lang = e.target.value;
+            i18n.changeLanguage(lang);
+            // Persist to DB so the preference survives across devices.
+            // Best-effort: a failed save leaves the in-browser change intact.
+            const token = getSessionToken();
+            if (token) {
+              updateUserPrefs(token, { ui_language: lang }).catch(() => {});
+            }
+          }}
+          className="rounded-md border border-gray-300 bg-white px-2 py-0.5 text-xs font-medium text-gray-700 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
+        >
+          <option value="en">English</option>
+          <option value="de">Deutsch</option>
+        </select>
       </div>
       <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />
       <button

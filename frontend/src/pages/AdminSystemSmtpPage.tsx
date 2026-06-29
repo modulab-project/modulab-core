@@ -13,11 +13,11 @@ export default function AdminSystemSmtpPage() {
 
   const [status, setStatus] = useState<SMTPStatus | null>(null);
   const [host, setHost] = useState("");
-  const [port, setPort] = useState("587");
+  const [port, setPort] = useState("465");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [fromAddress, setFromAddress] = useState("");
-  const [encryption, setEncryption] = useState("starttls");
+  const [encryption, setEncryption] = useState("tls");
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -35,10 +35,10 @@ export default function AdminSystemSmtpPage() {
         setStatus(s);
         if (s.configured) {
           setHost(s.host ?? "");
-          setPort(String(s.port ?? 587));
+          setPort(String(s.port ?? 465));
           setUsername(s.username ?? "");
           setFromAddress(s.from_address ?? "");
-          setEncryption(s.encryption ?? "starttls");
+          setEncryption(s.encryption ?? "tls");
         }
       })
       .catch(() => setMsg({ ok: false, text: t("admin.smtp.load_error") }));
@@ -81,7 +81,7 @@ export default function AdminSystemSmtpPage() {
     try {
       await deleteSmtpConfig(token);
       setStatus({ configured: false });
-      setHost(""); setPort("587"); setUsername(""); setPassword(""); setFromAddress(""); setEncryption("starttls");
+      setHost(""); setPort("465"); setUsername(""); setPassword(""); setFromAddress(""); setEncryption("tls");
     } catch (err) {
       setMsg({ ok: false, text: err instanceof Error ? err.message : t("admin.smtp.remove_error") });
     } finally {
@@ -108,32 +108,32 @@ export default function AdminSystemSmtpPage() {
         )}
         {msg && <Msg msg={msg} />}
         <form onSubmit={handleSubmit} className="space-y-4">
-          <Field label={t("setup.step6.host")}>
+          <Field label={t("admin.smtp.host")}>
             <input type="text" value={host} onChange={(e) => setHost(e.target.value)}
               placeholder="mail.example.com" className={inputClass} />
           </Field>
-          <Field label={t("setup.step6.port")}>
+          <Field label={t("admin.smtp.port")}>
             <input type="number" value={port} onChange={(e) => setPort(e.target.value)}
               className={inputClass} />
           </Field>
-          <Field label={t("setup.step6.username")}>
+          <Field label={t("admin.smtp.username")}>
             <input type="text" value={username} onChange={(e) => setUsername(e.target.value)}
               placeholder={t("admin.smtp.username_placeholder")} className={inputClass} />
           </Field>
-          <Field label={t("setup.step6.password")}>
+          <Field label={t("admin.smtp.password")}>
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
               placeholder={status?.configured ? t("admin.smtp.password_placeholder_existing") : ""}
               className={inputClass} />
           </Field>
-          <Field label={t("setup.step6.from_address")}>
+          <Field label={t("admin.smtp.from_address")}>
             <input type="email" value={fromAddress} onChange={(e) => setFromAddress(e.target.value)}
               placeholder="modulab@example.com" className={inputClass} />
           </Field>
-          <Field label={t("setup.step6.encryption")}>
+          <Field label={t("admin.smtp.encryption")}>
             <select value={encryption} onChange={(e) => setEncryption(e.target.value)} className={inputClass}>
-              <option value="none">{t("setup.step6.enc_none")}</option>
-              <option value="starttls">{t("setup.step6.enc_starttls")}</option>
-              <option value="tls">{t("setup.step6.enc_tls")}</option>
+              <option value="none">{t("admin.smtp.enc_none")}</option>
+              <option value="starttls">{t("admin.smtp.enc_starttls")}</option>
+              <option value="tls">{t("admin.smtp.enc_tls")}</option>
             </select>
           </Field>
           <button type="submit" disabled={saving} className={btnPrimary}>
