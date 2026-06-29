@@ -893,6 +893,7 @@ func streamAnthropic(ctx context.Context, w http.ResponseWriter, apiKey, model s
 		"model":      model,
 		"max_tokens": 4096,
 		"stream":     true,
+		"system":     systemMessage,
 		"messages":   messages,
 	}
 	bodyBytes, _ := json.Marshal(body)
@@ -948,13 +949,25 @@ func streamAnthropic(ctx context.Context, w http.ResponseWriter, apiKey, model s
 
 // ---- OpenAI-compatible streaming client ------------------------------------
 
+// systemMessage is prepended to every chat request so models default to the
+// user's language instead of falling back to English.
+const systemMessage = "Always respond in the same language the user writes in. " +
+	"If the user writes in German, reply in German. " +
+	"If the user writes in English, reply in English."
+
 // streamOpenAICompat calls any OpenAI-compatible /chat/completions endpoint
 // with stream=true and forwards choices[0].delta.content events as SSE deltas.
 func streamOpenAICompat(ctx context.Context, w http.ResponseWriter, apiKey, baseURL, model string, messages []chatMessage) error {
+	// Prepend a system message to enforce language mirroring.
+	apiMessages := make([]map[string]string, 0, len(messages)+1)
+	apiMessages = append(apiMessages, map[string]string{"role": "system", "content": systemMessage})
+	for _, m := range messages {
+		apiMessages = append(apiMessages, map[string]string{"role": m.Role, "content": m.Content})
+	}
 	body := map[string]any{
 		"model":    model,
 		"stream":   true,
-		"messages": messages,
+		"messages": apiMessages,
 	}
 	bodyBytes, _ := json.Marshal(body)
 
