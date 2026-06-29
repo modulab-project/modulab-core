@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { getSystemStatus, updateDNSChallenge, deleteDNSConfig } from "../lib/api";
+import { getSystemStatus, updateDNSChallenge, deleteDNSConfig, verifyDNSChallenge, type DNSVerifyResult } from "../lib/api";
 import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
@@ -39,7 +39,9 @@ export default function AdminSystemDNSPage() {
   const isCustom = provider === "__custom__";
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [verifyResult, setVerifyResult] = useState<DNSVerifyResult | null>(null);
   const hasFetched = useRef(false);
 
   useEffect(() => {
@@ -78,6 +80,7 @@ export default function AdminSystemDNSPage() {
     }
     setSaving(true);
     setMsg(null);
+    setVerifyResult(null);
     try {
       await updateDNSChallenge(token, {
         provider: effectiveProvider,
@@ -86,6 +89,16 @@ export default function AdminSystemDNSPage() {
       setConfigured(true);
       setCredentials("");
       setMsg({ ok: true, text: t("admin.system.saved") });
+      // Verify key after saving.
+      setVerifying(true);
+      try {
+        const result = await verifyDNSChallenge(token);
+        setVerifyResult(result);
+      } catch {
+        // Non-fatal – save succeeded, verify failed to reach backend.
+      } finally {
+        setVerifying(false);
+      }
     } catch (err) {
       setMsg({ ok: false, text: err instanceof Error ? err.message : t("admin.system.save_error") });
     } finally {
@@ -101,6 +114,7 @@ export default function AdminSystemDNSPage() {
     try {
       await deleteDNSConfig(token);
       setConfigured(false);
+      setVerifyResult(null);
       setProvider(""); setCustomProvider(""); setCredentials("");
     } catch (err) {
       setMsg({ ok: false, text: err instanceof Error ? err.message : t("admin.system.save_error") });
@@ -119,6 +133,10 @@ export default function AdminSystemDNSPage() {
         </div>
         <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">{t("admin.system.dns_hint")}</p>
         {msg && <Msg msg={msg} />}
+        {verifyResult && <VerifyMsg result={verifyResult} verifying={verifying} t={t} />}
+        {verifying && !verifyResult && (
+          <p className="mb-4 text-sm text-gray-400 dark:text-gray-500">{t("admin.system.dns.verifying")}</p>
+        )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <Field label={t("admin.system.dns_provider")}>
             <select value={provider} onChange={(e) => setProvider(e.target.value)} className={inputClass}>
@@ -198,6 +216,22 @@ function Msg({ msg }: { msg: { ok: boolean; text: string } }) {
   return (
     <p className={`mb-4 text-sm ${msg.ok ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
       {msg.text}
+    </p>
+  );
+}
+
+function VerifyMsg({ result, verifying, t }: { result: DNSVerifyResult; verifying: boolean; t: (k: string) => string }) {
+  if (verifying) return null;
+  if (!result.supported) {
+    return (
+      <p className="mb-4 text-sm text-gray-400 dark:text-gray-500">
+        {t("admin.system.dns.verify_unsupported")}
+      </p>
+    );
+  }
+  return (
+    <p className={`mb-4 text-sm ${result.valid ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+      {result.valid ? t("admin.system.dns.verify_valid") : `${t("admin.system.dns.verify_invalid")}: ${result.message}`}
     </p>
   );
 }

@@ -384,6 +384,7 @@ func main() {
 	mux.Handle("DELETE /v1/admin/oidc", superAdminOnly(adminapi.OIDCDeleteHandler(pool, cfg.MasterKey)))
 	mux.Handle("PATCH /v1/admin/dns-challenge", superAdminOnly(adminapi.DNSChallengeUpdateHandler(pool, cfg.MasterKey)))
 	mux.Handle("DELETE /v1/admin/dns-challenge", superAdminOnly(adminapi.DNSChallengeDeleteHandler(pool, cfg.MasterKey)))
+	mux.Handle("POST /v1/admin/dns-challenge/verify", superAdminOnly(adminapi.DNSChallengeVerifyHandler(pool, cfg.MasterKey)))
 	mux.Handle("GET /v1/audit-log", superAdminOnly(adminapi.AuditLogHandler(pool, cfg.MasterKey)))
 
 	// Widget endpoints (spec section 8 / Home page). Not wrapped in any

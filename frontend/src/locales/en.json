@@ -268,7 +268,11 @@
       },
       "dns": {
         "removing": "Removing…",
-        "remove": "Remove configuration"
+        "remove": "Remove configuration",
+        "verifying": "Verifying API key…",
+        "verify_valid": "API key is valid.",
+        "verify_invalid": "API key is invalid",
+        "verify_unsupported": "Automatic key verification is not supported for this provider."
       }
     },
     "audit": {

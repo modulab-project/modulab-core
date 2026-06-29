@@ -907,6 +907,19 @@ export function deleteDNSConfig(token: string): Promise<DNSChallengeStatus> {
   });
 }
 
+export interface DNSVerifyResult {
+  valid: boolean;
+  supported: boolean;
+  message: string;
+}
+
+export function verifyDNSChallenge(token: string): Promise<DNSVerifyResult> {
+  return request<DNSVerifyResult>("/v1/admin/dns-challenge/verify", {
+    method: "POST",
+    headers: bearerHeaders(token),
+  });
+}
+
 // ---- Audit log ----------------------------------------------------------------
 
 export interface AuditEntry {
