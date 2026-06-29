@@ -426,7 +426,7 @@
   },
   "setup": {
     "title": "ModuLab Core – Ersteinrichtung",
-    "step_of": "Schritt {{step}} von 7",
+    "step_of": "Schritt {{step}} von 6",
     "unknown_error": "Unbekannter Fehler",
     "step1": {
       "hint": "Den Bootstrap-Token findest du einmalig im Startprotokoll von ModuLab Core.",
@@ -444,15 +444,6 @@
       "next": "Weiter"
     },
     "step3": {
-      "hint": "Erforderlich für automatische TLS-Zertifikate über Traefik/Let's Encrypt.",
-      "dns_provider": "DNS-Provider",
-      "api_credentials": "API-Zugangsdaten",
-      "api_credentials_placeholder": "z. B. API-Token",
-      "back": "Zurück",
-      "saving": "Wird gespeichert…",
-      "next": "Weiter"
-    },
-    "step4": {
       "group_prefix": "Gruppen-Präfix",
       "back": "Zurück",
       "saving": "Wird gespeichert…",
@@ -461,13 +452,13 @@
       "continue": "Weiter zur Anmeldung",
       "missing": "Noch nicht vollständig, fehlend: {{items}}"
     },
-    "step5": {
+    "step4": {
       "hint": "Melde dich jetzt mit deinem OIDC-Konto an, um es als Super-Admin zu registrieren.",
       "not_super_admin": "Dieser Benutzer ist kein Mitglied der Super-Admin-Gruppe. Weise ihn in deinem OIDC-Provider zu und melde dich erneut an.",
       "login_button": "Mit OIDC anmelden"
     },
-    "step6": {
-      "hint": "Optional: ausgehende E-Mails für Kontobenachrichtigungen (genehmigt, gesperrt, entsperrt). Überspringe dies und richte es später unter Admin → SMTP ein, oder fülle es jetzt aus.",
+    "step5": {
+      "hint": "Optional: ausgehende E-Mails für Kontobenachrichtigungen (genehmigt, gesperrt, entsperrt). Überspringe dies und richte es später unter Admin → System → SMTP ein, oder fülle es jetzt aus.",
       "host": "Host",
       "port": "Port",
       "username": "Benutzername",
@@ -480,9 +471,15 @@
       "validation_error": "Host, Port und Absenderadresse sind erforderlich – oder überspringe diesen Schritt.",
       "skip": "Überspringen",
       "saving": "Wird gespeichert…",
-      "save_continue": "Speichern & weiter"
+      "save_continue": "Speichern & weiter",
+      "test_hint": "Verbindung testen, bevor du speicherst:",
+      "test_address_placeholder": "test@example.com",
+      "test_address_required": "Bitte eine Zieladresse eingeben.",
+      "test_button": "Test senden",
+      "test_sending": "Wird gesendet…",
+      "test_ok": "Test-E-Mail erfolgreich gesendet."
     },
-    "step7": {
+    "step6": {
       "hint": "Letzter Schritt: Bootstrap-Token dauerhaft deaktivieren.",
       "finishing": "Wird abgeschlossen…",
       "complete_button": "Einrichtung abschließen",

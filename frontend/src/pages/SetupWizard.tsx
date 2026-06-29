@@ -4,9 +4,9 @@ import { useTranslation } from "react-i18next";
 import {
   setupInit,
   configureOIDC,
-  configureDNSChallenge,
   configureGroupPrefix,
   configureSmtp,
+  testSmtp,
   completeSetup,
   loginRedirectUrl,
   getHealth,
@@ -23,12 +23,12 @@ import { AuthButton, AuthField, AuthSecondaryButton, AuthShell } from "../compon
 const TOKEN_KEY = "modulab_bootstrap_token";
 const STEP_KEY = "modulab_wizard_step";
 
-type StepNumber = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+type StepNumber = 1 | 2 | 3 | 4 | 5 | 6;
 
 function loadStep(): StepNumber {
   const raw = sessionStorage.getItem(STEP_KEY);
   const n = raw ? Number(raw) : 1;
-  return (n >= 1 && n <= 7 ? n : 1) as StepNumber;
+  return (n >= 1 && n <= 6 ? n : 1) as StepNumber;
 }
 
 function saveStep(step: StepNumber) {
@@ -36,23 +36,23 @@ function saveStep(step: StepNumber) {
 }
 
 // Implements the Setup Wizard (spec section 6.5) against the backend's
-// /v1/setup/*, /v1/auth/*, and /v1/admin/smtp/* endpoints. 7 steps today,
-// same number as the original spec but for a different reason: the spec's
-// own step 2 ("choose your OIDC provider") was dropped on 2026-06-21 -
-// ModuLab Core talks to every standard OIDC provider identically, so the
-// dropdown changed no behavior at all and just added a click - which took
-// the wizard down to 6 steps for a while, until step 6 below (SMTP) was
-// added back on the user's request, landing back at 7.
-// SMTP is deliberately placed *after* step 5's super-admin login rather
-// than alongside OIDC/DNS-challenge/group-prefix: those three are gated by
-// the bootstrap token (bootstrap.Manager's middleware, no session exists
-// yet), but SMTP configuration lives behind auth.RequireSuperAdminMiddleware
-// (see setup/smtp.go's doc comment on why it is admin-panel-only, not
-// wizard-only) - reusing that same endpoint here, instead of adding a
-// second bootstrap-token-gated copy, needs an actual session token, which
-// only exists once step 5's OIDC login has completed. Skippable - and,
-// unlike DNS-challenge, still fully editable afterwards from /admin/smtp
-// (AdminSmtpPage.tsx) any time, by any super-admin, not just during setup.
+// /v1/setup/*, /v1/auth/*, and /v1/admin/smtp/* endpoints. 6 steps:
+//   1. Bootstrap token
+//   2. OIDC credentials
+//   3. Group prefix
+//   4. Super-admin login
+//   5. SMTP (optional, skippable, with test-send)
+//   6. Complete
+// DNS-challenge was step 3 until 2026-06-29; removed so the operator can
+// enter the DNS API key later in the admin panel (/admin/system/dns) once
+// the rest of the setup is done - forcing it here blocked setups where the
+// DNS provider credentials are not yet at hand.
+// SMTP is deliberately placed *after* step 4's super-admin login: those
+// earlier steps are gated by the bootstrap token (bootstrap.Manager's
+// middleware, no session exists yet), but SMTP configuration lives behind
+// auth.RequireSuperAdminMiddleware - reusing that same endpoint needs an
+// actual session token, which only exists once step 4's OIDC login has
+// completed. Skippable and fully editable afterwards from /admin/system/smtp.
 //
 // Deliberately a single file: each step is a small, self-contained form,
 // and splitting them across files would mostly add import boilerplate
@@ -82,7 +82,7 @@ export default function SetupWizard() {
       .catch(() => setSetupCompleted(false));
   }, []);
 
-  // Runs once on mount - if we just got redirected back from step 5's
+  // Runs once on mount - if we just got redirected back from step 4's
   // super-admin login OIDC round trip (via AuthComplete), pick up the
   // result here. AuthComplete only ever sends the browser to /setup while
   // the wizard is still incomplete, so unlike before /login existed, this
@@ -99,7 +99,7 @@ export default function SetupWizard() {
     if (result.role) {
       setLoginRole(result.role);
       if (result.role === "super-admin") {
-        goTo(6);
+        goTo(5);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -146,20 +146,13 @@ export default function SetupWizard() {
         />
       )}
       {step === 3 && (
-        <StepDNSChallenge
+        <StepGroupPrefix
           bootstrapToken={bootstrapToken}
           onSuccess={() => goTo(4)}
           onBack={() => goTo(2)}
         />
       )}
       {step === 4 && (
-        <StepGroupPrefix
-          bootstrapToken={bootstrapToken}
-          onSuccess={() => goTo(5)}
-          onBack={() => goTo(3)}
-        />
-      )}
-      {step === 5 && (
         <StepSuperAdminLogin
           role={loginRole}
           error={loginError ? t(loginError) : null}
@@ -170,8 +163,8 @@ export default function SetupWizard() {
           }}
         />
       )}
-      {step === 6 && <StepSMTP onDone={() => goTo(7)} />}
-      {step === 7 && <StepComplete bootstrapToken={bootstrapToken} />}
+      {step === 5 && <StepSMTP onDone={() => goTo(6)} />}
+      {step === 6 && <StepComplete bootstrapToken={bootstrapToken} />}
     </AuthShell>
   );
 }
@@ -296,87 +289,7 @@ function StepOIDCCredentials({
   );
 }
 
-// --- Step 3: DNS-challenge provider (mandatory, no skip) -------------------
-
-const DNS_PROVIDER_OPTIONS = ["Cloudflare", "Route53", "DigitalOcean", "Hetzner"];
-
-function StepDNSChallenge({
-  bootstrapToken,
-  onSuccess,
-  onBack,
-}: {
-  bootstrapToken: string;
-  onSuccess: () => void;
-  onBack: () => void;
-}) {
-  const { t } = useTranslation();
-  const [provider, setProvider] = useState(DNS_PROVIDER_OPTIONS[0]);
-  const [credentials, setCredentials] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      await configureDNSChallenge(bootstrapToken, { provider, credentials });
-      onSuccess();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("setup.unknown_error"));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <form onSubmit={submit} className="space-y-4">
-      <p className="text-sm text-gray-600 dark:text-gray-400">
-        {t("setup.step3.hint")}
-      </p>
-      <div>
-        <label
-          htmlFor="dns-provider"
-          className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
-        >
-          {t("setup.step3.dns_provider")}
-        </label>
-        <select
-          id="dns-provider"
-          value={provider}
-          onChange={(e) => setProvider(e.target.value)}
-          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
-        >
-          {DNS_PROVIDER_OPTIONS.map((p) => (
-            <option key={p} value={p}>
-              {p}
-            </option>
-          ))}
-        </select>
-      </div>
-      <AuthField
-        label={t("setup.step3.api_credentials")}
-        id="dns-credentials"
-        value={credentials}
-        onChange={setCredentials}
-        type="password"
-        placeholder={t("setup.step3.api_credentials_placeholder")}
-        required
-      />
-      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
-      <div className="flex gap-2">
-        <AuthSecondaryButton onClick={onBack} type="button" className="flex-1">
-          {t("setup.step3.back")}
-        </AuthSecondaryButton>
-        <AuthButton type="submit" disabled={busy || credentials.trim() === ""} className="flex-1">
-          {busy ? t("setup.step3.saving") : t("setup.step3.next")}
-        </AuthButton>
-      </div>
-    </form>
-  );
-}
-
-// --- Step 4: group prefix ---------------------------------------------------
+// --- Step 3: group prefix ---------------------------------------------------
 
 function StepGroupPrefix({
   bootstrapToken,
@@ -411,7 +324,7 @@ function StepGroupPrefix({
     <div className="space-y-4">
       <form onSubmit={submit} className="space-y-4">
         <AuthField
-          label={t("setup.step4.group_prefix")}
+          label={t("setup.step3.group_prefix")}
           id="group-prefix"
           value={prefix}
           onChange={setPrefix}
@@ -421,10 +334,10 @@ function StepGroupPrefix({
         {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
         <div className="flex gap-2">
           <AuthSecondaryButton onClick={onBack} type="button" className="flex-1">
-            {t("setup.step4.back")}
+            {t("setup.step3.back")}
           </AuthSecondaryButton>
           <AuthButton type="submit" disabled={busy || prefix.trim() === ""} className="flex-1">
-            {busy ? t("setup.step4.saving") : t("setup.step4.save")}
+            {busy ? t("setup.step3.saving") : t("setup.step3.save")}
           </AuthButton>
         </div>
       </form>
@@ -432,7 +345,7 @@ function StepGroupPrefix({
       {groups && (
         <div className="rounded-md border border-gray-200 bg-gray-50 p-4 text-sm dark:border-gray-700 dark:bg-gray-800">
           <p className="mb-2 font-medium text-gray-700 dark:text-gray-200">
-            {t("setup.step4.groups_intro")}
+            {t("setup.step3.groups_intro")}
           </p>
           <ul className="list-disc space-y-1 pl-5 font-mono text-gray-600 dark:text-gray-400">
             {groups.map((g) => (
@@ -440,7 +353,7 @@ function StepGroupPrefix({
             ))}
           </ul>
           <AuthButton onClick={onSuccess} type="button" className="mt-4">
-            {t("setup.step4.continue")}
+            {t("setup.step3.continue")}
           </AuthButton>
         </div>
       )}
@@ -448,7 +361,7 @@ function StepGroupPrefix({
   );
 }
 
-// --- Step 5: Super-Admin login ----------------------------------------------
+// --- Step 4: Super-Admin login ----------------------------------------------
 
 function StepSuperAdminLogin({
   role,
@@ -464,30 +377,31 @@ function StepSuperAdminLogin({
   return (
     <div className="space-y-4">
       <p className="text-sm text-gray-600 dark:text-gray-400">
-        {t("setup.step5.hint")}
+        {t("setup.step4.hint")}
       </p>
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       {notSuperAdmin && (
         <p className="text-sm text-red-600 dark:text-red-400">
-          {t("setup.step5.not_super_admin")}
+          {t("setup.step4.not_super_admin")}
         </p>
       )}
       <AuthButton onClick={onRetry} type="button" className="w-full">
-        {t("setup.step5.login_button")}
+        {t("setup.step4.login_button")}
       </AuthButton>
     </div>
   );
 }
 
-// --- Step 6: SMTP (optional, skippable) -------------------------------------
+// --- Step 5: SMTP (optional, skippable, with test-send) --------------------
 
 // Unlike every earlier step, this one authenticates with the session
-// token from step 5's super-admin login (getSessionToken()), not the
+// token from step 4's super-admin login (getSessionToken()), not the
 // bootstrap token - see the top-of-file comment for why. It calls the same
-// configureSmtp() the standalone /admin/smtp page (AdminSmtpPage.tsx)
-// uses, so anything saved or skipped here is just as visible and just as
-// editable from there afterwards - this step has no state of its own
-// beyond what that endpoint already persists.
+// configureSmtp() the standalone /admin/system/smtp page uses, so anything
+// saved or skipped here is just as visible and editable there afterwards.
+// The test-send button calls POST /v1/admin/smtp/test with the current form
+// values (not yet saved), so the operator can verify connectivity before
+// committing the configuration.
 function StepSMTP({ onDone }: { onDone: () => void }) {
   const { t } = useTranslation();
   const [host, setHost] = useState("");
@@ -498,12 +412,15 @@ function StepSMTP({ onDone }: { onDone: () => void }) {
   const [encryption, setEncryption] = useState("starttls");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [testAddress, setTestAddress] = useState("");
+  const [testBusy, setTestBusy] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     const token = getSessionToken();
     if (!token) {
-      // Should not happen - step 5 always persists one before advancing
+      // Should not happen - step 4 always persists one before advancing
       // here - but skip ahead rather than get the operator stuck on a
       // step that cannot possibly succeed without one.
       onDone();
@@ -511,7 +428,7 @@ function StepSMTP({ onDone }: { onDone: () => void }) {
     }
     const parsedPort = parseInt(port, 10);
     if (!host.trim() || !fromAddress.trim() || Number.isNaN(parsedPort) || parsedPort <= 0) {
-      setError(t("setup.step6.validation_error"));
+      setError(t("setup.step5.validation_error"));
       return;
     }
     setBusy(true);
@@ -533,29 +450,62 @@ function StepSMTP({ onDone }: { onDone: () => void }) {
     }
   }
 
+  async function sendTest(e: FormEvent) {
+    e.preventDefault();
+    const token = getSessionToken();
+    if (!token) return;
+    const parsedPort = parseInt(port, 10);
+    if (!host.trim() || !fromAddress.trim() || Number.isNaN(parsedPort) || parsedPort <= 0) {
+      setTestResult({ ok: false, message: t("setup.step5.validation_error") });
+      return;
+    }
+    if (!testAddress.trim()) {
+      setTestResult({ ok: false, message: t("setup.step5.test_address_required") });
+      return;
+    }
+    setTestBusy(true);
+    setTestResult(null);
+    try {
+      await testSmtp(token, {
+        host: host.trim(),
+        port: parsedPort,
+        username: username.trim(),
+        password,
+        from_address: fromAddress.trim(),
+        encryption,
+        to: testAddress.trim(),
+      });
+      setTestResult({ ok: true, message: t("setup.step5.test_ok") });
+    } catch (err) {
+      setTestResult({ ok: false, message: err instanceof Error ? err.message : t("setup.unknown_error") });
+    } finally {
+      setTestBusy(false);
+    }
+  }
+
   return (
     <form onSubmit={submit} className="space-y-4">
       <p className="text-sm text-gray-600 dark:text-gray-400">
-        {t("setup.step6.hint")}
+        {t("setup.step5.hint")}
       </p>
-      <AuthField label={t("setup.step6.host")} id="smtp-host" value={host} onChange={setHost} placeholder="mail.example.com" />
-      <AuthField label={t("setup.step6.port")} id="smtp-port" value={port} onChange={setPort} />
+      <AuthField label={t("setup.step5.host")} id="smtp-host" value={host} onChange={setHost} placeholder="mail.example.com" />
+      <AuthField label={t("setup.step5.port")} id="smtp-port" value={port} onChange={setPort} />
       <AuthField
-        label={t("setup.step6.username")}
+        label={t("setup.step5.username")}
         id="smtp-username"
         value={username}
         onChange={setUsername}
         placeholder="leave empty for an unauthenticated relay"
       />
       <AuthField
-        label={t("setup.step6.password")}
+        label={t("setup.step5.password")}
         id="smtp-password"
         value={password}
         onChange={setPassword}
         type="password"
       />
       <AuthField
-        label={t("setup.step6.from_address")}
+        label={t("setup.step5.from_address")}
         id="smtp-from"
         value={fromAddress}
         onChange={setFromAddress}
@@ -564,7 +514,7 @@ function StepSMTP({ onDone }: { onDone: () => void }) {
       />
       <div>
         <label htmlFor="smtp-encryption" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-          {t("setup.step6.encryption")}
+          {t("setup.step5.encryption")}
         </label>
         <select
           id="smtp-encryption"
@@ -572,25 +522,54 @@ function StepSMTP({ onDone }: { onDone: () => void }) {
           onChange={(e) => setEncryption(e.target.value)}
           className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
         >
-          <option value="none">{t("setup.step6.enc_none")}</option>
-          <option value="starttls">{t("setup.step6.enc_starttls")}</option>
-          <option value="tls">{t("setup.step6.enc_tls")}</option>
+          <option value="none">{t("setup.step5.enc_none")}</option>
+          <option value="starttls">{t("setup.step5.enc_starttls")}</option>
+          <option value="tls">{t("setup.step5.enc_tls")}</option>
         </select>
       </div>
+
+      {/* Test-send row — submits via sendTest, not the main form's submit */}
+      <div className="rounded-md border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/50">
+        <p className="mb-2 text-xs font-medium text-gray-600 dark:text-gray-400">
+          {t("setup.step5.test_hint")}
+        </p>
+        <div className="flex gap-2">
+          <input
+            type="email"
+            value={testAddress}
+            onChange={(e) => setTestAddress(e.target.value)}
+            placeholder={t("setup.step5.test_address_placeholder")}
+            className="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-base text-gray-900 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+          />
+          <AuthSecondaryButton
+            onClick={sendTest}
+            type="button"
+            disabled={testBusy || testAddress.trim() === ""}
+          >
+            {testBusy ? t("setup.step5.test_sending") : t("setup.step5.test_button")}
+          </AuthSecondaryButton>
+        </div>
+        {testResult && (
+          <p className={`mt-2 text-xs ${testResult.ok ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+            {testResult.message}
+          </p>
+        )}
+      </div>
+
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       <div className="flex gap-2">
         <AuthSecondaryButton onClick={onDone} type="button" disabled={busy} className="flex-1">
-          {t("setup.step6.skip")}
+          {t("setup.step5.skip")}
         </AuthSecondaryButton>
         <AuthButton type="submit" disabled={busy} className="flex-1">
-          {busy ? t("setup.step6.saving") : t("setup.step6.save_continue")}
+          {busy ? t("setup.step5.saving") : t("setup.step5.save_continue")}
         </AuthButton>
       </div>
     </form>
   );
 }
 
-// --- Step 7: completion -----------------------------------------------------
+// --- Step 6: completion -----------------------------------------------------
 
 function StepComplete({ bootstrapToken }: { bootstrapToken: string }) {
   const { t } = useTranslation();
@@ -608,7 +587,7 @@ function StepComplete({ bootstrapToken }: { bootstrapToken: string }) {
         sessionStorage.removeItem(TOKEN_KEY);
         sessionStorage.removeItem(STEP_KEY);
       } else {
-        setError(t("setup.step7.missing", { items: (res.missing ?? []).join(", ") }));
+        setError(t("setup.step6.missing", { items: (res.missing ?? []).join(", ") }));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : t("setup.unknown_error"));
@@ -624,17 +603,17 @@ function StepComplete({ bootstrapToken }: { bootstrapToken: string }) {
   return (
     <div className="space-y-4">
       <p className="text-sm text-gray-600 dark:text-gray-400">
-        {t("setup.step7.hint")}
+        {t("setup.step6.hint")}
       </p>
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       <AuthButton onClick={finish} disabled={busy} type="button" className="w-full">
-        {busy ? t("setup.step7.finishing") : t("setup.step7.complete_button")}
+        {busy ? t("setup.step6.finishing") : t("setup.step6.complete_button")}
       </AuthButton>
     </div>
   );
 }
 
-// The super-admin login in step 5 already persisted a session token (see
+// The super-admin login in step 4 already persisted a session token (see
 // AuthComplete.tsx's storeSessionToken call), so there is no need to send
 // them through /login again - straight to / works immediately.
 function StepCompleteDone() {
@@ -643,10 +622,10 @@ function StepCompleteDone() {
   return (
     <div className="space-y-4">
       <p className="text-sm font-medium text-green-700 dark:text-green-400">
-        {t("setup.step7.done_message")}
+        {t("setup.step6.done_message")}
       </p>
       <AuthButton type="button" onClick={() => navigate("/")} className="w-full">
-        {t("setup.step7.done_button")}
+        {t("setup.step6.done_button")}
       </AuthButton>
     </div>
   );

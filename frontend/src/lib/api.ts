@@ -342,6 +342,24 @@ export function deleteSmtpConfig(token: string): Promise<void> {
   return request<void>("/v1/admin/smtp", { method: "DELETE", headers: bearerHeaders(token) });
 }
 
+// Body of POST /v1/admin/smtp/test — same fields as SMTPConfigRequest plus
+// a "to" address. The configuration is NOT persisted; the backend just dials
+// out immediately so the operator can verify connectivity before saving.
+export interface SMTPTestRequest extends SMTPConfigRequest {
+  to: string;
+}
+
+// POST /v1/admin/smtp/test — super-admin only. Sends a single test message
+// using the supplied configuration. Returns {ok: true} on success; throws
+// ApiError (502) if the SMTP connection or delivery failed.
+export function testSmtp(token: string, body: SMTPTestRequest): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>("/v1/admin/smtp/test", {
+    method: "POST",
+    headers: bearerHeaders(token),
+    body: JSON.stringify(body),
+  });
+}
+
 // --- News feeds ----------------------------------------------------------
 // Mirrors backend/internal/news.FeedResponse exactly.
 

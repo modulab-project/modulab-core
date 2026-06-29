@@ -426,7 +426,7 @@
   },
   "setup": {
     "title": "ModuLab Core – Initial Setup",
-    "step_of": "Step {{step}} of 7",
+    "step_of": "Step {{step}} of 6",
     "unknown_error": "Unknown error",
     "step1": {
       "hint": "You'll find the bootstrap token once in ModuLab Core's startup log.",
@@ -444,15 +444,6 @@
       "next": "Next"
     },
     "step3": {
-      "hint": "Required for automatic TLS certificates via Traefik/Let's Encrypt.",
-      "dns_provider": "DNS Provider",
-      "api_credentials": "API Credentials",
-      "api_credentials_placeholder": "e.g. API token",
-      "back": "Back",
-      "saving": "Saving…",
-      "next": "Next"
-    },
-    "step4": {
       "group_prefix": "Group Prefix",
       "back": "Back",
       "saving": "Saving…",
@@ -461,13 +452,13 @@
       "continue": "Continue to login",
       "missing": "Not yet complete, missing: {{items}}"
     },
-    "step5": {
+    "step4": {
       "hint": "Log in now with your OIDC account to bind it as super-admin.",
       "not_super_admin": "This user is not a member of the super-admin group. Please assign it in your OIDC provider and log in again.",
       "login_button": "Log in with OIDC"
     },
-    "step6": {
-      "hint": "Optional: outbound mail for account notifications (approved, locked, unlocked). Skip this and set it up later from Admin → SMTP any time, or fill it in now.",
+    "step5": {
+      "hint": "Optional: outbound mail for account notifications (approved, locked, unlocked). Skip this and set it up later from Admin → System → SMTP, or fill it in now.",
       "host": "Host",
       "port": "Port",
       "username": "Username",
@@ -480,9 +471,15 @@
       "validation_error": "Host, port, and from address are all required - or use Skip below.",
       "skip": "Skip",
       "saving": "Saving…",
-      "save_continue": "Save & continue"
+      "save_continue": "Save & continue",
+      "test_hint": "Test the connection before saving:",
+      "test_address_placeholder": "test@example.com",
+      "test_address_required": "Please enter a recipient address.",
+      "test_button": "Send test",
+      "test_sending": "Sending…",
+      "test_ok": "Test email sent successfully."
     },
-    "step7": {
+    "step6": {
       "hint": "Last step: permanently disable the bootstrap token.",
       "finishing": "Finishing…",
       "complete_button": "Complete setup",

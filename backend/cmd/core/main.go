@@ -136,15 +136,11 @@ func main() {
 	if err != nil {
 		log.Printf("setup: oidc check failed: %v", err)
 	}
-	dnsChallengeConfigured, err := setup.DNSChallengeConfigured(ctx, pool)
-	if err != nil {
-		log.Printf("setup: dns-challenge check failed: %v", err)
-	}
 	groupPrefixConfigured, err := setup.GroupPrefixConfigured(ctx, pool)
 	if err != nil {
 		log.Printf("setup: group prefix check failed: %v", err)
 	}
-	log.Printf("setup wizard progress: oidc=%t dns-challenge=%t group-prefix=%t", oidcConfigured, dnsChallengeConfigured, groupPrefixConfigured)
+	log.Printf("setup wizard progress: oidc=%t group-prefix=%t", oidcConfigured, groupPrefixConfigured)
 
 	// This is the decision bootstrapMgr.New()'s comment above refers to: a
 	// completed wizard from a previous run means the bootstrap-token gate
@@ -319,6 +315,7 @@ func main() {
 	// left to resolve), kept this shape purely for consistency.
 	superAdminOnly := auth.RequireSuperAdminMiddleware(authDeps)
 	mux.Handle("GET /v1/admin/smtp/status", superAdminOnly(setup.SMTPStatusHandler(pool, cfg.MasterKey)))
+	mux.Handle("POST /v1/admin/smtp/test", superAdminOnly(setup.SMTPTestHandler()))
 	mux.Handle("POST /v1/admin/smtp/configure", superAdminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		masterKey, err := setup.ResolveMasterKey(r.Context(), pool, cfg.MasterKey)
 		if err != nil {

@@ -84,10 +84,10 @@ func WizardComplete(ctx context.Context, pool *db.Pool) (bool, error) {
 	return len(missing) == 0, nil
 }
 
-// missingSteps reports which of the four prerequisites for completing the
-// wizard (OIDC, DNS-challenge provider, group prefix, a bound Super-Admin)
-// have not actually been persisted yet, using each step's own *Configured
-// helper so this stays in sync with them automatically.
+// missingSteps reports which of the three prerequisites for completing the
+// wizard (OIDC, group prefix, a bound Super-Admin) have not actually been
+// persisted yet, using each step's own *Configured helper so this stays in
+// sync with them automatically.
 //
 // The master key is deliberately NOT checked here anymore: it now comes
 // exclusively from MODULAB_MASTER_KEY, validated by config.Load at startup
@@ -95,11 +95,11 @@ func WizardComplete(ctx context.Context, pool *db.Pool) (bool, error) {
 // run at all, the master key is guaranteed present - there is nothing left
 // to persist or verify for it.
 //
-// DNS-challenge (step 4) is mandatory here on purpose: the frontend no
-// longer offers a "skip" button for it (removed 2026-06-21, after briefly
-// shipping a skippable version that just moved the deadlock from "stuck on
-// step 7" to "silently never configured"), so every wizard run that reaches
-// this handler is expected to have gone through it for real.
+// DNS-challenge is intentionally NOT required here (removed 2026-06-29):
+// the operator can enter the DNS provider credentials later in the admin
+// panel (/admin/system/dns) once the rest of the setup is done. Forcing
+// it during the wizard blocked fresh installs where the DNS API key is not
+// yet at hand.
 func missingSteps(ctx context.Context, pool *db.Pool) ([]string, error) {
 	var missing []string
 
@@ -109,14 +109,6 @@ func missingSteps(ctx context.Context, pool *db.Pool) ([]string, error) {
 	}
 	if !oidcDone {
 		missing = append(missing, "oidc")
-	}
-
-	dnsChallengeDone, err := DNSChallengeConfigured(ctx, pool)
-	if err != nil {
-		return nil, err
-	}
-	if !dnsChallengeDone {
-		missing = append(missing, "dns_challenge")
 	}
 
 	groupPrefixDone, err := GroupPrefixConfigured(ctx, pool)

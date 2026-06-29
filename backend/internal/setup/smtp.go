@@ -26,9 +26,11 @@ package setup
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/smtp"
 	"strconv"
 	"strings"
 
@@ -388,6 +390,150 @@ func SMTPConfigureHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 			Encryption:  req.Encryption,
 		})
 	}
+}
+
+// SMTPTestRequest is the body of POST /v1/admin/smtp/test.
+// All fields mirror SMTPConfigRequest. To is the recipient address for the
+// test message. The configuration is NOT persisted — the handler uses it
+// only for the outbound connection so the operator can verify connectivity
+// before committing via SMTPConfigureHandler.
+type SMTPTestRequest struct {
+	Host        string `json:"host"`
+	Port        int    `json:"port"`
+	Username    string `json:"username"`
+	Password    string `json:"password"`
+	FromAddress string `json:"from_address"`
+	Encryption  string `json:"encryption"`
+	To          string `json:"to"`
+}
+
+// SMTPTestHandler sends a single test message using the configuration
+// supplied in the request body, without persisting anything. Returns 200
+// on success, 400 for a missing/invalid field, or 502 if the outbound SMTP
+// connection failed. Exposed via POST /v1/admin/smtp/test (super-admin only).
+//
+// The send logic is a thin shim that constructs an SMTPRuntimeConfig from
+// the request and calls send() directly - no queue, no worker, just a
+// synchronous dial-and-send so the operator gets immediate feedback.
+func SMTPTestHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req SMTPTestRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		req.Host = strings.TrimSpace(req.Host)
+		req.Username = strings.TrimSpace(req.Username)
+		req.FromAddress = strings.TrimSpace(req.FromAddress)
+		req.To = strings.TrimSpace(req.To)
+		req.Encryption = strings.TrimSpace(req.Encryption)
+
+		if req.Host == "" || req.Port <= 0 || req.FromAddress == "" || req.To == "" {
+			http.Error(w, "host, port, from_address, and to are all required", http.StatusBadRequest)
+			return
+		}
+		if req.Encryption == "" {
+			req.Encryption = SMTPEncryptionSTARTTLS
+		}
+		switch req.Encryption {
+		case SMTPEncryptionNone, SMTPEncryptionSTARTTLS, SMTPEncryptionTLS:
+			// ok
+		default:
+			http.Error(w, fmt.Sprintf("encryption must be one of %q, %q, %q", SMTPEncryptionNone, SMTPEncryptionSTARTTLS, SMTPEncryptionTLS), http.StatusBadRequest)
+			return
+		}
+
+		cfg := SMTPRuntimeConfig{
+			Host:        req.Host,
+			Port:        req.Port,
+			Username:    req.Username,
+			Password:    req.Password,
+			FromAddress: req.FromAddress,
+			Encryption:  req.Encryption,
+		}
+		if err := SendTest(cfg, req.To); err != nil {
+			http.Error(w, fmt.Sprintf("smtp test failed: %v", err), http.StatusBadGateway)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	}
+}
+
+// SendTest delivers a single test message over cfg to recipient to.
+// Mirrors internal/mail's send() but lives here so the test handler can
+// call it without creating a circular import (mail imports setup, not the
+// other way around). No queue, no worker - just a synchronous dial-and-send
+// so the operator gets immediate connection feedback.
+func SendTest(cfg SMTPRuntimeConfig, to string) error {
+	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
+	subject := "ModuLab SMTP Test"
+	body := []byte(fmt.Sprintf(
+		"From: %s\r\nTo: %s\r\nSubject: %s\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\nThis is a test message sent from the ModuLab Setup Wizard to verify your SMTP configuration.\r\n",
+		cfg.FromAddress, to, subject,
+	))
+
+	var auth smtp.Auth
+	if cfg.Username != "" {
+		auth = smtp.PlainAuth("", cfg.Username, cfg.Password, cfg.Host)
+	}
+
+	if cfg.Encryption == SMTPEncryptionNone {
+		return smtp.SendMail(addr, auth, cfg.FromAddress, []string{to}, body)
+	}
+
+	var conn *smtp.Client
+	if cfg.Encryption == SMTPEncryptionTLS {
+		tlsConn, err := tls.Dial("tcp", addr, &tls.Config{ServerName: cfg.Host})
+		if err != nil {
+			return fmt.Errorf("tls dial %s: %w", addr, err)
+		}
+		var clientErr error
+		conn, clientErr = smtp.NewClient(tlsConn, cfg.Host)
+		if clientErr != nil {
+			tlsConn.Close()
+			return fmt.Errorf("smtp client: %w", clientErr)
+		}
+	} else {
+		var err error
+		conn, err = smtp.Dial(addr)
+		if err != nil {
+			return fmt.Errorf("dial %s: %w", addr, err)
+		}
+		if err := conn.StartTLS(&tls.Config{ServerName: cfg.Host}); err != nil {
+			conn.Close()
+			return fmt.Errorf("starttls: %w", err)
+		}
+	}
+	defer conn.Close()
+
+	if auth != nil {
+		if err := conn.Auth(auth); err != nil {
+			return fmt.Errorf("auth: %w", err)
+		}
+	}
+	if err := conn.Mail(cfg.FromAddress); err != nil {
+		return fmt.Errorf("mail from: %w", err)
+	}
+	if err := conn.Rcpt(to); err != nil {
+		return fmt.Errorf("rcpt to: %w", err)
+	}
+	w, err := conn.Data()
+	if err != nil {
+		return fmt.Errorf("data: %w", err)
+	}
+	if _, err := w.Write(body); err != nil {
+		return fmt.Errorf("write body: %w", err)
+	}
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("close data: %w", err)
+	}
+	return conn.Quit()
 }
 
 // SMTPDeleteHandler clears the SMTP configuration entirely (all six
