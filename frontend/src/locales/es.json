@@ -373,6 +373,11 @@
     "quick_links_remove": "Eliminar mosaico",
     "quick_links_empty": "Sin mosaicos — haga clic en \"+\" para añadir su primer enlace.",
     "quick_links_error": "Error al guardar",
+    "quick_links_mode_url": "URL",
+    "quick_links_mode_module": "Módulo",
+    "quick_links_module_required": "Por favor selecciona un módulo.",
+    "quick_links_modules_loading": "Cargando módulos…",
+    "quick_links_modules_empty": "No hay módulos activos instalados.",
     "search": {
       "tab_web": "Web",
       "tab_images": "Imágenes",

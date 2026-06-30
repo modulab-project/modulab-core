@@ -373,6 +373,11 @@
     "quick_links_remove": "Supprimer la tuile",
     "quick_links_empty": "Aucune tuile — cliquez sur \"+\" pour ajouter votre premier lien.",
     "quick_links_error": "Erreur lors de l'enregistrement",
+    "quick_links_mode_url": "URL",
+    "quick_links_mode_module": "Module",
+    "quick_links_module_required": "Veuillez sélectionner un module.",
+    "quick_links_modules_loading": "Chargement des modules…",
+    "quick_links_modules_empty": "Aucun module actif installé.",
     "search": {
       "tab_web": "Web",
       "tab_images": "Images",

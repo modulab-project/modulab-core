@@ -373,6 +373,11 @@
     "quick_links_remove": "Kachel entfernen",
     "quick_links_empty": "Noch keine Kacheln — klicke auf + um deine erste Verknüpfung anzulegen.",
     "quick_links_error": "Fehler beim Speichern",
+    "quick_links_mode_url": "URL",
+    "quick_links_mode_module": "Modul",
+    "quick_links_module_required": "Bitte ein Modul auswählen.",
+    "quick_links_modules_loading": "Module werden geladen…",
+    "quick_links_modules_empty": "Keine aktiven Module installiert.",
     "search": {
       "tab_web": "Web",
       "tab_images": "Bilder",

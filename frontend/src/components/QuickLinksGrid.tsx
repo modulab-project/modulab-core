@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Tile } from "../lib/quicklinks";
 import { createUserQuickLink, deleteUserQuickLink, saveOrder } from "../lib/quicklinks";
+import { listInstalledModules, type InstalledModule } from "../lib/api";
 
 // ---- Drag-and-drop ----------------------------------------------------------
 //
@@ -15,7 +16,21 @@ function tileKey(t: Tile) {
   return `${t.type}:${t.id}`;
 }
 
+// ---- Helpers ----------------------------------------------------------------
+
+function moduleDisplayName(mod: InstalledModule, lang: string): string {
+  const mf = mod.manifest as { display_name?: Record<string, string>; name?: string } | null;
+  return mf?.display_name?.[lang] ?? mf?.display_name?.["en"] ?? mf?.name ?? mod.name;
+}
+
+function moduleIcon(mod: InstalledModule): string {
+  const mf = mod.manifest as { icon?: string } | null;
+  return mf?.icon ?? "ti-puzzle";
+}
+
 // ---- Add-tile modal ---------------------------------------------------------
+
+type AddMode = "url" | "module";
 
 function AddTileModal({
   token,
@@ -26,21 +41,64 @@ function AddTileModal({
   onClose: () => void;
   onAdded: (tile: Tile) => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const lang = i18n.language?.slice(0, 2) ?? "en";
+
+  const [mode, setMode] = useState<AddMode>("url");
+
+  // URL-mode fields
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
   const [icon, setIcon] = useState("ti-link");
   const [description, setDescription] = useState("");
+
+  // Module-mode
+  const [modules, setModules] = useState<InstalledModule[]>([]);
+  const [modulesLoading, setModulesLoading] = useState(false);
+  const [selectedModule, setSelectedModule] = useState<InstalledModule | null>(null);
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  // Load modules when switching to module mode.
+  useEffect(() => {
+    if (mode !== "module" || modules.length > 0) return;
+    setModulesLoading(true);
+    listInstalledModules(token)
+      .then((mods) => setModules(mods.filter((m) => m.status === "active")))
+      .catch(() => {})
+      .finally(() => setModulesLoading(false));
+  }, [mode, token, modules.length]);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!title.trim() || !url.trim()) return;
     setSaving(true);
     setError("");
+
+    let body: { title: string; url: string; icon: string; description: string };
+
+    if (mode === "module") {
+      if (!selectedModule) {
+        setError(t("home.quick_links_module_required"));
+        setSaving(false);
+        return;
+      }
+      body = {
+        title: moduleDisplayName(selectedModule, lang),
+        url: `/modules/${encodeURIComponent(selectedModule.name)}`,
+        icon: moduleIcon(selectedModule),
+        description: "",
+      };
+    } else {
+      if (!title.trim() || !url.trim()) {
+        setSaving(false);
+        return;
+      }
+      body = { title, url, icon, description };
+    }
+
     try {
-      const newTile = await createUserQuickLink(token, { title, url, icon, description });
+      const newTile = await createUserQuickLink(token, body);
       onAdded(newTile);
       onClose();
     } catch (err) {
@@ -49,6 +107,13 @@ function AddTileModal({
       setSaving(false);
     }
   }
+
+  const tabCls = (active: boolean) =>
+    `flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${
+      active
+        ? "bg-white shadow-sm text-gray-900 dark:bg-gray-800 dark:text-gray-100"
+        : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+    }`;
 
   return (
     <div
@@ -62,56 +127,110 @@ function AddTileModal({
         <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">
           {t("home.quick_links_add_modal_title")}
         </h2>
+
+        {/* Mode toggle */}
+        <div className="mb-4 flex rounded-xl bg-gray-100 p-1 dark:bg-gray-800">
+          <button type="button" className={tabCls(mode === "url")} onClick={() => setMode("url")}>
+            <i className="ti ti-link mr-1.5 text-[13px]" />
+            {t("home.quick_links_mode_url")}
+          </button>
+          <button type="button" className={tabCls(mode === "module")} onClick={() => setMode("module")}>
+            <i className="ti ti-puzzle mr-1.5 text-[13px]" />
+            {t("home.quick_links_mode_module")}
+          </button>
+        </div>
+
         <form onSubmit={handleSubmit} className="space-y-3">
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-              {t("home.quick_links_tile_title")} *
-            </label>
-            <input
-              type="text"
-              required
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-base focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-              placeholder="z. B. Nextcloud"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-              {t("home.quick_links_tile_url")} *
-            </label>
-            <input
-              type="url"
-              required
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-base focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-              placeholder="https://cloud.example.com"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-              {t("home.quick_links_tile_icon")}{" "}
-              <span className="text-gray-400">(Tabler-Icon-Name, z. B. ti-cloud)</span>
-            </label>
-            <input
-              type="text"
-              value={icon}
-              onChange={(e) => setIcon(e.target.value)}
-              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-base focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-              {t("home.quick_links_tile_desc")}
-            </label>
-            <input
-              type="text"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-base focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-            />
-          </div>
+          {mode === "url" ? (
+            <>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {t("home.quick_links_tile_title")} *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-base focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  placeholder="z. B. Nextcloud"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {t("home.quick_links_tile_url")} *
+                </label>
+                <input
+                  type="url"
+                  required
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-base focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  placeholder="https://cloud.example.com"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {t("home.quick_links_tile_icon")}{" "}
+                  <span className="text-gray-400">(Tabler, z. B. ti-cloud)</span>
+                </label>
+                <input
+                  type="text"
+                  value={icon}
+                  onChange={(e) => setIcon(e.target.value)}
+                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-base focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {t("home.quick_links_tile_desc")}
+                </label>
+                <input
+                  type="text"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-base focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                />
+              </div>
+            </>
+          ) : (
+            <div>
+              {modulesLoading ? (
+                <p className="py-4 text-center text-sm text-gray-400">{t("home.quick_links_modules_loading")}</p>
+              ) : modules.length === 0 ? (
+                <p className="py-4 text-center text-sm text-gray-400">{t("home.quick_links_modules_empty")}</p>
+              ) : (
+                <div className="flex flex-col gap-1.5 max-h-64 overflow-y-auto">
+                  {modules.map((mod) => {
+                    const isSelected = selectedModule?.name === mod.name;
+                    return (
+                      <button
+                        key={mod.name}
+                        type="button"
+                        onClick={() => setSelectedModule(isSelected ? null : mod)}
+                        className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 text-left text-sm transition-colors ${
+                          isSelected
+                            ? "border-teal-500 bg-teal-50 dark:border-teal-400 dark:bg-teal-950/40"
+                            : "border-gray-200 hover:border-gray-300 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800"
+                        }`}
+                      >
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-teal-500 to-teal-700 text-white">
+                          <i className={`ti ${moduleIcon(mod)} text-base`} />
+                        </span>
+                        <span className="font-medium text-gray-800 dark:text-gray-100">
+                          {moduleDisplayName(mod, lang)}
+                        </span>
+                        {isSelected && (
+                          <i className="ti ti-check ml-auto text-teal-600 dark:text-teal-400" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
           {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
           <div className="flex justify-end gap-2 pt-1">
             <button
@@ -123,7 +242,7 @@ function AddTileModal({
             </button>
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || (mode === "module" && !selectedModule)}
               className="rounded-md bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50 dark:bg-teal-500 dark:hover:bg-teal-400"
             >
               {saving ? t("home.quick_links_saving") : t("home.quick_links_add_submit")}
@@ -224,11 +343,11 @@ function TileCard({
         </button>
       )}
 
-      {/* Icon */}
+      {/* Icon — internal module paths open in same tab, external URLs in new tab */}
       <a
         href={tile.url}
-        target="_blank"
-        rel="noopener noreferrer"
+        target={tile.url.startsWith("/") ? "_self" : "_blank"}
+        rel={tile.url.startsWith("/") ? undefined : "noopener noreferrer"}
         draggable={false}
         onClick={(e) => e.stopPropagation()}
         className="flex flex-col items-center gap-2 text-inherit no-underline"

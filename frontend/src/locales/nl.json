@@ -373,6 +373,11 @@
     "quick_links_remove": "Tegel verwijderen",
     "quick_links_empty": "Geen tegels — klik op \"+\" om uw eerste koppeling toe te voegen.",
     "quick_links_error": "Fout bij opslaan",
+    "quick_links_mode_url": "URL",
+    "quick_links_mode_module": "Module",
+    "quick_links_module_required": "Selecteer een module.",
+    "quick_links_modules_loading": "Modules laden…",
+    "quick_links_modules_empty": "Geen actieve modules geïnstalleerd.",
     "search": {
       "tab_web": "Web",
       "tab_images": "Afbeeldingen",

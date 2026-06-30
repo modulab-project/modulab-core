@@ -373,6 +373,11 @@
     "quick_links_remove": "Remove tile",
     "quick_links_empty": "No tiles yet — click \"+\" to add your first link.",
     "quick_links_error": "Error saving",
+    "quick_links_mode_url": "URL",
+    "quick_links_mode_module": "Module",
+    "quick_links_module_required": "Please select a module.",
+    "quick_links_modules_loading": "Loading modules…",
+    "quick_links_modules_empty": "No active modules installed.",
     "search": {
       "tab_web": "Web",
       "tab_images": "Images",
