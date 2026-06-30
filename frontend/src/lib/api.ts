@@ -389,11 +389,19 @@ export interface FeedImportResult {
   error?: string;
 }
 
-// POST /v1/admin/feeds/import — uploads an OPML file and bulk-imports feeds.
-export async function adminImportFeeds(token: string, file: File): Promise<FeedImportResult[]> {
+// One entry parsed from an OPML file — returned by adminParseOPML.
+export interface OPMLEntry {
+  url: string;
+  label: string;
+  already_exists: boolean;
+}
+
+// POST /v1/admin/feeds/opml-parse — parses an OPML file and returns the
+// list of feeds it contains (with already_exists flag) WITHOUT importing.
+export async function adminParseOPML(token: string, file: File): Promise<OPMLEntry[]> {
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch(`${API_BASE_URL}/v1/admin/feeds/import`, {
+  const res = await fetch(`${API_BASE_URL}/v1/admin/feeds/opml-parse`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
     body: form,
@@ -403,6 +411,18 @@ export async function adminImportFeeds(token: string, file: File): Promise<FeedI
     throw new ApiError(res.status, text || res.statusText);
   }
   return res.json();
+}
+
+// POST /v1/admin/feeds/import — imports a user-selected list of feeds (JSON body).
+export function adminImportFeeds(
+  token: string,
+  feeds: OPMLEntry[],
+): Promise<FeedImportResult[]> {
+  return request<FeedImportResult[]>("/v1/admin/feeds/import", {
+    method: "POST",
+    headers: bearerHeaders(token),
+    body: JSON.stringify({ feeds }),
+  });
 }
 
 export interface FeedCheckResult {

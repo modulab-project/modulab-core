@@ -177,7 +177,18 @@
       "import_opml": "OPML importieren",
       "importing": "Wird importiert…",
       "import_error": "Import fehlgeschlagen.",
-      "import_result": "{{added}} hinzugefügt · {{skipped}} übersprungen · {{failed}} fehlgeschlagen"
+      "import_result": "{{added}} hinzugefügt · {{skipped}} übersprungen · {{failed}} fehlgeschlagen",
+      "opml_modal": {
+        "title": "Feeds aus OPML auswählen",
+        "subtitle": "Wähle die Feeds aus, die du importieren möchtest.",
+        "already_exists": "bereits vorhanden",
+        "select_all": "Alle auswählen",
+        "deselect_all": "Alle abwählen",
+        "cancel": "Abbrechen",
+        "import": "Ausgewählte importieren ({{count}})",
+        "importing": "Wird importiert…",
+        "none_selected": "Mindestens einen Feed auswählen."
+      }
     },
     "searxng": {
       "title": "SearXNG",
@@ -386,7 +397,7 @@
     },
     "weather": {
       "panel_title": "Wetter",
-      "next_24h": "Nächste 24 Stunden",
+      "next_24h": "Nächste Stunden",
       "forecast_16d": "16-Tage-Vorhersage",
       "now": "jetzt",
       "today": "Heute",

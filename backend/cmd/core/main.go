@@ -315,7 +315,7 @@ func main() {
 	// left to resolve), kept this shape purely for consistency.
 	superAdminOnly := auth.RequireSuperAdminMiddleware(authDeps)
 	mux.Handle("GET /v1/admin/smtp/status", superAdminOnly(setup.SMTPStatusHandler(pool, cfg.MasterKey)))
-	mux.Handle("POST /v1/admin/smtp/test", superAdminOnly(setup.SMTPTestHandler()))
+	mux.Handle("POST /v1/admin/smtp/test", superAdminOnly(setup.SMTPTestHandler(pool, cfg.MasterKey)))
 	mux.Handle("POST /v1/admin/smtp/configure", superAdminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		masterKey, err := setup.ResolveMasterKey(r.Context(), pool, cfg.MasterKey)
 		if err != nil {
@@ -419,6 +419,7 @@ func main() {
 	//   subscriptions, and fetch aggregated articles. The aggregator caches
 	//   each feed's articles in Valkey for 15 minutes per feed.
 	mux.HandleFunc("POST /v1/admin/feeds/check", news.AdminCheckHandler(authDeps))
+	mux.HandleFunc("POST /v1/admin/feeds/opml-parse", news.AdminParseOPMLHandler(authDeps))
 	mux.HandleFunc("POST /v1/admin/feeds/import", news.AdminImportHandler(authDeps))
 	mux.HandleFunc("GET /v1/admin/feeds", news.AdminListHandler(authDeps))
 	mux.HandleFunc("POST /v1/admin/feeds", news.AdminCreateHandler(authDeps))

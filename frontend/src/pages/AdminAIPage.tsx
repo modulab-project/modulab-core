@@ -219,8 +219,8 @@ export default function AdminAIPage() {
                     <p className="text-xs text-gray-500 dark:text-gray-400">
                       {t("admin.ai.model_label")}: <span className="font-medium text-gray-700 dark:text-gray-300">{p?.default_model ?? def.defaultModel}</span>
                     </p>
-                    {/* Balance display — only for providers with a public balance API */}
-                    {hasKey && (def.type === "openai" || def.type === "deepseek") && (() => {
+                    {/* Balance display — only for providers with a public balance API (DeepSeek only) */}
+                    {hasKey && def.type === "deepseek" && (() => {
                       const bal = balances[def.id];
                       if (!bal) return (
                         <button

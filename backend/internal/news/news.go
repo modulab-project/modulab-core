@@ -364,19 +364,22 @@ func flattenOPML(outlines []opmlOutline) []opmlOutline {
 	return flat
 }
 
-// ImportResult is one entry in the JSON array returned by POST /v1/admin/feeds/import.
-type ImportResult struct {
-	URL     string `json:"url"`
-	Label   string `json:"label"`
-	Skipped bool   `json:"skipped"` // true if feed already existed
-	Error   string `json:"error,omitempty"`
+// OPMLEntry is one feed parsed from an OPML file, returned by
+// POST /v1/admin/feeds/opml-parse before any import happens.
+type OPMLEntry struct {
+	URL   string `json:"url"`
+	Label string `json:"label"`
+	// AlreadyExists is true when this feed URL is already in the global pool.
+	AlreadyExists bool `json:"already_exists"`
 }
 
-// AdminImportHandler is POST /v1/admin/feeds/import.
+// AdminParseOPMLHandler is POST /v1/admin/feeds/opml-parse.
 // Accepts a multipart/form-data upload with a field named "file" containing
-// an OPML document. Inserts each valid feed URL from the file, skipping any
-// that are already present (by URL uniqueness in the DB).
-func AdminImportHandler(d auth.Deps) http.HandlerFunc {
+// an OPML document. Returns the list of feeds found in the file — including
+// whether each is already in the global pool — without inserting anything.
+// The caller (admin UI) shows a selection step and then calls
+// POST /v1/admin/feeds/import with the chosen feeds.
+func AdminParseOPMLHandler(d auth.Deps) http.HandlerFunc {
 	const maxUploadSize = 2 << 20 // 2 MB
 	return func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := auth.RequireAdminSession(d, w, r); !ok {
@@ -413,21 +416,83 @@ func AdminImportHandler(d auth.Deps) http.HandlerFunc {
 			return
 		}
 
-		// Fetch existing feed URLs once so we can skip duplicates without
-		// relying on a DB unique constraint error for flow control.
 		existing, _ := d.Pool.ListFeeds(r.Context())
 		existingURLs := make(map[string]bool, len(existing))
 		for _, f := range existing {
 			existingURLs[strings.ToLower(strings.TrimSpace(f.URL))] = true
 		}
 
-		results := make([]ImportResult, 0, len(leaves))
+		entries := make([]OPMLEntry, 0, len(leaves))
 		for _, o := range leaves {
 			feedURL := strings.TrimSpace(o.XMLURL)
+			if feedURL == "" || !isHTTPURL(feedURL) {
+				continue
+			}
 			label := strings.TrimSpace(o.Text)
 			if label == "" {
 				label = strings.TrimSpace(o.Title)
 			}
+			if label == "" {
+				label = feedURL
+			}
+			entries = append(entries, OPMLEntry{
+				URL:           feedURL,
+				Label:         label,
+				AlreadyExists: existingURLs[strings.ToLower(feedURL)],
+			})
+		}
+
+		writeJSON(w, http.StatusOK, entries)
+	}
+}
+
+// ImportResult is one entry in the JSON array returned by POST /v1/admin/feeds/import.
+type ImportResult struct {
+	URL     string `json:"url"`
+	Label   string `json:"label"`
+	Skipped bool   `json:"skipped"` // true if feed already existed
+	Error   string `json:"error,omitempty"`
+}
+
+// ImportRequest is the body of POST /v1/admin/feeds/import when called with
+// a JSON body (selection-based import). The caller sends the list of feeds
+// the user selected from the OPML parse step.
+type ImportRequest struct {
+	Feeds []OPMLEntry `json:"feeds"`
+}
+
+// AdminImportHandler is POST /v1/admin/feeds/import.
+// Accepts a JSON body {"feeds": [{url, label}, ...]} — the selection the
+// admin made after the parse step (AdminParseOPMLHandler). Inserts each
+// valid feed URL, skipping any already present.
+func AdminImportHandler(d auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := auth.RequireAdminSession(d, w, r); !ok {
+			return
+		}
+
+		var req ImportRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if len(req.Feeds) == 0 {
+			http.Error(w, "feeds list is empty", http.StatusBadRequest)
+			return
+		}
+
+		// Fetch existing feed URLs once to skip duplicates without relying on
+		// DB unique-constraint errors for flow control.
+		existing, _ := d.Pool.ListFeeds(r.Context())
+		existingURLs := make(map[string]bool, len(existing))
+		for _, f := range existing {
+			existingURLs[strings.ToLower(strings.TrimSpace(f.URL))] = true
+		}
+
+		results := make([]ImportResult, 0, len(req.Feeds))
+		for _, entry := range req.Feeds {
+			feedURL := strings.TrimSpace(entry.URL)
+			label := strings.TrimSpace(entry.Label)
 			if label == "" {
 				label = feedURL
 			}

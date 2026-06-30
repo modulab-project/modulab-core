@@ -397,6 +397,14 @@ func SMTPConfigureHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 // test message. The configuration is NOT persisted — the handler uses it
 // only for the outbound connection so the operator can verify connectivity
 // before committing via SMTPConfigureHandler.
+//
+// Password may be empty when a configuration is already saved and the admin
+// has not re-entered the password (the frontend never receives the stored
+// password for security reasons). SMTPTestHandler detects an empty Password
+// and falls back to the stored encrypted password from core_settings, so
+// testing an existing configuration works without re-entering the password —
+// identical semantics to SMTPConfigureHandler's "leave empty to keep existing
+// password" behaviour.
 type SMTPTestRequest struct {
 	Host        string `json:"host"`
 	Port        int    `json:"port"`
@@ -412,10 +420,10 @@ type SMTPTestRequest struct {
 // on success, 400 for a missing/invalid field, or 502 if the outbound SMTP
 // connection failed. Exposed via POST /v1/admin/smtp/test (super-admin only).
 //
-// The send logic is a thin shim that constructs an SMTPRuntimeConfig from
-// the request and calls send() directly - no queue, no worker, just a
-// synchronous dial-and-send so the operator gets immediate feedback.
-func SMTPTestHandler() http.HandlerFunc {
+// pool and masterKey are required so the handler can fall back to the stored
+// encrypted password when the request carries an empty Password field (the
+// frontend never exposes the stored password to the browser).
+func SMTPTestHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -449,11 +457,23 @@ func SMTPTestHandler() http.HandlerFunc {
 			return
 		}
 
+		// When the request carries no password (the admin tests an existing
+		// config without re-entering the password), fall back to the stored
+		// encrypted password so the test does not fail with an auth error.
+		password := req.Password
+		if password == "" {
+			if encPwd, exists, err := pool.GetSetting(r.Context(), smtpPasswordSettingKey); err == nil && exists && encPwd != "" {
+				if dec, decErr := crypto.Decrypt(masterKey, encPwd); decErr == nil {
+					password = dec
+				}
+			}
+		}
+
 		cfg := SMTPRuntimeConfig{
 			Host:        req.Host,
 			Port:        req.Port,
 			Username:    req.Username,
-			Password:    req.Password,
+			Password:    password,
 			FromAddress: req.FromAddress,
 			Encryption:  req.Encryption,
 		}

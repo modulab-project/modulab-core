@@ -606,16 +606,10 @@ func AdminBalanceHandler(deps auth.Deps) http.HandlerFunc {
 			}
 			_ = json.NewEncoder(w).Encode(balanceResp{Supported: true, Currency: currency, Amount: bal})
 
-		case "openai":
-			bal, currency, fetchErr := fetchOpenAIBalance(r.Context(), adminKey)
-			if fetchErr != nil {
-				_ = json.NewEncoder(w).Encode(balanceResp{Supported: true, Error: fetchErr.Error()})
-				return
-			}
-			_ = json.NewEncoder(w).Encode(balanceResp{Supported: true, Currency: currency, Amount: bal})
-
 		default:
-			// Anthropic, Gemini, and custom providers do not have a public balance API.
+			// OpenAI, Anthropic, Gemini, and custom providers do not have a
+			// reliably accessible public balance API (OpenAI's credits endpoint
+			// returns 404 for most account types), so we report unsupported.
 			_ = json.NewEncoder(w).Encode(balanceResp{Supported: false})
 		}
 	}
@@ -660,44 +654,6 @@ func fetchDeepSeekBalance(ctx context.Context, apiKey string) (float64, string, 
 	var total float64
 	fmt.Sscanf(info.TotalBalance, "%f", &total)
 	return total, info.Currency, nil
-}
-
-// fetchOpenAIBalance calls the OpenAI credits endpoint. This endpoint is only
-// available for prepaid (credit) accounts; subscription/postpaid accounts
-// will receive a 404 or permission error, which surfaces as an error to the caller.
-func fetchOpenAIBalance(ctx context.Context, apiKey string) (float64, string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.openai.com/v1/organization/credits", nil)
-	if err != nil {
-		return 0, "", err
-	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return 0, "", fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	if resp.StatusCode != http.StatusOK {
-		return 0, "", fmt.Errorf("openai returned %d: %s", resp.StatusCode, body)
-	}
-
-	var result struct {
-		Object string `json:"object"`
-		Data   []struct {
-			GrantedCredits    float64 `json:"granted_credits"`
-			UsedCredits       float64 `json:"used_credits"`
-			ExpiresAt         int64   `json:"expires_at"`
-		} `json:"data"`
-		TotalGranted float64 `json:"total_granted"`
-		TotalUsed    float64 `json:"total_used"`
-		TotalAvailable float64 `json:"total_available"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return 0, "", fmt.Errorf("parse error: %w", err)
-	}
-	return result.TotalAvailable / 100.0, "USD", nil // OpenAI returns credits in cents
 }
 
 // AdminSettingsHandler handles GET and PATCH /v1/admin/ai/settings.

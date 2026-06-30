@@ -14,6 +14,7 @@ import {
   adminUpdateFeed,
   adminDeleteFeed,
   adminCheckFeed,
+  adminParseOPML,
   adminImportFeeds,
   adminGetNewsSettings,
   adminUpdateNewsSettings,
@@ -21,6 +22,7 @@ import {
   type AdminNewsSettings,
   type FeedCheckResult,
   type FeedImportResult,
+  type OPMLEntry,
   type ApiError,
 } from "../lib/api";
 import { getSessionToken } from "../lib/session";
@@ -46,7 +48,9 @@ export default function AdminFeedsPage() {
   const [modalOpen, setModalOpen] = useState(false);
 
   // OPML import state
-  const [importing, setImporting] = useState(false);
+  const [parsing, setParsing] = useState(false);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [opmlEntries, setOpmlEntries] = useState<OPMLEntry[] | null>(null); // non-null = modal open
   const [importResults, setImportResults] = useState<FeedImportResult[] | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
 
@@ -118,25 +122,42 @@ export default function AdminFeedsPage() {
     }
   }
 
-  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+  // Step 1: parse OPML file and open the selection modal.
+  async function handleOPMLFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     const token = getSessionToken();
     if (!token) return;
-    setImporting(true);
+    setParsing(true);
+    setParseError(null);
     setImportResults(null);
     setImportError(null);
     try {
-      const results = await adminImportFeeds(token, file);
+      const entries = await adminParseOPML(token, file);
+      setOpmlEntries(entries);
+    } catch (err: unknown) {
+      setParseError((err as ApiError).message ?? t("admin.feeds.import_error"));
+    } finally {
+      setParsing(false);
+      // Reset the file input so the same file can be re-selected.
+      e.target.value = "";
+    }
+  }
+
+  // Step 2: import the user-selected feeds from the modal.
+  async function handleImportSelected(selected: OPMLEntry[]) {
+    const token = getSessionToken();
+    if (!token) return;
+    setOpmlEntries(null);
+    setImportResults(null);
+    setImportError(null);
+    try {
+      const results = await adminImportFeeds(token, selected);
       setImportResults(results);
       // Reload feed list to show newly imported feeds.
       load();
     } catch (err: unknown) {
       setImportError((err as ApiError).message ?? t("admin.feeds.import_error"));
-    } finally {
-      setImporting(false);
-      // Reset the file input so the same file can be re-selected.
-      e.target.value = "";
     }
   }
 
@@ -253,15 +274,15 @@ export default function AdminFeedsPage() {
           </div>
           <div className="flex items-center gap-2">
             {/* OPML import — hidden file input triggered by label */}
-            <label className={`flex cursor-pointer items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800 ${importing ? "opacity-50 pointer-events-none" : ""}`}>
+            <label className={`flex cursor-pointer items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800 ${parsing ? "opacity-50 pointer-events-none" : ""}`}>
               <i className="ti ti-upload text-[14px]" />
-              {importing ? t("admin.feeds.importing") : t("admin.feeds.import_opml")}
+              {parsing ? t("admin.feeds.importing") : t("admin.feeds.import_opml")}
               <input
                 type="file"
                 accept=".opml,.xml"
                 className="sr-only"
-                onChange={handleImport}
-                disabled={importing}
+                onChange={handleOPMLFileSelected}
+                disabled={parsing}
               />
             </label>
             <button
@@ -273,6 +294,13 @@ export default function AdminFeedsPage() {
             </button>
           </div>
         </div>
+
+        {/* Parse error */}
+        {parseError && (
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-400">
+            {parseError}
+          </div>
+        )}
 
         {/* Import result summary */}
         {importError && (
@@ -371,7 +399,165 @@ export default function AdminFeedsPage() {
           }}
         />
       )}
+
+      {opmlEntries && (
+        <OPMLSelectionModal
+          entries={opmlEntries}
+          onClose={() => setOpmlEntries(null)}
+          onImport={handleImportSelected}
+        />
+      )}
     </AppShell>
+  );
+}
+
+// ---- OPML selection modal ---------------------------------------------------
+
+function OPMLSelectionModal({
+  entries,
+  onClose,
+  onImport,
+}: {
+  entries: OPMLEntry[];
+  onClose: () => void;
+  onImport: (selected: OPMLEntry[]) => void;
+}) {
+  const { t } = useTranslation();
+  // Pre-select all entries that don't already exist.
+  const [selected, setSelected] = useState<Set<string>>(
+    () => new Set(entries.filter((e) => !e.already_exists).map((e) => e.url)),
+  );
+  const [importing, setImporting] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
+
+  const allNewSelected = entries
+    .filter((e) => !e.already_exists)
+    .every((e) => selected.has(e.url));
+
+  function toggle(url: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(url)) next.delete(url);
+      else next.add(url);
+      return next;
+    });
+    setValidationError(null);
+  }
+
+  function toggleAll() {
+    const newEntries = entries.filter((e) => !e.already_exists).map((e) => e.url);
+    if (allNewSelected) {
+      setSelected((prev) => {
+        const next = new Set(prev);
+        newEntries.forEach((u) => next.delete(u));
+        return next;
+      });
+    } else {
+      setSelected((prev) => new Set([...prev, ...newEntries]));
+    }
+  }
+
+  async function handleImport() {
+    const chosen = entries.filter((e) => selected.has(e.url));
+    if (chosen.length === 0) {
+      setValidationError(t("admin.feeds.opml_modal.none_selected"));
+      return;
+    }
+    setImporting(true);
+    onImport(chosen);
+  }
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div className="fixed inset-0 z-40 bg-black/40" onClick={onClose} />
+      {/* Dialog */}
+      <div className="fixed inset-x-4 top-[8%] z-50 mx-auto flex max-w-lg flex-col rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-gray-950"
+        style={{ maxHeight: "80vh" }}>
+        {/* Header */}
+        <div className="px-6 pt-5 pb-3 shrink-0">
+          <h2 className="text-base font-semibold">{t("admin.feeds.opml_modal.title")}</h2>
+          <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
+            {t("admin.feeds.opml_modal.subtitle")}
+          </p>
+          <div className="mt-3 flex items-center justify-between">
+            <span className="text-xs text-gray-500 dark:text-gray-400">
+              {entries.length} {entries.length === 1 ? "Feed" : "Feeds"}
+            </span>
+            <button
+              type="button"
+              onClick={toggleAll}
+              className="text-xs font-medium text-teal-600 hover:text-teal-700 dark:text-teal-400"
+            >
+              {allNewSelected
+                ? t("admin.feeds.opml_modal.deselect_all")
+                : t("admin.feeds.opml_modal.select_all")}
+            </button>
+          </div>
+        </div>
+
+        {/* Scrollable feed list */}
+        <div className="overflow-y-auto flex-1 divide-y divide-gray-100 dark:divide-gray-800 px-2">
+          {entries.map((entry) => {
+            const isChecked = selected.has(entry.url);
+            return (
+              <label
+                key={entry.url}
+                className={`flex items-start gap-3 px-4 py-3 cursor-pointer rounded-lg transition-colors ${
+                  entry.already_exists
+                    ? "opacity-50 cursor-default"
+                    : "hover:bg-gray-50 dark:hover:bg-gray-900"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={isChecked}
+                  disabled={entry.already_exists}
+                  onChange={() => !entry.already_exists && toggle(entry.url)}
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-teal-600"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium leading-tight">{entry.label}</p>
+                  <p className="truncate text-xs text-gray-500 dark:text-gray-400">{entry.url}</p>
+                  {entry.already_exists && (
+                    <span className="mt-0.5 inline-block rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                      {t("admin.feeds.opml_modal.already_exists")}
+                    </span>
+                  )}
+                </div>
+              </label>
+            );
+          })}
+        </div>
+
+        {/* Footer */}
+        <div className="shrink-0 border-t border-gray-100 dark:border-gray-800 px-6 py-4">
+          {validationError && (
+            <p className="mb-2 text-xs text-red-600 dark:text-red-400">{validationError}</p>
+          )}
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={importing}
+              className="rounded-lg px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+            >
+              {t("admin.feeds.opml_modal.cancel")}
+            </button>
+            <button
+              type="button"
+              onClick={handleImport}
+              disabled={importing || selected.size === 0}
+              className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
+            >
+              {importing
+                ? t("admin.feeds.opml_modal.importing")
+                : t("admin.feeds.opml_modal.import", { count: selected.size })}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
 
