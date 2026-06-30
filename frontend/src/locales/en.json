@@ -344,12 +344,15 @@
     "modules": {
       "title": "Module Management",
       "subtitle": "Install, update, and manage modules on this ModuLab instance.",
+      "syncing": "Syncing registry and checking for updates…",
       "store_title": "Module Store",
       "store_desc": "Browse and install modules from the official registry and community.",
       "store_count": "{{count}} modules available",
       "installed_title": "Installed Modules",
       "installed_desc": "Manage active modules, check for updates, pin or remove installations.",
-      "installed_count": "{{count}} installed"
+      "installed_count": "{{count}} installed",
+      "updates_available": "{{count}} update(s) available",
+      "all_up_to_date": "All modules up to date"
     }
   },
   "home": {

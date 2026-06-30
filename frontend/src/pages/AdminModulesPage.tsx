@@ -1,11 +1,17 @@
 // /admin/modules — hub page for module management.
-// Links to the Module Store browser (/admin/modules/store) and the
-// installed-modules manager (/admin/modules/installed).
-// Gate: org-admin and super-admin (same as AdminUsersPage).
+// On mount: automatically runs registry sync + update check + installed count
+// in the background so the user arrives at /admin/modules/installed with
+// fresh data and update badges already set — no manual clicks needed.
+// Gate: org-admin and super-admin.
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { listInstalledModules, listStore } from "../lib/api";
+import {
+  checkModuleUpdates,
+  listInstalledModules,
+  listStore,
+  syncStore,
+} from "../lib/api";
 import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell, isAdminRole } from "../components/AppShell";
@@ -15,8 +21,11 @@ export default function AdminModulesPage() {
   const { session, loading } = useAuthenticatedSession();
   const navigate = useNavigate();
 
+  // null = not yet known, number = resolved
   const [storeCount, setStoreCount] = useState<number | null>(null);
   const [installedCount, setInstalledCount] = useState<number | null>(null);
+  const [updateCount, setUpdateCount] = useState<number | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     if (!session) return;
@@ -28,24 +37,50 @@ export default function AdminModulesPage() {
     const token = getSessionToken();
     if (!token) return;
 
-    listStore(token)
-      .then((r) => setStoreCount(r.total_count))
-      .catch(() => setStoreCount(null));
+    setSyncing(true);
 
-    listInstalledModules(token)
-      .then((list) => setInstalledCount(list?.length ?? 0))
-      .catch(() => setInstalledCount(null));
+    Promise.allSettled([
+      // 1. Sync registry, then read updated count
+      syncStore(token)
+        .then(() => listStore(token))
+        .then((r) => setStoreCount(r.total_count))
+        .catch(() => {
+          // Sync failed (e.g. GitHub unreachable) — still try to read cached count
+          listStore(token)
+            .then((r) => setStoreCount(r.total_count))
+            .catch(() => {});
+        }),
+
+      // 2. Check which installed modules have updates
+      checkModuleUpdates(token)
+        .then((r) => setUpdateCount(r.count))
+        .catch(() => setUpdateCount(0)),
+
+      // 3. Total installed count
+      listInstalledModules(token)
+        .then((list) => setInstalledCount(list?.length ?? 0))
+        .catch(() => setInstalledCount(null)),
+    ]).finally(() => setSyncing(false));
   }, [session, navigate]);
 
   if (loading || !session || !isAdminRole(session.role)) return null;
+
+  const hasUpdates = updateCount !== null && updateCount > 0;
 
   return (
     <AppShell session={session}>
       <div className="mx-auto w-full max-w-2xl py-10">
         <div className="mb-8">
-          <h1 className="text-xl font-semibold mb-1">{t("admin.modules.title")}</h1>
+          <div className="flex items-center gap-2 mb-1">
+            <h1 className="text-xl font-semibold">{t("admin.modules.title")}</h1>
+            {syncing && (
+              <i className="ti ti-loader-2 animate-spin text-[16px] text-gray-400 dark:text-gray-500" />
+            )}
+          </div>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            {t("admin.modules.subtitle")}
+            {syncing
+              ? t("admin.modules.syncing")
+              : t("admin.modules.subtitle")}
           </p>
         </div>
 
@@ -67,41 +102,80 @@ export default function AdminModulesPage() {
             <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 mb-3">
               {t("admin.modules.store_desc")}
             </p>
-            {storeCount !== null && (
-              <div className="mt-auto flex items-center gap-1.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-blue-400" />
-                <span className="text-[11px] text-gray-400 dark:text-gray-500">
-                  {t("admin.modules.store_count", { count: storeCount })}
+            <div className="mt-auto flex items-center gap-1.5 min-h-[16px]">
+              {syncing ? (
+                <span className="text-[11px] text-gray-400 dark:text-gray-500 animate-pulse">
+                  {t("admin.modules.syncing")}
                 </span>
-              </div>
-            )}
+              ) : storeCount !== null ? (
+                <>
+                  <span className="h-1.5 w-1.5 rounded-full bg-blue-400" />
+                  <span className="text-[11px] text-gray-400 dark:text-gray-500">
+                    {t("admin.modules.store_count", { count: storeCount })}
+                  </span>
+                </>
+              ) : null}
+            </div>
           </Link>
 
-          {/* Installed modules */}
+          {/* Installed modules — highlighted when updates are available */}
           <Link
             to="/admin/modules/installed"
-            className="group flex flex-col rounded-xl border border-gray-200 p-4 transition-colors hover:border-teal-400 hover:bg-teal-50/40 dark:border-gray-800 dark:hover:border-teal-700 dark:hover:bg-teal-950/30"
+            className={`group flex flex-col rounded-xl border p-4 transition-colors ${
+              hasUpdates
+                ? "border-amber-300 bg-amber-50/40 hover:border-amber-400 hover:bg-amber-50/60 dark:border-amber-700 dark:bg-amber-950/20 dark:hover:border-amber-600"
+                : "border-gray-200 hover:border-teal-400 hover:bg-teal-50/40 dark:border-gray-800 dark:hover:border-teal-700 dark:hover:bg-teal-950/30"
+            }`}
           >
             <div className="flex items-start justify-between gap-3 mb-2">
               <div className="flex items-center gap-2.5">
-                <i className="ti ti-puzzle text-[18px] text-gray-400 group-hover:text-teal-600 dark:group-hover:text-teal-400" />
+                <i className={`ti ti-puzzle text-[18px] ${hasUpdates ? "text-amber-500 dark:text-amber-400" : "text-gray-400 group-hover:text-teal-600 dark:group-hover:text-teal-400"}`} />
                 <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
                   {t("admin.modules.installed_title")}
                 </span>
+                {hasUpdates && (
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-900 dark:text-amber-300">
+                    {updateCount}
+                  </span>
+                )}
               </div>
-              <i className="ti ti-chevron-right flex-none text-gray-300 group-hover:text-teal-500 dark:text-gray-600 dark:group-hover:text-teal-400" />
+              <i className={`ti ti-chevron-right flex-none ${hasUpdates ? "text-amber-400 dark:text-amber-600" : "text-gray-300 group-hover:text-teal-500 dark:text-gray-600 dark:group-hover:text-teal-400"}`} />
             </div>
             <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 mb-3">
               {t("admin.modules.installed_desc")}
             </p>
-            {installedCount !== null && (
-              <div className="mt-auto flex items-center gap-1.5">
-                <span className={`h-1.5 w-1.5 rounded-full ${installedCount > 0 ? "bg-green-500" : "bg-gray-300 dark:bg-gray-600"}`} />
-                <span className="text-[11px] text-gray-400 dark:text-gray-500">
-                  {t("admin.modules.installed_count", { count: installedCount })}
+            <div className="mt-auto flex items-center gap-1.5 min-h-[16px]">
+              {syncing ? (
+                <span className="text-[11px] text-gray-400 dark:text-gray-500 animate-pulse">
+                  {t("admin.modules.syncing")}
                 </span>
-              </div>
-            )}
+              ) : updateCount !== null ? (
+                hasUpdates ? (
+                  <>
+                    <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+                    <span className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
+                      {t("admin.modules.updates_available", { count: updateCount })}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                    <span className="text-[11px] text-gray-400 dark:text-gray-500">
+                      {installedCount !== null
+                        ? t("admin.modules.installed_count", { count: installedCount })
+                        : t("admin.modules.all_up_to_date")}
+                    </span>
+                  </>
+                )
+              ) : installedCount !== null ? (
+                <>
+                  <span className={`h-1.5 w-1.5 rounded-full ${installedCount > 0 ? "bg-green-500" : "bg-gray-300 dark:bg-gray-600"}`} />
+                  <span className="text-[11px] text-gray-400 dark:text-gray-500">
+                    {t("admin.modules.installed_count", { count: installedCount })}
+                  </span>
+                </>
+              ) : null}
+            </div>
           </Link>
         </div>
       </div>
