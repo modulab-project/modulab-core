@@ -123,6 +123,13 @@
         "save_provider_error": "Error al guardar el proveedor.",
         "save_changes": "Guardar cambios",
         "add_provider": "Añadir proveedor"
+      },
+      "balance": {
+        "check": "Consultar saldo",
+        "loading": "Consultando…",
+        "label": "Saldo",
+        "fetch_error": "No se pudo consultar el saldo.",
+        "not_supported": "Este proveedor no admite consulta de saldo."
       }
     },
     "feeds": {
@@ -157,7 +164,30 @@
         "save_error": "Error al guardar",
         "cancel": "Cancelar",
         "saving": "Guardando…",
-        "save": "Guardar"
+        "save": "Guardar",
+        "check_button": "Verificar",
+        "checking": "Verificando…",
+        "check_ok": "Accesible",
+        "check_articles": "{{count}} artículos",
+        "check_has_images": "con imágenes",
+        "check_no_images": "sin imágenes",
+        "check_unreachable": "Feed no accesible",
+        "check_error": "No se pudo verificar el feed."
+      },
+      "import_opml": "Importar OPML",
+      "importing": "Importando…",
+      "import_error": "Error al importar.",
+      "import_result": "{{added}} añadidos · {{skipped}} omitidos · {{failed}} fallidos",
+      "opml_modal": {
+        "title": "Seleccionar feeds del OPML",
+        "subtitle": "Elige qué feeds quieres importar.",
+        "already_exists": "ya existe",
+        "select_all": "Seleccionar todos",
+        "deselect_all": "Deseleccionar todos",
+        "cancel": "Cancelar",
+        "import": "Importar seleccionados ({{count}})",
+        "importing": "Importando…",
+        "none_selected": "Selecciona al menos un feed."
       }
     },
     "searxng": {
@@ -207,7 +237,15 @@
       "action": {
         "removing": "Eliminando…",
         "remove": "Eliminar configuración"
-      }
+      },
+      "test_title": "Enviar correo de prueba",
+      "test_hint": "Utiliza la configuración actual del formulario (sin guardar).",
+      "test_address_placeholder": "destinatario@ejemplo.com",
+      "test_address_required": "Introduce una dirección de correo.",
+      "test_button": "Enviar correo de prueba",
+      "test_sending": "Enviando…",
+      "test_ok": "¡Correo de prueba enviado!",
+      "test_error": "Error al enviar: {{error}}"
     },
     "quick_links": {
       "title": "Mosaicos de acceso rápido",
@@ -359,7 +397,7 @@
     },
     "weather": {
       "panel_title": "Tiempo",
-      "next_24h": "Próximas 24 horas",
+      "next_24h": "Próximas horas",
       "forecast_16d": "Pronóstico 16 días",
       "now": "ahora",
       "today": "Hoy",
@@ -523,7 +561,8 @@
     "save": "Guardar",
     "saving": "Guardando…",
     "loading": "Cargando…",
-    "saved": "Guardado"
+    "saved": "Guardado",
+    "dismiss": "Cerrar"
   },
   "user": {
     "ai": {

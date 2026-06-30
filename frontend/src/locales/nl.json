@@ -123,6 +123,13 @@
         "save_provider_error": "Opslaan van provider mislukt.",
         "save_changes": "Wijzigingen opslaan",
         "add_provider": "Provider toevoegen"
+      },
+      "balance": {
+        "check": "Saldo controleren",
+        "loading": "Opvragen…",
+        "label": "Saldo",
+        "fetch_error": "Saldo kon niet worden opgehaald.",
+        "not_supported": "Deze provider ondersteunt geen saldo-opvraag."
       }
     },
     "feeds": {
@@ -157,7 +164,30 @@
         "save_error": "Opslaan mislukt",
         "cancel": "Annuleren",
         "saving": "Opslaan…",
-        "save": "Opslaan"
+        "save": "Opslaan",
+        "check_button": "Controleren",
+        "checking": "Controleren…",
+        "check_ok": "Bereikbaar",
+        "check_articles": "{{count}} artikelen",
+        "check_has_images": "met afbeeldingen",
+        "check_no_images": "zonder afbeeldingen",
+        "check_unreachable": "Feed niet bereikbaar",
+        "check_error": "Feed kon niet worden gecontroleerd."
+      },
+      "import_opml": "OPML importeren",
+      "importing": "Importeren…",
+      "import_error": "Importeren mislukt.",
+      "import_result": "{{added}} toegevoegd · {{skipped}} overgeslagen · {{failed}} mislukt",
+      "opml_modal": {
+        "title": "Feeds selecteren uit OPML",
+        "subtitle": "Kies welke feeds je wilt importeren.",
+        "already_exists": "bestaat al",
+        "select_all": "Alles selecteren",
+        "deselect_all": "Alles deselecteren",
+        "cancel": "Annuleren",
+        "import": "Geselecteerde importeren ({{count}})",
+        "importing": "Importeren…",
+        "none_selected": "Selecteer ten minste één feed."
       }
     },
     "searxng": {
@@ -207,7 +237,15 @@
       "action": {
         "removing": "Verwijderen…",
         "remove": "Configuratie verwijderen"
-      }
+      },
+      "test_title": "Testmail versturen",
+      "test_hint": "Gebruikt de huidige formulierinstelling (niet opgeslagen).",
+      "test_address_placeholder": "ontvanger@voorbeeld.com",
+      "test_address_required": "Voer een e-mailadres in.",
+      "test_button": "Testmail versturen",
+      "test_sending": "Versturen…",
+      "test_ok": "Testmail verzonden!",
+      "test_error": "Versturen mislukt: {{error}}"
     },
     "quick_links": {
       "title": "Snelkoppelingstegels",
@@ -359,7 +397,7 @@
     },
     "weather": {
       "panel_title": "Weer",
-      "next_24h": "Komende 24 uur",
+      "next_24h": "Komende uren",
       "forecast_16d": "16-daagse voorspelling",
       "now": "nu",
       "today": "Vandaag",
@@ -523,7 +561,8 @@
     "save": "Opslaan",
     "saving": "Opslaan…",
     "loading": "Laden…",
-    "saved": "Opgeslagen"
+    "saved": "Opgeslagen",
+    "dismiss": "Sluiten"
   },
   "user": {
     "ai": {
