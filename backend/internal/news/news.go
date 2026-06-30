@@ -1027,69 +1027,52 @@ var catalogCountries = map[string][]string{
 	"NL": {"NLD", "BEL"},
 }
 
+// catalogLanguages is the ordered list of supported language codes for the catalog.
+var catalogLanguages = []string{"DE", "EN", "ES", "FR", "NL"}
+
 // AdminCatalogHandler is GET /v1/admin/feeds/catalog.
-// Fetches the public news-feed catalog from GitHub (cached 24 h in Valkey),
-// filters to countries matching ModuLab's supported languages (DE/EN/ES/FR/NL),
-// skips bot-protected feeds, and returns a deduplicated []OPMLEntry with
-// AlreadyExists populated from the current DB feed list. Reachable is left
-// false — the frontend runs the same reachability check as for OPML imports.
+//
+// Without query params: returns {"languages": ["DE","EN","ES","FR","NL"]}.
+// With ?lang=DE: fetches the GitHub catalog (cached 24 h), filters to the
+// countries for that language, checks reachability in parallel (same semaphore
+// approach as AdminParseOPMLHandler), and returns []OPMLEntry with Reachable
+// and AlreadyExists both populated.
 func AdminCatalogHandler(d auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := auth.RequireAdminSession(d, w, r); !ok {
 			return
 		}
 
-		// 1. Fetch raw catalog JSON — try Valkey cache first.
-		var rawJSON string
-		cached, hit, err := d.Valkey.Get(r.Context(), catalogCacheKey)
-		if err == nil && hit {
-			rawJSON = cached
-		} else {
-			req, reqErr := http.NewRequestWithContext(r.Context(), http.MethodGet, catalogURL, nil)
-			if reqErr != nil {
-				http.Error(w, "failed to build catalog request: "+reqErr.Error(), http.StatusInternalServerError)
-				return
-			}
-			req.Header.Set("User-Agent", httpUserAgent)
-			client := &http.Client{Timeout: 30 * time.Second}
-			resp, fetchErr := client.Do(req)
-			if fetchErr != nil {
-				http.Error(w, "failed to fetch catalog: "+fetchErr.Error(), http.StatusBadGateway)
-				return
-			}
-			defer resp.Body.Close()
-			if resp.StatusCode != http.StatusOK {
-				http.Error(w, fmt.Sprintf("catalog returned HTTP %d", resp.StatusCode), http.StatusBadGateway)
-				return
-			}
-			body, readErr := io.ReadAll(io.LimitReader(resp.Body, 10<<20)) // 10 MB cap
-			if readErr != nil {
-				http.Error(w, "failed to read catalog: "+readErr.Error(), http.StatusInternalServerError)
-				return
-			}
-			rawJSON = string(body)
-			// Store in cache; ignore cache write errors.
-			if cacheErr := d.Valkey.SetWithTTL(r.Context(), catalogCacheKey, rawJSON, catalogCacheTTL); cacheErr != nil {
-				log.Printf("news: catalog cache write failed: %v", cacheErr)
-			}
+		lang := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("lang")))
+
+		// No lang param → return language list.
+		if lang == "" {
+			writeJSON(w, http.StatusOK, map[string][]string{"languages": catalogLanguages})
+			return
 		}
 
-		// 2. Parse the catalog.
+		// Validate lang.
+		countryCodes, ok := catalogCountries[lang]
+		if !ok {
+			http.Error(w, "unsupported language: "+lang, http.StatusBadRequest)
+			return
+		}
+
+		// 1. Fetch raw catalog JSON — try Valkey cache first.
+		rawJSON, err := catalogFetchRaw(r.Context(), d)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+
+		// 2. Parse catalog.
 		var catalog map[string][]catalogPublication
 		if err := json.Unmarshal([]byte(rawJSON), &catalog); err != nil {
 			http.Error(w, "failed to parse catalog: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		// 3. Build set of target country codes.
-		targetCountries := make(map[string]bool)
-		for _, codes := range catalogCountries {
-			for _, c := range codes {
-				targetCountries[c] = true
-			}
-		}
-
-		// 4. Load current DB feeds for AlreadyExists check.
+		// 3. Load existing DB feeds for AlreadyExists check.
 		existingFeeds, dbErr := d.Pool.ListFeeds(r.Context())
 		if dbErr != nil {
 			http.Error(w, dbErr.Error(), http.StatusInternalServerError)
@@ -1100,11 +1083,15 @@ func AdminCatalogHandler(d auth.Deps) http.HandlerFunc {
 			existingURLs[strings.ToLower(f.URL)] = true
 		}
 
-		// 5. Collect entries, deduplicating by URL.
+		// 4. Collect entries for the requested language (deduplicated by URL).
+		targetSet := make(map[string]bool, len(countryCodes))
+		for _, c := range countryCodes {
+			targetSet[c] = true
+		}
 		seen := make(map[string]bool)
 		var entries []OPMLEntry
 		for countryCode, pubs := range catalog {
-			if !targetCountries[countryCode] {
+			if !targetSet[countryCode] {
 				continue
 			}
 			for _, pub := range pubs {
@@ -1126,7 +1113,6 @@ func AdminCatalogHandler(d auth.Deps) http.HandlerFunc {
 					if feed.Category != "" {
 						label = pub.Name + " – " + feed.Category
 					}
-
 					entries = append(entries, OPMLEntry{
 						URL:           feedURL,
 						Label:         label,
@@ -1136,6 +1122,60 @@ func AdminCatalogHandler(d auth.Deps) http.HandlerFunc {
 			}
 		}
 
+		// 5. Check reachability in parallel (max 10 concurrent).
+		sem := make(chan struct{}, maxConcurrency)
+		var wg sync.WaitGroup
+		for i := range entries {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				_, fetchErr := fetchFeed(r.Context(), entries[idx].URL, entries[idx].Label)
+				if fetchErr != nil {
+					entries[idx].Reachable = false
+					entries[idx].ReachError = fetchErr.Error()
+				} else {
+					entries[idx].Reachable = true
+				}
+			}(i)
+		}
+		wg.Wait()
+
 		writeJSON(w, http.StatusOK, entries)
 	}
+}
+
+// catalogFetchRaw returns the raw GitHub catalog JSON, using Valkey as a 24 h cache.
+func catalogFetchRaw(ctx context.Context, d auth.Deps) (string, error) {
+	cached, hit, err := d.Valkey.Get(ctx, catalogCacheKey)
+	if err == nil && hit {
+		return cached, nil
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, catalogURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to build catalog request: %w", err)
+	}
+	req.Header.Set("User-Agent", httpUserAgent)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch catalog: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("catalog returned HTTP %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
+	if err != nil {
+		return "", fmt.Errorf("failed to read catalog: %w", err)
+	}
+	raw := string(body)
+	if cacheErr := d.Valkey.SetWithTTL(ctx, catalogCacheKey, raw, catalogCacheTTL); cacheErr != nil {
+		log.Printf("news: catalog cache write failed: %v", cacheErr)
+	}
+	return raw, nil
 }

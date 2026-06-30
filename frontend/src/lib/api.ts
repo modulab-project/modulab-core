@@ -429,12 +429,17 @@ export function adminImportFeeds(
   });
 }
 
-// GET /v1/admin/feeds/catalog — fetches the curated news-feed catalog
-// (cached 24 h on the backend). Returns OPMLEntry[] with AlreadyExists
-// populated; reachable is always false here — run adminParseOPML-style
-// check on the frontend to confirm before importing.
-export function adminFetchCatalog(token: string): Promise<OPMLEntry[]> {
-  return request<OPMLEntry[]>("/v1/admin/feeds/catalog", {
+// GET /v1/admin/feeds/catalog — without lang: returns {languages: string[]}.
+// With ?lang=DE: returns []OPMLEntry with reachable + already_exists populated
+// (reachability check runs server-side, takes a few seconds).
+export function adminFetchCatalogLanguages(token: string): Promise<{ languages: string[] }> {
+  return request<{ languages: string[] }>("/v1/admin/feeds/catalog", {
+    headers: bearerHeaders(token),
+  });
+}
+
+export function adminFetchCatalogByLang(token: string, lang: string): Promise<OPMLEntry[]> {
+  return request<OPMLEntry[]>(`/v1/admin/feeds/catalog?lang=${encodeURIComponent(lang)}`, {
     headers: bearerHeaders(token),
   });
 }

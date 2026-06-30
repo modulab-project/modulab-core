@@ -175,11 +175,15 @@
         "check_error": "Feed konnte nicht geprüft werden."
       },
       "catalog_open": "Aus Katalog",
-      "catalog_loading": "Katalog wird geladen…",
+      "catalog_checking": "Feeds werden geprüft…",
       "catalog_error": "Katalog konnte nicht geladen werden.",
       "catalog_modal": {
+        "pick_title": "Sprache auswählen",
+        "pick_subtitle": "Wähle eine Sprache, um die passenden Nachrichtenfeeds zu laden und zu prüfen.",
+        "checking": "{{lang}}-Feeds werden geprüft…",
+        "checking_hint": "Erreichbarkeit der Feeds wird serverseitig geprüft. Das kann einen Moment dauern.",
         "title": "Feeds aus Katalog auswählen",
-        "subtitle": "Kuratierte Nachrichtenfeeds nach Sprache und Land. Wähle die Feeds aus, die du importieren möchtest."
+        "subtitle": "Kuratierte Nachrichtenfeeds. Wähle die Feeds aus, die du importieren möchtest."
       },
       "import_opml": "OPML importieren",
       "parsing_opml": "Feeds werden geprüft…",

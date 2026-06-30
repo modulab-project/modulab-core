@@ -175,11 +175,15 @@
         "check_error": "Impossible de vérifier le flux."
       },
       "catalog_open": "Depuis le catalogue",
-      "catalog_loading": "Chargement du catalogue…",
+      "catalog_checking": "Vérification des flux…",
       "catalog_error": "Impossible de charger le catalogue de flux.",
       "catalog_modal": {
+        "pick_title": "Choisir une langue",
+        "pick_subtitle": "Choisissez une langue pour charger et vérifier les flux d'actualités correspondants.",
+        "checking": "Vérification des flux {{lang}}…",
+        "checking_hint": "L'accessibilité est vérifiée côté serveur. Cela peut prendre un moment.",
         "title": "Sélectionner des flux depuis le catalogue",
-        "subtitle": "Flux d'actualités triés par langue et pays. Sélectionnez les flux que vous souhaitez importer."
+        "subtitle": "Flux d'actualités triés. Sélectionnez les flux que vous souhaitez importer."
       },
       "import_opml": "Importer OPML",
       "parsing_opml": "Vérification des flux…",

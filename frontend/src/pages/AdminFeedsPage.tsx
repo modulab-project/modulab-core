@@ -16,7 +16,8 @@ import {
   adminCheckFeed,
   adminParseOPML,
   adminImportFeeds,
-  adminFetchCatalog,
+  adminFetchCatalogLanguages,
+  adminFetchCatalogByLang,
   adminGetNewsSettings,
   adminUpdateNewsSettings,
   type Feed,
@@ -56,9 +57,12 @@ export default function AdminFeedsPage() {
   const [importError, setImportError] = useState<string | null>(null);
 
   // Catalog state
-  const [catalogLoading, setCatalogLoading] = useState(false);
+  // "lang_pick" = Sprachauswahl offen, "checking" = Erreichbarkeits-Check läuft, "select" = Auswahl-Modal
+  const [catalogStep, setCatalogStep] = useState<"lang_pick" | "checking" | "select" | null>(null);
+  const [catalogLangs, setCatalogLangs] = useState<string[]>([]);
+  const [catalogCheckingLang, setCatalogCheckingLang] = useState<string>("");
   const [catalogError, setCatalogError] = useState<string | null>(null);
-  const [catalogEntries, setCatalogEntries] = useState<OPMLEntry[] | null>(null); // non-null = modal open
+  const [catalogEntries, setCatalogEntries] = useState<OPMLEntry[] | null>(null);
 
   useEffect(() => {
     if (!session) return;
@@ -167,29 +171,45 @@ export default function AdminFeedsPage() {
     }
   }
 
-  // Fetch catalog from backend and open selection modal.
+  // Step 1: open language picker (fetch available languages from backend).
   async function handleCatalogOpen() {
     const token = getSessionToken();
     if (!token) return;
-    setCatalogLoading(true);
     setCatalogError(null);
     setCatalogEntries(null);
     setImportResults(null);
     setImportError(null);
     try {
-      const entries = await adminFetchCatalog(token);
-      setCatalogEntries(entries);
+      const { languages } = await adminFetchCatalogLanguages(token);
+      setCatalogLangs(languages);
+      setCatalogStep("lang_pick");
     } catch (err: unknown) {
       setCatalogError((err as ApiError).message ?? t("admin.feeds.catalog_error"));
-    } finally {
-      setCatalogLoading(false);
     }
   }
 
-  // Import selected catalog feeds (same flow as OPML import).
+  // Step 2: user picks a language → backend fetches + checks feeds.
+  async function handleCatalogLangSelect(lang: string) {
+    const token = getSessionToken();
+    if (!token) return;
+    setCatalogStep("checking");
+    setCatalogCheckingLang(lang);
+    setCatalogError(null);
+    try {
+      const entries = await adminFetchCatalogByLang(token, lang);
+      setCatalogEntries(entries);
+      setCatalogStep("select");
+    } catch (err: unknown) {
+      setCatalogError((err as ApiError).message ?? t("admin.feeds.catalog_error"));
+      setCatalogStep(null);
+    }
+  }
+
+  // Step 3: import selected feeds.
   async function handleCatalogImportSelected(selected: OPMLEntry[]) {
     const token = getSessionToken();
     if (!token) return;
+    setCatalogStep(null);
     setCatalogEntries(null);
     setImportResults(null);
     setImportError(null);
@@ -317,12 +337,14 @@ export default function AdminFeedsPage() {
             {/* Catalog import */}
             <button
               type="button"
-              disabled={catalogLoading}
+              disabled={catalogStep === "checking"}
               onClick={handleCatalogOpen}
-              className={`flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800 disabled:opacity-50 disabled:pointer-events-none`}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800 disabled:opacity-50 disabled:pointer-events-none"
             >
               <i className="ti ti-book text-[14px]" />
-              {catalogLoading ? t("admin.feeds.catalog_loading") : t("admin.feeds.catalog_open")}
+              {catalogStep === "checking"
+                ? t("admin.feeds.catalog_checking", { lang: catalogCheckingLang })
+                : t("admin.feeds.catalog_open")}
             </button>
             {/* OPML import — hidden file input triggered by label */}
             <label className={`flex cursor-pointer items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800 ${parsing ? "opacity-50 pointer-events-none" : ""}`}>
@@ -466,16 +488,113 @@ export default function AdminFeedsPage() {
         />
       )}
 
-      {catalogEntries && (
+      {catalogStep === "lang_pick" && (
+        <CatalogLangModal
+          languages={catalogLangs}
+          onClose={() => setCatalogStep(null)}
+          onSelect={handleCatalogLangSelect}
+        />
+      )}
+
+      {catalogStep === "checking" && (
+        <CatalogCheckingOverlay lang={catalogCheckingLang} />
+      )}
+
+      {catalogStep === "select" && catalogEntries && (
         <OPMLSelectionModal
           entries={catalogEntries}
           titleKey="admin.feeds.catalog_modal.title"
           subtitleKey="admin.feeds.catalog_modal.subtitle"
-          onClose={() => setCatalogEntries(null)}
+          onClose={() => { setCatalogStep(null); setCatalogEntries(null); }}
           onImport={handleCatalogImportSelected}
         />
       )}
     </AppShell>
+  );
+}
+
+// ---- Catalog language picker ------------------------------------------------
+
+const LANG_LABELS: Record<string, string> = {
+  DE: "Deutsch",
+  EN: "English",
+  ES: "Español",
+  FR: "Français",
+  NL: "Nederlands",
+};
+
+function CatalogLangModal({
+  languages,
+  onClose,
+  onSelect,
+}: {
+  languages: string[];
+  onClose: () => void;
+  onSelect: (lang: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/40" onClick={onClose} />
+      <div className="fixed inset-x-4 top-[25%] z-50 mx-auto max-w-sm rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-gray-800 dark:bg-gray-950">
+        <h2 className="mb-1 text-base font-semibold">{t("admin.feeds.catalog_modal.pick_title")}</h2>
+        <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
+          {t("admin.feeds.catalog_modal.pick_subtitle")}
+        </p>
+        <div className="flex flex-col gap-2">
+          {languages.map((lang) => (
+            <button
+              key={lang}
+              type="button"
+              onClick={() => onSelect(lang)}
+              className="flex items-center gap-3 rounded-xl border border-gray-200 px-4 py-3 text-left text-sm font-medium hover:border-teal-400 hover:bg-teal-50 dark:border-gray-700 dark:hover:border-teal-500 dark:hover:bg-teal-950 transition-colors"
+            >
+              <span className="text-lg">{langFlag(lang)}</span>
+              <span>{LANG_LABELS[lang] ?? lang}</span>
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-4 w-full rounded-lg px-4 py-2 text-sm text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+        >
+          {t("admin.feeds.opml_modal.cancel")}
+        </button>
+      </div>
+    </>
+  );
+}
+
+function langFlag(lang: string): string {
+  const flags: Record<string, string> = {
+    DE: "🇩🇪",
+    EN: "🇬🇧",
+    ES: "🇪🇸",
+    FR: "🇫🇷",
+    NL: "🇳🇱",
+  };
+  return flags[lang] ?? "🌐";
+}
+
+// ---- Catalog checking overlay -----------------------------------------------
+
+function CatalogCheckingOverlay({ lang }: { lang: string }) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/40" />
+      <div className="fixed inset-x-4 top-[30%] z-50 mx-auto max-w-sm rounded-2xl border border-gray-200 bg-white p-8 shadow-2xl dark:border-gray-800 dark:bg-gray-950 text-center">
+        <div className="mb-3 flex justify-center">
+          <svg className="h-8 w-8 animate-spin text-teal-600" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+          </svg>
+        </div>
+        <p className="text-sm font-medium">{t("admin.feeds.catalog_modal.checking", { lang: LANG_LABELS[lang] ?? lang })}</p>
+        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("admin.feeds.catalog_modal.checking_hint")}</p>
+      </div>
+    </>
   );
 }
 
