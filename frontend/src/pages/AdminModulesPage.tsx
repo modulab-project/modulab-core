@@ -39,28 +39,25 @@ export default function AdminModulesPage() {
 
     setSyncing(true);
 
-    Promise.allSettled([
-      // 1. Sync registry, then read updated count
-      syncStore(token)
-        .then(() => listStore(token))
-        .then((r) => setStoreCount(r.total_count))
-        .catch(() => {
-          // Sync failed (e.g. GitHub unreachable) — still try to read cached count
+    // Step 1: sync registry first so the DB has the latest versions.
+    // Step 2: only after sync completes, run update-check + read counts
+    // in parallel — otherwise checkModuleUpdates reads stale data.
+    syncStore(token)
+      .catch(() => {}) // sync failure is non-fatal; cached data is still useful
+      .then(() =>
+        Promise.allSettled([
           listStore(token)
             .then((r) => setStoreCount(r.total_count))
-            .catch(() => {});
-        }),
-
-      // 2. Check which installed modules have updates
-      checkModuleUpdates(token)
-        .then((r) => setUpdateCount(r.count))
-        .catch(() => setUpdateCount(0)),
-
-      // 3. Total installed count
-      listInstalledModules(token)
-        .then((list) => setInstalledCount(list?.length ?? 0))
-        .catch(() => setInstalledCount(null)),
-    ]).finally(() => setSyncing(false));
+            .catch(() => {}),
+          checkModuleUpdates(token)
+            .then((r) => setUpdateCount(r.count))
+            .catch(() => setUpdateCount(0)),
+          listInstalledModules(token)
+            .then((list) => setInstalledCount(list?.length ?? 0))
+            .catch(() => setInstalledCount(null)),
+        ]),
+      )
+      .finally(() => setSyncing(false));
   }, [session, navigate]);
 
   if (loading || !session || !isAdminRole(session.role)) return null;
