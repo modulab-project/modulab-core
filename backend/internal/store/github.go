@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -61,7 +62,10 @@ func FetchOfficialRegistry(ctx context.Context) ([]Entry, error) {
 	ctx, cancel := context.WithTimeout(ctx, githubAPITimeout)
 	defer cancel()
 
-	data, err := httpGet(ctx, officialRegistryURL)
+	// Append a Unix timestamp to bypass raw.githubusercontent.com's CDN cache,
+	// which can serve stale content for up to 5 minutes after a file is updated.
+	cacheBust := officialRegistryURL + "?_=" + strconv.FormatInt(time.Now().Unix(), 10)
+	data, err := httpGet(ctx, cacheBust)
 	if err != nil {
 		return nil, fmt.Errorf("store: fetch official registry: %w", err)
 	}
