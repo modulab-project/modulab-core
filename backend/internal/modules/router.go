@@ -133,7 +133,9 @@ var allowedImageTypes = map[string]bool{
 
 // saveUploadedFile extracts the "file" field from a multipart upload, validates
 // that it is an image, and saves it to {dataDir}/{moduleName}/storage/uploads/.
-// Returns the absolute path.
+// Returns a stable relative path ("uploads/{filename}") — never an absolute
+// path — so that the value stored in the DB is portable across environments
+// (local dev, Docker, different data dir mounts).
 func saveUploadedFile(r *http.Request, dataDir, moduleName string) (string, error) {
 	r.Body = http.MaxBytesReader(nil, r.Body, maxUploadBytes)
 	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
@@ -184,7 +186,9 @@ func saveUploadedFile(r *http.Request, dataDir, moduleName string) (string, erro
 		return "", fmt.Errorf("write file: %w", err)
 	}
 
-	return dst, nil
+	// Return a relative path so the DB value is portable across environments.
+	// The storage handler reconstructs the absolute path from DataDir at serve time.
+	return "uploads/" + safeName, nil
 }
 
 // ModuleLocaleHandler serves a module's locale file from its installed
