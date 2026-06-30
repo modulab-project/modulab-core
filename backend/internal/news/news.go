@@ -371,16 +371,27 @@ type OPMLEntry struct {
 	Label string `json:"label"`
 	// AlreadyExists is true when this feed URL is already in the global pool.
 	AlreadyExists bool `json:"already_exists"`
+	// Reachable is false when the feed URL could not be fetched or parsed
+	// during the parse step. The frontend uses this to pre-deselect and
+	// disable unreachable feeds in the selection modal.
+	Reachable bool `json:"reachable"`
+	// ReachError is a short human-readable reason when Reachable is false.
+	ReachError string `json:"reach_error,omitempty"`
 }
 
 // AdminParseOPMLHandler is POST /v1/admin/feeds/opml-parse.
 // Accepts a multipart/form-data upload with a field named "file" containing
 // an OPML document. Returns the list of feeds found in the file — including
-// whether each is already in the global pool — without inserting anything.
-// The caller (admin UI) shows a selection step and then calls
+// whether each is already in the global pool and whether it is reachable —
+// without inserting anything. Reachability is checked in parallel (up to 10
+// concurrent fetches) so large OPML files resolve quickly without overwhelming
+// the network. The caller (admin UI) shows a selection step and then calls
 // POST /v1/admin/feeds/import with the chosen feeds.
 func AdminParseOPMLHandler(d auth.Deps) http.HandlerFunc {
-	const maxUploadSize = 2 << 20 // 2 MB
+	const (
+		maxUploadSize  = 2 << 20 // 2 MB
+		maxConcurrency = 10      // parallel feed checks
+	)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := auth.RequireAdminSession(d, w, r); !ok {
 			return
@@ -422,6 +433,12 @@ func AdminParseOPMLHandler(d auth.Deps) http.HandlerFunc {
 			existingURLs[strings.ToLower(strings.TrimSpace(f.URL))] = true
 		}
 
+		// Build the candidate list first (filter invalid URLs).
+		type candidate struct {
+			idx   int
+			entry OPMLEntry
+		}
+		candidates := make([]candidate, 0, len(leaves))
 		entries := make([]OPMLEntry, 0, len(leaves))
 		for _, o := range leaves {
 			feedURL := strings.TrimSpace(o.XMLURL)
@@ -435,12 +452,34 @@ func AdminParseOPMLHandler(d auth.Deps) http.HandlerFunc {
 			if label == "" {
 				label = feedURL
 			}
-			entries = append(entries, OPMLEntry{
+			e := OPMLEntry{
 				URL:           feedURL,
 				Label:         label,
 				AlreadyExists: existingURLs[strings.ToLower(feedURL)],
-			})
+			}
+			candidates = append(candidates, candidate{idx: len(entries), entry: e})
+			entries = append(entries, e)
 		}
+
+		// Check reachability in parallel, bounded by maxConcurrency.
+		sem := make(chan struct{}, maxConcurrency)
+		var wg sync.WaitGroup
+		for _, c := range candidates {
+			wg.Add(1)
+			go func(idx int, feedURL, label string) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				_, fetchErr := fetchFeed(r.Context(), feedURL, label)
+				if fetchErr != nil {
+					entries[idx].Reachable = false
+					entries[idx].ReachError = fetchErr.Error()
+				} else {
+					entries[idx].Reachable = true
+				}
+			}(c.idx, c.entry.URL, c.entry.Label)
+		}
+		wg.Wait()
 
 		writeJSON(w, http.StatusOK, entries)
 	}

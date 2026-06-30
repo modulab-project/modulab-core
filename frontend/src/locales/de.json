@@ -175,6 +175,7 @@
         "check_error": "Feed konnte nicht geprüft werden."
       },
       "import_opml": "OPML importieren",
+      "parsing_opml": "Feeds werden geprüft…",
       "importing": "Wird importiert…",
       "import_error": "Import fehlgeschlagen.",
       "import_result": "{{added}} hinzugefügt · {{skipped}} übersprungen · {{failed}} fehlgeschlagen",
@@ -187,7 +188,8 @@
         "cancel": "Abbrechen",
         "import": "Ausgewählte importieren ({{count}})",
         "importing": "Wird importiert…",
-        "none_selected": "Mindestens einen Feed auswählen."
+        "none_selected": "Mindestens einen Feed auswählen.",
+        "unreachable": "nicht erreichbar"
       }
     },
     "searxng": {

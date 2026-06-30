@@ -175,6 +175,7 @@
         "check_error": "Impossible de vérifier le flux."
       },
       "import_opml": "Importer OPML",
+      "parsing_opml": "Vérification des flux…",
       "importing": "Importation…",
       "import_error": "Échec de l'importation.",
       "import_result": "{{added}} ajoutés · {{skipped}} ignorés · {{failed}} échoués",
@@ -187,7 +188,8 @@
         "cancel": "Annuler",
         "import": "Importer la sélection ({{count}})",
         "importing": "Importation…",
-        "none_selected": "Sélectionnez au moins un flux."
+        "none_selected": "Sélectionnez au moins un flux.",
+        "unreachable": "inaccessible"
       }
     },
     "searxng": {

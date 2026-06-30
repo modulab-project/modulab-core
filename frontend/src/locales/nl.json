@@ -175,6 +175,7 @@
         "check_error": "Feed kon niet worden gecontroleerd."
       },
       "import_opml": "OPML importeren",
+      "parsing_opml": "Feeds controleren…",
       "importing": "Importeren…",
       "import_error": "Importeren mislukt.",
       "import_result": "{{added}} toegevoegd · {{skipped}} overgeslagen · {{failed}} mislukt",
@@ -187,7 +188,8 @@
         "cancel": "Annuleren",
         "import": "Geselecteerde importeren ({{count}})",
         "importing": "Importeren…",
-        "none_selected": "Selecteer ten minste één feed."
+        "none_selected": "Selecteer ten minste één feed.",
+        "unreachable": "niet bereikbaar"
       }
     },
     "searxng": {

@@ -394,6 +394,10 @@ export interface OPMLEntry {
   url: string;
   label: string;
   already_exists: boolean;
+  /** false when the feed could not be fetched/parsed during the parse step */
+  reachable: boolean;
+  /** short error string when reachable is false */
+  reach_error?: string;
 }
 
 // POST /v1/admin/feeds/opml-parse — parses an OPML file and returns the

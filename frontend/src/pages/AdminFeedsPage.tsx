@@ -276,7 +276,7 @@ export default function AdminFeedsPage() {
             {/* OPML import — hidden file input triggered by label */}
             <label className={`flex cursor-pointer items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800 ${parsing ? "opacity-50 pointer-events-none" : ""}`}>
               <i className="ti ti-upload text-[14px]" />
-              {parsing ? t("admin.feeds.importing") : t("admin.feeds.import_opml")}
+              {parsing ? t("admin.feeds.parsing_opml") : t("admin.feeds.import_opml")}
               <input
                 type="file"
                 accept=".opml,.xml"
@@ -423,16 +423,16 @@ function OPMLSelectionModal({
   onImport: (selected: OPMLEntry[]) => void;
 }) {
   const { t } = useTranslation();
-  // Pre-select all entries that don't already exist.
+  // Pre-select entries that are new AND reachable.
   const [selected, setSelected] = useState<Set<string>>(
-    () => new Set(entries.filter((e) => !e.already_exists).map((e) => e.url)),
+    () => new Set(entries.filter((e) => !e.already_exists && e.reachable).map((e) => e.url)),
   );
   const [importing, setImporting] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  const allNewSelected = entries
-    .filter((e) => !e.already_exists)
-    .every((e) => selected.has(e.url));
+  // Selectable = not already in DB and reachable.
+  const selectable = entries.filter((e) => !e.already_exists && e.reachable);
+  const allSelectableSelected = selectable.length > 0 && selectable.every((e) => selected.has(e.url));
 
   function toggle(url: string) {
     setSelected((prev) => {
@@ -445,15 +445,15 @@ function OPMLSelectionModal({
   }
 
   function toggleAll() {
-    const newEntries = entries.filter((e) => !e.already_exists).map((e) => e.url);
-    if (allNewSelected) {
+    const selectableUrls = selectable.map((e) => e.url);
+    if (allSelectableSelected) {
       setSelected((prev) => {
         const next = new Set(prev);
-        newEntries.forEach((u) => next.delete(u));
+        selectableUrls.forEach((u) => next.delete(u));
         return next;
       });
     } else {
-      setSelected((prev) => new Set([...prev, ...newEntries]));
+      setSelected((prev) => new Set([...prev, ...selectableUrls]));
     }
   }
 
@@ -484,46 +484,56 @@ function OPMLSelectionModal({
             <span className="text-xs text-gray-500 dark:text-gray-400">
               {entries.length} {entries.length === 1 ? "Feed" : "Feeds"}
             </span>
-            <button
-              type="button"
-              onClick={toggleAll}
-              className="text-xs font-medium text-teal-600 hover:text-teal-700 dark:text-teal-400"
-            >
-              {allNewSelected
-                ? t("admin.feeds.opml_modal.deselect_all")
-                : t("admin.feeds.opml_modal.select_all")}
-            </button>
+            {selectable.length > 0 && (
+              <button
+                type="button"
+                onClick={toggleAll}
+                className="text-xs font-medium text-teal-600 hover:text-teal-700 dark:text-teal-400"
+              >
+                {allSelectableSelected
+                  ? t("admin.feeds.opml_modal.deselect_all")
+                  : t("admin.feeds.opml_modal.select_all")}
+              </button>
+            )}
           </div>
         </div>
 
         {/* Scrollable feed list */}
         <div className="overflow-y-auto flex-1 divide-y divide-gray-100 dark:divide-gray-800 px-2">
           {entries.map((entry) => {
+            const isDisabled = entry.already_exists || !entry.reachable;
             const isChecked = selected.has(entry.url);
             return (
               <label
                 key={entry.url}
-                className={`flex items-start gap-3 px-4 py-3 cursor-pointer rounded-lg transition-colors ${
-                  entry.already_exists
+                className={`flex items-start gap-3 px-4 py-3 rounded-lg transition-colors ${
+                  isDisabled
                     ? "opacity-50 cursor-default"
-                    : "hover:bg-gray-50 dark:hover:bg-gray-900"
+                    : "cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-900"
                 }`}
               >
                 <input
                   type="checkbox"
                   checked={isChecked}
-                  disabled={entry.already_exists}
-                  onChange={() => !entry.already_exists && toggle(entry.url)}
+                  disabled={isDisabled}
+                  onChange={() => !isDisabled && toggle(entry.url)}
                   className="mt-0.5 h-4 w-4 shrink-0 accent-teal-600"
                 />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium leading-tight">{entry.label}</p>
                   <p className="truncate text-xs text-gray-500 dark:text-gray-400">{entry.url}</p>
-                  {entry.already_exists && (
-                    <span className="mt-0.5 inline-block rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400">
-                      {t("admin.feeds.opml_modal.already_exists")}
-                    </span>
-                  )}
+                  <div className="mt-0.5 flex flex-wrap gap-1">
+                    {entry.already_exists && (
+                      <span className="inline-block rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                        {t("admin.feeds.opml_modal.already_exists")}
+                      </span>
+                    )}
+                    {!entry.reachable && (
+                      <span className="inline-block rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-600 dark:bg-red-950 dark:text-red-400">
+                        {t("admin.feeds.opml_modal.unreachable")}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </label>
             );
