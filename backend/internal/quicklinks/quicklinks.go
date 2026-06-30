@@ -50,11 +50,21 @@ type AdminTile struct {
 
 // ---- Local helpers ----------------------------------------------------------
 
-// isHTTPURL returns true when raw is a syntactically valid http or https URL.
-// Prevents javascript:, data:, and other dangerous schemes from being stored
-// as tile URLs, which the frontend renders as anchor hrefs.
-func isHTTPURL(raw string) bool {
-	u, err := url.ParseRequestURI(strings.TrimSpace(raw))
+// isValidTileURL returns true for URLs that are safe to store as quick-link tile
+// hrefs. Accepts http/https absolute URLs and absolute-path URLs (e.g.
+// /modules/rezepte) for internal ModuLab module links. Blocks javascript:,
+// data:, and other dangerous schemes.
+func isValidTileURL(raw string) bool {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return false
+	}
+	// Absolute internal path (starts with / but not //).
+	if strings.HasPrefix(s, "/") && !strings.HasPrefix(s, "//") {
+		return true
+	}
+	// Absolute HTTP(S) URL.
+	u, err := url.ParseRequestURI(s)
 	if err != nil {
 		return false
 	}
@@ -192,8 +202,8 @@ func CreateUserLinkHandler(d auth.Deps) http.HandlerFunc {
 			http.Error(w, "title and url are required", http.StatusBadRequest)
 			return
 		}
-		if !isHTTPURL(body.URL) {
-			http.Error(w, "url must be a valid http or https URL", http.StatusBadRequest)
+		if !isValidTileURL(body.URL) {
+			http.Error(w, "url must be a valid http/https URL or an absolute path", http.StatusBadRequest)
 			return
 		}
 		id, err := d.Pool.CreateUserQuickLink(r.Context(), sess.UserID, body.Title, body.URL, body.Icon, body.Description)
@@ -303,8 +313,8 @@ func AdminCreateHandler(d auth.Deps) http.HandlerFunc {
 			http.Error(w, "title and url are required", http.StatusBadRequest)
 			return
 		}
-		if !isHTTPURL(body.URL) {
-			http.Error(w, "url must be a valid http or https URL", http.StatusBadRequest)
+		if !isValidTileURL(body.URL) {
+			http.Error(w, "url must be a valid http/https URL or an absolute path", http.StatusBadRequest)
 			return
 		}
 		link, err := d.Pool.CreateAdminQuickLink(r.Context(),
@@ -348,8 +358,8 @@ func AdminUpdateHandler(d auth.Deps) http.HandlerFunc {
 			http.Error(w, "title and url are required", http.StatusBadRequest)
 			return
 		}
-		if !isHTTPURL(body.URL) {
-			http.Error(w, "url must be a valid http or https URL", http.StatusBadRequest)
+		if !isValidTileURL(body.URL) {
+			http.Error(w, "url must be a valid http/https URL or an absolute path", http.StatusBadRequest)
 			return
 		}
 		found, err := d.Pool.UpdateAdminQuickLink(r.Context(),

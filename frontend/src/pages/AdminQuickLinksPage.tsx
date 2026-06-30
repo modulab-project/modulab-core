@@ -11,15 +11,29 @@ import {
   listAdminQuickLinks,
   updateAdminQuickLink,
 } from "../lib/quicklinks";
+import { listInstalledModules, type InstalledModule } from "../lib/api";
+
+function moduleDisplayName(mod: InstalledModule, lang: string): string {
+  const mf = mod.manifest as { display_name?: Record<string, string>; name?: string } | null;
+  return mf?.display_name?.[lang] ?? mf?.display_name?.["en"] ?? mf?.name ?? mod.name;
+}
+function moduleIcon(mod: InstalledModule): string {
+  const mf = mod.manifest as { icon?: string } | null;
+  return mf?.icon ?? "ti-puzzle";
+}
 
 // ---- Edit / Create form -----------------------------------------------------
 
+type FormMode = "url" | "module";
+
 function QuickLinkForm({
   initial,
+  token,
   onSave,
   onCancel,
 }: {
   initial?: AdminTile;
+  token: string;
   onSave: (data: {
     title: string;
     url: string;
@@ -29,22 +43,63 @@ function QuickLinkForm({
   }) => Promise<void>;
   onCancel: () => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const lang = i18n.language?.slice(0, 2) ?? "en";
+
+  // When editing an existing tile that points to a module path, start in module mode.
+  const initialMode: FormMode =
+    !initial || initial.url.startsWith("/modules/") ? "url" : "url";
+  const [mode, setMode] = useState<FormMode>(initialMode);
+
   const [title, setTitle] = useState(initial?.title ?? "");
   const [url, setUrl] = useState(initial?.url ?? "");
   const [icon, setIcon] = useState(initial?.icon ?? "ti-link");
   const [description, setDescription] = useState(initial?.description ?? "");
   const [sortOrder, setSortOrder] = useState(initial?.sort_order ?? 0);
+
+  const [modules, setModules] = useState<InstalledModule[]>([]);
+  const [modulesLoading, setModulesLoading] = useState(false);
+  const [selectedModule, setSelectedModule] = useState<InstalledModule | null>(null);
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    if (mode !== "module" || modules.length > 0) return;
+    setModulesLoading(true);
+    listInstalledModules(token)
+      .then((mods) => setModules(mods.filter((m) => m.status === "active")))
+      .catch(() => {})
+      .finally(() => setModulesLoading(false));
+  }, [mode, token, modules.length]);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!title.trim() || !url.trim()) return;
     setSaving(true);
     setError("");
+
+    let data: { title: string; url: string; icon: string; description: string; sort_order: number };
+
+    if (mode === "module") {
+      if (!selectedModule) {
+        setError(t("home.quick_links_module_required"));
+        setSaving(false);
+        return;
+      }
+      data = {
+        title: moduleDisplayName(selectedModule, lang),
+        url: `/modules/${encodeURIComponent(selectedModule.name)}`,
+        icon: moduleIcon(selectedModule),
+        description: "",
+        sort_order: sortOrder,
+      };
+    } else {
+      if (!title.trim() || !url.trim()) { setSaving(false); return; }
+      data = { title, url, icon, description, sort_order: sortOrder };
+    }
+
     try {
-      await onSave({ title, url, icon, description, sort_order: sortOrder });
+      await onSave(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("admin.quick_links.form.error"));
     } finally {
@@ -52,73 +107,145 @@ function QuickLinkForm({
     }
   }
 
+  const tabCls = (active: boolean) =>
+    `flex-1 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+      active
+        ? "bg-white shadow-sm text-gray-900 dark:bg-gray-800 dark:text-gray-100"
+        : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+    }`;
+
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
-            {t("admin.quick_links.form.title_label")} *
-          </label>
-          <input
-            type="text"
-            required
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-base focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-          />
+      {/* Mode toggle — only shown when creating */}
+      {!initial && (
+        <div className="flex rounded-xl bg-gray-100 p-1 dark:bg-gray-700/50">
+          <button type="button" className={tabCls(mode === "url")} onClick={() => setMode("url")}>
+            <i className="ti ti-link mr-1 text-[12px]" />{t("home.quick_links_mode_url")}
+          </button>
+          <button type="button" className={tabCls(mode === "module")} onClick={() => setMode("module")}>
+            <i className="ti ti-puzzle mr-1 text-[12px]" />{t("home.quick_links_mode_module")}
+          </button>
         </div>
+      )}
+
+      {mode === "module" && !initial ? (
+        /* Module picker */
         <div>
-          <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
-            {t("admin.quick_links.form.url_label")} *
-          </label>
-          <input
-            type="url"
-            required
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-base focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-          />
-        </div>
-      </div>
-      <div className="grid grid-cols-3 gap-3">
-        <div className="col-span-2">
-          <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
-            {t("admin.quick_links.form.icon_label")}{" "}
-            <span className="text-gray-400">{t("admin.quick_links.form.icon_hint")}</span>
-          </label>
-          <div className="flex items-center gap-2">
-            <i className={`ti ${icon || "ti-link"} text-xl text-teal-600 dark:text-teal-400`} />
+          {modulesLoading ? (
+            <p className="py-3 text-center text-xs text-gray-400">{t("home.quick_links_modules_loading")}</p>
+          ) : modules.length === 0 ? (
+            <p className="py-3 text-center text-xs text-gray-400">{t("home.quick_links_modules_empty")}</p>
+          ) : (
+            <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto">
+              {modules.map((mod) => {
+                const isSel = selectedModule?.name === mod.name;
+                return (
+                  <button
+                    key={mod.name}
+                    type="button"
+                    onClick={() => setSelectedModule(isSel ? null : mod)}
+                    className={`flex items-center gap-3 rounded-xl border px-3 py-2 text-left text-sm transition-colors ${
+                      isSel
+                        ? "border-teal-500 bg-teal-50 dark:border-teal-400 dark:bg-teal-950/40"
+                        : "border-gray-200 hover:border-gray-300 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-700"
+                    }`}
+                  >
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-teal-500 to-teal-700 text-white">
+                      <i className={`ti ${moduleIcon(mod)} text-sm`} />
+                    </span>
+                    <span className="font-medium text-gray-800 dark:text-gray-100 text-sm">
+                      {moduleDisplayName(mod, lang)}
+                    </span>
+                    {isSel && <i className="ti ti-check ml-auto text-teal-600 dark:text-teal-400" />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <div>
+            <label className="mb-1 mt-2 block text-xs font-medium text-gray-600 dark:text-gray-400">
+              {t("admin.quick_links.form.order_label")}
+            </label>
             <input
-              type="text"
-              value={icon}
-              onChange={(e) => setIcon(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-base focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+              type="number"
+              value={sortOrder}
+              onChange={(e) => setSortOrder(Number(e.target.value))}
+              className="w-24 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-base focus:border-teal-500 focus:outline-none dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
             />
           </div>
         </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
-            {t("admin.quick_links.form.order_label")}
-          </label>
-          <input
-            type="number"
-            value={sortOrder}
-            onChange={(e) => setSortOrder(Number(e.target.value))}
-            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-base focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-          />
-        </div>
-      </div>
-      <div>
-        <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
-          {t("admin.quick_links.form.desc_label")}
-        </label>
-        <input
-          type="text"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-base focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-        />
-      </div>
+      ) : (
+        /* URL form (existing or new URL tile) */
+        <>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+                {t("admin.quick_links.form.title_label")} *
+              </label>
+              <input
+                type="text"
+                required
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-base focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+                {t("admin.quick_links.form.url_label")} *
+              </label>
+              <input
+                type="text"
+                required
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="https://… oder /modules/…"
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-base focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="col-span-2">
+              <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+                {t("admin.quick_links.form.icon_label")}{" "}
+                <span className="text-gray-400">{t("admin.quick_links.form.icon_hint")}</span>
+              </label>
+              <div className="flex items-center gap-2">
+                <i className={`ti ${icon || "ti-link"} text-xl text-teal-600 dark:text-teal-400`} />
+                <input
+                  type="text"
+                  value={icon}
+                  onChange={(e) => setIcon(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-base focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+                {t("admin.quick_links.form.order_label")}
+              </label>
+              <input
+                type="number"
+                value={sortOrder}
+                onChange={(e) => setSortOrder(Number(e.target.value))}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-base focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+              {t("admin.quick_links.form.desc_label")}
+            </label>
+            <input
+              type="text"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-base focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+            />
+          </div>
+        </>
+      )}
+
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       <div className="flex justify-end gap-2">
         <button
@@ -130,7 +257,7 @@ function QuickLinkForm({
         </button>
         <button
           type="submit"
-          disabled={saving}
+          disabled={saving || (mode === "module" && !initial && !selectedModule)}
           className="rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50 dark:bg-teal-500"
         >
           {saving
@@ -229,6 +356,7 @@ export default function AdminQuickLinksPage() {
             {t("admin.quick_links.new_tile")}
           </h2>
           <QuickLinkForm
+            token={token}
             onSave={handleCreate}
             onCancel={() => setShowCreate(false)}
           />
@@ -251,6 +379,7 @@ export default function AdminQuickLinksPage() {
                 <div className="p-4">
                   <QuickLinkForm
                     initial={link}
+                    token={token}
                     onSave={(data) => handleUpdate(link.id, data)}
                     onCancel={() => setEditId(null)}
                   />
