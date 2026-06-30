@@ -25,7 +25,7 @@
   },
   "profile": {
     "title": "Profile",
-    "subtitle": "Managed by your identity provider - Core only displays what it received at login.",
+    "subtitle": "Your profile is managed via your SSO account. Make changes there.",
     "name": "Name",
     "username": "Username",
     "email": "Email",
@@ -123,6 +123,13 @@
         "save_provider_error": "Failed to save provider.",
         "save_changes": "Save changes",
         "add_provider": "Add provider"
+      },
+      "balance": {
+        "check": "Check balance",
+        "loading": "Fetching…",
+        "label": "Balance",
+        "fetch_error": "Failed to fetch balance.",
+        "not_supported": "This provider does not support balance queries."
       }
     },
     "feeds": {
@@ -157,8 +164,20 @@
         "save_error": "Save failed",
         "cancel": "Cancel",
         "saving": "Saving…",
-        "save": "Save"
-      }
+        "save": "Save",
+        "check_button": "Check",
+        "checking": "Checking…",
+        "check_ok": "Reachable",
+        "check_articles": "{{count}} articles",
+        "check_has_images": "with images",
+        "check_no_images": "no images",
+        "check_unreachable": "Feed not reachable",
+        "check_error": "Could not check feed."
+      },
+      "import_opml": "Import OPML",
+      "importing": "Importing…",
+      "import_error": "Import failed.",
+      "import_result": "{{added}} added · {{skipped}} skipped · {{failed}} failed"
     },
     "searxng": {
       "title": "SearXNG",
@@ -207,7 +226,15 @@
       "action": {
         "removing": "Removing…",
         "remove": "Remove configuration"
-      }
+      },
+      "test_title": "Send test email",
+      "test_hint": "Sends a test email using the current form values (even before saving).",
+      "test_address_placeholder": "recipient@example.com",
+      "test_address_required": "Please enter a recipient address.",
+      "test_button": "Send test",
+      "test_sending": "Sending…",
+      "test_ok": "Test email sent successfully.",
+      "test_error": "Failed to send test email."
     },
     "quick_links": {
       "title": "Quick Access Tiles",
@@ -523,7 +550,8 @@
     "save": "Save",
     "saving": "Saving…",
     "loading": "Loading…",
-    "saved": "Saved"
+    "saved": "Saved",
+    "dismiss": "Dismiss"
   },
   "user": {
     "ai": {

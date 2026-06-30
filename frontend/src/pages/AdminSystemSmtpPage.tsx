@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { smtpStatus as fetchSmtpStatus, configureSmtp, deleteSmtpConfig, type SMTPStatus } from "../lib/api";
+import { smtpStatus as fetchSmtpStatus, configureSmtp, deleteSmtpConfig, testSmtp, type SMTPStatus } from "../lib/api";
 import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
@@ -21,6 +21,9 @@ export default function AdminSystemSmtpPage() {
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [testAddress, setTestAddress] = useState("");
+  const [testBusy, setTestBusy] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null);
   const hasFetched = useRef(false);
 
   useEffect(() => {
@@ -69,6 +72,39 @@ export default function AdminSystemSmtpPage() {
       setMsg({ ok: false, text: err instanceof Error ? err.message : t("admin.smtp.save_error") });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleTest(e: FormEvent) {
+    e.preventDefault();
+    const token = getSessionToken();
+    if (!token) return;
+    const parsedPort = parseInt(port, 10);
+    if (!host.trim() || !fromAddress.trim() || Number.isNaN(parsedPort) || parsedPort <= 0) {
+      setTestResult({ ok: false, text: t("admin.smtp.validation_error") });
+      return;
+    }
+    if (!testAddress.trim()) {
+      setTestResult({ ok: false, text: t("admin.smtp.test_address_required") });
+      return;
+    }
+    setTestBusy(true);
+    setTestResult(null);
+    try {
+      await testSmtp(token, {
+        host: host.trim(),
+        port: parsedPort,
+        username: username.trim(),
+        password,
+        from_address: fromAddress.trim(),
+        encryption,
+        to: testAddress.trim(),
+      });
+      setTestResult({ ok: true, text: t("admin.smtp.test_ok") });
+    } catch (err) {
+      setTestResult({ ok: false, text: err instanceof Error ? err.message : t("admin.smtp.test_error") });
+    } finally {
+      setTestBusy(false);
     }
   }
 
@@ -147,6 +183,33 @@ export default function AdminSystemSmtpPage() {
             )}
           </div>
         </form>
+
+        {/* Test-send — always visible so admin can verify config before/after saving */}
+        <div className="mt-6 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/50">
+          <p className="mb-1 text-sm font-medium text-gray-700 dark:text-gray-300">{t("admin.smtp.test_title")}</p>
+          <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">{t("admin.smtp.test_hint")}</p>
+          <form onSubmit={handleTest} className="flex gap-2">
+            <input
+              type="email"
+              value={testAddress}
+              onChange={(e) => setTestAddress(e.target.value)}
+              placeholder={t("admin.smtp.test_address_placeholder")}
+              className={`min-w-0 flex-1 ${inputClass}`}
+            />
+            <button
+              type="submit"
+              disabled={testBusy || !testAddress.trim()}
+              className={btnSecondary}
+            >
+              {testBusy ? t("admin.smtp.test_sending") : t("admin.smtp.test_button")}
+            </button>
+          </form>
+          {testResult && (
+            <p className={`mt-2 text-xs ${testResult.ok ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+              {testResult.text}
+            </p>
+          )}
+        </div>
       </div>
     </AppShell>
   );
@@ -188,3 +251,6 @@ const btnPrimary =
 
 const btnDanger =
   "rounded-lg border border-red-300 px-4 py-2.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950";
+
+const btnSecondary =
+  "flex-none rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-700";

@@ -565,6 +565,141 @@ func isCompatibleModel(provType, modelID string) bool {
 	return true
 }
 
+// AdminBalanceHandler handles GET /v1/admin/ai/providers/{id}/balance.
+// Queries the provider's credit/balance API and returns the result.
+// Currently supported: deepseek, openai.
+// Returns {"supported": false} for providers without a public balance API.
+func AdminBalanceHandler(deps auth.Deps) http.HandlerFunc {
+	type balanceResp struct {
+		Supported bool    `json:"supported"`
+		Currency  string  `json:"currency,omitempty"`
+		Amount    float64 `json:"amount,omitempty"`
+		Error     string  `json:"error,omitempty"`
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		id := r.PathValue("id")
+
+		prov, err := deps.Pool.GetAIProvider(r.Context(), id)
+		if err != nil || prov == nil {
+			http.Error(w, "provider not found", http.StatusNotFound)
+			return
+		}
+		adminKey, err := deps.Pool.GetAIProviderAdminKey(r.Context(), id)
+		if err != nil || adminKey == "" {
+			http.Error(w, "no admin API key configured for this provider", http.StatusServiceUnavailable)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+
+		switch prov.Type {
+		case "deepseek":
+			bal, currency, fetchErr := fetchDeepSeekBalance(r.Context(), adminKey)
+			if fetchErr != nil {
+				_ = json.NewEncoder(w).Encode(balanceResp{Supported: true, Error: fetchErr.Error()})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(balanceResp{Supported: true, Currency: currency, Amount: bal})
+
+		case "openai":
+			bal, currency, fetchErr := fetchOpenAIBalance(r.Context(), adminKey)
+			if fetchErr != nil {
+				_ = json.NewEncoder(w).Encode(balanceResp{Supported: true, Error: fetchErr.Error()})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(balanceResp{Supported: true, Currency: currency, Amount: bal})
+
+		default:
+			// Anthropic, Gemini, and custom providers do not have a public balance API.
+			_ = json.NewEncoder(w).Encode(balanceResp{Supported: false})
+		}
+	}
+}
+
+// fetchDeepSeekBalance calls https://api.deepseek.com/user/balance and returns
+// the total available balance in USD.
+func fetchDeepSeekBalance(ctx context.Context, apiKey string) (float64, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.deepseek.com/user/balance", nil)
+	if err != nil {
+		return 0, "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, "", fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode != http.StatusOK {
+		return 0, "", fmt.Errorf("deepseek returned %d: %s", resp.StatusCode, body)
+	}
+
+	var result struct {
+		IsAvailable bool `json:"is_available"`
+		BalanceInfos []struct {
+			Currency        string `json:"currency"`
+			TotalBalance    string `json:"total_balance"`
+			GrantedBalance  string `json:"granted_balance"`
+			ToppedUpBalance string `json:"topped_up_balance"`
+		} `json:"balance_infos"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return 0, "", fmt.Errorf("parse error: %w", err)
+	}
+	if len(result.BalanceInfos) == 0 {
+		return 0, "", fmt.Errorf("no balance info returned")
+	}
+	info := result.BalanceInfos[0]
+	var total float64
+	fmt.Sscanf(info.TotalBalance, "%f", &total)
+	return total, info.Currency, nil
+}
+
+// fetchOpenAIBalance calls the OpenAI credits endpoint. This endpoint is only
+// available for prepaid (credit) accounts; subscription/postpaid accounts
+// will receive a 404 or permission error, which surfaces as an error to the caller.
+func fetchOpenAIBalance(ctx context.Context, apiKey string) (float64, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.openai.com/v1/organization/credits", nil)
+	if err != nil {
+		return 0, "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, "", fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode != http.StatusOK {
+		return 0, "", fmt.Errorf("openai returned %d: %s", resp.StatusCode, body)
+	}
+
+	var result struct {
+		Object string `json:"object"`
+		Data   []struct {
+			GrantedCredits    float64 `json:"granted_credits"`
+			UsedCredits       float64 `json:"used_credits"`
+			ExpiresAt         int64   `json:"expires_at"`
+		} `json:"data"`
+		TotalGranted float64 `json:"total_granted"`
+		TotalUsed    float64 `json:"total_used"`
+		TotalAvailable float64 `json:"total_available"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return 0, "", fmt.Errorf("parse error: %w", err)
+	}
+	return result.TotalAvailable / 100.0, "USD", nil // OpenAI returns credits in cents
+}
+
 // AdminSettingsHandler handles GET and PATCH /v1/admin/ai/settings.
 // Auth is enforced by the superAdminOnly middleware in main.go.
 //

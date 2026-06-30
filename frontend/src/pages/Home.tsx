@@ -802,9 +802,10 @@ function WeatherPanelContent({ weather }: { weather: WeatherResponse }) {
         {t("home.weather.next_24h")}
       </p>
       <div
-        className="mb-5 flex overflow-x-auto rounded-xl border border-gray-100 dark:border-gray-800"
-        style={{ scrollbarWidth: "none" }}
+        className="mb-5 overflow-x-auto rounded-xl border border-gray-100 dark:border-gray-800"
+        style={{ scrollbarWidth: "none", WebkitOverflowScrolling: "touch" }}
       >
+        <div className="flex min-w-max">
         {hourly.map((h, i) => {
           const timeLabel = i === 0 ? t("home.weather.now") : formatHourLabel(h.time);
           return (
@@ -835,6 +836,7 @@ function WeatherPanelContent({ weather }: { weather: WeatherResponse }) {
             </div>
           );
         })}
+        </div>
       </div>
 
       {/* 16-day daily forecast */}

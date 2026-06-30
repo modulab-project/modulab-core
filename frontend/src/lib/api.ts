@@ -382,6 +382,45 @@ export interface NewsArticle {
 }
 
 // GET /v1/admin/feeds — org-admin/super-admin only.
+export interface FeedImportResult {
+  url: string;
+  label: string;
+  skipped: boolean;
+  error?: string;
+}
+
+// POST /v1/admin/feeds/import — uploads an OPML file and bulk-imports feeds.
+export async function adminImportFeeds(token: string, file: File): Promise<FeedImportResult[]> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_BASE_URL}/v1/admin/feeds/import`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new ApiError(res.status, text || res.statusText);
+  }
+  return res.json();
+}
+
+export interface FeedCheckResult {
+  reachable: boolean;
+  article_count: number;
+  has_images: boolean;
+  error?: string;
+}
+
+// POST /v1/admin/feeds/check — checks reachability and image support without saving.
+export function adminCheckFeed(token: string, url: string): Promise<FeedCheckResult> {
+  return request<FeedCheckResult>("/v1/admin/feeds/check", {
+    method: "POST",
+    headers: bearerHeaders(token),
+    body: JSON.stringify({ url }),
+  });
+}
+
 export function adminListFeeds(token: string): Promise<Feed[]> {
   return request<Feed[]>("/v1/admin/feeds", { headers: bearerHeaders(token) });
 }
@@ -721,6 +760,20 @@ export async function adminFetchAIProviderModels(token: string, id: string): Pro
     { headers: bearerHeaders(token) },
   );
   return result.models ?? [];
+}
+
+export interface AIBalanceResult {
+  supported: boolean;
+  currency?: string;
+  amount?: number;
+  error?: string;
+}
+
+export async function adminFetchAIProviderBalance(token: string, id: string): Promise<AIBalanceResult> {
+  return request<AIBalanceResult>(
+    `/v1/admin/ai/providers/${encodeURIComponent(id)}/balance`,
+    { headers: bearerHeaders(token) },
+  );
 }
 
 export interface AISettings {

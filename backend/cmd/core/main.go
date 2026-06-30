@@ -418,6 +418,8 @@ func main() {
 	//   User endpoints: every approved session can list feeds, toggle their own
 	//   subscriptions, and fetch aggregated articles. The aggregator caches
 	//   each feed's articles in Valkey for 15 minutes per feed.
+	mux.HandleFunc("POST /v1/admin/feeds/check", news.AdminCheckHandler(authDeps))
+	mux.HandleFunc("POST /v1/admin/feeds/import", news.AdminImportHandler(authDeps))
 	mux.HandleFunc("GET /v1/admin/feeds", news.AdminListHandler(authDeps))
 	mux.HandleFunc("POST /v1/admin/feeds", news.AdminCreateHandler(authDeps))
 	mux.HandleFunc("PATCH /v1/admin/feeds/{id}", news.AdminUpdateHandler(authDeps))
@@ -442,6 +444,7 @@ func main() {
 	mux.Handle("DELETE /v1/admin/ai/providers/{id}", superAdminOnly(ai.AdminDeleteHandler(authDeps)))
 	mux.Handle("DELETE /v1/admin/ai/providers/{id}/key", superAdminOnly(ai.AdminClearKeyHandler(authDeps)))
 	mux.Handle("GET /v1/admin/ai/providers/{id}/models", superAdminOnly(ai.AdminListModelsHandler(authDeps)))
+	mux.Handle("GET /v1/admin/ai/providers/{id}/balance", superAdminOnly(ai.AdminBalanceHandler(authDeps)))
 	mux.HandleFunc("GET /v1/ai/providers", ai.UserProvidersHandler(authDeps))
 	mux.HandleFunc("PUT /v1/ai/keys/{id}", ai.UserSetKeyHandler(authDeps))
 	mux.HandleFunc("DELETE /v1/ai/keys/{id}", ai.UserDeleteKeyHandler(authDeps))

@@ -25,7 +25,7 @@
   },
   "profile": {
     "title": "Profil",
-    "subtitle": "Verwaltet von deinem Identitätsprovider – Core zeigt nur an, was beim Login übermittelt wurde.",
+    "subtitle": "Dein Profil wird über dein SSO-Konto verwaltet. Änderungen nimmst du dort vor.",
     "name": "Name",
     "username": "Benutzername",
     "email": "E-Mail",
@@ -123,6 +123,13 @@
         "save_provider_error": "Anbieter konnte nicht gespeichert werden.",
         "save_changes": "Änderungen speichern",
         "add_provider": "Anbieter hinzufügen"
+      },
+      "balance": {
+        "check": "Guthaben prüfen",
+        "loading": "Wird abgefragt…",
+        "label": "Guthaben",
+        "fetch_error": "Guthaben konnte nicht abgefragt werden.",
+        "not_supported": "Dieser Anbieter unterstützt keine Guthaben-Abfrage."
       }
     },
     "feeds": {
@@ -157,8 +164,20 @@
         "save_error": "Speichern fehlgeschlagen",
         "cancel": "Abbrechen",
         "saving": "Wird gespeichert…",
-        "save": "Speichern"
-      }
+        "save": "Speichern",
+        "check_button": "Prüfen",
+        "checking": "Wird geprüft…",
+        "check_ok": "Erreichbar",
+        "check_articles": "{{count}} Artikel",
+        "check_has_images": "mit Bilder",
+        "check_no_images": "ohne Bilder",
+        "check_unreachable": "Feed nicht erreichbar",
+        "check_error": "Feed konnte nicht geprüft werden."
+      },
+      "import_opml": "OPML importieren",
+      "importing": "Wird importiert…",
+      "import_error": "Import fehlgeschlagen.",
+      "import_result": "{{added}} hinzugefügt · {{skipped}} übersprungen · {{failed}} fehlgeschlagen"
     },
     "searxng": {
       "title": "SearXNG",
@@ -207,7 +226,15 @@
       "action": {
         "removing": "Wird entfernt…",
         "remove": "Konfiguration entfernen"
-      }
+      },
+      "test_title": "Test-E-Mail senden",
+      "test_hint": "Sendet eine Test-E-Mail mit den aktuellen Formularwerten (auch vor dem Speichern).",
+      "test_address_placeholder": "empfaenger@example.com",
+      "test_address_required": "Bitte eine Empfängeradresse eingeben.",
+      "test_button": "Test senden",
+      "test_sending": "Wird gesendet…",
+      "test_ok": "Test-E-Mail erfolgreich gesendet.",
+      "test_error": "Test-E-Mail konnte nicht gesendet werden."
     },
     "quick_links": {
       "title": "Schnellzugriff-Kacheln",
@@ -523,7 +550,8 @@
     "save": "Speichern",
     "saving": "Wird gespeichert…",
     "loading": "Wird geladen…",
-    "saved": "Gespeichert"
+    "saved": "Gespeichert",
+    "dismiss": "Schließen"
   },
   "user": {
     "ai": {

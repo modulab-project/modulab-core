@@ -5,7 +5,7 @@
 // home page, whether to show images).
 // Gate is enforced server-side (requireAdminDeps in internal/news/news.go);
 // client-side we additionally redirect non-admins to / via isAdminRole.
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -13,10 +13,14 @@ import {
   adminCreateFeed,
   adminUpdateFeed,
   adminDeleteFeed,
+  adminCheckFeed,
+  adminImportFeeds,
   adminGetNewsSettings,
   adminUpdateNewsSettings,
   type Feed,
   type AdminNewsSettings,
+  type FeedCheckResult,
+  type FeedImportResult,
   type ApiError,
 } from "../lib/api";
 import { getSessionToken } from "../lib/session";
@@ -40,6 +44,11 @@ export default function AdminFeedsPage() {
   // Modal state
   const [editTarget, setEditTarget] = useState<Feed | null>(null); // null = create
   const [modalOpen, setModalOpen] = useState(false);
+
+  // OPML import state
+  const [importing, setImporting] = useState(false);
+  const [importResults, setImportResults] = useState<FeedImportResult[] | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!session) return;
@@ -106,6 +115,28 @@ export default function AdminFeedsPage() {
       setFeeds((prev) => prev.filter((f) => f.id !== feed.id));
     } catch (e: unknown) {
       setError((e as ApiError).message ?? t("admin.feeds.delete_error"));
+    }
+  }
+
+  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const token = getSessionToken();
+    if (!token) return;
+    setImporting(true);
+    setImportResults(null);
+    setImportError(null);
+    try {
+      const results = await adminImportFeeds(token, file);
+      setImportResults(results);
+      // Reload feed list to show newly imported feeds.
+      load();
+    } catch (err: unknown) {
+      setImportError((err as ApiError).message ?? t("admin.feeds.import_error"));
+    } finally {
+      setImporting(false);
+      // Reset the file input so the same file can be re-selected.
+      e.target.value = "";
     }
   }
 
@@ -213,21 +244,63 @@ export default function AdminFeedsPage() {
         </div>
 
         {/* ── Feed pool ───────────────────────────────────────────── */}
-        <div className="mb-6 flex items-center justify-between">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-xl font-semibold">{t("admin.feeds.title")}</h2>
             <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
               {t("admin.feeds.subtitle")}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={openCreate}
-            className="flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-2 text-sm font-medium text-white hover:bg-teal-700"
-          >
-            <i className="ti ti-plus text-[14px]" /> {t("admin.feeds.action.add")}
-          </button>
+          <div className="flex items-center gap-2">
+            {/* OPML import — hidden file input triggered by label */}
+            <label className={`flex cursor-pointer items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800 ${importing ? "opacity-50 pointer-events-none" : ""}`}>
+              <i className="ti ti-upload text-[14px]" />
+              {importing ? t("admin.feeds.importing") : t("admin.feeds.import_opml")}
+              <input
+                type="file"
+                accept=".opml,.xml"
+                className="sr-only"
+                onChange={handleImport}
+                disabled={importing}
+              />
+            </label>
+            <button
+              type="button"
+              onClick={openCreate}
+              className="flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-2 text-sm font-medium text-white hover:bg-teal-700"
+            >
+              <i className="ti ti-plus text-[14px]" /> {t("admin.feeds.action.add")}
+            </button>
+          </div>
         </div>
+
+        {/* Import result summary */}
+        {importError && (
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-400">
+            {importError}
+          </div>
+        )}
+        {importResults && (
+          <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 dark:border-gray-700 dark:bg-gray-800/50">
+            <p className="mb-1 text-sm font-medium text-gray-700 dark:text-gray-200">
+              {t("admin.feeds.import_result", {
+                added: importResults.filter(r => !r.skipped && !r.error).length,
+                skipped: importResults.filter(r => r.skipped).length,
+                failed: importResults.filter(r => !!r.error).length,
+              })}
+            </p>
+            {importResults.filter(r => !!r.error).map((r, i) => (
+              <p key={i} className="text-xs text-red-600 dark:text-red-400 truncate">✗ {r.label}: {r.error}</p>
+            ))}
+            <button
+              type="button"
+              onClick={() => setImportResults(null)}
+              className="mt-1 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+            >
+              {t("common.dismiss")}
+            </button>
+          </div>
+        )}
 
         {error && (
           <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-400">
@@ -318,6 +391,24 @@ function FeedModal({
   const [label, setLabel] = useState(feed?.label ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [checkResult, setCheckResult] = useState<FeedCheckResult | null>(null);
+
+  async function handleCheck() {
+    if (!url.trim()) return;
+    const token = getSessionToken();
+    if (!token) return;
+    setChecking(true);
+    setCheckResult(null);
+    try {
+      const result = await adminCheckFeed(token, url.trim());
+      setCheckResult(result);
+    } catch {
+      setCheckResult({ reachable: false, article_count: 0, has_images: false, error: t("admin.feeds.modal.check_error") });
+    } finally {
+      setChecking(false);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -365,14 +456,41 @@ function FeedModal({
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium">{t("admin.feeds.modal.url")}</label>
-            <input
-              type="url"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://example.com/feed.xml"
-              required
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-base outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-900"
-            />
+            <div className="flex gap-2">
+              <input
+                type="url"
+                value={url}
+                onChange={(e) => { setUrl(e.target.value); setCheckResult(null); }}
+                placeholder="https://example.com/feed.xml"
+                required
+                className="min-w-0 flex-1 rounded-lg border border-gray-300 px-3 py-2 text-base outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-900"
+              />
+              <button
+                type="button"
+                disabled={checking || !url.trim()}
+                onClick={handleCheck}
+                className="flex-none rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+              >
+                {checking ? t("admin.feeds.modal.checking") : t("admin.feeds.modal.check_button")}
+              </button>
+            </div>
+            {checkResult && (
+              <div className={`mt-2 rounded-md px-3 py-2 text-xs ${
+                checkResult.reachable
+                  ? "bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-400"
+                  : "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-400"
+              }`}>
+                {checkResult.reachable ? (
+                  <>
+                    <span className="font-medium">✓ {t("admin.feeds.modal.check_ok")}</span>
+                    {" · "}{t("admin.feeds.modal.check_articles", { count: checkResult.article_count })}
+                    {" · "}{checkResult.has_images ? t("admin.feeds.modal.check_has_images") : t("admin.feeds.modal.check_no_images")}
+                  </>
+                ) : (
+                  <span>✗ {checkResult.error ?? t("admin.feeds.modal.check_unreachable")}</span>
+                )}
+              </div>
+            )}
           </div>
           {error && (
             <p className="text-sm text-red-600 dark:text-red-400">{error}</p>

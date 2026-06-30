@@ -8,10 +8,12 @@ import {
   adminDeleteAIProvider,
   adminClearAIProviderKey,
   adminFetchAIProviderModels,
+  adminFetchAIProviderBalance,
   adminGetAISettings,
   adminPatchAISettings,
   type AIProvider,
   type AISettings,
+  type AIBalanceResult,
 } from "../lib/api";
 import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
@@ -41,6 +43,7 @@ export default function AdminAIPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [modal, setModal] = useState<ModalState>({ kind: "closed" });
+  const [balances, setBalances] = useState<Record<string, AIBalanceResult & { loading?: boolean }>>({});
 
   // AI settings (rate limit + body limit)
   const [aiSettings, setAiSettings] = useState<AISettings | null>(null);
@@ -135,6 +138,21 @@ export default function AdminAIPage() {
     }
   }
 
+  async function handleFetchBalance(id: string) {
+    const token = getSessionToken();
+    if (!token) return;
+    setBalances((prev) => ({ ...prev, [id]: { supported: true, loading: true } }));
+    try {
+      const result = await adminFetchAIProviderBalance(token, id);
+      setBalances((prev) => ({ ...prev, [id]: result }));
+    } catch (e) {
+      setBalances((prev) => ({
+        ...prev,
+        [id]: { supported: true, error: e instanceof Error ? e.message : t("admin.ai.balance.fetch_error") },
+      }));
+    }
+  }
+
   async function handleToggleEnabled(p: AIProvider) {
     const token = getSessionToken();
     if (!token) return;
@@ -197,9 +215,33 @@ export default function AdminAIPage() {
                   </span>
                 </div>
                 <div className="mt-1.5 flex items-center justify-between gap-2">
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    {t("admin.ai.model_label")}: <span className="font-medium text-gray-700 dark:text-gray-300">{p?.default_model ?? def.defaultModel}</span>
-                  </p>
+                  <div className="min-w-0">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {t("admin.ai.model_label")}: <span className="font-medium text-gray-700 dark:text-gray-300">{p?.default_model ?? def.defaultModel}</span>
+                    </p>
+                    {/* Balance display — only for providers with a public balance API */}
+                    {hasKey && (def.type === "openai" || def.type === "deepseek") && (() => {
+                      const bal = balances[def.id];
+                      if (!bal) return (
+                        <button
+                          type="button"
+                          onClick={() => handleFetchBalance(def.id)}
+                          className="mt-0.5 text-[11px] text-teal-600 hover:underline dark:text-teal-400"
+                        >
+                          {t("admin.ai.balance.check")}
+                        </button>
+                      );
+                      if (bal.loading) return <p className="mt-0.5 text-[11px] text-gray-400">{t("admin.ai.balance.loading")}</p>;
+                      if (bal.error) return <p className="mt-0.5 text-[11px] text-red-500">{bal.error}</p>;
+                      if (!bal.supported) return null;
+                      return (
+                        <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
+                          {t("admin.ai.balance.label")}: <span className="font-medium text-gray-700 dark:text-gray-300">{bal.amount?.toFixed(2)} {bal.currency}</span>
+                          <button type="button" onClick={() => handleFetchBalance(def.id)} className="ml-1.5 text-teal-600 hover:underline dark:text-teal-400">↺</button>
+                        </p>
+                      );
+                    })()}
+                  </div>
                   <div className="flex flex-none items-center gap-1.5">
                     <ActionButton
                       variant="secondary"

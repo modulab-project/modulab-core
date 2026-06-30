@@ -1,11 +1,17 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getMe, getHealth, type Session } from "./api";
+import { getMe, getHealth, ApiError, type Session } from "./api";
 import { clearSessionToken, getSessionToken } from "./session";
 
 // Same interval Pending.tsx polls on - kept in sync so "how stale can a
 // revoked session look in the UI" is one number, not two.
 const POLL_INTERVAL_MS = 15_000;
+
+// On the initial page load, if the /v1/auth/me request fails with a transient
+// error (network, 5xx), we retry up to this many times before giving up and
+// leaving the user on a blank loading screen (which will auto-recover on the
+// next POLL_INTERVAL_MS tick anyway).
+const INITIAL_RETRY_DELAY_MS = 2_000;
 
 // Shared guard for every page that requires a fully-approved session -
 // currently Home ("/"), ProfilePage ("/profile"), and AdminUsersPage
@@ -28,6 +34,10 @@ export function useAuthenticatedSession(): { session: Session | null; loading: b
   const navigate = useNavigate();
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  // Tracks whether the very first getMe() call has ever succeeded. Used to
+  // decide whether a transient error on a subsequent poll should trigger a
+  // short retry (initial load) or just be silently skipped (already loaded).
+  const [initialLoadDone, setInitialLoadDone] = useState(false);
 
   useEffect(() => {
     const token = getSessionToken();
@@ -42,13 +52,14 @@ export function useAuthenticatedSession(): { session: Session | null; loading: b
     }
 
     let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
     // Takes the token as a parameter rather than closing over the outer
     // `token` directly - same TypeScript narrowing limitation already
     // documented on Pending.tsx's `check`: the `string | null` -> `string`
     // guard above doesn't carry across into a separately declared nested
     // function, so it would otherwise widen back to `string | null` here.
-    function check(currentToken: string) {
+    function check(currentToken: string, isRetry = false) {
       getMe(currentToken)
         .then((s) => {
           if (cancelled) {
@@ -79,16 +90,32 @@ export function useAuthenticatedSession(): { session: Session | null; loading: b
             }
             return s;
           });
+          setInitialLoadDone(true);
           setLoading(false);
         })
-        .catch(() => {
-          // Covers an expired token as well as one an admin revoked via
-          // lock/delete - both look identical from here (the session key is
-          // simply gone), and both fail closed the same way.
-          if (!cancelled) {
+        .catch((err) => {
+          if (cancelled) return;
+          // Only treat explicit auth rejections (401/403) as "this token is
+          // dead" — those mean the backend actively refused the credential.
+          // Network errors, 502/503/504 from Traefik, and other transient
+          // failures are handled differently depending on whether the initial
+          // load has already succeeded:
+          //   - Already loaded: silently ignore; the next poll will retry.
+          //   - Still on initial load: schedule one quick retry after 2 s so
+          //     a brief backend restart on page load doesn't leave a blank screen.
+          if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
             clearSessionToken();
             navigate("/login", { replace: true });
+            return;
           }
+          // Transient error — only retry once on initial load.
+          if (!initialLoadDone && !isRetry) {
+            retryTimer = setTimeout(() => {
+              if (!cancelled) check(currentToken, true);
+            }, INITIAL_RETRY_DELAY_MS);
+          }
+          // Already-loaded pages continue to work normally; the interval
+          // will pick up again on the next POLL_INTERVAL_MS tick.
         });
     }
 
@@ -97,8 +124,9 @@ export function useAuthenticatedSession(): { session: Session | null; loading: b
     return () => {
       cancelled = true;
       window.clearInterval(id);
+      if (retryTimer !== null) clearTimeout(retryTimer);
     };
-  }, [navigate]);
+  }, [navigate, initialLoadDone]);
 
   return { session, loading };
 }

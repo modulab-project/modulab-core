@@ -334,6 +334,176 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Write(data)
 }
 
+// ---- OPML import ------------------------------------------------------------
+
+// opmlBody is the minimal OPML 2.0 structure we need to parse.
+// OPML organises feeds in <outline> elements; the feed URL is in the
+// xmlUrl attribute and a human-readable name is in text or title.
+type opmlBody struct {
+	XMLName  xml.Name      `xml:"opml"`
+	Outlines []opmlOutline `xml:"body>outline"`
+}
+
+type opmlOutline struct {
+	Text     string        `xml:"text,attr"`
+	Title    string        `xml:"title,attr"`
+	XMLURL   string        `xml:"xmlUrl,attr"`
+	Children []opmlOutline `xml:"outline"`
+}
+
+// flattenOPML collects all leaf outlines (those with an xmlUrl attribute)
+// recursively so folder-grouped feeds are handled the same as flat ones.
+func flattenOPML(outlines []opmlOutline) []opmlOutline {
+	var flat []opmlOutline
+	for _, o := range outlines {
+		if o.XMLURL != "" {
+			flat = append(flat, o)
+		}
+		flat = append(flat, flattenOPML(o.Children)...)
+	}
+	return flat
+}
+
+// ImportResult is one entry in the JSON array returned by POST /v1/admin/feeds/import.
+type ImportResult struct {
+	URL     string `json:"url"`
+	Label   string `json:"label"`
+	Skipped bool   `json:"skipped"` // true if feed already existed
+	Error   string `json:"error,omitempty"`
+}
+
+// AdminImportHandler is POST /v1/admin/feeds/import.
+// Accepts a multipart/form-data upload with a field named "file" containing
+// an OPML document. Inserts each valid feed URL from the file, skipping any
+// that are already present (by URL uniqueness in the DB).
+func AdminImportHandler(d auth.Deps) http.HandlerFunc {
+	const maxUploadSize = 2 << 20 // 2 MB
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := auth.RequireAdminSession(d, w, r); !ok {
+			return
+		}
+		if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+			http.Error(w, "file too large or invalid form", http.StatusBadRequest)
+			return
+		}
+		file, _, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, "missing file field", http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+
+		body, err := io.ReadAll(io.LimitReader(file, maxUploadSize))
+		if err != nil {
+			http.Error(w, "read error", http.StatusInternalServerError)
+			return
+		}
+
+		var doc opmlBody
+		dec := xml.NewDecoder(bytes.NewReader(body))
+		dec.Strict = false
+		if err := dec.Decode(&doc); err != nil {
+			http.Error(w, "invalid OPML: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		leaves := flattenOPML(doc.Outlines)
+		if len(leaves) == 0 {
+			http.Error(w, "no feed entries found in OPML", http.StatusBadRequest)
+			return
+		}
+
+		// Fetch existing feed URLs once so we can skip duplicates without
+		// relying on a DB unique constraint error for flow control.
+		existing, _ := d.Pool.ListFeeds(r.Context())
+		existingURLs := make(map[string]bool, len(existing))
+		for _, f := range existing {
+			existingURLs[strings.ToLower(strings.TrimSpace(f.URL))] = true
+		}
+
+		results := make([]ImportResult, 0, len(leaves))
+		for _, o := range leaves {
+			feedURL := strings.TrimSpace(o.XMLURL)
+			label := strings.TrimSpace(o.Text)
+			if label == "" {
+				label = strings.TrimSpace(o.Title)
+			}
+			if label == "" {
+				label = feedURL
+			}
+			if !isHTTPURL(feedURL) {
+				results = append(results, ImportResult{URL: feedURL, Label: label, Error: "invalid URL"})
+				continue
+			}
+			if existingURLs[strings.ToLower(feedURL)] {
+				results = append(results, ImportResult{URL: feedURL, Label: label, Skipped: true})
+				continue
+			}
+			if _, err := d.Pool.CreateFeed(r.Context(), feedURL, label); err != nil {
+				results = append(results, ImportResult{URL: feedURL, Label: label, Error: err.Error()})
+				continue
+			}
+			existingURLs[strings.ToLower(feedURL)] = true
+			results = append(results, ImportResult{URL: feedURL, Label: label})
+		}
+
+		writeJSON(w, http.StatusOK, results)
+	}
+}
+
+// ---- Feed check -------------------------------------------------------------
+
+// CheckResult is the JSON body returned by POST /v1/admin/feeds/check.
+type CheckResult struct {
+	Reachable    bool   `json:"reachable"`
+	ArticleCount int    `json:"article_count"`
+	HasImages    bool   `json:"has_images"`
+	Error        string `json:"error,omitempty"`
+}
+
+// AdminCheckHandler is POST /v1/admin/feeds/check.
+// Body: {"url": "..."}
+// Fetches the feed URL, parses it, and reports reachability + image support.
+// Does not write to the database — purely diagnostic.
+func AdminCheckHandler(d auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := auth.RequireAdminSession(d, w, r); !ok {
+			return
+		}
+		var body struct {
+			URL string `json:"url"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		body.URL = strings.TrimSpace(body.URL)
+		if !isHTTPURL(body.URL) {
+			writeJSON(w, http.StatusOK, CheckResult{Reachable: false, Error: "url must be a valid http or https URL"})
+			return
+		}
+
+		arts, err := fetchFeed(r.Context(), body.URL, "check")
+		if err != nil {
+			writeJSON(w, http.StatusOK, CheckResult{Reachable: false, Error: err.Error()})
+			return
+		}
+
+		hasImages := false
+		for _, a := range arts {
+			if a.ImageURL != "" {
+				hasImages = true
+				break
+			}
+		}
+		writeJSON(w, http.StatusOK, CheckResult{
+			Reachable:    true,
+			ArticleCount: len(arts),
+			HasImages:    hasImages,
+		})
+	}
+}
+
 // ---- Admin handlers ---------------------------------------------------------
 
 // AdminListHandler is GET /v1/admin/feeds.

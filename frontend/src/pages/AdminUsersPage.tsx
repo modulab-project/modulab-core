@@ -138,13 +138,14 @@ export default function AdminUsersPage() {
                     </p>
                     <StatusBadge status={status} />
                   </div>
-                  {/* Row 2: details + action buttons */}
-                  <div className="mt-1.5 flex items-end justify-between gap-2">
-                    <div className="min-w-0 text-xs text-gray-500 dark:text-gray-400">
-                      <p className="truncate">{u.email} · {u.role}</p>
-                      <p className="truncate">{t("admin.users.joined")} {new Date(u.created_at).toLocaleDateString()} · {t("admin.users.last_login")} {new Date(u.last_login_at).toLocaleDateString()}</p>
-                    </div>
-                    <div className="flex flex-none items-center gap-1.5">
+                  {/* Row 2: details */}
+                  <div className="mt-1 min-w-0 text-xs text-gray-500 dark:text-gray-400">
+                    <p className="truncate">{u.email} · {u.role}</p>
+                    <p className="truncate">{t("admin.users.joined")} {new Date(u.created_at).toLocaleDateString()} · {t("admin.users.last_login")} {new Date(u.last_login_at).toLocaleDateString()}</p>
+                  </div>
+                  {/* Row 3: action buttons — stacked vertically */}
+                  {(status === "pending" || (status === "active" && !isSelf) || status === "locked") && (
+                    <div className="mt-2.5 flex flex-col gap-1.5">
                       {status === "pending" && (
                         <ActionButton busy={busy} onClick={() => runAction(u.subject, approveUser)}>
                           {t("admin.users.action.approve")}
@@ -175,7 +176,7 @@ export default function AdminUsersPage() {
                         </>
                       )}
                     </div>
-                  </div>
+                  )}
                 </div>
               );
             })}
@@ -222,7 +223,7 @@ function ActionButton({
       type="button"
       disabled={busy}
       onClick={onClick}
-      className={`flex-none rounded-md px-3 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${styles[variant]}`}
+      className={`w-full rounded-md px-3 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${styles[variant]}`}
     >
       {busy ? "…" : children}
     </button>
