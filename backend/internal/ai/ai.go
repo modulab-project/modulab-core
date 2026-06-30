@@ -584,8 +584,8 @@ func AdminBalanceHandler(deps auth.Deps) http.HandlerFunc {
 		}
 		id := r.PathValue("id")
 
-		prov, err := deps.Pool.GetAIProvider(r.Context(), id)
-		if err != nil || prov == nil {
+		prov, found, err := deps.Pool.GetAIProvider(r.Context(), id)
+		if err != nil || !found {
 			http.Error(w, "provider not found", http.StatusNotFound)
 			return
 		}
