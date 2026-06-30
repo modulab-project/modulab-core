@@ -34,11 +34,12 @@ import (
 )
 
 const (
-	feedCacheTTL  = 15 * time.Minute
-	cacheKeyPfx   = "news:feed:"
-	maxArticles   = 100
-	fetchTimeout  = 10 * time.Second
-	httpUserAgent = "ModuLab-Core/1.0 (https://modulab.app)"
+	feedCacheTTL   = 15 * time.Minute
+	cacheKeyPfx    = "news:feed:"
+	maxArticles    = 100
+	fetchTimeout   = 10 * time.Second
+	httpUserAgent  = "ModuLab-Core/1.0 (https://modulab.app)"
+	maxConcurrency = 10 // parallel feed reachability checks
 )
 
 // ---- Response types ---------------------------------------------------------
@@ -388,10 +389,7 @@ type OPMLEntry struct {
 // the network. The caller (admin UI) shows a selection step and then calls
 // POST /v1/admin/feeds/import with the chosen feeds.
 func AdminParseOPMLHandler(d auth.Deps) http.HandlerFunc {
-	const (
-		maxUploadSize  = 2 << 20 // 2 MB
-		maxConcurrency = 10      // parallel feed checks
-	)
+	const maxUploadSize = 2 << 20 // 2 MB
 	return func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := auth.RequireAdminSession(d, w, r); !ok {
 			return
