@@ -83,6 +83,10 @@ export function AppShell({
   const [openPanel, setOpenPanel] = useState<OpenPanel>(null);
   const [dark, setDark] = useState(() => localStorage.getItem(THEME_KEY) === "dark");
   const [activeModules, setActiveModules] = useState<InstalledModule[]>([]);
+  // How many installed modules have an update waiting (available_version set).
+  // Shown in the notification bell badge alongside pending-user count.
+  // null = not yet fetched, 0 = all up to date, n = n updates available.
+  const [moduleUpdateCount, setModuleUpdateCount] = useState<number | null>(null);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
@@ -99,14 +103,25 @@ export function AppShell({
       .catch(() => setHealth(null));
   }, []);
 
-  // Load active modules for navigation links.
-  useEffect(() => {
+  // Load active modules (for navigation links) and count pending updates
+  // (for the notification badge). Merged into one call to avoid a second
+  // round-trip. Re-runs via refreshModuleUpdateCount when the notification
+  // panel is opened so the count is always fresh when the admin looks at it.
+  const refreshModuleUpdateCount = useCallback(() => {
     const token = getSessionToken();
     if (!token) return;
     listInstalledModules(token)
-      .then((list) => setActiveModules((list ?? []).filter((m) => m.status === "active")))
+      .then((list) => {
+        const all = list ?? [];
+        setActiveModules(all.filter((m) => m.status === "active"));
+        setModuleUpdateCount(all.filter((m) => !!m.available_version).length);
+      })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    refreshModuleUpdateCount();
+  }, [refreshModuleUpdateCount]);
 
   // Load the stored UI language on first render for this user and apply it
   // so the preference survives across browsers and devices. Best-effort: a
@@ -207,6 +222,7 @@ export function AppShell({
       const next = current === panel ? null : panel;
       if (next === "notifications") {
         refreshPendingCount();
+        refreshModuleUpdateCount();
       }
       return next;
     });
@@ -218,6 +234,7 @@ export function AppShell({
         session={session}
         isAdmin={isAdmin}
         pendingCount={pendingCount}
+        moduleUpdateCount={moduleUpdateCount}
         openPanel={openPanel}
         onTogglePanel={togglePanel}
         chatOpen={chatOpen}
@@ -260,10 +277,15 @@ export function AppShell({
       >
         <NotificationsPanelContent
           pendingCount={pendingCount}
+          moduleUpdateCount={moduleUpdateCount}
           feed={feed}
           onReviewPending={() => {
             setOpenPanel(null);
             navigate("/admin/users");
+          }}
+          onViewModuleUpdates={() => {
+            setOpenPanel(null);
+            navigate("/admin/modules/installed");
           }}
         />
       </SlidePanel>
@@ -277,6 +299,7 @@ function Header({
   session,
   isAdmin,
   pendingCount,
+  moduleUpdateCount,
   openPanel,
   onTogglePanel,
   chatOpen,
@@ -285,6 +308,7 @@ function Header({
   session: Session;
   isAdmin: boolean;
   pendingCount: number | null;
+  moduleUpdateCount: number | null;
   openPanel: OpenPanel;
   onTogglePanel: (panel: Exclude<OpenPanel, null>) => void;
   chatOpen: boolean;
@@ -317,11 +341,19 @@ function Header({
             className="relative flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-900"
           >
             <i className="ti ti-bell text-[18px] text-gray-500 dark:text-gray-400" />
-            {!!pendingCount && pendingCount > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-semibold leading-none text-white">
-                {pendingCount > 9 ? "9+" : pendingCount}
-              </span>
-            )}
+            {(() => {
+              const total = (pendingCount ?? 0) + (moduleUpdateCount ?? 0);
+              if (total === 0) return null;
+              // Red for pending users, amber when only module updates
+              const color = (pendingCount ?? 0) > 0
+                ? "bg-red-600"
+                : "bg-amber-500";
+              return (
+                <span className={`absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full ${color} px-1 text-[10px] font-semibold leading-none text-white`}>
+                  {total > 9 ? "9+" : total}
+                </span>
+              );
+            })()}
           </button>
         )}
         <button
@@ -635,16 +667,21 @@ function ProfilePanelContent({
 // every toast can still see an accurate count, even with an empty feed.
 function NotificationsPanelContent({
   pendingCount,
+  moduleUpdateCount,
   feed,
   onReviewPending,
+  onViewModuleUpdates,
 }: {
   pendingCount: number | null;
+  moduleUpdateCount: number | null;
   feed: FeedItem[];
   onReviewPending: () => void;
+  onViewModuleUpdates: () => void;
 }) {
   const { t } = useTranslation();
   return (
     <div>
+      {/* Pending user approvals */}
       <button
         type="button"
         onClick={onReviewPending}
@@ -662,6 +699,33 @@ function NotificationsPanelContent({
         </span>
         {!!pendingCount && pendingCount > 0 && <i className="ti ti-chevron-right text-gray-400" />}
       </button>
+
+      {/* Module updates */}
+      <button
+        type="button"
+        onClick={onViewModuleUpdates}
+        className="flex w-full items-center justify-between rounded-lg px-2.5 py-2.5 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
+      >
+        <span className="flex items-center gap-2.5">
+          <i className={`ti ti-puzzle text-[15px] ${moduleUpdateCount ? "text-amber-500" : "text-gray-500"}`} />
+          {moduleUpdateCount === null
+            ? t("shell.notifications_panel.checking")
+            : moduleUpdateCount === 0
+              ? t("shell.notifications_panel.no_module_updates")
+              : moduleUpdateCount === 1
+                ? t("shell.notifications_panel.module_updates_one", { count: moduleUpdateCount })
+                : t("shell.notifications_panel.module_updates_many", { count: moduleUpdateCount })}
+        </span>
+        {!!moduleUpdateCount && moduleUpdateCount > 0 && (
+          <span className="flex items-center gap-1">
+            <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-900 dark:text-amber-300">
+              {moduleUpdateCount}
+            </span>
+            <i className="ti ti-chevron-right text-gray-400" />
+          </span>
+        )}
+      </button>
+
       <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />
       <p className="px-2.5 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
         {t("shell.notifications_panel.recent_activity")}

@@ -497,7 +497,10 @@
       "recent_activity": "Letzte Aktivität",
       "nothing_yet": "Noch nichts – hier erscheint nur, was in dieser Tab-Sitzung ankam.",
       "review": "Überprüfen",
-      "waiting_toast": "{{name}} wartet auf Genehmigung."
+      "waiting_toast": "{{name}} wartet auf Genehmigung.",
+      "no_module_updates": "Alle Module aktuell",
+      "module_updates_one": "{{count}} Modul-Update verfügbar",
+      "module_updates_many": "{{count}} Modul-Updates verfügbar"
     },
     "chat": {
       "no_provider": "Kein Anbieter",

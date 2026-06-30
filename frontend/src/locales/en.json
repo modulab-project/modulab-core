@@ -497,7 +497,10 @@
       "recent_activity": "Recent activity",
       "nothing_yet": "Nothing yet - this only shows what arrived while this tab was open.",
       "review": "Review",
-      "waiting_toast": "{{name}} is waiting for approval."
+      "waiting_toast": "{{name}} is waiting for approval.",
+      "no_module_updates": "All modules up to date",
+      "module_updates_one": "{{count}} module update available",
+      "module_updates_many": "{{count}} module updates available"
     },
     "chat": {
       "no_provider": "No provider",
