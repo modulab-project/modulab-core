@@ -174,6 +174,13 @@
         "check_unreachable": "Flux inaccessible",
         "check_error": "Impossible de vérifier le flux."
       },
+      "catalog_open": "Depuis le catalogue",
+      "catalog_loading": "Chargement du catalogue…",
+      "catalog_error": "Impossible de charger le catalogue de flux.",
+      "catalog_modal": {
+        "title": "Sélectionner des flux depuis le catalogue",
+        "subtitle": "Flux d'actualités triés par langue et pays. Sélectionnez les flux que vous souhaitez importer."
+      },
       "import_opml": "Importer OPML",
       "parsing_opml": "Vérification des flux…",
       "importing": "Importation…",

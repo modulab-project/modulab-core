@@ -420,6 +420,7 @@ func main() {
 	//   each feed's articles in Valkey for 15 minutes per feed.
 	mux.HandleFunc("POST /v1/admin/feeds/check", news.AdminCheckHandler(authDeps))
 	mux.HandleFunc("POST /v1/admin/feeds/opml-parse", news.AdminParseOPMLHandler(authDeps))
+	mux.HandleFunc("GET /v1/admin/feeds/catalog", news.AdminCatalogHandler(authDeps))
 	mux.HandleFunc("POST /v1/admin/feeds/import", news.AdminImportHandler(authDeps))
 	mux.HandleFunc("GET /v1/admin/feeds", news.AdminListHandler(authDeps))
 	mux.HandleFunc("POST /v1/admin/feeds", news.AdminCreateHandler(authDeps))

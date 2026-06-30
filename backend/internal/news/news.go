@@ -996,3 +996,146 @@ func AdminNewsSettingsHandler(d auth.Deps) http.HandlerFunc {
 		writeJSON(w, http.StatusOK, readCurrent(r.Context()))
 	}
 }
+
+// ---- Feed catalog -----------------------------------------------------------
+
+const (
+	catalogURL      = "https://raw.githubusercontent.com/yavuz/news-feed-list-of-countries/master/database/news-feed-list-of-countries.json"
+	catalogCacheKey = "news:catalog"
+	catalogCacheTTL = 24 * time.Hour
+)
+
+type catalogPublication struct {
+	Name    string           `json:"publication_name"`
+	Website string           `json:"publication_website_uri"`
+	Feeds   []catalogFeedURI `json:"publication_rss_feed_uris"`
+}
+
+type catalogFeedURI struct {
+	URI           string `json:"uri"`
+	BotProtection bool   `json:"bot_protection"`
+	Category      string `json:"category,omitempty"`
+}
+
+// catalogCountries maps each supported language code to the ISO 3166-1 Alpha-3
+// country codes included in the catalog fetch.
+var catalogCountries = map[string][]string{
+	"DE": {"DEU", "AUT", "CHE"},
+	"EN": {"GBR", "USA", "AUS", "CAN", "IRL", "NZL"},
+	"ES": {"ESP", "MEX", "ARG", "COL", "CHL", "PER", "VEN"},
+	"FR": {"FRA", "BEL", "CHE"},
+	"NL": {"NLD", "BEL"},
+}
+
+// AdminCatalogHandler is GET /v1/admin/feeds/catalog.
+// Fetches the public news-feed catalog from GitHub (cached 24 h in Valkey),
+// filters to countries matching ModuLab's supported languages (DE/EN/ES/FR/NL),
+// skips bot-protected feeds, and returns a deduplicated []OPMLEntry with
+// AlreadyExists populated from the current DB feed list. Reachable is left
+// false — the frontend runs the same reachability check as for OPML imports.
+func AdminCatalogHandler(d auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := auth.RequireAdminSession(d, w, r); !ok {
+			return
+		}
+
+		// 1. Fetch raw catalog JSON — try Valkey cache first.
+		var rawJSON string
+		cached, hit, err := d.Valkey.Get(r.Context(), catalogCacheKey)
+		if err == nil && hit {
+			rawJSON = cached
+		} else {
+			req, reqErr := http.NewRequestWithContext(r.Context(), http.MethodGet, catalogURL, nil)
+			if reqErr != nil {
+				http.Error(w, "failed to build catalog request: "+reqErr.Error(), http.StatusInternalServerError)
+				return
+			}
+			req.Header.Set("User-Agent", httpUserAgent)
+			client := &http.Client{Timeout: 30 * time.Second}
+			resp, fetchErr := client.Do(req)
+			if fetchErr != nil {
+				http.Error(w, "failed to fetch catalog: "+fetchErr.Error(), http.StatusBadGateway)
+				return
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				http.Error(w, fmt.Sprintf("catalog returned HTTP %d", resp.StatusCode), http.StatusBadGateway)
+				return
+			}
+			body, readErr := io.ReadAll(io.LimitReader(resp.Body, 10<<20)) // 10 MB cap
+			if readErr != nil {
+				http.Error(w, "failed to read catalog: "+readErr.Error(), http.StatusInternalServerError)
+				return
+			}
+			rawJSON = string(body)
+			// Store in cache; ignore cache write errors.
+			if cacheErr := d.Valkey.SetWithTTL(r.Context(), catalogCacheKey, rawJSON, catalogCacheTTL); cacheErr != nil {
+				log.Printf("news: catalog cache write failed: %v", cacheErr)
+			}
+		}
+
+		// 2. Parse the catalog.
+		var catalog map[string][]catalogPublication
+		if err := json.Unmarshal([]byte(rawJSON), &catalog); err != nil {
+			http.Error(w, "failed to parse catalog: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// 3. Build set of target country codes.
+		targetCountries := make(map[string]bool)
+		for _, codes := range catalogCountries {
+			for _, c := range codes {
+				targetCountries[c] = true
+			}
+		}
+
+		// 4. Load current DB feeds for AlreadyExists check.
+		existingFeeds, dbErr := d.Pool.ListFeeds(r.Context())
+		if dbErr != nil {
+			http.Error(w, dbErr.Error(), http.StatusInternalServerError)
+			return
+		}
+		existingURLs := make(map[string]bool, len(existingFeeds))
+		for _, f := range existingFeeds {
+			existingURLs[strings.ToLower(f.URL)] = true
+		}
+
+		// 5. Collect entries, deduplicating by URL.
+		seen := make(map[string]bool)
+		var entries []OPMLEntry
+		for countryCode, pubs := range catalog {
+			if !targetCountries[countryCode] {
+				continue
+			}
+			for _, pub := range pubs {
+				for _, feed := range pub.Feeds {
+					if feed.BotProtection {
+						continue
+					}
+					feedURL := strings.TrimSpace(feed.URI)
+					if !isHTTPURL(feedURL) {
+						continue
+					}
+					lower := strings.ToLower(feedURL)
+					if seen[lower] {
+						continue
+					}
+					seen[lower] = true
+
+					label := pub.Name
+					if feed.Category != "" {
+						label = pub.Name + " – " + feed.Category
+					}
+
+					entries = append(entries, OPMLEntry{
+						URL:           feedURL,
+						Label:         label,
+						AlreadyExists: existingURLs[lower],
+					})
+				}
+			}
+		}
+
+		writeJSON(w, http.StatusOK, entries)
+	}
+}

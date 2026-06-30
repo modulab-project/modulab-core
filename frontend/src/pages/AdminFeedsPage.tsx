@@ -16,6 +16,7 @@ import {
   adminCheckFeed,
   adminParseOPML,
   adminImportFeeds,
+  adminFetchCatalog,
   adminGetNewsSettings,
   adminUpdateNewsSettings,
   type Feed,
@@ -53,6 +54,11 @@ export default function AdminFeedsPage() {
   const [opmlEntries, setOpmlEntries] = useState<OPMLEntry[] | null>(null); // non-null = modal open
   const [importResults, setImportResults] = useState<FeedImportResult[] | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+
+  // Catalog state
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [catalogEntries, setCatalogEntries] = useState<OPMLEntry[] | null>(null); // non-null = modal open
 
   useEffect(() => {
     if (!session) return;
@@ -155,6 +161,41 @@ export default function AdminFeedsPage() {
       const results = await adminImportFeeds(token, selected);
       setImportResults(results);
       // Reload feed list to show newly imported feeds.
+      load();
+    } catch (err: unknown) {
+      setImportError((err as ApiError).message ?? t("admin.feeds.import_error"));
+    }
+  }
+
+  // Fetch catalog from backend and open selection modal.
+  async function handleCatalogOpen() {
+    const token = getSessionToken();
+    if (!token) return;
+    setCatalogLoading(true);
+    setCatalogError(null);
+    setCatalogEntries(null);
+    setImportResults(null);
+    setImportError(null);
+    try {
+      const entries = await adminFetchCatalog(token);
+      setCatalogEntries(entries);
+    } catch (err: unknown) {
+      setCatalogError((err as ApiError).message ?? t("admin.feeds.catalog_error"));
+    } finally {
+      setCatalogLoading(false);
+    }
+  }
+
+  // Import selected catalog feeds (same flow as OPML import).
+  async function handleCatalogImportSelected(selected: OPMLEntry[]) {
+    const token = getSessionToken();
+    if (!token) return;
+    setCatalogEntries(null);
+    setImportResults(null);
+    setImportError(null);
+    try {
+      const results = await adminImportFeeds(token, selected);
+      setImportResults(results);
       load();
     } catch (err: unknown) {
       setImportError((err as ApiError).message ?? t("admin.feeds.import_error"));
@@ -272,7 +313,17 @@ export default function AdminFeedsPage() {
               {t("admin.feeds.subtitle")}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Catalog import */}
+            <button
+              type="button"
+              disabled={catalogLoading}
+              onClick={handleCatalogOpen}
+              className={`flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800 disabled:opacity-50 disabled:pointer-events-none`}
+            >
+              <i className="ti ti-book text-[14px]" />
+              {catalogLoading ? t("admin.feeds.catalog_loading") : t("admin.feeds.catalog_open")}
+            </button>
             {/* OPML import — hidden file input triggered by label */}
             <label className={`flex cursor-pointer items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800 ${parsing ? "opacity-50 pointer-events-none" : ""}`}>
               <i className="ti ti-upload text-[14px]" />
@@ -299,6 +350,13 @@ export default function AdminFeedsPage() {
         {parseError && (
           <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-400">
             {parseError}
+          </div>
+        )}
+
+        {/* Catalog error */}
+        {catalogError && (
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-400">
+            {catalogError}
           </div>
         )}
 
@@ -407,6 +465,16 @@ export default function AdminFeedsPage() {
           onImport={handleImportSelected}
         />
       )}
+
+      {catalogEntries && (
+        <OPMLSelectionModal
+          entries={catalogEntries}
+          titleKey="admin.feeds.catalog_modal.title"
+          subtitleKey="admin.feeds.catalog_modal.subtitle"
+          onClose={() => setCatalogEntries(null)}
+          onImport={handleCatalogImportSelected}
+        />
+      )}
     </AppShell>
   );
 }
@@ -417,10 +485,14 @@ function OPMLSelectionModal({
   entries,
   onClose,
   onImport,
+  titleKey = "admin.feeds.opml_modal.title",
+  subtitleKey = "admin.feeds.opml_modal.subtitle",
 }: {
   entries: OPMLEntry[];
   onClose: () => void;
   onImport: (selected: OPMLEntry[]) => void;
+  titleKey?: string;
+  subtitleKey?: string;
 }) {
   const { t } = useTranslation();
   // Pre-select entries that are new AND reachable.
@@ -476,9 +548,9 @@ function OPMLSelectionModal({
         style={{ maxHeight: "80vh" }}>
         {/* Header */}
         <div className="px-6 pt-5 pb-3 shrink-0">
-          <h2 className="text-base font-semibold">{t("admin.feeds.opml_modal.title")}</h2>
+          <h2 className="text-base font-semibold">{t(titleKey)}</h2>
           <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
-            {t("admin.feeds.opml_modal.subtitle")}
+            {t(subtitleKey)}
           </p>
           <div className="mt-3 flex items-center justify-between">
             <span className="text-xs text-gray-500 dark:text-gray-400">
