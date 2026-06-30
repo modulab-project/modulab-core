@@ -61,11 +61,20 @@ func (p *WorkerPool) Start(name, entrypoint string) error {
 	_ = os.Remove(sockPath)
 
 	// Build a module-scoped DB URL with search_path set to the module's schema
-	// first, then public. This means unqualified table names like "recipes"
-	// resolve to "module_recipes.recipes" without the handler needing to
+	// first, then public. This means unqualified table names like "settings"
+	// resolve to "module_vacation_spots.settings" without the handler needing to
 	// schema-qualify every query.
-	moduleSchema := "module_" + name
-	dbURL := p.dbURL + "?search_path=" + moduleSchema + ",public"
+	//
+	// IMPORTANT: use the same identifier transformation as moduleIdentifiers()
+	// in migrations.go (hyphens → underscores) so the schema name matches what
+	// was actually created during installation.
+	// Also use & instead of ? when the base URL already carries query parameters.
+	moduleSchema := "module_" + strings.ReplaceAll(strings.ToLower(name), "-", "_")
+	sep := "?"
+	if strings.Contains(p.dbURL, "?") {
+		sep = "&"
+	}
+	dbURL := p.dbURL + sep + "search_path=" + moduleSchema + ",public"
 
 	w := &denoWorker{
 		name:       name,
