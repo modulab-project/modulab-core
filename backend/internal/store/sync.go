@@ -65,7 +65,11 @@ func runSync(ctx context.Context, d Deps) {
 
 // syncBoth fetches and persists entries from both sources. Each source is
 // independent: a failure on one does not prevent the other from being updated.
+// After upserting, stale entries that no longer appear in either registry are
+// pruned from the DB so deleted modules don't linger in the store UI.
 func syncBoth(ctx context.Context, d Deps) (offErr, comErr error) {
+	seen := make(map[string]bool)
+
 	// ── Official ────────────────────────────────────────────────────────────
 	official, err := FetchOfficialRegistry(ctx)
 	if err != nil {
@@ -74,6 +78,8 @@ func syncBoth(ctx context.Context, d Deps) (offErr, comErr error) {
 		for _, e := range official {
 			if err := UpsertEntry(ctx, d.Pool, e); err != nil {
 				log.Printf("store: sync: upsert official %q: %v", e.Name, err)
+			} else {
+				seen[e.Name] = true
 			}
 		}
 	}
@@ -96,9 +102,68 @@ func syncBoth(ctx context.Context, d Deps) (offErr, comErr error) {
 			}
 			if err := UpsertEntry(ctx, d.Pool, e); err != nil {
 				log.Printf("store: sync: upsert community %q: %v", e.Name, err)
+			} else {
+				seen[e.Name] = true
 			}
 		}
 	}
 
+	// ── Prune stale entries ─────────────────────────────────────────────────
+	// Only prune when at least one source succeeded — if both failed we have
+	// no reliable "current" list and must not wipe the cache.
+	if offErr == nil || comErr == nil {
+		if err := pruneStaleEntries(ctx, d, seen); err != nil {
+			log.Printf("store: sync: prune stale entries: %v", err)
+		}
+	}
+
 	return offErr, comErr
+}
+
+// pruneStaleEntries deletes registry rows whose names are not in the seen set.
+// Modules that are currently installed are never deleted from the registry so
+// their metadata (version, source_repo) remains available for the UI even if
+// the upstream listing was temporarily unavailable.
+func pruneStaleEntries(ctx context.Context, d Deps, seen map[string]bool) error {
+	// Build a list of all registry names.
+	rows, err := d.Pool.Query(ctx, `SELECT name FROM module_registry`)
+	if err != nil {
+		return fmt.Errorf("query names: %w", err)
+	}
+	var stale []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan name: %w", err)
+		}
+		if !seen[name] {
+			stale = append(stale, name)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("rows error: %w", err)
+	}
+
+	for _, name := range stale {
+		// Skip modules that are installed — keep their registry row intact.
+		var installed bool
+		if err := d.Pool.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM installed_modules WHERE name = $1)`, name,
+		).Scan(&installed); err != nil {
+			log.Printf("store: sync: prune check installed %q: %v", name, err)
+			continue
+		}
+		if installed {
+			log.Printf("store: sync: keeping stale registry entry %q (still installed)", name)
+			continue
+		}
+		if _, err := d.Pool.Exec(ctx, `DELETE FROM module_registry WHERE name = $1`, name); err != nil {
+			log.Printf("store: sync: delete stale entry %q: %v", name, err)
+		} else {
+			log.Printf("store: sync: pruned stale entry %q (no longer in registry)", name)
+		}
+	}
+	return nil
 }
