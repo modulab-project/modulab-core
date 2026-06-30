@@ -735,11 +735,11 @@ func (p *Pool) SetNewsPrefs(ctx context.Context, userID string, prefs NewsPrefs)
 	return err
 }
 
-// ListFeeds returns every feed row, oldest first. Used by the admin CRUD and
-// by the news aggregator to look up feed URLs.
+// ListFeeds returns every feed row, sorted alphabetically by label. Used by
+// the admin CRUD and by the news aggregator to look up feed URLs.
 func (p *Pool) ListFeeds(ctx context.Context) ([]FeedRow, error) {
 	rows, err := p.Query(ctx, `
-		SELECT id, url, label, created_at FROM news_feeds ORDER BY created_at ASC
+		SELECT id, url, label, created_at FROM news_feeds ORDER BY lower(label) ASC
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("db: list feeds: %w", err)
@@ -804,7 +804,7 @@ func (p *Pool) ListFeedsForUser(ctx context.Context, userID string) ([]FeedWithS
 		FROM   news_feeds f
 		LEFT   JOIN user_feed_subscriptions s
 		       ON s.feed_id = f.id AND s.user_id = $1
-		ORDER  BY f.created_at ASC
+		ORDER  BY lower(f.label) ASC
 	`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("db: list feeds for user: %w", err)
