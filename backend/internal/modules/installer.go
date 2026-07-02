@@ -53,6 +53,12 @@ type Manifest struct {
 	// each job's Handler path is resolved relative to the module's installed
 	// directory, same as the top-level Handler field.
 	Jobs []ManifestJob `yaml:"jobs" json:"jobs,omitempty"`
+	// TLSSkipVerify, when true, scopes the worker's
+	// --unsafely-ignore-certificate-errors to exactly its EgressHosts — see
+	// WorkerOptions.SkipTLSVerify in deno.go. Only for modules whose runtime
+	// destinations are private IPs with no CA-issued cert (unifi-network).
+	// Defaults to false; must be explicitly opted into per module.
+	TLSSkipVerify bool `yaml:"tls_skip_verify" json:"tls_skip_verify,omitempty"`
 }
 
 // ManifestJob describes one scheduled job entry under a module's jobs: list.
@@ -251,7 +257,11 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 	// shipped — this is the only source of --allow-net hosts for the
 	// worker. See WorkerOptions in deno.go for why there is no wildcard.
 	if mf.Tier >= 2 {
-		opts := WorkerOptions{EgressHosts: mf.EgressAllowlist, Jobs: ResolveJobEntrypoints(destDir, mf.Jobs)}
+		opts := WorkerOptions{
+			EgressHosts:   mf.EgressAllowlist,
+			Jobs:          ResolveJobEntrypoints(destDir, mf.Jobs),
+			SkipTLSVerify: mf.TLSSkipVerify,
+		}
 		if err := d.Workers.Start(mf.Name, filepath.Join(destDir, mf.Handler), opts); err != nil {
 			_, _ = d.DB.UpdateModuleStatus(ctx, entry.Name, db.ModuleStatusFailed)
 			return fmt.Errorf("modules: install %q: start deno worker: %w", entry.Name, err)

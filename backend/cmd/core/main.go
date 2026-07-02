@@ -518,6 +518,7 @@ func main() {
 					Handler         string                `json:"handler"`
 					EgressAllowlist []string              `json:"egress_allowlist"`
 					Jobs            []modules.ManifestJob `json:"jobs"`
+					TLSSkipVerify   bool                  `json:"tls_skip_verify"`
 				}
 				if row.Manifest != nil {
 					if json.Unmarshal(row.Manifest, &mf) == nil {
@@ -526,8 +527,9 @@ func main() {
 				}
 				if entrypoint != "" {
 					opts := modules.WorkerOptions{
-						EgressHosts: mf.EgressAllowlist,
-						Jobs:        modules.ResolveJobEntrypoints(destDir, mf.Jobs),
+						EgressHosts:   mf.EgressAllowlist,
+						Jobs:          modules.ResolveJobEntrypoints(destDir, mf.Jobs),
+						SkipTLSVerify: mf.TLSSkipVerify,
 					}
 					if err := workerPool.Start(row.Name, entrypoint, opts); err != nil {
 						log.Printf("main: startup: could not start worker for %q: %v", row.Name, err)

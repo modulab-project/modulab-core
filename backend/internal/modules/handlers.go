@@ -197,6 +197,7 @@ func UpdateModuleHandler(d Deps, storeDeps store.Deps, authDeps auth.Deps) http.
 				Handler         string        `json:"handler"`
 				EgressAllowlist []string      `json:"egress_allowlist"`
 				Jobs            []ManifestJob `json:"jobs"`
+				TLSSkipVerify   bool          `json:"tls_skip_verify"`
 			}
 			if row.Manifest != nil {
 				_ = json.Unmarshal(row.Manifest, &mf)
@@ -204,7 +205,11 @@ func UpdateModuleHandler(d Deps, storeDeps store.Deps, authDeps auth.Deps) http.
 			if mf.Handler != "" {
 				destDir := filepath.Join(d.DataDir, name)
 				entrypoint := filepath.Join(destDir, mf.Handler)
-				opts := WorkerOptions{EgressHosts: mf.EgressAllowlist, Jobs: ResolveJobEntrypoints(destDir, mf.Jobs)}
+				opts := WorkerOptions{
+					EgressHosts:   mf.EgressAllowlist,
+					Jobs:          ResolveJobEntrypoints(destDir, mf.Jobs),
+					SkipTLSVerify: mf.TLSSkipVerify,
+				}
 				if err := d.Workers.Start(name, entrypoint, opts); err != nil {
 					log.Printf("modules: update %q: restart worker: %v", name, err)
 				}

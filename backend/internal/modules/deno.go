@@ -42,6 +42,23 @@ type WorkerPool struct {
 	// module that had an empty egress_allowlist (2026-07-02).
 	dbHost string
 
+	// dnsResolver is the host:port every worker's --allow-net also always
+	// includes, on top of dbHost and the manifest/runtime egress hosts.
+	// Deno's --allow-net is a TCP-connect allowlist, but resolving *any*
+	// hostname (including ones already on the allowlist, like a gateway's
+	// FQDN) requires Deno's internal DNS client to reach a resolver over the
+	// network first — that lookup is a separate connection the sandbox does
+	// not implicitly grant just because the final destination is allowed.
+	// In this Docker deployment the resolver is the embedded Docker DNS at
+	// 127.0.0.11:53. Without this, Deno.resolveDns() (and any implicit
+	// hostname lookup npm:postgres or fetch() performs) fails with
+	// NotCapable, which unifi-network's isPrivateHost() then treats as "DNS
+	// resolution failed" and fails closed (PrivateHostViolationError) even
+	// though the destination itself was correctly allowlisted — hit on the
+	// first deploy where all three egress hosts were already in --allow-net
+	// (2026-07-02).
+	dnsResolver string
+
 	mu      sync.RWMutex
 	workers map[string]*denoWorker
 }
@@ -57,10 +74,11 @@ func NewWorkerPool(dataDir, dbURL string) *WorkerPool {
 		log.Printf("modules: NewWorkerPool: could not parse dbURL to extract host for worker --allow-net grants: %v", err)
 	}
 	return &WorkerPool{
-		dataDir: dataDir,
-		dbURL:   dbURL,
-		dbHost:  dbHost,
-		workers: make(map[string]*denoWorker),
+		dataDir:     dataDir,
+		dbURL:       dbURL,
+		dbHost:      dbHost,
+		dnsResolver: "127.0.0.11:53", // Docker's embedded DNS resolver — see field doc comment
+		workers:     make(map[string]*denoWorker),
 	}
 }
 
@@ -83,6 +101,15 @@ type WorkerOptions struct {
 	// startup alongside the HTTP handler; JobRunner (jobs.go) dispatches to
 	// these by name on its own schedule, independent of HTTP traffic.
 	Jobs map[string]string
+	// SkipTLSVerify, when true, scopes
+	// --unsafely-ignore-certificate-errors to exactly this worker's
+	// EgressHosts. For modules whose runtime destinations are private IPs
+	// with no CA-issued certificate (unifi-network's gateways — see
+	// unifi-client.ts). Manifest-declared per module (manifest.yaml's
+	// tls_skip_verify: true), NOT a global default: most modules talk to
+	// public APIs (e.g. recipes' openfoodfacts.org) where cert validation
+	// must stay on.
+	SkipTLSVerify bool
 }
 
 // Start spawns a Deno worker for the given module. entrypoint is the absolute
@@ -147,6 +174,7 @@ func (p *WorkerPool) startLocked(name, entrypoint string, opts WorkerOptions) er
 		// directory, not the rest of the host.
 		moduleRoot:     filepath.Dir(sockPath),
 		egressHosts:    egressHosts,
+		skipTLSVerify:  opts.SkipTLSVerify,
 		jobEntrypoints: jobs,
 	}
 	if err := w.start(); err != nil {
@@ -173,6 +201,7 @@ func (p *WorkerPool) effectiveEgressHosts(manifestHosts []string) []string {
 		}
 	}
 	add(p.dbHost)
+	add(p.dnsResolver)
 	for _, h := range manifestHosts {
 		add(h)
 	}
@@ -193,7 +222,13 @@ func (p *WorkerPool) ReloadEgress(name string, hosts []string) error {
 		return ErrWorkerNotFound
 	}
 	entrypoint := existing.entrypoint
-	opts := WorkerOptions{EgressHosts: hosts, Jobs: existing.jobEntrypoints}
+	// SkipTLSVerify must be carried over from the existing worker — it is
+	// manifest-derived, not something ReloadEgress's caller (a module
+	// handler reacting to a gateway create/update) passes in. Losing it on
+	// reload would silently re-enable cert validation for the same private
+	// IPs on every gateway save, breaking exactly the case this option
+	// exists for.
+	opts := WorkerOptions{EgressHosts: hosts, Jobs: existing.jobEntrypoints, SkipTLSVerify: existing.skipTLSVerify}
 	if err := p.startLocked(name, entrypoint, opts); err != nil {
 		return fmt.Errorf("reload egress for %q: %w", name, err)
 	}
@@ -314,6 +349,7 @@ type denoWorker struct {
 	// worker's own Unix socket at moduleRoot/worker.sock.
 	moduleRoot     string
 	egressHosts    []string          // hostnames granted via --allow-net; empty = no network
+	skipTLSVerify  bool              // manifest tls_skip_verify: true — see WorkerOptions.SkipTLSVerify
 	jobEntrypoints map[string]string // job name -> absolute .ts path, from manifest.yaml jobs:
 
 	cmd    *exec.Cmd
@@ -527,6 +563,20 @@ func (w *denoWorker) start() error {
 	}
 	if len(w.egressHosts) > 0 {
 		args = append(args, "--allow-net="+strings.Join(w.egressHosts, ","))
+	}
+	// unifi-network's gateways are addressed by private IP (2026-07-02
+	// decision — see unifi-client.ts's unifiFetch comment): a controller
+	// reachable only on a private IP has no public FQDN to hold a CA-issued
+	// certificate against, so its self-signed/private-CA cert can never pass
+	// Deno's default TLS validation. Rather than disabling cert validation
+	// process-wide, scope --unsafely-ignore-certificate-errors to exactly
+	// the same host list as --allow-net: a compromised module handler still
+	// cannot use this to talk to (or spoof) hosts outside its own egress
+	// grant, it can only skip cert-chain validation for hosts it was already
+	// allowed to reach. dbHost/dnsResolver are deliberately included too —
+	// harmless (neither serves TLS), simpler than excluding them.
+	if len(w.egressHosts) > 0 && w.skipTLSVerify {
+		args = append(args, "--unsafely-ignore-certificate-errors="+strings.Join(w.egressHosts, ","))
 	}
 	args = append(args, tmpScript.Name())
 
