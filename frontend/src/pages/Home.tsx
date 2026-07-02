@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "re
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuthenticatedSession } from "../lib/useSession";
+import { safeHref } from "../lib/url";
 import {
   getWeather,
   getNews,
@@ -658,7 +659,7 @@ function WebResultCard({ result }: { result: WebResult }) {
 
   return (
     <a
-      href={result.url}
+      href={safeHref(result.url)}
       target="_blank"
       rel="noopener noreferrer"
       className="group flex flex-col gap-0.5 px-5 py-3.5 first:rounded-t-2xl last:rounded-b-2xl hover:bg-gray-50 dark:hover:bg-gray-900"
@@ -682,7 +683,7 @@ function ImageResultCard({ result }: { result: WebResult }) {
 
   return (
     <a
-      href={result.url}
+      href={safeHref(result.url)}
       target="_blank"
       rel="noopener noreferrer"
       className="group relative block overflow-hidden rounded-xl bg-gray-100 dark:bg-gray-800"
@@ -1119,7 +1120,7 @@ function ArticleCard({
   if (compact) {
     return (
       <a
-        href={article.url}
+        href={safeHref(article.url)}
         target="_blank"
         rel="noopener noreferrer"
         className="group flex items-start gap-3 rounded-xl px-2.5 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-900"
@@ -1154,7 +1155,7 @@ function ArticleCard({
 
   return (
     <a
-      href={article.url}
+      href={safeHref(article.url)}
       target="_blank"
       rel="noopener noreferrer"
       className="group flex flex-col overflow-hidden rounded-xl border border-gray-100 bg-white transition-shadow hover:shadow-md dark:border-gray-800 dark:bg-gray-900"

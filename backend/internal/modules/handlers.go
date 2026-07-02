@@ -194,14 +194,18 @@ func UpdateModuleHandler(d Deps, storeDeps store.Deps, authDeps auth.Deps) http.
 		row, _, _ := d.DB.GetInstalledModule(r.Context(), name)
 		if row.Tier >= 2 {
 			var mf struct {
-				Handler string `json:"handler"`
+				Handler         string        `json:"handler"`
+				EgressAllowlist []string      `json:"egress_allowlist"`
+				Jobs            []ManifestJob `json:"jobs"`
 			}
 			if row.Manifest != nil {
 				_ = json.Unmarshal(row.Manifest, &mf)
 			}
 			if mf.Handler != "" {
-				entrypoint := filepath.Join(d.DataDir, name, mf.Handler)
-				if err := d.Workers.Start(name, entrypoint); err != nil {
+				destDir := filepath.Join(d.DataDir, name)
+				entrypoint := filepath.Join(destDir, mf.Handler)
+				opts := WorkerOptions{EgressHosts: mf.EgressAllowlist, Jobs: ResolveJobEntrypoints(destDir, mf.Jobs)}
+				if err := d.Workers.Start(name, entrypoint, opts); err != nil {
 					log.Printf("modules: update %q: restart worker: %v", name, err)
 				}
 			}

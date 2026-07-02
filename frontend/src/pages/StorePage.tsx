@@ -15,6 +15,7 @@ import {
 import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell, isAdminRole } from "../components/AppShell";
+import { safeHref } from "../lib/url";
 
 type SourceFilter = "all" | "official" | "community";
 
@@ -211,7 +212,7 @@ export default function StorePage() {
                 {/* Bottom row */}
                 <div className="mt-auto flex items-center justify-between gap-2">
                   <a
-                    href={entry.source_repo}
+                    href={safeHref(entry.source_repo)}
                     target="_blank"
                     rel="noreferrer"
                     className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"

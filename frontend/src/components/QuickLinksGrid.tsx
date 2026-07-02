@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { Tile } from "../lib/quicklinks";
 import { createUserQuickLink, deleteUserQuickLink, saveOrder } from "../lib/quicklinks";
 import { listInstalledModules, type InstalledModule } from "../lib/api";
+import { safeHref } from "../lib/url";
 
 // ---- Drag-and-drop ----------------------------------------------------------
 //
@@ -345,7 +346,7 @@ function TileCard({
 
       {/* Icon — internal module paths open in same tab, external URLs in new tab */}
       <a
-        href={tile.url}
+        href={safeHref(tile.url)}
         target={tile.url.startsWith("/") ? "_self" : "_blank"}
         rel={tile.url.startsWith("/") ? undefined : "noopener noreferrer"}
         draggable={false}

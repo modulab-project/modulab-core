@@ -119,6 +119,22 @@ func ModuleProxyHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(resp.Status)
 		_, _ = w.Write(resp.Body)
+
+		// ── Runtime egress reload (unifi-network and similar) ───────────────
+		// A handler that just wrote a new runtime destination to its own
+		// schema (e.g. createGateway/updateGateway) can ask Core to restart
+		// its worker with an updated --allow-net host list by setting
+		// restartHosts on its response. This runs after the response has
+		// already been written to the client so the reload latency (a few
+		// hundred ms for the Deno process to respawn) is not on the request
+		// path; the very next module request will hit the new worker.
+		if resp.RestartHosts != nil {
+			go func(name string, hosts []string) {
+				if err := d.Workers.ReloadEgress(name, hosts); err != nil {
+					log.Printf("modules: %q: egress reload failed: %v", name, err)
+				}
+			}(moduleName, resp.RestartHosts)
+		}
 	}
 }
 
@@ -235,7 +251,11 @@ func ModuleLocaleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 // import() not being able to send Authorization headers.
 func ModuleBundleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := auth.RequireActiveSession(authDeps, w, r); !ok {
+		// Loaded via fetch() with a Bearer header per the doc comment above,
+		// but also reachable as a <script src> in some module-loading paths —
+		// query-token fallback kept narrowly scoped to this handler and
+		// ModuleStorageHandler. See auth.BearerTokenAllowQuery.
+		if _, ok := auth.RequireActiveSessionAllowQueryToken(authDeps, w, r); !ok {
 			return
 		}
 		moduleName := r.PathValue("name")
@@ -269,7 +289,10 @@ func ModuleBundleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 // served; path traversal attempts are rejected by filepath.Clean.
 func ModuleStorageHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := auth.RequireActiveSession(authDeps, w, r); !ok {
+		// <img src="...">-loaded files cannot carry an Authorization header,
+		// so this is the one place a ?t= query token is accepted — see
+		// auth.BearerTokenAllowQuery for why this must stay narrowly scoped.
+		if _, ok := auth.RequireActiveSessionAllowQueryToken(authDeps, w, r); !ok {
 			return
 		}
 		moduleName := r.PathValue("name")

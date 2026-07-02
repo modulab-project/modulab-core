@@ -43,15 +43,45 @@ func NewWorkerPool(dataDir, dbURL string) *WorkerPool {
 	}
 }
 
+// WorkerOptions carries the module-scoped permission grant for a Deno worker.
+// It is derived from the module's manifest.yaml (EgressAllowlist) and passed
+// to Start so each worker gets exactly the access its manifest declares —
+// never more. There is deliberately no "allow everything" sentinel here:
+// modules that need a runtime-determined destination (e.g. unifi-network,
+// whose gateway URLs are entered by the admin after install) must instead
+// call ReloadEgress with the concrete hosts once they are known, and the
+// worker is restarted with a scoped --allow-net for exactly those hosts.
+// See ReloadEgress and WorkerResponse.RestartHosts.
+type WorkerOptions struct {
+	// EgressHosts lists the hostnames (no scheme/port) the worker's
+	// --allow-net flag is scoped to. Empty = no outbound network access at
+	// all for this worker.
+	EgressHosts []string
+	// Jobs maps job name (from manifest.yaml's jobs: list) to the absolute
+	// filesystem path of that job's .ts entrypoint. Loaded once at worker
+	// startup alongside the HTTP handler; JobRunner (jobs.go) dispatches to
+	// these by name on its own schedule, independent of HTTP traffic.
+	Jobs map[string]string
+}
+
 // Start spawns a Deno worker for the given module. entrypoint is the absolute
 // path to the module's handler file (e.g. /var/lib/modulab/modules/rezepte/handlers/index.ts).
 // The worker socket is placed at {dataDir}/{name}/worker.sock.
 //
+// opts scopes the worker's OS-level permissions (network egress) to what the
+// module's manifest actually declares. Callers should always pass the
+// manifest-derived WorkerOptions; only ReloadEgress (unifi-network's runtime
+// host discovery) overrides EgressHosts after the fact.
+//
 // If a worker for this module is already running, it is stopped first.
-func (p *WorkerPool) Start(name, entrypoint string) error {
+func (p *WorkerPool) Start(name, entrypoint string, opts WorkerOptions) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	return p.startLocked(name, entrypoint, opts)
+}
 
+// startLocked does the actual spawn. Caller must hold p.mu.
+func (p *WorkerPool) startLocked(name, entrypoint string, opts WorkerOptions) error {
 	if existing, ok := p.workers[name]; ok {
 		existing.stop()
 		delete(p.workers, name)
@@ -77,18 +107,48 @@ func (p *WorkerPool) Start(name, entrypoint string) error {
 	}
 	dbURL := p.dbURL + sep + "search_path=" + moduleSchema + ",public"
 
+	jobs := opts.Jobs
+	if jobs == nil {
+		jobs = map[string]string{}
+	}
 	w := &denoWorker{
-		name:       name,
-		entrypoint: entrypoint,
-		sockPath:   sockPath,
-		dbURL:      dbURL,
+		name:           name,
+		entrypoint:     entrypoint,
+		sockPath:       sockPath,
+		dbURL:          dbURL,
+		entryDir:       filepath.Dir(entrypoint),
+		egressHosts:    append([]string(nil), opts.EgressHosts...),
+		jobEntrypoints: jobs,
 	}
 	if err := w.start(); err != nil {
 		return fmt.Errorf("worker %q: start: %w", name, err)
 	}
 
 	p.workers[name] = w
-	log.Printf("modules: deno worker %q started (pid %d, socket %s)", name, w.cmd.Process.Pid, sockPath)
+	log.Printf("modules: deno worker %q started (pid %d, socket %s, egress=%v)",
+		name, w.cmd.Process.Pid, sockPath, opts.EgressHosts)
+	return nil
+}
+
+// ReloadEgress restarts the worker for name with an updated egress host list,
+// keeping the same entrypoint. Used by modules whose outbound targets are
+// only known at runtime (e.g. unifi-network gateway base URLs entered by an
+// admin after install) — see WorkerResponse.RestartHosts. No-op if the
+// worker is not currently running.
+func (p *WorkerPool) ReloadEgress(name string, hosts []string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	existing, ok := p.workers[name]
+	if !ok {
+		return ErrWorkerNotFound
+	}
+	entrypoint := existing.entrypoint
+	opts := WorkerOptions{EgressHosts: hosts, Jobs: existing.jobEntrypoints}
+	if err := p.startLocked(name, entrypoint, opts); err != nil {
+		return fmt.Errorf("reload egress for %q: %w", name, err)
+	}
+	log.Printf("modules: deno worker %q reloaded with egress=%v", name, hosts)
 	return nil
 }
 
@@ -149,12 +209,24 @@ var ErrWorkerNotFound = errors.New("modules: no running worker for this module")
 
 // WorkerRequest is the JSON object sent to the Deno worker on each request.
 // It mirrors the HandlerRequest interface in the module SDK.
+//
+// Two shapes travel over the same socket protocol:
+//   - HTTP requests: Method/Path/Body/Auth set, Job empty. Dispatched to the
+//     module's default HTTP handler (unchanged from before).
+//   - Job invocations: Job set to the job name from manifest.yaml (e.g.
+//     "poll_gateways"), everything else empty. Dispatched to
+//     jobs/{handler-path-from-manifest}.ts's default export, called with a
+//     JobContext ({ db }) instead of a HandlerRequest. See JobRunner in
+//     jobs.go for the Go-side scheduler that sends these.
 type WorkerRequest struct {
-	Method      string          `json:"method"`
-	Path        string          `json:"path"`
-	Body        json.RawMessage `json:"body,omitempty"`
-	Auth        WorkerAuth      `json:"auth"`
+	Method      string            `json:"method,omitempty"`
+	Path        string            `json:"path,omitempty"`
+	Body        json.RawMessage   `json:"body,omitempty"`
+	Auth        WorkerAuth        `json:"auth"`
 	Credentials map[string]string `json:"credentials,omitempty"`
+	// Job, when set, identifies this as a scheduled-job invocation rather
+	// than an HTTP request. Value is the job's manifest name.
+	Job string `json:"job,omitempty"`
 }
 
 // WorkerAuth carries the already-verified session context to the handler.
@@ -170,16 +242,27 @@ type WorkerAuth struct {
 type WorkerResponse struct {
 	Status int             `json:"status"`
 	Body   json.RawMessage `json:"body"`
+	// RestartHosts, when non-nil, asks Core to restart this worker with the
+	// given egress host list. Set by module handlers (via the SDK's
+	// requestEgressReload() helper) after writing a new runtime destination
+	// to the database — e.g. unifi-network's createGateway/updateGateway
+	// call this so the freshly-added gateway host is actually reachable
+	// on the next request. An empty (non-nil) slice restart the worker
+	// with no network access at all.
+	RestartHosts []string `json:"restartHosts,omitempty"`
 }
 
 // ── denoWorker (internal) ─────────────────────────────────────────────────────
 
 // denoWorker manages a single Deno subprocess.
 type denoWorker struct {
-	name       string
-	entrypoint string
-	sockPath   string
-	dbURL      string
+	name           string
+	entrypoint     string
+	sockPath       string
+	dbURL          string
+	entryDir       string            // directory containing entrypoint; worker's --allow-read scope
+	egressHosts    []string          // hostnames granted via --allow-net; empty = no network
+	jobEntrypoints map[string]string // job name -> absolute .ts path, from manifest.yaml jobs:
 
 	cmd    *exec.Cmd
 	cancel context.CancelFunc
@@ -208,12 +291,38 @@ const dec = new TextDecoder();
 const sql = postgres(Deno.env.get("MODULAB_DB_URL") ?? "");
 
 // ModuleDbClient adapter that wraps the postgres.js client.
+//
+// Note on sql.unsafe(): despite the name, sql.unsafe(sqlStr, params) still
+// sends params as real bind parameters over the wire protocol — it does not
+// concatenate them into the query string. "Unsafe" refers to sqlStr itself
+// being a plain string instead of a tagged template, which is required here
+// because module handlers build sqlStr dynamically (e.g. optional WHERE
+// clauses). The actual injection risk would only appear if a handler
+// concatenated user input directly into sqlStr — module code was audited
+// and does not do this (params are always passed via the array). Passing
+// { prepare: true } additionally opts back into prepared statements, which
+// sql.unsafe disables by default.
 const db = {
   async query(sqlStr: string, params: unknown[] = []): Promise<unknown[]> {
-    const rows = await sql.unsafe(sqlStr, params as never[]);
+    const rows = await sql.unsafe(sqlStr, params as never[], { prepare: true });
     return rows as unknown[];
   },
 };
+
+// Job handlers this module declares in manifest.yaml's jobs: list, keyed by
+// job name. Populated by Go (see denoWorker.start) as a JSON object literal
+// mapping job name -> absolute path to the job's .ts entrypoint. Empty ({})
+// for modules with no jobs. Loaded once at worker startup, same as the HTTP
+// handler — job code runs under the exact same --allow-* grant as the HTTP
+// handler, since it is the same Deno process (no separate --allow-net scope
+// per job; a job that needs network access relies on the same egress hosts
+// the HTTP handler was granted).
+const jobEntrypoints: Record<string, string> = %s;
+const jobHandlers: Record<string, (ctx: { db: typeof db }) => Promise<void>> = {};
+for (const [jobName, path] of Object.entries(jobEntrypoints)) {
+  const mod = await import(path);
+  jobHandlers[jobName] = mod.default;
+}
 
 // Remove stale socket file from a previous (crashed) worker before binding.
 try { Deno.removeSync("%s"); } catch { /* doesn't exist, that's fine */ }
@@ -252,7 +361,20 @@ async function handleConn(conn: Deno.Conn) {
         let resp: { status: number; body: unknown };
         try {
           const req = JSON.parse(line);
-          resp = await handler({ ...req, db });
+          if (req.job) {
+            // Job invocation (see JobRunner in Go's jobs.go): no HTTP
+            // envelope, just { db } as the JobContext. Job handlers return
+            // void — success is "didn't throw" and we report a fixed 200.
+            const jobFn = jobHandlers[req.job];
+            if (!jobFn) {
+              resp = { status: 404, body: { error: "unknown job: " + req.job } };
+            } else {
+              await jobFn({ db });
+              resp = { status: 200, body: { ok: true } };
+            }
+          } else {
+            resp = await handler({ ...req, db });
+          }
         } catch (e) {
           resp = { status: 500, body: { error: String(e) } };
         }
@@ -271,7 +393,13 @@ func (w *denoWorker) start() error {
 	w.cancel = cancel
 
 	// Write the bootstrap script to a temp file so we can pass it to deno run.
-	bootstrap := fmt.Sprintf(workerBootstrapScript, w.entrypoint, w.sockPath, w.sockPath, w.sockPath)
+	jobEntrypointsJSON, err := json.Marshal(w.jobEntrypoints)
+	if err != nil {
+		cancel()
+		return fmt.Errorf("marshal job entrypoints: %w", err)
+	}
+	bootstrap := fmt.Sprintf(workerBootstrapScript,
+		w.entrypoint, string(jobEntrypointsJSON), w.sockPath, w.sockPath, w.sockPath)
 	tmpScript, err := os.CreateTemp("", "modulab-worker-"+w.name+"-*.ts")
 	if err != nil {
 		cancel()
@@ -283,15 +411,53 @@ func (w *denoWorker) start() error {
 	}
 	tmpScript.Close()
 
+	// Permission scoping (replaces the previous --allow-all):
+	//   --allow-read  limited to the module's own handler directory, so a
+	//                 handler cannot read arbitrary files on the host. No
+	//                 --allow-write is granted at all: none of the current
+	//                 modules (my-place, recipes, unifi-network) touch the
+	//                 filesystem — uploads go through Core's own
+	//                 ModuleStorageHandler (router.go), which writes to disk
+	//                 as Core, not as the Deno worker. If a future module
+	//                 genuinely needs local write access, that should be a
+	//                 deliberate, reviewed manifest field, not a default.
+	//   --allow-net   limited to the hostnames from the module's manifest
+	//                 egress_allowlist (opts.EgressHosts). No entry = no
+	//                 outbound network for this worker at all. There is no
+	//                 wildcard/"allow everything" host — modules whose
+	//                 destination is only known at runtime must call
+	//                 ReloadEgress once the destination is known (see
+	//                 WorkerResponse.RestartHosts).
+	//   --allow-env   limited to the two variables a module could plausibly
+	//                 need: its scoped DB URL and the shared encryption key
+	//                 used for AES-GCM of PII fields. Nothing else from
+	//                 Core's environment (DB root credentials, master key
+	//                 material beyond this, SMTP secrets, etc.) is visible
+	//                 to the subprocess.
 	args := []string{
 		"run",
 		"--no-prompt",
-		"--allow-all", // TODO: tighten permissions once worker is stable
-		tmpScript.Name(),
+		"--allow-read=" + w.entryDir,
+		"--allow-env=MODULAB_DB_URL,MODULAB_ENCRYPTION_KEY",
 	}
+	if len(w.egressHosts) > 0 {
+		args = append(args, "--allow-net="+strings.Join(w.egressHosts, ","))
+	}
+	args = append(args, tmpScript.Name())
 
 	w.cmd = exec.CommandContext(ctx, "deno", args...)
-	w.cmd.Env = append(os.Environ(), "MODULAB_DB_URL="+w.dbURL)
+	// Deliberately not os.Environ(): the worker only receives the handful of
+	// variables it was granted via --allow-env above, plus its own scoped DB
+	// URL. Everything else Core has in its environment (DB root credentials
+	// if different from the module role, SMTP secrets, OIDC client secret,
+	// etc.) stays invisible to module code even if a future --allow-env
+	// grant were widened by mistake, since it was never in w.cmd.Env to
+	// begin with.
+	moduleEnv := []string{"MODULAB_DB_URL=" + w.dbURL}
+	if encKey := os.Getenv("MODULAB_ENCRYPTION_KEY"); encKey != "" {
+		moduleEnv = append(moduleEnv, "MODULAB_ENCRYPTION_KEY="+encKey)
+	}
+	w.cmd.Env = moduleEnv
 	w.cmd.Stdout = &prefixWriter{prefix: "[" + w.name + "] ", w: os.Stdout}
 	w.cmd.Stderr = &prefixWriter{prefix: "[" + w.name + "] ", w: os.Stderr}
 

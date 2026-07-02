@@ -20,6 +20,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/modulab-project/modulab-core/backend/internal/adminapi"
@@ -266,8 +267,15 @@ func main() {
 		PublicBaseURL:   cfg.PublicBaseURL,
 		FrontendBaseURL: cfg.FrontendBaseURL,
 	}
-	mux.HandleFunc("/v1/auth/login", auth.LoginHandler(authDeps))
-	mux.HandleFunc("/v1/auth/callback", auth.CallbackHandler(authDeps))
+	// Rate-limited: unauthenticated endpoints reachable by anyone who can
+	// reach Core at all. login redirects to the IdP (creates an
+	// oauthstate: key in Valkey per call — unbounded calls let someone
+	// flood that keyspace) and callback completes the OIDC exchange (an
+	// upstream-directed request whose volume this instance controls).
+	// authRateLimitMiddleware fails open on a Valkey hiccup rather than
+	// locking everyone out because of a cache blip — see its doc comment.
+	mux.HandleFunc("/v1/auth/login", authRateLimitMiddleware(valkeyClient, "login", auth.LoginHandler(authDeps)))
+	mux.HandleFunc("/v1/auth/callback", authRateLimitMiddleware(valkeyClient, "callback", auth.CallbackHandler(authDeps)))
 	mux.HandleFunc("/v1/auth/me", auth.MeHandler(authDeps))
 	// Method-specific pattern alongside the bare "/v1/auth/me" above - Go's
 	// ServeMux treats the two as non-conflicting (the method-specific one
@@ -505,20 +513,35 @@ func main() {
 		for _, row := range installedAtBoot {
 			if row.Tier >= 2 && row.Status == "active" {
 				entrypoint := ""
+				destDir := cfg.ModuleDataDir + "/" + row.Name
+				var mf struct {
+					Handler         string                `json:"handler"`
+					EgressAllowlist []string              `json:"egress_allowlist"`
+					Jobs            []modules.ManifestJob `json:"jobs"`
+				}
 				if row.Manifest != nil {
-					var mf struct{ Handler string `json:"handler"` }
 					if json.Unmarshal(row.Manifest, &mf) == nil {
-						entrypoint = cfg.ModuleDataDir + "/" + row.Name + "/" + mf.Handler
+						entrypoint = destDir + "/" + mf.Handler
 					}
 				}
 				if entrypoint != "" {
-					if err := workerPool.Start(row.Name, entrypoint); err != nil {
+					opts := modules.WorkerOptions{
+						EgressHosts: mf.EgressAllowlist,
+						Jobs:        modules.ResolveJobEntrypoints(destDir, mf.Jobs),
+					}
+					if err := workerPool.Start(row.Name, entrypoint, opts); err != nil {
 						log.Printf("main: startup: could not start worker for %q: %v", row.Name, err)
 					}
 				}
 			}
 		}
 	}
+
+	// Scheduled job runner (manifest.yaml jobs: list, e.g. unifi-network's
+	// poll_gateways) — see internal/modules/jobs.go. Runs for Core's entire
+	// lifetime, same lifecycle as the mail worker below.
+	jobRunner := modules.NewJobRunner(pool, workerPool)
+	jobRunner.Start(ctx)
 
 	mux.HandleFunc("GET /v1/modules", modules.ListInstalledHandler(moduleDeps, authDeps))
 	mux.HandleFunc("GET /v1/modules/updates", modules.CheckUpdatesHandler(moduleDeps, storeDeps, authDeps))
@@ -629,13 +652,91 @@ func maxBodyMiddleware(pool *db.Pool, next http.Handler) http.Handler {
 // secHeadersMiddleware adds defensive HTTP response headers that do not
 // require per-route knowledge. TLS-related headers (HSTS, etc.) are handled
 // by Traefik at the edge and are intentionally omitted here.
+//
+// Content-Security-Policy note: this is Core's API server, not the
+// frontend's own HTTP server (the SPA is built by Vite and served
+// separately, see frontend/nginx.conf for its CSP). Core's own CSP here
+// matters for the handful of responses Core serves directly that a browser
+// renders/executes rather than just consumes as JSON: module UI bundles
+// (ModuleBundleHandler, GET /v1/modules/{name}/ui/bundle.js) and storage
+// files (ModuleStorageHandler). script-src 'self' covers the bundle
+// endpoint; object-src/frame-ancestors 'none' block the classic embedding
+// vectors. This intentionally does not attempt to allow the frontend's own
+// blob:-URL module loading (ModulePage.tsx's import(blobUrl); see the
+// Frontend security review) — that decision belongs to the frontend's CSP,
+// not Core's, and blob: script execution should be reconsidered as part of
+// the planned iframe-sandboxed module rendering rather than allowlisted
+// here.
 func secHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Content-Security-Policy",
+			"default-src 'none'; "+
+				"script-src 'self'; "+
+				"style-src 'self' 'unsafe-inline'; "+
+				"img-src 'self' data:; "+
+				"connect-src 'self'; "+
+				"object-src 'none'; "+
+				"frame-ancestors 'none'; "+
+				"base-uri 'none'")
 		next.ServeHTTP(w, r)
 	})
+}
+
+// authRateLimitWindow/authRateLimitMax bound how often a single client IP
+// may hit a rate-limited auth endpoint. Sized for a homelab (a handful of
+// real users, occasional retries) while still cutting off unbounded
+// scripted hammering of the login/callback endpoints.
+const (
+	authRateLimitWindow = time.Minute
+	authRateLimitMax    = 20
+)
+
+// authRateLimitMiddleware applies a per-client-IP fixed-window rate limit
+// (via valkey.Client.IncrExpire) to a single handler. label distinguishes
+// the Valkey key namespace per endpoint (e.g. "login" vs "callback") so the
+// two don't share a budget. On a Valkey error the request is let through
+// (fail open) — a cache hiccup should degrade to "no rate limiting" rather
+// than "everyone locked out of login".
+func authRateLimitMiddleware(vk *valkey.Client, label string, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ip := clientIP(r)
+		key := "ratelimit:auth:" + label + ":" + ip
+		count, err := vk.IncrExpire(r.Context(), key, authRateLimitWindow)
+		if err != nil {
+			log.Printf("main: rate limit check failed (failing open): %v", err)
+			next.ServeHTTP(w, r)
+			return
+		}
+		if count > authRateLimitMax {
+			http.Error(w, "too many requests", http.StatusTooManyRequests)
+			return
+		}
+		next.ServeHTTP(w, r)
+	}
+}
+
+// clientIP extracts the originating client address for rate-limiting
+// purposes. Core sits behind Traefik (see project docs), which sets
+// X-Forwarded-For — we take the first (left-most, i.e. original client)
+// entry rather than r.RemoteAddr, which would otherwise always resolve to
+// Traefik's own address and rate-limit the entire instance as a single
+// client. Falls back to RemoteAddr when the header is absent (e.g. direct
+// connections in local dev without Traefik in front).
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if i := strings.IndexByte(xff, ','); i != -1 {
+			return strings.TrimSpace(xff[:i])
+		}
+		return strings.TrimSpace(xff)
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 // corsMiddleware allows cfg.FrontendBaseURL's origin to call every route on

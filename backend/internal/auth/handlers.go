@@ -738,12 +738,23 @@ func bearerToken(r *http.Request) string {
 	if strings.HasPrefix(h, prefix) {
 		return strings.TrimPrefix(h, prefix)
 	}
-	// Fall back to ?t= query parameter for contexts where an Authorization
-	// header cannot be sent (e.g. <img src> tags for module storage files).
-	if t := r.URL.Query().Get("t"); t != "" {
+	return ""
+}
+
+// BearerTokenAllowQuery is bearerToken plus a ?t= query-parameter fallback,
+// for the small set of routes where an Authorization header genuinely
+// cannot be sent — <img src>/<script src> style browser-initiated GETs
+// (module storage files, UI bundles). Every other endpoint must use
+// RequireActiveSession/RequireAdminSession (header-only), because a token
+// in the URL ends up in access logs, browser history, and any Referer
+// header sent onward — acceptable for a handful of asset-serving GETs,
+// not for the general case. See router.go's ModuleStorageHandler /
+// ModuleBundleHandler for the only two callers.
+func BearerTokenAllowQuery(r *http.Request) string {
+	if t := bearerToken(r); t != "" {
 		return t
 	}
-	return ""
+	return r.URL.Query().Get("t")
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

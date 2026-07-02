@@ -48,6 +48,23 @@ type Manifest struct {
 	// EgressAllowlist lists the hostnames the Deno worker may connect to
 	// (mapped to --allow-net). Empty = no outbound network.
 	EgressAllowlist []string `yaml:"egress_allowlist" json:"egress_allowlist,omitempty"`
+	// Jobs lists scheduled background jobs the module ships (Tier 2/3 only).
+	// Read by JobRunner (jobs.go) to build the periodic dispatch schedule;
+	// each job's Handler path is resolved relative to the module's installed
+	// directory, same as the top-level Handler field.
+	Jobs []ManifestJob `yaml:"jobs" json:"jobs,omitempty"`
+}
+
+// ManifestJob describes one scheduled job entry under a module's jobs: list.
+type ManifestJob struct {
+	Name    string `yaml:"name"     json:"name"`
+	// Schedule is a 5-field cron expression. JobRunner only supports minute
+	// granularity (spec says "Cron-Format erlaubt kein Sub-Minuten-Intervall"
+	// in the reference modules) — it is evaluated once per minute, so any
+	// schedule finer than "* * * * *" is not meaningfully supported.
+	Schedule string `yaml:"schedule" json:"schedule"`
+	Handler  string `yaml:"handler"  json:"handler"`
+	CatchUp  bool   `yaml:"catch_up" json:"catch_up,omitempty"`
 }
 
 const (
@@ -230,8 +247,12 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 	}
 
 	// ── 11. Deno worker registration ──────────────────────────────────────
+	// EgressAllowlist comes straight from the manifest the module author
+	// shipped — this is the only source of --allow-net hosts for the
+	// worker. See WorkerOptions in deno.go for why there is no wildcard.
 	if mf.Tier >= 2 {
-		if err := d.Workers.Start(mf.Name, filepath.Join(destDir, mf.Handler)); err != nil {
+		opts := WorkerOptions{EgressHosts: mf.EgressAllowlist, Jobs: ResolveJobEntrypoints(destDir, mf.Jobs)}
+		if err := d.Workers.Start(mf.Name, filepath.Join(destDir, mf.Handler), opts); err != nil {
 			_, _ = d.DB.UpdateModuleStatus(ctx, entry.Name, db.ModuleStatusFailed)
 			return fmt.Errorf("modules: install %q: start deno worker: %w", entry.Name, err)
 		}
