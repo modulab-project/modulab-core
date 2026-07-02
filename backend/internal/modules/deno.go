@@ -428,17 +428,35 @@ func (w *denoWorker) start() error {
 	//                 destination is only known at runtime must call
 	//                 ReloadEgress once the destination is known (see
 	//                 WorkerResponse.RestartHosts).
-	//   --allow-env   limited to the two variables a module could plausibly
-	//                 need: its scoped DB URL and the shared encryption key
-	//                 used for AES-GCM of PII fields. Nothing else from
-	//                 Core's environment (DB root credentials, master key
-	//                 material beyond this, SMTP secrets, etc.) is visible
-	//                 to the subprocess.
+	//   --allow-env   limited to MODULAB_DB_URL/MODULAB_ENCRYPTION_KEY (what
+	//                 a module could plausibly need) plus a "PG*" prefix
+	//                 wildcard. The PG* grant isn't for the module's own
+	//                 code — it's because npm:postgres (the DB client
+	//                 every worker imports, see workerBootstrapScript)
+	//                 unconditionally probes PGHOST, PGPORT, PGDATABASE,
+	//                 PGUSER(NAME), PGPASSWORD, PGAPPNAME,
+	//                 PGTARGETSESSIONATTRS, and one PG<option> variable per
+	//                 connection default (PGMAX, PGIDLE_TIMEOUT,
+	//                 PGCONNECT_TIMEOUT, PGMAX_LIFETIME, PGMAX_PIPELINE,
+	//                 PGBACKOFF, PGKEEP_ALIVE, PGPREPARE, PGDEBUG,
+	//                 PGFETCH_TYPES, PGPUBLICATIONS — see parseOptions in
+	//                 postgres.js's src/index.js) while parsing connection
+	//                 options, regardless of whether MODULAB_DB_URL already
+	//                 specifies everything. Deno's env permission check
+	//                 fires on the *read attempt*, not on whether the
+	//                 variable is actually set, so every worker crashed on
+	//                 startup with NotCapable for PGMAX before this was
+	//                 added (2026-07-02, first real deploy of the sandbox).
+	//                 None of these PG* variables are ever set in Core's own
+	//                 environment, so this is "may ask for values that don't
+	//                 exist", not an actual credential leak — the real
+	//                 secrets (DB root password, SMTP, OIDC client secret)
+	//                 are still excluded, same as before.
 	args := []string{
 		"run",
 		"--no-prompt",
 		"--allow-read=" + w.entryDir,
-		"--allow-env=MODULAB_DB_URL,MODULAB_ENCRYPTION_KEY",
+		"--allow-env=MODULAB_DB_URL,MODULAB_ENCRYPTION_KEY,PG*",
 	}
 	if len(w.egressHosts) > 0 {
 		args = append(args, "--allow-net="+strings.Join(w.egressHosts, ","))
