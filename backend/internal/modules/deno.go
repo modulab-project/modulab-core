@@ -112,11 +112,18 @@ func (p *WorkerPool) startLocked(name, entrypoint string, opts WorkerOptions) er
 		jobs = map[string]string{}
 	}
 	w := &denoWorker{
-		name:           name,
-		entrypoint:     entrypoint,
-		sockPath:       sockPath,
-		dbURL:          dbURL,
-		entryDir:       filepath.Dir(entrypoint),
+		name:       name,
+		entrypoint: entrypoint,
+		sockPath:   sockPath,
+		dbURL:      dbURL,
+		// moduleRoot is {dataDir}/{name} — the common parent of both the
+		// handler code (moduleRoot/handlers/...) and the worker's Unix
+		// socket (moduleRoot/worker.sock, see sockPath above). Used as the
+		// --allow-read/--allow-write scope instead of separately reasoning
+		// about which exact sub-paths Deno.listen()'s Unix-socket bind and
+		// Deno.removeSync() touch — still confined to this one module's own
+		// directory, not the rest of the host.
+		moduleRoot:     filepath.Dir(sockPath),
 		egressHosts:    append([]string(nil), opts.EgressHosts...),
 		jobEntrypoints: jobs,
 	}
@@ -256,11 +263,14 @@ type WorkerResponse struct {
 
 // denoWorker manages a single Deno subprocess.
 type denoWorker struct {
-	name           string
-	entrypoint     string
-	sockPath       string
-	dbURL          string
-	entryDir       string            // directory containing entrypoint; worker's --allow-read scope
+	name       string
+	entrypoint string
+	sockPath   string
+	dbURL      string
+	// moduleRoot is {dataDir}/{name} — the --allow-read/--allow-write scope.
+	// Covers both the handler code under moduleRoot/handlers/... and the
+	// worker's own Unix socket at moduleRoot/worker.sock.
+	moduleRoot     string
 	egressHosts    []string          // hostnames granted via --allow-net; empty = no network
 	jobEntrypoints map[string]string // job name -> absolute .ts path, from manifest.yaml jobs:
 
@@ -412,15 +422,29 @@ func (w *denoWorker) start() error {
 	tmpScript.Close()
 
 	// Permission scoping (replaces the previous --allow-all):
-	//   --allow-read  limited to the module's own handler directory, so a
-	//                 handler cannot read arbitrary files on the host. No
-	//                 --allow-write is granted at all: none of the current
-	//                 modules (my-place, recipes, unifi-network) touch the
-	//                 filesystem — uploads go through Core's own
+	//   --allow-read  scoped to moduleRoot ({dataDir}/{name}), covering both
+	//                 the handler code (moduleRoot/handlers/...) and the
+	//                 worker's own Unix socket (moduleRoot/worker.sock) — so
+	//                 a handler cannot read arbitrary files on the host, but
+	//                 the bootstrap script's own Deno.listen({ path:
+	//                 sockPath, transport: "unix" }) call (which needs read
+	//                 access to bind the socket) still works.
+	//   --allow-write also scoped to moduleRoot — needed for the same
+	//                 Deno.listen() call above (binding a Unix socket
+	//                 creates the file) and for the bootstrap's
+	//                 Deno.removeSync(sockPath) cleanup of a stale socket
+	//                 left behind by a crashed previous instance. No module
+	//                 code (my-place, recipes, unifi-network) itself writes
+	//                 files — uploads go through Core's own
 	//                 ModuleStorageHandler (router.go), which writes to disk
-	//                 as Core, not as the Deno worker. If a future module
-	//                 genuinely needs local write access, that should be a
-	//                 deliberate, reviewed manifest field, not a default.
+	//                 as Core, not as the Deno worker — but the grant is
+	//                 kept at directory scope (rather than the single
+	//                 worker.sock path) since Unix-socket binding needs
+	//                 write access to the containing directory, not just the
+	//                 not-yet-existing socket file itself. Still confined to
+	//                 this one module's own directory, not the rest of the
+	//                 host. Missing this caused every worker to crash with
+	//                 NotCapable on Deno.listen at first deploy (2026-07-02).
 	//   --allow-net   limited to the hostnames from the module's manifest
 	//                 egress_allowlist (opts.EgressHosts). No entry = no
 	//                 outbound network for this worker at all. There is no
@@ -455,7 +479,8 @@ func (w *denoWorker) start() error {
 	args := []string{
 		"run",
 		"--no-prompt",
-		"--allow-read=" + w.entryDir,
+		"--allow-read=" + w.moduleRoot,
+		"--allow-write=" + w.moduleRoot,
 		"--allow-env=MODULAB_DB_URL,MODULAB_ENCRYPTION_KEY,PG*",
 	}
 	if len(w.egressHosts) > 0 {
