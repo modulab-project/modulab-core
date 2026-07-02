@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,6 +28,19 @@ import (
 type WorkerPool struct {
 	dataDir string // /var/lib/modulab/modules — used to resolve socket paths
 	dbURL   string // postgres:// URL passed to Deno workers for DB access
+	// dbHost is the host:port parsed out of dbURL once at construction time.
+	// Every worker's --allow-net always includes this, on top of whatever
+	// the module's own manifest egress_allowlist grants: the DB connection
+	// is Core-managed infrastructure (schema-isolated per module via
+	// search_path, see startLocked below — that's the real access boundary
+	// for the database, not the OS-level network permission), not a module
+	// choosing an external destination, so it doesn't belong in the
+	// module-authored egress allowlist. Without this, npm:postgres's own
+	// DNS resolution of the DB hostname is blocked by the Deno sandbox
+	// (getaddrinfo EPERM) even though the worker never leaves the network
+	// path Core itself set up for it — hit on the first real deploy with a
+	// module that had an empty egress_allowlist (2026-07-02).
+	dbHost string
 
 	mu      sync.RWMutex
 	workers map[string]*denoWorker
@@ -36,9 +50,16 @@ type WorkerPool struct {
 // Tier 2/3 module at startup. dbURL is the PostgreSQL connection string that
 // will be passed to each Deno worker so modules can query the database.
 func NewWorkerPool(dataDir, dbURL string) *WorkerPool {
+	dbHost := ""
+	if u, err := url.Parse(dbURL); err == nil {
+		dbHost = u.Host // includes port, e.g. "postgres:5432" — exactly what --allow-net expects
+	} else {
+		log.Printf("modules: NewWorkerPool: could not parse dbURL to extract host for worker --allow-net grants: %v", err)
+	}
 	return &WorkerPool{
 		dataDir: dataDir,
 		dbURL:   dbURL,
+		dbHost:  dbHost,
 		workers: make(map[string]*denoWorker),
 	}
 }
@@ -111,6 +132,7 @@ func (p *WorkerPool) startLocked(name, entrypoint string, opts WorkerOptions) er
 	if jobs == nil {
 		jobs = map[string]string{}
 	}
+	egressHosts := p.effectiveEgressHosts(opts.EgressHosts)
 	w := &denoWorker{
 		name:       name,
 		entrypoint: entrypoint,
@@ -124,7 +146,7 @@ func (p *WorkerPool) startLocked(name, entrypoint string, opts WorkerOptions) er
 		// Deno.removeSync() touch — still confined to this one module's own
 		// directory, not the rest of the host.
 		moduleRoot:     filepath.Dir(sockPath),
-		egressHosts:    append([]string(nil), opts.EgressHosts...),
+		egressHosts:    egressHosts,
 		jobEntrypoints: jobs,
 	}
 	if err := w.start(); err != nil {
@@ -133,8 +155,28 @@ func (p *WorkerPool) startLocked(name, entrypoint string, opts WorkerOptions) er
 
 	p.workers[name] = w
 	log.Printf("modules: deno worker %q started (pid %d, socket %s, egress=%v)",
-		name, w.cmd.Process.Pid, sockPath, opts.EgressHosts)
+		name, w.cmd.Process.Pid, sockPath, egressHosts)
 	return nil
+}
+
+// effectiveEgressHosts prepends dbHost (if known) to manifestHosts and
+// dedupes. Every worker gets the DB host regardless of what its manifest
+// declares — see the dbHost field doc comment on WorkerPool for why the DB
+// connection is Core infrastructure, not module-chosen egress.
+func (p *WorkerPool) effectiveEgressHosts(manifestHosts []string) []string {
+	seen := make(map[string]bool, len(manifestHosts)+1)
+	var out []string
+	add := func(h string) {
+		if h != "" && !seen[h] {
+			seen[h] = true
+			out = append(out, h)
+		}
+	}
+	add(p.dbHost)
+	for _, h := range manifestHosts {
+		add(h)
+	}
+	return out
 }
 
 // ReloadEgress restarts the worker for name with an updated egress host list,
