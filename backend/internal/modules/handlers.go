@@ -189,6 +189,20 @@ func UpdateModuleHandler(d Deps, storeDeps store.Deps, authDeps auth.Deps) http.
 			return
 		}
 
+		// Capture the currently-running worker's actual (runtime-discovered)
+		// egress hosts BEFORE stopping it — see CurrentModuleEgressHosts doc
+		// comment in deno.go for why this must not simply fall back to the
+		// manifest's egress_allowlist. For a module like unifi-network,
+		// whose manifest declares an empty allowlist by design (real hosts
+		// only ever arrive via ReloadEgress after an admin configures a
+		// gateway), using the manifest here would silently reset the worker
+		// to zero network access on every update — exactly what happened in
+		// production 2026-07-02/03: a routine update paused all three
+		// gateways overnight with no error logged anywhere, because the
+		// connection attempts failed inside the Deno sandbox before the
+		// module's own error handling ever ran.
+		runtimeEgressHosts, hadRuntimeHosts := d.Workers.CurrentModuleEgressHosts(name)
+
 		// Restart the Deno worker so it picks up the new handler code.
 		_ = d.Workers.Stop(name)
 		row, _, _ := d.DB.GetInstalledModule(r.Context(), name)
@@ -205,8 +219,12 @@ func UpdateModuleHandler(d Deps, storeDeps store.Deps, authDeps auth.Deps) http.
 			if mf.Handler != "" {
 				destDir := filepath.Join(d.DataDir, name)
 				entrypoint := filepath.Join(destDir, mf.Handler)
+				egressHosts := mf.EgressAllowlist
+				if hadRuntimeHosts && len(runtimeEgressHosts) > 0 {
+					egressHosts = runtimeEgressHosts
+				}
 				opts := WorkerOptions{
-					EgressHosts:   mf.EgressAllowlist,
+					EgressHosts:   egressHosts,
 					Jobs:          ResolveJobEntrypoints(destDir, mf.Jobs),
 					SkipTLSVerify: mf.TLSSkipVerify,
 				}

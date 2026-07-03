@@ -172,10 +172,19 @@ func (p *WorkerPool) startLocked(name, entrypoint string, opts WorkerOptions) er
 		// about which exact sub-paths Deno.listen()'s Unix-socket bind and
 		// Deno.removeSync() touch — still confined to this one module's own
 		// directory, not the rest of the host.
-		moduleRoot:     filepath.Dir(sockPath),
-		egressHosts:    egressHosts,
-		skipTLSVerify:  opts.SkipTLSVerify,
-		jobEntrypoints: jobs,
+		moduleRoot: filepath.Dir(sockPath),
+		egressHosts: egressHosts,
+		// moduleEgressHosts is opts.EgressHosts as passed in, WITHOUT dbHost/
+		// dnsResolver mixed in — i.e. exactly the hosts a module itself
+		// declared or requested via ReloadEgress. Kept separately from
+		// egressHosts (the effective, infra-included list actually passed to
+		// --allow-net) so callers that need to preserve "what the module
+		// asked for" across an unrelated restart (see CurrentModuleEgressHosts
+		// and its use in handlers.go's update-restart path) don't have to
+		// guess which entries were infra vs. module-declared.
+		moduleEgressHosts: append([]string(nil), opts.EgressHosts...),
+		skipTLSVerify:     opts.SkipTLSVerify,
+		jobEntrypoints:    jobs,
 	}
 	if err := w.start(); err != nil {
 		return fmt.Errorf("worker %q: start: %w", name, err)
@@ -206,6 +215,36 @@ func (p *WorkerPool) effectiveEgressHosts(manifestHosts []string) []string {
 		add(h)
 	}
 	return out
+}
+
+// CurrentModuleEgressHosts returns the module-declared egress hosts the
+// running worker for name currently has — i.e. what the manifest's
+// egress_allowlist said at last start, PLUS whatever a later ReloadEgress
+// call added at runtime (e.g. unifi-network gateway IPs), but WITHOUT the
+// infra hosts (DB, DNS resolver) that startLocked always adds on top.
+//
+// Exists so a module-code update (UpdateModuleHandler in handlers.go) can
+// restart the worker without silently discarding runtime-discovered egress
+// hosts that aren't in the manifest at all. Before this, an update reset
+// the worker to exactly mf.EgressAllowlist from the manifest — for
+// unifi-network (manifest egress_allowlist: [] by design, real hosts only
+// ever added via ReloadEgress) that meant every module update wiped the
+// worker back to zero network access with no error or warning, and
+// gateways silently stopped being pollable until an admin happened to
+// re-save one (hit in production, 2026-07-02/03 — a routine module update
+// to 0.3.4 pausd all three gateways overnight with no log output at all,
+// since the connection attempts failed inside the sandbox before the
+// handler's own error logging could run).
+//
+// Returns false if no worker is currently running for name.
+func (p *WorkerPool) CurrentModuleEgressHosts(name string) ([]string, bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	w, ok := p.workers[name]
+	if !ok {
+		return nil, false
+	}
+	return append([]string(nil), w.moduleEgressHosts...), true
 }
 
 // ReloadEgress restarts the worker for name with an updated egress host list,
@@ -347,10 +386,14 @@ type denoWorker struct {
 	// moduleRoot is {dataDir}/{name} — the --allow-read/--allow-write scope.
 	// Covers both the handler code under moduleRoot/handlers/... and the
 	// worker's own Unix socket at moduleRoot/worker.sock.
-	moduleRoot     string
-	egressHosts    []string          // hostnames granted via --allow-net; empty = no network
-	skipTLSVerify  bool              // manifest tls_skip_verify: true — see WorkerOptions.SkipTLSVerify
-	jobEntrypoints map[string]string // job name -> absolute .ts path, from manifest.yaml jobs:
+	moduleRoot string
+	egressHosts    []string // hostnames granted via --allow-net (includes dbHost/dnsResolver); empty = no network
+	// moduleEgressHosts is egressHosts minus the infra hosts (dbHost,
+	// dnsResolver) — see the field doc comment where this is set in
+	// startLocked.
+	moduleEgressHosts []string
+	skipTLSVerify     bool              // manifest tls_skip_verify: true — see WorkerOptions.SkipTLSVerify
+	jobEntrypoints    map[string]string // job name -> absolute .ts path, from manifest.yaml jobs:
 
 	cmd    *exec.Cmd
 	cancel context.CancelFunc
