@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
+	"github.com/modulab-project/modulab-core/backend/internal/notify"
 )
 
 // maxUploadBytes is the per-request upload cap for module image uploads.
@@ -134,6 +135,24 @@ func ModuleProxyHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 					log.Printf("modules: %q: egress reload failed: %v", name, err)
 				}
 			}(moduleName, resp.RestartHosts)
+		}
+
+		// A handler can also surface async notifications the same way a
+		// scheduled job does (see WorkerResponse.Notifications' doc
+		// comment and modules.JobRunner.dispatchJob's identical publish
+		// loop, jobs.go) â e.g. unifi-network's createDevice/approveDevice
+		// notifying admins that a device is waiting for approval, or was
+		// just approved. Published under the single generic
+		// "module.notification" event type; the payload is already fully
+		// rendered text (ModuleNotification.Message), so Core has nothing
+		// module-specific to key on here either.
+		if d.Valkey != nil {
+			for _, n := range resp.Notifications {
+				ev := notify.Event{Type: "module.notification", Data: map[string]any{"message": n.Message}}
+				if err := notify.Publish(r.Context(), d.Valkey, notify.AdminChannel(), ev); err != nil {
+					log.Printf("modules: %q: publish notification: %v", moduleName, err)
+				}
+			}
 		}
 	}
 }
