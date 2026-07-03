@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -316,6 +317,56 @@ func (p *WorkerPool) Dispatch(ctx context.Context, name string, req WorkerReques
 	return w.dispatch(ctx, req)
 }
 
+// egressHostsQueryTimeout bounds how long QueryEgressHosts waits for a
+// module's EgressHostsHandler to compute its current hosts. This is a pure
+// DB read (e.g. unifi-network's computeEgressHosts() selects from its own
+// gateways table) — no outbound network call, so it does not need the full
+// jobTimeout scheduled jobs get.
+const egressHostsQueryTimeout = 10 * time.Second
+
+// QueryEgressHosts dispatches the reserved "__compute_egress_hosts__" job
+// (see ResolveJobEntrypoints/egressHostsJobName in jobs.go) to the running
+// worker for name and parses its response body as a []string. Returns
+// (nil, false) if the worker has no such job registered (module doesn't set
+// EgressHostsHandler in its manifest, or isn't running at all) rather than
+// an error — callers should treat that as "nothing to do here", not a
+// failure.
+//
+// This exists to solve the gap CurrentModuleEgressHosts/DynamicEgress left
+// open: that mechanism preserves a RUNNING worker's egress across a code
+// update by asking the worker itself, but there is no running worker to ask
+// immediately after Core's own process starts. QueryEgressHosts instead asks
+// the module to recompute its hosts from its own persisted state (its DB
+// schema), which works the same whether Core just started, a module was
+// just updated, or anything else — there's no "previous worker" dependency
+// at all.
+func (p *WorkerPool) QueryEgressHosts(ctx context.Context, name string) ([]string, bool) {
+	queryCtx, cancel := context.WithTimeout(ctx, egressHostsQueryTimeout)
+	defer cancel()
+
+	resp, err := p.Dispatch(queryCtx, name, WorkerRequest{Job: egressHostsJobName})
+	if err != nil {
+		// ErrWorkerNotFound or a transport error — nothing to reload with.
+		return nil, false
+	}
+	if resp.Status == http.StatusNotFound {
+		// Worker has no egressHostsJobName entry — module doesn't set
+		// EgressHostsHandler. Not an error, just "this module doesn't use
+		// this feature".
+		return nil, false
+	}
+	if resp.Status >= 400 {
+		log.Printf("modules: %q: egress hosts query failed (status %d): %s", name, resp.Status, string(resp.Body))
+		return nil, false
+	}
+	var hosts []string
+	if err := json.Unmarshal(resp.Body, &hosts); err != nil {
+		log.Printf("modules: %q: egress hosts query returned unparseable body: %v", name, err)
+		return nil, false
+	}
+	return hosts, true
+}
+
 // Running reports whether a worker is currently registered for the module.
 func (p *WorkerPool) Running(name string) bool {
 	p.mu.RLock()
@@ -449,7 +500,7 @@ const db = {
 // per job; a job that needs network access relies on the same egress hosts
 // the HTTP handler was granted).
 const jobEntrypoints: Record<string, string> = %s;
-const jobHandlers: Record<string, (ctx: { db: typeof db }) => Promise<void>> = {};
+const jobHandlers: Record<string, (ctx: { db: typeof db }) => Promise<unknown>> = {};
 for (const [jobName, path] of Object.entries(jobEntrypoints)) {
   const mod = await import(path);
   jobHandlers[jobName] = mod.default;
@@ -494,14 +545,25 @@ async function handleConn(conn: Deno.Conn) {
           const req = JSON.parse(line);
           if (req.job) {
             // Job invocation (see JobRunner in Go's jobs.go): no HTTP
-            // envelope, just { db } as the JobContext. Job handlers return
-            // void — success is "didn't throw" and we report a fixed 200.
+            // envelope, just { db } as the JobContext. Scheduled jobs
+            // (manifest.yaml's jobs: list) return void — success is "didn't
+            // throw" and we report a fixed 200/{ok:true}.
+            //
+            // System jobs (job names starting with "__", not declared in
+            // manifest.yaml's jobs: list, dispatched by Core itself rather
+            // than JobRunner's cron scheduler — e.g. "__compute_egress_hosts__",
+            // see WorkerPool.QueryEgressHosts in deno.go) MAY return a value;
+            // if the handler returns anything other than undefined, that
+            // value becomes the response body instead of the fixed
+            // {ok:true}. This keeps every existing scheduled job (which
+            // returns nothing) working identically, while letting a module
+            // opt into a request/response job by simply returning a value.
             const jobFn = jobHandlers[req.job];
             if (!jobFn) {
               resp = { status: 404, body: { error: "unknown job: " + req.job } };
             } else {
-              await jobFn({ db });
-              resp = { status: 200, body: { ok: true } };
+              const result = await jobFn({ db });
+              resp = { status: 200, body: result === undefined ? { ok: true } : result };
             }
           } else {
             resp = await handler({ ...req, db });

@@ -202,11 +202,12 @@ func UpdateModuleHandler(d Deps, storeDeps store.Deps, authDeps auth.Deps) http.
 		row, _, _ := d.DB.GetInstalledModule(r.Context(), name)
 		if row.Tier >= 2 {
 			var mf struct {
-				Handler         string        `json:"handler"`
-				EgressAllowlist []string      `json:"egress_allowlist"`
-				Jobs            []ManifestJob `json:"jobs"`
-				TLSSkipVerify   bool          `json:"tls_skip_verify"`
-				DynamicEgress   bool          `json:"dynamic_egress"`
+				Handler            string        `json:"handler"`
+				EgressAllowlist    []string      `json:"egress_allowlist"`
+				Jobs               []ManifestJob `json:"jobs"`
+				TLSSkipVerify      bool          `json:"tls_skip_verify"`
+				DynamicEgress      bool          `json:"dynamic_egress"`
+				EgressHostsHandler string        `json:"egress_hosts_handler"`
 			}
 			if row.Manifest != nil {
 				_ = json.Unmarshal(row.Manifest, &mf)
@@ -220,11 +221,21 @@ func UpdateModuleHandler(d Deps, storeDeps store.Deps, authDeps auth.Deps) http.
 				}
 				opts := WorkerOptions{
 					EgressHosts:   egressHosts,
-					Jobs:          ResolveJobEntrypoints(destDir, mf.Jobs),
+					Jobs:          ResolveJobEntrypoints(destDir, mf.Jobs, mf.EgressHostsHandler),
 					SkipTLSVerify: mf.TLSSkipVerify,
 				}
 				if err := d.Workers.Start(name, entrypoint, opts); err != nil {
 					log.Printf("modules: update %q: restart worker: %v", name, err)
+				} else if mf.DynamicEgress && mf.EgressHostsHandler != "" {
+					// The just-started worker is a fresher source of truth
+					// than whatever we captured before stopping it above
+					// (the update may itself have changed how hosts are
+					// computed) — ask it directly and reload once more.
+					if hosts, ok := d.Workers.QueryEgressHosts(r.Context(), name); ok {
+						if err := d.Workers.ReloadEgress(name, hosts); err != nil {
+							log.Printf("modules: update %q: egress hosts reload failed: %v", name, err)
+						}
+					}
 				}
 			}
 		}

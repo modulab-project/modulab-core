@@ -79,6 +79,28 @@ type Manifest struct {
 	// default to false — a manifest's EgressAllowlist is trusted as-is
 	// unless a module explicitly opts into runtime-managed egress.
 	DynamicEgress bool `yaml:"dynamic_egress" json:"dynamic_egress,omitempty"`
+	// EgressHostsHandler is the relative path (same convention as Handler) to
+	// a .ts module whose default export is () => Promise<string[]> — the
+	// module's own computation of its current runtime egress hosts (e.g.
+	// unifi-network's computeEgressHosts(), reading configured gateway IPs
+	// out of its own DB schema).
+	//
+	// Only meaningful when DynamicEgress is true. Solves a gap DynamicEgress
+	// alone didn't cover: DynamicEgress preserves a RUNNING worker's egress
+	// across a code update by asking the worker itself (see
+	// WorkerPool.CurrentModuleEgressHosts), but there is no running worker to
+	// ask right after Core's own process starts (container restart, not a
+	// module update) — main.go's startup-restore loop was still resetting
+	// unifi-network to egress_allowlist: [] on every Core restart, silently
+	// making all configured gateways unreachable until an admin happened to
+	// re-save one (found 2026-07-03, one day after DynamicEgress shipped).
+	// When set, Core dispatches this handler as a one-off job (see
+	// WorkerPool.QueryEgressHosts in deno.go) immediately after starting the
+	// worker with an empty/manifest-only egress grant, then reloads the
+	// worker with whatever hosts it returns — computed fresh from the
+	// module's own DB state every time, so it can never go stale the way a
+	// Core-side cache of "last known hosts" could.
+	EgressHostsHandler string `yaml:"egress_hosts_handler" json:"egress_hosts_handler,omitempty"`
 }
 
 // ManifestJob describes one scheduled job entry under a module's jobs: list.
@@ -279,12 +301,25 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 	if mf.Tier >= 2 {
 		opts := WorkerOptions{
 			EgressHosts:   mf.EgressAllowlist,
-			Jobs:          ResolveJobEntrypoints(destDir, mf.Jobs),
+			Jobs:          ResolveJobEntrypoints(destDir, mf.Jobs, mf.EgressHostsHandler),
 			SkipTLSVerify: mf.TLSSkipVerify,
 		}
 		if err := d.Workers.Start(mf.Name, filepath.Join(destDir, mf.Handler), opts); err != nil {
 			_, _ = d.DB.UpdateModuleStatus(ctx, entry.Name, db.ModuleStatusFailed)
 			return fmt.Errorf("modules: install %q: start deno worker: %w", entry.Name, err)
+		}
+		// A fresh install has no prior runtime egress state to preserve (no
+		// gateways configured yet for unifi-network, etc.) — but if the
+		// module declares EgressHostsHandler, ask it anyway rather than
+		// special-casing "just installed": harmless (returns an empty list
+		// when nothing is configured yet) and keeps this path identical to
+		// the update/startup ones, one less place to get out of sync.
+		if mf.DynamicEgress && mf.EgressHostsHandler != "" {
+			if hosts, ok := d.Workers.QueryEgressHosts(ctx, mf.Name); ok {
+				if err := d.Workers.ReloadEgress(mf.Name, hosts); err != nil {
+					log.Printf("modules: install %q: initial egress hosts reload failed: %v", entry.Name, err)
+				}
+			}
 		}
 	}
 

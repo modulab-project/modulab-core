@@ -12,21 +12,33 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/db"
 )
 
-// ResolveJobEntrypoints turns a manifest's jobs: list into the job-name ->
-// absolute-path map that WorkerOptions.Jobs (and the Deno bootstrap's
-// dynamic imports) expect. destDir is the module's installed directory
-// (DataDir/{name}); each job's Handler path is relative to it, the same
-// convention as the top-level manifest Handler field.
-func ResolveJobEntrypoints(destDir string, jobs []ManifestJob) map[string]string {
-	if len(jobs) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(jobs))
+// egressHostsJobName is the reserved job name QueryEgressHosts dispatches
+// under. Prefixed with "__" so it can never collide with a module-declared
+// job name from manifest.yaml's jobs: list (module authors are not
+// restricted from using "__"-prefixed names themselves, but nothing in the
+// reference modules does, and this is Core-internal wiring, not part of the
+// module SDK's public job-name surface).
+const egressHostsJobName = "__compute_egress_hosts__"
+
+// ResolveJobEntrypoints turns a manifest's jobs: list (plus, if set,
+// EgressHostsHandler) into the job-name -> absolute-path map that
+// WorkerOptions.Jobs (and the Deno bootstrap's dynamic imports) expect.
+// destDir is the module's installed directory (DataDir/{name}); each job's
+// Handler path is relative to it, the same convention as the top-level
+// manifest Handler field.
+func ResolveJobEntrypoints(destDir string, jobs []ManifestJob, egressHostsHandler string) map[string]string {
+	out := make(map[string]string, len(jobs)+1)
 	for _, j := range jobs {
 		if j.Name == "" || j.Handler == "" {
 			continue
 		}
 		out[j.Name] = filepath.Join(destDir, j.Handler)
+	}
+	if egressHostsHandler != "" {
+		out[egressHostsJobName] = filepath.Join(destDir, egressHostsHandler)
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

@@ -515,10 +515,12 @@ func main() {
 				entrypoint := ""
 				destDir := cfg.ModuleDataDir + "/" + row.Name
 				var mf struct {
-					Handler         string                `json:"handler"`
-					EgressAllowlist []string              `json:"egress_allowlist"`
-					Jobs            []modules.ManifestJob `json:"jobs"`
-					TLSSkipVerify   bool                  `json:"tls_skip_verify"`
+					Handler            string                `json:"handler"`
+					EgressAllowlist    []string              `json:"egress_allowlist"`
+					Jobs               []modules.ManifestJob `json:"jobs"`
+					TLSSkipVerify      bool                  `json:"tls_skip_verify"`
+					DynamicEgress      bool                  `json:"dynamic_egress"`
+					EgressHostsHandler string                `json:"egress_hosts_handler"`
 				}
 				if row.Manifest != nil {
 					if json.Unmarshal(row.Manifest, &mf) == nil {
@@ -528,11 +530,27 @@ func main() {
 				if entrypoint != "" {
 					opts := modules.WorkerOptions{
 						EgressHosts:   mf.EgressAllowlist,
-						Jobs:          modules.ResolveJobEntrypoints(destDir, mf.Jobs),
+						Jobs:          modules.ResolveJobEntrypoints(destDir, mf.Jobs, mf.EgressHostsHandler),
 						SkipTLSVerify: mf.TLSSkipVerify,
 					}
 					if err := workerPool.Start(row.Name, entrypoint, opts); err != nil {
 						log.Printf("main: startup: could not start worker for %q: %v", row.Name, err)
+					} else if mf.DynamicEgress && mf.EgressHostsHandler != "" {
+						// This is the fix for the Core-restart egress-reset
+						// bug: at boot there is no previously-running worker
+						// to ask for its runtime hosts (unlike the
+						// module-update path in handlers.go), so the worker
+						// above was just started with EgressAllowlist only
+						// (empty for unifi-network by design). Ask the
+						// freshly-started worker itself to recompute its
+						// hosts from its own DB state (e.g. unifi-network's
+						// configured gateway IPs) and reload egress
+						// immediately, before any job/request needs it.
+						if hosts, ok := workerPool.QueryEgressHosts(ctx, row.Name); ok {
+							if err := workerPool.ReloadEgress(row.Name, hosts); err != nil {
+								log.Printf("main: startup: egress hosts reload failed for %q: %v", row.Name, err)
+							}
+						}
 					}
 				}
 			}
