@@ -59,6 +59,26 @@ type Manifest struct {
 	// destinations are private IPs with no CA-issued cert (unifi-network).
 	// Defaults to false; must be explicitly opted into per module.
 	TLSSkipVerify bool `yaml:"tls_skip_verify" json:"tls_skip_verify,omitempty"`
+	// DynamicEgress, when true, tells UpdateModuleHandler (handlers.go) to
+	// preserve the running worker's current egress hosts across a module
+	// code update instead of resetting to EgressAllowlist. Only for modules
+	// that add hosts at runtime via ReloadEgress that EgressAllowlist can
+	// never express (unifi-network's admin-configured gateway IPs — its
+	// manifest declares egress_allowlist: [] by design).
+	//
+	// Without this flag, EVERY module update would need to guess whether a
+	// difference between the running worker's hosts and the manifest's
+	// EgressAllowlist means "runtime hosts to preserve" or "the manifest
+	// author removed these hosts on purpose" — those two cases are
+	// indistinguishable from the runtime hosts alone. Found 2026-07-03:
+	// recipes removed world.openfoodfacts.org/api.openfoodfacts.org from
+	// its manifest (no longer used, see handlers/index.ts), but every
+	// subsequent update kept restarting the worker with those old hosts
+	// anyway, because the earlier (unifi-network-motivated) fix blindly
+	// preferred any non-empty runtime host list over the manifest. Modules
+	// default to false — a manifest's EgressAllowlist is trusted as-is
+	// unless a module explicitly opts into runtime-managed egress.
+	DynamicEgress bool `yaml:"dynamic_egress" json:"dynamic_egress,omitempty"`
 }
 
 // ManifestJob describes one scheduled job entry under a module's jobs: list.
