@@ -251,15 +251,23 @@ export function AppShell({
     // every new module notification, which violates the module system's
     // core promise that a module is developable without ever touching Core.
     if (event.type === "module.notification" && isAdmin) {
-      const data = (event.data ?? {}) as { message?: Record<string, string> };
+      const data = (event.data ?? {}) as { message?: Record<string, string>; actionPath?: string };
       const lang = i18n.language?.slice(0, 2) ?? "en";
       const message = data.message?.[lang] ?? data.message?.en;
       if (message) {
-        const goToModules = () => navigate("/admin/modules/installed");
+        // actionPath is supplied by the module itself (e.g.
+        // "/modules/unifi-network?view=pending") — Core has no route table
+        // for modules and cannot derive a sensible destination on its own.
+        // Falls back to the installed-modules list only when a module
+        // genuinely doesn't send one. Fixed 2026-07-04: every module
+        // notification previously landed here regardless of what it was
+        // actually about.
+        const target = data.actionPath || "/admin/modules/installed";
+        const goToTarget = () => navigate(target);
         const reviewLabel = t("shell.notifications_panel.review");
-        push({ message, actionLabel: reviewLabel, onAction: goToModules });
+        push({ message, actionLabel: reviewLabel, onAction: goToTarget });
         setFeed((prev) => [
-          { id: nextFeedItemID++, message, at: Date.now(), actionLabel: reviewLabel, onAction: goToModules },
+          { id: nextFeedItemID++, message, at: Date.now(), actionLabel: reviewLabel, onAction: goToTarget },
           ...prev,
         ].slice(0, FEED_LIMIT));
       }

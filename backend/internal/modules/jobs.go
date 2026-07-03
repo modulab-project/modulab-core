@@ -181,7 +181,7 @@ func (r *JobRunner) dispatchJob(moduleName, jobName string) {
 	// time so a failure on one does not drop the others.
 	if r.valkey != nil {
 		for _, n := range resp.Notifications {
-			ev := notify.Event{Type: "module.notification", Data: map[string]any{"message": n.Message}}
+			ev := notify.Event{Type: "module.notification", Data: map[string]any{"message": n.Message, "actionPath": n.ActionPath}}
 			if err := notify.Publish(context.Background(), r.valkey, notify.AdminChannel(), ev); err != nil {
 				log.Printf("modules: job %q/%q: publish notification: %v", moduleName, jobName, err)
 			}

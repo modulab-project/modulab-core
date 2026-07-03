@@ -148,7 +148,7 @@ func ModuleProxyHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 		// module-specific to key on here either.
 		if d.Valkey != nil {
 			for _, n := range resp.Notifications {
-				ev := notify.Event{Type: "module.notification", Data: map[string]any{"message": n.Message}}
+				ev := notify.Event{Type: "module.notification", Data: map[string]any{"message": n.Message, "actionPath": n.ActionPath}}
 				if err := notify.Publish(r.Context(), d.Valkey, notify.AdminChannel(), ev); err != nil {
 					log.Printf("modules: %q: publish notification: %v", moduleName, err)
 				}

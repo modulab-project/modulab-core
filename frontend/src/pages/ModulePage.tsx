@@ -10,7 +10,7 @@
 //
 // For v1 (no external bundle yet), a fallback is shown when no bundle is found.
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import i18n from "../lib/i18n";
 import { getSessionToken } from "../lib/session";
@@ -23,6 +23,15 @@ export interface ModuleComponentProps {
   moduleName: string;
   apiBase: string;       // full URL prefix for /v1/modules/{name}/api
   token: string;
+  // initialQuery carries the URL's query string as-is (e.g. "view=pending"),
+  // parsed from /modules/{name}?<query>. Added so a module notification's
+  // actionPath (Core: WorkerResponse.Notifications, deno.go) can deep-link
+  // into a specific in-module view — e.g. unifi-network's pending-devices
+  // tab — without Core needing to know anything about the module's internal
+  // view state. A module that doesn't care about query params can just
+  // ignore this prop; it is optional, generic, and not unifi-network-
+  // specific, so any module can use the same mechanism.
+  initialQuery?: URLSearchParams;
 }
 
 export default function ModulePage() {
@@ -30,6 +39,7 @@ export default function ModulePage() {
   const { t } = useTranslation();
   const { session, loading } = useAuthenticatedSession();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [mod, setMod] = useState<InstalledModule | null>(null);
   const [ModuleComponent, setModuleComponent] = useState<React.ComponentType<ModuleComponentProps> | null>(null);
@@ -176,7 +186,7 @@ export default function ModulePage() {
         )}
 
         {!fetching && !loadError && ModuleComponent && (
-          <ModuleComponent moduleName={moduleName} apiBase={apiBase} token={token} />
+          <ModuleComponent moduleName={moduleName} apiBase={apiBase} token={token} initialQuery={searchParams} />
         )}
 
         {!fetching && !loadError && !ModuleComponent && mod && (

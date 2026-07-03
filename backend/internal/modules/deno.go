@@ -459,6 +459,21 @@ type WorkerResponse struct {
 // side (falling back to "en" if the admin's language isn't present).
 type ModuleNotification struct {
 	Message map[string]string `json:"message"`
+	// ActionPath, when set, is where Core navigates to if the admin clicks
+	// this notification's action button (e.g. "/modules/unifi-network" or
+	// "/modules/unifi-network?view=pending"). Same reasoning as Message:
+	// Core has no route table for modules, so it cannot derive a sensible
+	// destination itself — it previously hardcoded every module
+	// notification's click target to "/admin/modules/installed" (the
+	// installed-modules list), which is rarely where an admin actually
+	// needs to go to act on the notification (reported 2026-07-04: clicking
+	// "review" on a device-approval notification landed on the module list,
+	// not the module's own pending-devices view). The module knows its own
+	// routes, so it supplies the path; Core just navigates there without
+	// interpreting it. Falls back to "/admin/modules/installed" if empty,
+	// for notifications that genuinely have no more specific destination
+	// (e.g. "module.updates_available", still built by Core itself).
+	ActionPath string `json:"actionPath,omitempty"`
 }
 
 // ── denoWorker (internal) ─────────────────────────────────────────────────────
