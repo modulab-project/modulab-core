@@ -795,10 +795,10 @@ function NotificationsPanelContent({
         feed.map((item) => (
           <div
             key={item.id}
-            className="flex items-center justify-between gap-3 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
+            className="flex items-start justify-between gap-3 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
           >
             <div className="min-w-0">
-              <p className="truncate">{item.message}</p>
+              <p className="whitespace-pre-wrap break-words">{item.message}</p>
               <p className="text-xs text-gray-400 dark:text-gray-500">{relativeTime(item.at)}</p>
             </div>
             {item.actionLabel && item.onAction && (

@@ -49,9 +49,9 @@ export function ToastStack({ toasts }: { toasts: ToastItem[] }) {
       {toasts.map((t) => (
         <div
           key={t.id}
-          className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm shadow-lg dark:border-gray-800 dark:bg-gray-900"
+          className="flex items-start justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm shadow-lg dark:border-gray-800 dark:bg-gray-900"
         >
-          <span className="min-w-0 truncate">{t.message}</span>
+          <span className="min-w-0 whitespace-pre-wrap break-words">{t.message}</span>
           {t.actionLabel && t.onAction && (
             <button
               type="button"
