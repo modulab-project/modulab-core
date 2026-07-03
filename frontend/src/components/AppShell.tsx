@@ -77,7 +77,7 @@ export function AppShell({
   session: Session;
   children: ReactNode;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [openPanel, setOpenPanel] = useState<OpenPanel>(null);
@@ -237,6 +237,32 @@ export function AppShell({
         ...prev,
       ].slice(0, FEED_LIMIT));
       refreshModuleUpdateCount();
+    }
+    // Module-triggered events (Core: WorkerResponse.Notifications, deno.go —
+    // published from modules.JobRunner.dispatchJob, jobs.go, under the
+    // single generic "module.notification" type). A module's own job code
+    // decides when these fire (see unifi-network's poll-gateways.ts) and
+    // renders the text itself in every language ModuLab's UI supports
+    // ({de, en} — ModuleNotification.Message) before handing it to Core.
+    // Core does NOT look up any translation for this: it only picks the
+    // entry matching the viewer's current UI language client-side. This
+    // replaces an earlier design where Core's own de.json/en.json hardcoded
+    // a locale key per module event type — that required a Core change for
+    // every new module notification, which violates the module system's
+    // core promise that a module is developable without ever touching Core.
+    if (event.type === "module.notification" && isAdmin) {
+      const data = (event.data ?? {}) as { message?: Record<string, string> };
+      const lang = i18n.language?.slice(0, 2) ?? "en";
+      const message = data.message?.[lang] ?? data.message?.en;
+      if (message) {
+        const goToModules = () => navigate("/admin/modules/installed");
+        const reviewLabel = t("shell.notifications_panel.review");
+        push({ message, actionLabel: reviewLabel, onAction: goToModules });
+        setFeed((prev) => [
+          { id: nextFeedItemID++, message, at: Date.now(), actionLabel: reviewLabel, onAction: goToModules },
+          ...prev,
+        ].slice(0, FEED_LIMIT));
+      }
     }
   });
 

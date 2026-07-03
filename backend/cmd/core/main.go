@@ -569,7 +569,7 @@ func main() {
 	// Scheduled job runner (manifest.yaml jobs: list, e.g. unifi-network's
 	// poll_gateways) — see internal/modules/jobs.go. Runs for Core's entire
 	// lifetime, same lifecycle as the mail worker below.
-	jobRunner := modules.NewJobRunner(pool, workerPool)
+	jobRunner := modules.NewJobRunner(pool, workerPool, valkeyClient)
 	jobRunner.Start(ctx)
 
 	mux.HandleFunc("GET /v1/modules", modules.ListInstalledHandler(moduleDeps, authDeps))

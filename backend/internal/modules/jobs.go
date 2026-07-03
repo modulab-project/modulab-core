@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/notify"
+	"github.com/modulab-project/modulab-core/backend/internal/valkey"
 )
 
 // egressHostsJobName is the reserved job name QueryEgressHosts dispatches
@@ -69,11 +71,18 @@ type JobRunner struct {
 	db      *db.Pool
 	workers *WorkerPool
 	stop    chan struct{}
+	// valkey is used to publish WorkerResponse.Notifications (module-
+	// triggered async events, e.g. unifi-network's poll_gateways job
+	// auto-adopting a device or a gateway flipping to paused) to
+	// notify.AdminChannel(). Nil-safe: dispatchJob skips publishing if this
+	// is nil rather than requiring every JobRunner construction site to
+	// have a Valkey client available.
+	valkey *valkey.Client
 }
 
 // NewJobRunner creates a JobRunner. Call Start to begin ticking.
-func NewJobRunner(pool *db.Pool, workers *WorkerPool) *JobRunner {
-	return &JobRunner{db: pool, workers: workers, stop: make(chan struct{})}
+func NewJobRunner(pool *db.Pool, workers *WorkerPool, vk *valkey.Client) *JobRunner {
+	return &JobRunner{db: pool, workers: workers, stop: make(chan struct{}), valkey: vk}
 }
 
 // Start begins the scheduling loop in a background goroutine. Call Stop (or
@@ -158,6 +167,24 @@ func (r *JobRunner) dispatchJob(moduleName, jobName string) {
 	if resp.RestartHosts != nil {
 		if err := r.workers.ReloadEgress(moduleName, resp.RestartHosts); err != nil {
 			log.Printf("modules: job %q/%q: egress reload failed: %v", moduleName, jobName, err)
+		}
+	}
+	// Jobs can also surface async events discovered with no admin currently
+	// watching (e.g. unifi-network's poll_gateways auto-adopting a device,
+	// or a gateway flipping to paused) — see WorkerResponse.Notifications'
+	// doc comment. Published under the single generic "module.notification"
+	// event type (not a per-module/per-event type) precisely because the
+	// payload is already fully rendered text (ModuleNotification.Message);
+	// Core has nothing module-specific to key on, it just forwards
+	// {message: {de, en}} to every admin's SSE stream and the frontend
+	// picks the entry matching the viewer's UI language. Published one at a
+	// time so a failure on one does not drop the others.
+	if r.valkey != nil {
+		for _, n := range resp.Notifications {
+			ev := notify.Event{Type: "module.notification", Data: map[string]any{"message": n.Message}}
+			if err := notify.Publish(context.Background(), r.valkey, notify.AdminChannel(), ev); err != nil {
+				log.Printf("modules: job %q/%q: publish notification: %v", moduleName, jobName, err)
+			}
 		}
 	}
 }

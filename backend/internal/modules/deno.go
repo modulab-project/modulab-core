@@ -424,6 +424,41 @@ type WorkerResponse struct {
 	// on the next request. An empty (non-nil) slice restart the worker
 	// with no network access at all.
 	RestartHosts []string `json:"restartHosts,omitempty"`
+	// Notifications, when non-empty, asks Core to publish each one to
+	// notify.AdminChannel() so every connected admin session's SSE stream
+	// (auth/events.go) picks it up live — the same delivery path used for
+	// "user.pending" and "module.updates_available". Added for
+	// asynchronous, job-triggered events a module discovers with no admin
+	// currently watching (e.g. unifi-network's poll_gateways cron
+	// auto-adopting a device, or a gateway flipping to paused) — unlike an
+	// HTTP-handler-triggered change (e.g. approving a device), which the
+	// requesting admin already sees synchronously in that request's own
+	// response and does not need a separate notification for. See
+	// ModuleNotification's doc comment for why the payload carries
+	// pre-rendered text rather than a type+data pair Core would interpret.
+	Notifications []ModuleNotification `json:"notifications,omitempty"`
+}
+
+// ModuleNotification is a single event a module's job or handler wants
+// surfaced to every connected admin, dispatched via WorkerResponse.
+// Notifications.
+//
+// Message carries the FULLY RENDERED text in every language ModuLab's UI
+// supports ({"de": "...", "en": "..."}), not a type key + raw data for Core
+// to translate — deliberately, so that adding module notifications never
+// requires a Core change. An earlier version of this feature had Core's own
+// de.json/en.json hardcode per-module, per-event translation strings (e.g.
+// "unifi-network.gateway_paused": "Gateway {{gatewayName}} paused..."),
+// which directly violated the module system's core promise: a module
+// should be independently developable without ever touching Core. The
+// module already has its own locales/de.json + en.json (see
+// GetEncKey/getGatewayName-style helpers) — it renders its own strings
+// using its own translations and just hands Core the finished text to
+// display. Core does not parse, template, or otherwise interpret Message;
+// it only picks the entry matching the viewing admin's UI language client-
+// side (falling back to "en" if the admin's language isn't present).
+type ModuleNotification struct {
+	Message map[string]string `json:"message"`
 }
 
 // ── denoWorker (internal) ─────────────────────────────────────────────────────
@@ -540,7 +575,7 @@ async function handleConn(conn: Deno.Conn) {
       partial = lines.pop() ?? "";
       for (const line of lines) {
         if (!line.trim()) continue;
-        let resp: { status: number; body: unknown };
+        let resp: { status: number; body: unknown; notifications?: unknown };
         try {
           const req = JSON.parse(line);
           if (req.job) {
@@ -558,12 +593,38 @@ async function handleConn(conn: Deno.Conn) {
             // {ok:true}. This keeps every existing scheduled job (which
             // returns nothing) working identically, while letting a module
             // opt into a request/response job by simply returning a value.
+            //
+            // Separately, ANY job (scheduled or system) can surface async
+            // notifications (see WorkerResponse.Notifications in deno.go)
+            // by returning an object with a `__notifications` array
+            // property — pulled out here onto resp.notifications (top-level
+            // JSON key, matching restartHosts' own top-level placement) so
+            // Go's WorkerResponse can bind it without it also becoming part
+            // of the response body. Chosen as a double-underscore-prefixed
+            // property rather than reusing the whole return value, so a
+            // scheduled job can both return void (the common case) AND
+            // separately report notifications without also having to
+            // invent a body — e.g. unifi-network's poll_gateways still
+            // returns void for its normal 200/{ok:true}, but can attach
+            // { __notifications: [...] } alongside that.
             const jobFn = jobHandlers[req.job];
             if (!jobFn) {
               resp = { status: 404, body: { error: "unknown job: " + req.job } };
             } else {
               const result = await jobFn({ db });
-              resp = { status: 200, body: result === undefined ? { ok: true } : result };
+              let notifications: unknown;
+              let body: unknown = result;
+              if (result && typeof result === "object" && "__notifications" in result) {
+                const r = result as { __notifications: unknown; [k: string]: unknown };
+                notifications = r.__notifications;
+                const { __notifications, ...rest } = r;
+                body = Object.keys(rest).length > 0 ? rest : undefined;
+              }
+              resp = {
+                status: 200,
+                body: body === undefined ? { ok: true } : body,
+                ...(notifications !== undefined ? { notifications } : {}),
+              };
             }
           } else {
             resp = await handler({ ...req, db });
