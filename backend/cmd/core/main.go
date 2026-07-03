@@ -505,7 +505,16 @@ func main() {
 		DataDir:   cfg.ModuleDataDir,
 		CosignBin: cfg.CosignBinaryPath,
 		Workers:   workerPool,
+		Valkey:    valkeyClient,
 	}
+
+	// Background check for installed-module updates (separate from
+	// store.RunSync above, which only refreshes the registry listing).
+	// Runs every 15 minutes and publishes a notify.AdminChannel() event
+	// when it finds something new, so connected admins see it via SSE
+	// without needing to click "check updates" or reload — see
+	// modules.RunUpdateChecks's doc comment for the full rationale.
+	go modules.RunUpdateChecks(ctx, moduleDeps, storeDeps)
 
 	// At startup, restart Deno workers for all Tier 2/3 modules that were
 	// active before the last shutdown.

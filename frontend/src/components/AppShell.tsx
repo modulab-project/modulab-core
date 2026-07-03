@@ -195,10 +195,11 @@ export function AppShell({
   // Spec section 3.5's real-time notifications: every authenticated page
   // using AppShell gets one SSE connection (lib/useEvents.ts), but only
   // org-admin/super-admin sessions ever actually receive anything on
-  // it today - "user.pending" is published exclusively to
-  // notify.AdminChannel() (backend/internal/auth/handlers.go), so a plain
-  // "user" session's connection just sits idle, costing one open
-  // connection for symmetry/future events rather than anything it
+  // it today - "user.pending" and "module.updates_available" are both
+  // published exclusively to notify.AdminChannel() (backend/internal/
+  // auth/handlers.go and backend/internal/modules/status.go respectively),
+  // so a plain "user" session's connection just sits idle, costing one
+  // open connection for symmetry/future events rather than anything it
   // currently uses.
   const { toasts, push } = useToasts();
   useNotificationEvents(getSessionToken(), (event: ServerEvent) => {
@@ -214,6 +215,28 @@ export function AppShell({
         ...prev,
       ].slice(0, FEED_LIMIT));
       refreshPendingCount();
+    }
+    if (event.type === "module.updates_available" && isAdmin) {
+      // Published by modules.RunUpdateChecks (backend/internal/modules/
+      // status.go) — a background pass (every 15 min) found at least one
+      // installed module with a newer version. Previously moduleUpdateCount
+      // only ever refreshed on mount or when the notifications panel was
+      // opened, so a background-discovered update sat invisible until an
+      // admin happened to look; this makes it show up the same way
+      // "user.pending" already does — live, via SSE, no reload needed.
+      const data = (event.data ?? {}) as { count?: number };
+      const count = data.count ?? 1;
+      const goToModules = () => navigate("/admin/modules/installed");
+      const updatesMsg = count === 1
+        ? t("shell.notifications_panel.module_updates_one", { count })
+        : t("shell.notifications_panel.module_updates_many", { count });
+      const viewLabel = t("shell.notifications_panel.review");
+      push({ message: updatesMsg, actionLabel: viewLabel, onAction: goToModules });
+      setFeed((prev) => [
+        { id: nextFeedItemID++, message: updatesMsg, at: Date.now(), actionLabel: viewLabel, onAction: goToModules },
+        ...prev,
+      ].slice(0, FEED_LIMIT));
+      refreshModuleUpdateCount();
     }
   });
 

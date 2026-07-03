@@ -15,6 +15,7 @@ import (
 
 	"github.com/modulab-project/modulab-core/backend/internal/db"
 	"github.com/modulab-project/modulab-core/backend/internal/store"
+	"github.com/modulab-project/modulab-core/backend/internal/valkey"
 	"gopkg.in/yaml.v3"
 )
 
@@ -25,6 +26,14 @@ type Deps struct {
 	DataDir   string      // base dir for module files, e.g. /var/lib/modulab/modules
 	CosignBin string      // "" = use "cosign" on $PATH
 	Workers   *WorkerPool // Deno worker lifecycle manager (tier 2/3 modules)
+	// Valkey is used by RunUpdateChecks (status.go) to publish a
+	// notify.AdminChannel() event when a background check finds a newer
+	// version for an installed module, so connected admin sessions see it
+	// via SSE (GET /v1/events) without needing to reopen the notifications
+	// panel or reload the page. Nil-safe: CheckUpdates itself does not
+	// require it (only the background loop publishes), so existing callers
+	// that construct Deps without it (if any) keep working.
+	Valkey *valkey.Client
 }
 
 // Manifest is the parsed content of manifest.yaml inside a module ZIP.
