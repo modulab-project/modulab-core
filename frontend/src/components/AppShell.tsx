@@ -170,6 +170,19 @@ export function AppShell({
   // elsewhere" case for the count actively being looked at).
   const [pendingCount, setPendingCount] = useState<number | null>(null);
   const [feed, setFeed] = useState<FeedItem[]>([]);
+  // unreadModuleNotifications: a client-only "seen since last panel open"
+  // counter for "module.notification" events (device waiting/approved/
+  // deleted, gateway paused/online, etc.). Unlike pendingCount and
+  // moduleUpdateCount, there is no authoritative server-side "how many
+  // unread module events" query to refetch — Core deliberately does not
+  // interpret module notifications (see ModuleNotification's doc comment),
+  // so it has nothing to count from a DB. Reported 2026-07-04: the bell
+  // badge never reflected an arriving module notification at all, only a
+  // manual reload made it visible — because the badge total only ever
+  // summed pendingCount + moduleUpdateCount. Reset to 0 whenever the
+  // notifications panel is opened, same "seen it now" semantics as
+  // refreshPendingCount/refreshModuleUpdateCount refetching on open.
+  const [unreadModuleNotifications, setUnreadModuleNotifications] = useState(0);
 
   const refreshPendingCount = useCallback(() => {
     if (!isAdmin) {
@@ -270,6 +283,7 @@ export function AppShell({
           { id: nextFeedItemID++, message, at: Date.now(), actionLabel: reviewLabel, onAction: goToTarget },
           ...prev,
         ].slice(0, FEED_LIMIT));
+        setUnreadModuleNotifications((prev) => prev + 1);
       }
     }
   });
@@ -280,6 +294,7 @@ export function AppShell({
       if (next === "notifications") {
         refreshPendingCount();
         refreshModuleUpdateCount();
+        setUnreadModuleNotifications(0);
       }
       return next;
     });
@@ -292,6 +307,7 @@ export function AppShell({
         isAdmin={isAdmin}
         pendingCount={pendingCount}
         moduleUpdateCount={moduleUpdateCount}
+        unreadModuleNotifications={unreadModuleNotifications}
         openPanel={openPanel}
         onTogglePanel={togglePanel}
         chatOpen={chatOpen}
@@ -357,6 +373,7 @@ function Header({
   isAdmin,
   pendingCount,
   moduleUpdateCount,
+  unreadModuleNotifications,
   openPanel,
   onTogglePanel,
   chatOpen,
@@ -366,6 +383,7 @@ function Header({
   isAdmin: boolean;
   pendingCount: number | null;
   moduleUpdateCount: number | null;
+  unreadModuleNotifications: number;
   openPanel: OpenPanel;
   onTogglePanel: (panel: Exclude<OpenPanel, null>) => void;
   chatOpen: boolean;
@@ -399,9 +417,16 @@ function Header({
           >
             <i className="ti ti-bell text-[18px] text-gray-500 dark:text-gray-400" />
             {(() => {
-              const total = (pendingCount ?? 0) + (moduleUpdateCount ?? 0);
+              // unreadModuleNotifications included so the badge reflects a
+              // live-arriving module event (device waiting/approved/
+              // deleted, gateway paused/online, etc.) immediately, not just
+              // after the next reload — see its declaration for why this is
+              // a separate client-only counter rather than a server refetch
+              // like the other two.
+              const total = (pendingCount ?? 0) + (moduleUpdateCount ?? 0) + unreadModuleNotifications;
               if (total === 0) return null;
-              // Red for pending users, amber when only module updates
+              // Red for pending users, amber otherwise (module updates
+              // and/or unread module notifications)
               const color = (pendingCount ?? 0) > 0
                 ? "bg-red-600"
                 : "bg-amber-500";
