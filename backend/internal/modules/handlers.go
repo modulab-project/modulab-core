@@ -89,6 +89,45 @@ func GetInstalledHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	}
 }
 
+// ── GET /v1/modules/{name}/egress-hosts ───────────────────────────────────────
+
+// GetModuleEgressHostsHandler returns the module's CURRENTLY RUNNING worker's
+// actual egress hosts — as opposed to GetInstalledHandler's row.Manifest,
+// which only has the static egress_allowlist from the manifest at last
+// install/update.
+//
+// This distinction matters for modules like unifi-network whose real network
+// access is entirely runtime-configured (admin-entered gateway IPs) and
+// whose manifest deliberately declares egress_allowlist: [] — the info card
+// (ModuleInfoView in each module's own UI) was showing "no network access"
+// even with gateways configured and working, because it only ever read the
+// static manifest value. Reported by the user 2026-07-04 ("Info Netzzugriff
+// (Core) kein Netzzugriff" despite configured gateways).
+//
+// Falls back to an empty list (not an error) if no worker is currently
+// running for the module (Tier 0/1 module with no worker at all, or a
+// worker that failed to start) — the info card already renders that the
+// same way as "static allowlist is empty".
+func GetModuleEgressHostsHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := auth.RequireActiveSession(authDeps, w, r); !ok {
+			return
+		}
+
+		name := r.PathValue("name")
+		if name == "" {
+			http.Error(w, "missing module name", http.StatusBadRequest)
+			return
+		}
+
+		hosts, ok := d.Workers.CurrentModuleEgressHosts(name)
+		if !ok {
+			hosts = []string{}
+		}
+		writeModuleJSON(w, http.StatusOK, map[string]any{"egress_hosts": hosts})
+	}
+}
+
 // ── POST /v1/modules/install ──────────────────────────────────────────────────
 
 // InstallHandler installs a module from the registry.
