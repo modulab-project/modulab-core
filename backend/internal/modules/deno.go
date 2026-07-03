@@ -596,7 +596,7 @@ async function handleConn(conn: Deno.Conn) {
             //
             // Separately, ANY job (scheduled or system) can surface async
             // notifications (see WorkerResponse.Notifications in deno.go)
-            // by returning an object with a `__notifications` array
+            // by returning an object with a "__notifications" array
             // property — pulled out here onto resp.notifications (top-level
             // JSON key, matching restartHosts' own top-level placement) so
             // Go's WorkerResponse can bind it without it also becoming part
