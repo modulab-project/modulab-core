@@ -29,9 +29,27 @@ import (
 	"sync"
 	"time"
 
+	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/setup"
 )
+
+// logFeedAudit writes one audit_log entry for a feed admin action. Mirrors
+// auth/admin.go's logAudit and modules/handlers.go's logModuleAudit (same
+// "resolve master key, log-and-swallow on failure" shape) - a failed audit
+// write must never turn a successful feed create/update/delete into a 500
+// the admin has to retry.
+func logFeedAudit(ctx context.Context, d auth.Deps, p audit.LogParams) {
+	masterKey, err := setup.ResolveMasterKey(ctx, d.Pool, d.MasterKeyEnv)
+	if err != nil {
+		log.Printf("news: audit: failed to resolve master key for %s: %v", p.EventType, err)
+		return
+	}
+	if err := audit.Log(ctx, d.Pool, masterKey, p); err != nil {
+		log.Printf("news: audit: failed to write %s: %v", p.EventType, err)
+	}
+}
 
 const (
 	feedCacheTTL   = 15 * time.Minute
@@ -504,7 +522,8 @@ type ImportRequest struct {
 // valid feed URL, skipping any already present.
 func AdminImportHandler(d auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := auth.RequireAdminSession(d, w, r); !ok {
+		sess, ok := auth.RequireAdminSession(d, w, r)
+		if !ok {
 			return
 		}
 
@@ -548,6 +567,28 @@ func AdminImportHandler(d auth.Deps) http.HandlerFunc {
 			existingURLs[strings.ToLower(feedURL)] = true
 			results = append(results, ImportResult{URL: feedURL, Label: label})
 		}
+
+		// One summary entry per import batch rather than one per feed - an
+		// OPML import can bring in dozens of feeds at once, and per-feed
+		// entries would drown out everything else in the audit log for a
+		// single admin action.
+		created, skipped, failed := 0, 0, 0
+		for _, res := range results {
+			switch {
+			case res.Error != "":
+				failed++
+			case res.Skipped:
+				skipped++
+			default:
+				created++
+			}
+		}
+		logFeedAudit(r.Context(), d, audit.LogParams{
+			EventType:  audit.EventFeedCreated,
+			ActorID:    sess.UserID,
+			ActorEmail: sess.Email,
+			Details:    fmt.Sprintf(`{"import":true,"created":%d,"skipped":%d,"failed":%d}`, created, skipped, failed),
+		})
 
 		writeJSON(w, http.StatusOK, results)
 	}
@@ -636,7 +677,8 @@ func AdminListHandler(d auth.Deps) http.HandlerFunc {
 // Body: {"url": "...", "label": "..."}
 func AdminCreateHandler(d auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := auth.RequireAdminSession(d, w, r); !ok {
+		sess, ok := auth.RequireAdminSession(d, w, r)
+		if !ok {
 			return
 		}
 		var body struct {
@@ -662,6 +704,13 @@ func AdminCreateHandler(d auth.Deps) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		logFeedAudit(r.Context(), d, audit.LogParams{
+			EventType:  audit.EventFeedCreated,
+			ActorID:    sess.UserID,
+			ActorEmail: sess.Email,
+			TargetID:   strconv.Itoa(feed.ID),
+			Details:    fmt.Sprintf(`{"label":%q,"url":%q}`, feed.Label, feed.URL),
+		})
 		writeJSON(w, http.StatusCreated, FeedResponse{
 			ID:        feed.ID,
 			URL:       feed.URL,
@@ -675,7 +724,8 @@ func AdminCreateHandler(d auth.Deps) http.HandlerFunc {
 // Body: {"url": "...", "label": "..."} — both fields required.
 func AdminUpdateHandler(d auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := auth.RequireAdminSession(d, w, r); !ok {
+		sess, ok := auth.RequireAdminSession(d, w, r)
+		if !ok {
 			return
 		}
 		id, err := strconv.Atoi(r.PathValue("id"))
@@ -710,6 +760,13 @@ func AdminUpdateHandler(d auth.Deps) http.HandlerFunc {
 			http.Error(w, "no such feed", http.StatusNotFound)
 			return
 		}
+		logFeedAudit(r.Context(), d, audit.LogParams{
+			EventType:  audit.EventFeedUpdated,
+			ActorID:    sess.UserID,
+			ActorEmail: sess.Email,
+			TargetID:   strconv.Itoa(id),
+			Details:    fmt.Sprintf(`{"label":%q,"url":%q}`, body.Label, body.URL),
+		})
 		// Invalidate the cached articles for this feed so a URL change
 		// takes effect immediately rather than waiting for TTL expiry.
 		_ = d.Valkey.Del(r.Context(), cacheKey(id))
@@ -720,13 +777,28 @@ func AdminUpdateHandler(d auth.Deps) http.HandlerFunc {
 // AdminDeleteHandler is DELETE /v1/admin/feeds/{id}.
 func AdminDeleteHandler(d auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := auth.RequireAdminSession(d, w, r); !ok {
+		sess, ok := auth.RequireAdminSession(d, w, r)
+		if !ok {
 			return
 		}
 		id, err := strconv.Atoi(r.PathValue("id"))
 		if err != nil || id <= 0 {
 			http.Error(w, "invalid feed id", http.StatusBadRequest)
 			return
+		}
+		// Capture label/URL before deleting - DeleteFeed only returns
+		// found/error, and the audit entry below is more useful with the
+		// feed's identity than a bare numeric id. Best-effort: if this
+		// lookup fails for some reason, the delete still proceeds and the
+		// audit entry just falls back to the id alone.
+		var label, feedURL string
+		if feeds, err := d.Pool.ListFeeds(r.Context()); err == nil {
+			for _, f := range feeds {
+				if f.ID == id {
+					label, feedURL = f.Label, f.URL
+					break
+				}
+			}
 		}
 		found, err := d.Pool.DeleteFeed(r.Context(), id)
 		if err != nil {
@@ -737,6 +809,13 @@ func AdminDeleteHandler(d auth.Deps) http.HandlerFunc {
 			http.Error(w, "no such feed", http.StatusNotFound)
 			return
 		}
+		logFeedAudit(r.Context(), d, audit.LogParams{
+			EventType:  audit.EventFeedDeleted,
+			ActorID:    sess.UserID,
+			ActorEmail: sess.Email,
+			TargetID:   strconv.Itoa(id),
+			Details:    fmt.Sprintf(`{"label":%q,"url":%q}`, label, feedURL),
+		})
 		// Best-effort cache invalidation - the feed row is already gone.
 		_ = d.Valkey.Del(r.Context(), cacheKey(id))
 		w.WriteHeader(http.StatusNoContent)

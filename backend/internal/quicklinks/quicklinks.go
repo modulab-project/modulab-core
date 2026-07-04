@@ -12,14 +12,34 @@
 package quicklinks
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
 
+	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/setup"
 )
+
+// logQuickLinkAudit writes one audit_log entry for a quick-link admin
+// action. Mirrors auth/admin.go's logAudit and its counterparts in the
+// modules/news packages (same "resolve master key, log-and-swallow on
+// failure" shape).
+func logQuickLinkAudit(ctx context.Context, d auth.Deps, p audit.LogParams) {
+	masterKey, err := setup.ResolveMasterKey(ctx, d.Pool, d.MasterKeyEnv)
+	if err != nil {
+		log.Printf("quicklinks: audit: failed to resolve master key for %s: %v", p.EventType, err)
+		return
+	}
+	if err := audit.Log(ctx, d.Pool, masterKey, p); err != nil {
+		log.Printf("quicklinks: audit: failed to write %s: %v", p.EventType, err)
+	}
+}
 
 // ---- Response types ---------------------------------------------------------
 
@@ -323,6 +343,13 @@ func AdminCreateHandler(d auth.Deps) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		logQuickLinkAudit(r.Context(), d, audit.LogParams{
+			EventType:  audit.EventQuickLinkCreated,
+			ActorID:    sess.UserID,
+			ActorEmail: sess.Email,
+			TargetID:   link.ID,
+			Details:    fmt.Sprintf(`{"title":%q,"url":%q}`, link.Title, link.URL),
+		})
 		writeJSON(w, http.StatusCreated, AdminTile{
 			ID:          link.ID,
 			Title:       link.Title,
@@ -339,7 +366,8 @@ func AdminCreateHandler(d auth.Deps) http.HandlerFunc {
 // Body: {"title":"…","url":"…","icon":"…","description":"…","sort_order":0}
 func AdminUpdateHandler(d auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := auth.RequireAdminSession(d, w, r); !ok {
+		sess, ok := auth.RequireAdminSession(d, w, r)
+		if !ok {
 			return
 		}
 		id := r.PathValue("id")
@@ -372,6 +400,13 @@ func AdminUpdateHandler(d auth.Deps) http.HandlerFunc {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
+		logQuickLinkAudit(r.Context(), d, audit.LogParams{
+			EventType:  audit.EventQuickLinkUpdated,
+			ActorID:    sess.UserID,
+			ActorEmail: sess.Email,
+			TargetID:   id,
+			Details:    fmt.Sprintf(`{"title":%q,"url":%q}`, body.Title, body.URL),
+		})
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -379,7 +414,8 @@ func AdminUpdateHandler(d auth.Deps) http.HandlerFunc {
 // AdminDeleteHandler is DELETE /v1/admin/quick-links/{id}.
 func AdminDeleteHandler(d auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := auth.RequireAdminSession(d, w, r); !ok {
+		sess, ok := auth.RequireAdminSession(d, w, r)
+		if !ok {
 			return
 		}
 		id := r.PathValue("id")
@@ -392,6 +428,12 @@ func AdminDeleteHandler(d auth.Deps) http.HandlerFunc {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
+		logQuickLinkAudit(r.Context(), d, audit.LogParams{
+			EventType:  audit.EventQuickLinkDeleted,
+			ActorID:    sess.UserID,
+			ActorEmail: sess.Email,
+			TargetID:   id,
+		})
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

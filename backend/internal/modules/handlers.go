@@ -1,15 +1,37 @@
 package modules
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"path/filepath"
 
+	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/setup"
 	"github.com/modulab-project/modulab-core/backend/internal/store"
 )
+
+// logModuleAudit writes one audit_log entry for a module lifecycle action.
+// Mirrors auth/admin.go's logAudit (same "resolve master key, log-and-swallow
+// on failure" shape) - duplicated rather than shared because it lives in a
+// different package and depends on auth.Deps only for MasterKeyEnv/Pool, not
+// anything modules-specific. A failed audit write must never turn a
+// successful install/uninstall/update/pin into a 500 the admin has to retry;
+// the module action has already happened by the time this is called.
+func logModuleAudit(ctx context.Context, authDeps auth.Deps, p audit.LogParams) {
+	masterKey, err := setup.ResolveMasterKey(ctx, authDeps.Pool, authDeps.MasterKeyEnv)
+	if err != nil {
+		log.Printf("modules: audit: failed to resolve master key for %s: %v", p.EventType, err)
+		return
+	}
+	if err := audit.Log(ctx, authDeps.Pool, masterKey, p); err != nil {
+		log.Printf("modules: audit: failed to write %s: %v", p.EventType, err)
+	}
+}
 
 // ── GET /v1/modules ───────────────────────────────────────────────────────────
 
@@ -139,7 +161,8 @@ func GetModuleEgressHostsHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 // A non-blocking job queue (with SSE progress) is planned post-v1.
 func InstallHandler(d Deps, storeDeps store.Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := auth.RequireAdminSession(authDeps, w, r); !ok {
+		sess, ok := auth.RequireAdminSession(authDeps, w, r)
+		if !ok {
 			return
 		}
 
@@ -167,6 +190,15 @@ func InstallHandler(d Deps, storeDeps store.Deps, authDeps auth.Deps) http.Handl
 		}
 
 		row, _, _ := d.DB.GetInstalledModule(r.Context(), body.Name)
+
+		logModuleAudit(r.Context(), authDeps, audit.LogParams{
+			EventType:  audit.EventModuleInstalled,
+			ActorID:    sess.UserID,
+			ActorEmail: sess.Email,
+			TargetID:   body.Name,
+			Details:    fmt.Sprintf(`{"version":%q,"tier":%d,"source":%q}`, row.Version, row.Tier, entry.Source),
+		})
+
 		writeModuleJSON(w, http.StatusCreated, row)
 	}
 }
@@ -177,7 +209,8 @@ func InstallHandler(d Deps, storeDeps store.Deps, authDeps auth.Deps) http.Handl
 // Requires org-admin or super-admin.
 func UninstallHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := auth.RequireAdminSession(authDeps, w, r); !ok {
+		sess, ok := auth.RequireAdminSession(authDeps, w, r)
+		if !ok {
 			return
 		}
 
@@ -187,10 +220,22 @@ func UninstallHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 			return
 		}
 
+		// Read the row before Uninstall deletes it, so the audit entry below
+		// can still record what version/tier was actually removed.
+		row, _, _ := d.DB.GetInstalledModule(r.Context(), name)
+
 		if err := Uninstall(r.Context(), d, name); err != nil {
 			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 			return
 		}
+
+		logModuleAudit(r.Context(), authDeps, audit.LogParams{
+			EventType:  audit.EventModuleUninstalled,
+			ActorID:    sess.UserID,
+			ActorEmail: sess.Email,
+			TargetID:   name,
+			Details:    fmt.Sprintf(`{"version":%q,"tier":%d}`, row.Version, row.Tier),
+		})
 
 		w.WriteHeader(http.StatusNoContent)
 	}
@@ -203,7 +248,8 @@ func UninstallHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 // rely on the daily sync). Requires org-admin or super-admin.
 func UpdateModuleHandler(d Deps, storeDeps store.Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := auth.RequireAdminSession(authDeps, w, r); !ok {
+		sess, ok := auth.RequireAdminSession(authDeps, w, r)
+		if !ok {
 			return
 		}
 
@@ -222,6 +268,11 @@ func UpdateModuleHandler(d Deps, storeDeps store.Deps, authDeps auth.Deps) http.
 			http.Error(w, "module not found in registry", http.StatusNotFound)
 			return
 		}
+
+		// Capture the pre-update version for the audit entry below - Update
+		// overwrites installed_modules.version in place.
+		oldRow, _, _ := d.DB.GetInstalledModule(r.Context(), name)
+		oldVersion := oldRow.Version
 
 		if err := Update(r.Context(), d, entry); err != nil {
 			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
@@ -279,6 +330,14 @@ func UpdateModuleHandler(d Deps, storeDeps store.Deps, authDeps auth.Deps) http.
 			}
 		}
 
+		logModuleAudit(r.Context(), authDeps, audit.LogParams{
+			EventType:  audit.EventModuleUpdated,
+			ActorID:    sess.UserID,
+			ActorEmail: sess.Email,
+			TargetID:   name,
+			Details:    fmt.Sprintf(`{"from_version":%q,"to_version":%q}`, oldVersion, row.Version),
+		})
+
 		writeModuleJSON(w, http.StatusOK, row)
 	}
 }
@@ -289,7 +348,8 @@ func UpdateModuleHandler(d Deps, storeDeps store.Deps, authDeps auth.Deps) http.
 // Requires org-admin or super-admin.
 func PinHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := auth.RequireAdminSession(authDeps, w, r); !ok {
+		sess, ok := auth.RequireAdminSession(authDeps, w, r)
+		if !ok {
 			return
 		}
 
@@ -304,6 +364,13 @@ func PinHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 			return
 		}
 
+		logModuleAudit(r.Context(), authDeps, audit.LogParams{
+			EventType:  audit.EventModulePinned,
+			ActorID:    sess.UserID,
+			ActorEmail: sess.Email,
+			TargetID:   name,
+		})
+
 		writeModuleJSON(w, http.StatusOK, map[string]any{"name": name, "pinned": true})
 	}
 }
@@ -314,7 +381,8 @@ func PinHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 // Requires org-admin or super-admin.
 func UnpinHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := auth.RequireAdminSession(authDeps, w, r); !ok {
+		sess, ok := auth.RequireAdminSession(authDeps, w, r)
+		if !ok {
 			return
 		}
 
@@ -328,6 +396,13 @@ func UnpinHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 			http.Error(w, "module not installed", http.StatusNotFound)
 			return
 		}
+
+		logModuleAudit(r.Context(), authDeps, audit.LogParams{
+			EventType:  audit.EventModuleUnpinned,
+			ActorID:    sess.UserID,
+			ActorEmail: sess.Email,
+			TargetID:   name,
+		})
 
 		writeModuleJSON(w, http.StatusOK, map[string]any{"name": name, "pinned": false})
 	}

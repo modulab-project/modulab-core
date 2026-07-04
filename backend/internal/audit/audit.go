@@ -55,6 +55,26 @@ const (
 	EventConfigAIKeyCleared  = "config.ai_provider.key_cleared"
 	// Setup
 	EventSetupComplete = "setup.completed"
+	// Module lifecycle events (org-admin/super-admin driven, spec section
+	// 4.6-4.9). Installing a module runs arbitrary code (Tier 2/3 modules
+	// spawn a Deno subprocess with DB + scoped network access) - previously
+	// none of install/uninstall/update/pin/unpin produced any audit trail
+	// at all, the single biggest gap found in the V1 audit-log review.
+	EventModuleInstalled   = "module.installed"
+	EventModuleUninstalled = "module.uninstalled"
+	EventModuleUpdated     = "module.updated"
+	EventModulePinned      = "module.pinned"
+	EventModuleUnpinned    = "module.unpinned"
+	// Feed management (org-admin/super-admin), internal/news.
+	EventFeedCreated = "feed.created"
+	EventFeedUpdated = "feed.updated"
+	EventFeedDeleted = "feed.deleted"
+	// Quick-link management (org-admin/super-admin), internal/quicklinks.
+	EventQuickLinkCreated = "quicklink.created"
+	EventQuickLinkUpdated = "quicklink.updated"
+	EventQuickLinkDeleted = "quicklink.deleted"
+	// Manual Module Store registry sync trigger, internal/store.
+	EventStoreSyncTriggered = "store.sync_triggered"
 )
 
 // Entry is one row from the audit_log table, returned by List. All PII

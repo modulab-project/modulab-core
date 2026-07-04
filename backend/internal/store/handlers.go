@@ -1,11 +1,30 @@
 package store
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 
+	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
+	"github.com/modulab-project/modulab-core/backend/internal/setup"
 )
+
+// logStoreAudit writes one audit_log entry for a store admin action. Mirrors
+// logAudit/logModuleAudit/logFeedAudit/logQuickLinkAudit in the other
+// packages (same "resolve master key, log-and-swallow on failure" shape).
+func logStoreAudit(ctx context.Context, authDeps auth.Deps, p audit.LogParams) {
+	masterKey, err := setup.ResolveMasterKey(ctx, authDeps.Pool, authDeps.MasterKeyEnv)
+	if err != nil {
+		log.Printf("store: audit: failed to resolve master key for %s: %v", p.EventType, err)
+		return
+	}
+	if err := audit.Log(ctx, authDeps.Pool, masterKey, p); err != nil {
+		log.Printf("store: audit: failed to write %s: %v", p.EventType, err)
+	}
+}
 
 // ── GET /v1/store ─────────────────────────────────────────────────────────────
 
@@ -99,11 +118,18 @@ func DetailHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 // super-admin role.
 func SyncHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := auth.RequireAdminSession(authDeps, w, r); !ok {
+		sess, ok := auth.RequireAdminSession(authDeps, w, r)
+		if !ok {
 			return
 		}
 
 		if err := TriggerSync(r.Context(), d); err != nil {
+			logStoreAudit(r.Context(), authDeps, audit.LogParams{
+				EventType:  audit.EventStoreSyncTriggered,
+				ActorID:    sess.UserID,
+				ActorEmail: sess.Email,
+				Details:    fmt.Sprintf(`{"ok":false,"error":%q}`, err.Error()),
+			})
 			// Partial sync: still a 200 so the UI can show what was refreshed,
 			// but include the error detail so the admin can investigate.
 			writeJSON(w, http.StatusOK, map[string]any{
@@ -113,6 +139,12 @@ func SyncHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 			return
 		}
 
+		logStoreAudit(r.Context(), authDeps, audit.LogParams{
+			EventType:  audit.EventStoreSyncTriggered,
+			ActorID:    sess.UserID,
+			ActorEmail: sess.Email,
+			Details:    `{"ok":true}`,
+		})
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	}
 }
