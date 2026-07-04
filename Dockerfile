@@ -1,5 +1,5 @@
 # ── Stage 1: Frontend build ───────────────────────────────────────────────────
-FROM node:22-alpine AS frontend-builder
+FROM node:24-alpine AS frontend-builder
 
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
@@ -9,7 +9,7 @@ RUN npm run build
 # Output: /app/frontend/dist/
 
 # ── Stage 2: Go build ─────────────────────────────────────────────────────────
-FROM golang:1.25-alpine AS go-builder
+FROM golang:1.26-alpine AS go-builder
 
 WORKDIR /app/backend
 COPY backend/go.mod backend/go.sum ./
@@ -22,7 +22,7 @@ FROM debian:bookworm-slim
 
 # Install Deno (required for Tier 2/3 module handlers).
 # Pinned to a specific version for reproducible builds.
-ENV DENO_VERSION=2.3.6
+ENV DENO_VERSION=2.9.0
 # Detect CPU arch at build time so the image works on both x86_64 and arm64
 # (Apple Silicon via `docker buildx build --platform linux/arm64` or plain
 # `docker build` on an M-series Mac with the default linux/arm64 platform).
