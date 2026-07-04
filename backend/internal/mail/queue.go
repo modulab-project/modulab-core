@@ -16,6 +16,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/modulab-project/modulab-core/backend/internal/crypto"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
 	"github.com/modulab-project/modulab-core/backend/internal/valkey"
@@ -39,9 +40,41 @@ type Message struct {
 	Body    string `json:"body"`
 }
 
-// Enqueue durably queues msg for delivery by RunWorker.
-func Enqueue(ctx context.Context, vk *valkey.Client, msg Message) error {
-	payload, err := json.Marshal(msg)
+// storedMessage is the on-the-wire (Valkey list) representation of a
+// Message. To and Body are AES-256-GCM encrypted before being pushed to the
+// queue: To is the recipient's email address, and Body is templates.go's
+// fully-rendered text, which always embeds the recipient's name
+// (greeting()) and — for PendingApprovalMessage — the new signup's own
+// name and email too. Found during the pre-V1 re-audit: a message stuck in
+// the queue after an SMTP failure (RunWorker's no-retry, log-and-drop path)
+// was sitting in Valkey as plaintext PII in the meantime. Subject stays
+// plaintext: every template.go subject line is a static string with no
+// PII in it (see templates.go), so there is nothing there to encrypt.
+type storedMessage struct {
+	ToEnc   string `json:"to_enc"`
+	Subject string `json:"subject"`
+	BodyEnc string `json:"body_enc"`
+}
+
+// Enqueue durably queues msg (encrypted, see storedMessage) for delivery by
+// RunWorker. masterKeyEnv is resolved fresh on every call, the same
+// "re-resolve every time" choice deliver() already makes below.
+func Enqueue(ctx context.Context, vk *valkey.Client, pool *db.Pool, masterKeyEnv string, msg Message) error {
+	masterKey, err := setup.ResolveMasterKey(ctx, pool, masterKeyEnv)
+	if err != nil {
+		return fmt.Errorf("mail: resolve master key: %w", err)
+	}
+	toEnc, err := crypto.EncryptIfNotEmpty(masterKey, msg.To)
+	if err != nil {
+		return fmt.Errorf("mail: encrypt to: %w", err)
+	}
+	bodyEnc, err := crypto.EncryptIfNotEmpty(masterKey, msg.Body)
+	if err != nil {
+		return fmt.Errorf("mail: encrypt body: %w", err)
+	}
+	stored := storedMessage{ToEnc: toEnc, Subject: msg.Subject, BodyEnc: bodyEnc}
+
+	payload, err := json.Marshal(stored)
 	if err != nil {
 		return fmt.Errorf("mail: marshal message: %w", err)
 	}
@@ -78,11 +111,27 @@ func RunWorker(ctx context.Context, vk *valkey.Client, pool *db.Pool, masterKeyE
 			continue // idle queue - the normal case, not worth logging
 		}
 
-		var msg Message
-		if err := json.Unmarshal([]byte(raw), &msg); err != nil {
+		var stored storedMessage
+		if err := json.Unmarshal([]byte(raw), &stored); err != nil {
 			log.Printf("mail: dropping unreadable queued message: %v", err)
 			continue
 		}
+		masterKey, err := setup.ResolveMasterKey(ctx, pool, masterKeyEnv)
+		if err != nil {
+			log.Printf("mail: dropping queued message, could not resolve master key: %v", err)
+			continue
+		}
+		to, err := crypto.DecryptIfNotEmpty(masterKey, stored.ToEnc)
+		if err != nil {
+			log.Printf("mail: dropping queued message, could not decrypt to: %v", err)
+			continue
+		}
+		body, err := crypto.DecryptIfNotEmpty(masterKey, stored.BodyEnc)
+		if err != nil {
+			log.Printf("mail: dropping queued message, could not decrypt body: %v", err)
+			continue
+		}
+		msg := Message{To: to, Subject: stored.Subject, Body: body}
 		if err := deliver(ctx, pool, masterKeyEnv, msg); err != nil {
 			// No retry or dead-letter queue yet: a failed send (SMTP
 			// unreachable, bad credentials, or never configured at all)

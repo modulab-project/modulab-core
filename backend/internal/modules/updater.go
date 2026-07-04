@@ -169,20 +169,32 @@ func Update(ctx context.Context, d Deps, entry store.Entry) error {
 			fmt.Errorf("create new dir: %w", err))
 	}
 	if err := copyDir(extractDir, newDir); err != nil {
-		_ = os.RemoveAll(newDir)
+		if rmErr := os.RemoveAll(newDir); rmErr != nil {
+			log.Printf("modules: update %q: cleanup %s after failed copy: %v", entry.Name, newDir, rmErr)
+		}
 		return d.rollback(ctx, entry.Name, cachedZip,
 			fmt.Errorf("copy new files: %w", err))
 	}
 	oldDir := destDir + ".old-" + row.Version
 	if err := os.Rename(destDir, oldDir); err != nil {
-		_ = os.RemoveAll(newDir)
+		if rmErr := os.RemoveAll(newDir); rmErr != nil {
+			log.Printf("modules: update %q: cleanup %s after failed rename: %v", entry.Name, newDir, rmErr)
+		}
 		return d.rollback(ctx, entry.Name, cachedZip,
 			fmt.Errorf("move old dir: %w", err))
 	}
 	if err := os.Rename(newDir, destDir); err != nil {
-		// Try to restore old dir before rolling back.
-		_ = os.Rename(oldDir, destDir)
-		_ = os.RemoveAll(newDir)
+		// Try to restore old dir before rolling back. If this restore
+		// itself fails, the module is left with neither destDir nor oldDir
+		// in place — worth logging loudly since it needs manual recovery,
+		// not just silent fall-through into rollback (which would then also
+		// fail, since destDir wouldn't exist for copyDir to write into).
+		if restoreErr := os.Rename(oldDir, destDir); restoreErr != nil {
+			log.Printf("modules: update %q: CRITICAL: could not restore %s after failed activation, module directory may be missing: %v", entry.Name, oldDir, restoreErr)
+		}
+		if rmErr := os.RemoveAll(newDir); rmErr != nil {
+			log.Printf("modules: update %q: cleanup %s after failed rename: %v", entry.Name, newDir, rmErr)
+		}
 		return d.rollback(ctx, entry.Name, cachedZip,
 			fmt.Errorf("move new dir: %w", err))
 	}
@@ -201,7 +213,15 @@ func Update(ctx context.Context, d Deps, entry store.Entry) error {
 			log.Printf("modules: update %q: could not preserve storage dir (uploaded files may be lost): %v", entry.Name, err)
 		}
 	}
-	_ = os.RemoveAll(oldDir) // best-effort cleanup of superseded files
+	// Best-effort cleanup of superseded files. Logged (not just swallowed)
+	// because a failure here leaves a "{name}.old-{version}" directory
+	// permanently and invisibly orphaned in DataDir — nothing else in the
+	// codebase ever revisits or reports on stray .old-* directories, so a
+	// silent failure here was effectively unrecoverable without someone
+	// noticing extra disk usage and investigating by hand.
+	if err := os.RemoveAll(oldDir); err != nil {
+		log.Printf("modules: update %q: could not remove superseded dir %s: %v", entry.Name, oldDir, err)
+	}
 
 	// ── 9. Module migrations ──────────────────────────────────────────────
 	newMigrationsDir := filepath.Join(extractDir, "migrations")
@@ -217,15 +237,28 @@ func Update(ctx context.Context, d Deps, entry store.Entry) error {
 	if _, err := d.DB.UpdateModuleStatus(ctx, entry.Name, db.ModuleStatusActive); err != nil {
 		return fmt.Errorf("modules: update %q: mark active: %w", entry.Name, err)
 	}
-	// Clear available_version now that we're on the latest.
-	_ = d.DB.SetModuleAvailableVersion(ctx, entry.Name, "")
+	// Clear available_version now that we're on the latest. Logged (not
+	// just swallowed): a failure here leaves the UI showing a permanent,
+	// misleading "update available" badge for a module that is already on
+	// the latest version, with nothing in the logs to explain why to
+	// whoever investigates the mismatch later.
+	if err := d.DB.SetModuleAvailableVersion(ctx, entry.Name, ""); err != nil {
+		log.Printf("modules: update %q: could not clear available_version: %v", entry.Name, err)
+	}
 
 	// ── 11. Remove rollback cache ─────────────────────────────────────────
 	if cachedZip != "" {
 		if err := os.Remove(cachedZip); err != nil && !os.IsNotExist(err) {
 			log.Printf("modules: update %q: warning: remove rollback zip: %v", entry.Name, err)
 		}
-		_ = d.DB.ClearModuleCachedZip(ctx, entry.Name)
+		// Same reasoning as SetModuleAvailableVersion above: a failure here
+		// is invisible otherwise, and leaves the DB pointing at a rollback
+		// zip that Remove just deleted from disk — a future rollback
+		// attempt for this module would fail confusingly instead of
+		// cleanly reporting "no rollback available".
+		if err := d.DB.ClearModuleCachedZip(ctx, entry.Name); err != nil {
+			log.Printf("modules: update %q: could not clear cached zip reference: %v", entry.Name, err)
+		}
 	}
 
 	log.Printf("modules: updated %q %s → %s", entry.Name, row.Version, mf.Version)

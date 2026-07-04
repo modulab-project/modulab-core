@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/modulab-project/modulab-core/backend/internal/crypto"
+	"github.com/modulab-project/modulab-core/backend/internal/setup"
 	"github.com/modulab-project/modulab-core/backend/internal/valkey"
 )
 
@@ -73,20 +75,123 @@ type Session struct {
 	Locked            bool   `json:"locked,omitempty"`
 }
 
-// CreateSession mints a new opaque bearer token for sess and stores it in
-// Valkey with TTL SessionTTL. The token is 256 bits of randomness,
-// base64url-encoded.
-func CreateSession(ctx context.Context, vk *valkey.Client, sess Session) (string, error) {
+// storedSession is the on-the-wire (Valkey) representation of a Session.
+// Email, Name, PreferredUsername, and Picture are AES-256-GCM encrypted
+// before being written to Valkey — Session's own doc comment says these are
+// copied verbatim from the OIDC ID token's claims, i.e. the same class of
+// PII the project's encryption policy already covers for the users table,
+// OIDC/SMTP config, quicklinks, and news-feed URLs (see
+// feedback_encrypt_at_implementation_time). Found during the pre-V1 re-audit:
+// this was the one remaining PII store still in plaintext.
+//
+// UserID stays plaintext: it is an opaque OIDC subject identifier, not PII,
+// and is also used as a Valkey/DB lookup key elsewhere
+// (userSessionsKeyPrefix+UserID) — same treatment as audit_log's actor_id.
+// EmailVerified, Role, and Locked are booleans/enums, exempt by the same
+// policy.
+//
+// Deploying this is a one-time, self-healing transition: any session
+// created by the previous plaintext format will fail to populate the *_enc
+// fields on the next read (unknown old JSON keys are silently ignored by
+// json.Unmarshal), so decryptSession returns "" for Email/Name/
+// PreferredUsername/Picture until that session's next login — UserID/Role
+// still round-trip correctly, so access itself is unaffected. No migration
+// needed given SessionTTL is only 24h.
+type storedSession struct {
+	UserID               string `json:"user_id"`
+	EmailEnc             string `json:"email_enc"`
+	EmailVerified        bool   `json:"email_verified"`
+	NameEnc              string `json:"name_enc"`
+	PreferredUsernameEnc string `json:"preferred_username_enc"`
+	PictureEnc           string `json:"picture_enc"`
+	Role                 string `json:"role"`
+	Locked               bool   `json:"locked,omitempty"`
+}
+
+// encryptSession converts a plaintext Session into its encrypted-at-rest
+// storedSession form.
+func encryptSession(masterKey string, sess Session) (storedSession, error) {
+	emailEnc, err := crypto.EncryptIfNotEmpty(masterKey, sess.Email)
+	if err != nil {
+		return storedSession{}, fmt.Errorf("encrypt email: %w", err)
+	}
+	nameEnc, err := crypto.EncryptIfNotEmpty(masterKey, sess.Name)
+	if err != nil {
+		return storedSession{}, fmt.Errorf("encrypt name: %w", err)
+	}
+	preferredEnc, err := crypto.EncryptIfNotEmpty(masterKey, sess.PreferredUsername)
+	if err != nil {
+		return storedSession{}, fmt.Errorf("encrypt preferred_username: %w", err)
+	}
+	pictureEnc, err := crypto.EncryptIfNotEmpty(masterKey, sess.Picture)
+	if err != nil {
+		return storedSession{}, fmt.Errorf("encrypt picture: %w", err)
+	}
+	return storedSession{
+		UserID:               sess.UserID,
+		EmailEnc:             emailEnc,
+		EmailVerified:        sess.EmailVerified,
+		NameEnc:              nameEnc,
+		PreferredUsernameEnc: preferredEnc,
+		PictureEnc:           pictureEnc,
+		Role:                 sess.Role,
+		Locked:               sess.Locked,
+	}, nil
+}
+
+// decryptSession is encryptSession's inverse, used by ValidateSession.
+func decryptSession(masterKey string, s storedSession) (Session, error) {
+	email, err := crypto.DecryptIfNotEmpty(masterKey, s.EmailEnc)
+	if err != nil {
+		return Session{}, fmt.Errorf("decrypt email: %w", err)
+	}
+	name, err := crypto.DecryptIfNotEmpty(masterKey, s.NameEnc)
+	if err != nil {
+		return Session{}, fmt.Errorf("decrypt name: %w", err)
+	}
+	preferred, err := crypto.DecryptIfNotEmpty(masterKey, s.PreferredUsernameEnc)
+	if err != nil {
+		return Session{}, fmt.Errorf("decrypt preferred_username: %w", err)
+	}
+	picture, err := crypto.DecryptIfNotEmpty(masterKey, s.PictureEnc)
+	if err != nil {
+		return Session{}, fmt.Errorf("decrypt picture: %w", err)
+	}
+	return Session{
+		UserID:            s.UserID,
+		Email:             email,
+		EmailVerified:     s.EmailVerified,
+		Name:              name,
+		PreferredUsername: preferred,
+		Picture:           picture,
+		Role:              s.Role,
+		Locked:            s.Locked,
+	}, nil
+}
+
+// CreateSession mints a new opaque bearer token for sess and stores it
+// (encrypted, see storedSession) in Valkey with TTL SessionTTL. The token is
+// 256 bits of randomness, base64url-encoded.
+func CreateSession(ctx context.Context, d Deps, sess Session) (string, error) {
 	token, err := randomToken()
 	if err != nil {
 		return "", err
 	}
 
-	data, err := json.Marshal(sess)
+	masterKey, err := setup.ResolveMasterKey(ctx, d.Pool, d.MasterKeyEnv)
+	if err != nil {
+		return "", fmt.Errorf("auth: resolve master key: %w", err)
+	}
+	stored, err := encryptSession(masterKey, sess)
+	if err != nil {
+		return "", fmt.Errorf("auth: encrypt session: %w", err)
+	}
+
+	data, err := json.Marshal(stored)
 	if err != nil {
 		return "", fmt.Errorf("auth: marshal session: %w", err)
 	}
-	if err := vk.SetWithTTL(ctx, sessionKeyPrefix+token, string(data), SessionTTL); err != nil {
+	if err := d.Valkey.SetWithTTL(ctx, sessionKeyPrefix+token, string(data), SessionTTL); err != nil {
 		return "", fmt.Errorf("auth: store session: %w", err)
 	}
 	// Indexed by subject too, so RevokeUserSessions can find this token
@@ -96,7 +201,7 @@ func CreateSession(ctx context.Context, vk *valkey.Client, sess Session) (string
 	// action against this user would not catch this particular session
 	// until it expires on its own, so it is still surfaced as an error
 	// rather than silently swallowed.
-	if err := vk.AddSetMember(ctx, userSessionsKeyPrefix+sess.UserID, token, SessionTTL); err != nil {
+	if err := d.Valkey.AddSetMember(ctx, userSessionsKeyPrefix+sess.UserID, token, SessionTTL); err != nil {
 		return "", fmt.Errorf("auth: index session by user: %w", err)
 	}
 	return token, nil
@@ -134,22 +239,31 @@ func RevokeUserSessions(ctx context.Context, vk *valkey.Client, subject string) 
 // extension failures are non-fatal: the session was already read
 // successfully, so the caller gets a valid response regardless. Worst
 // case the session expires on its original schedule rather than sliding.
-func ValidateSession(ctx context.Context, vk *valkey.Client, token string) (Session, bool, error) {
-	raw, exists, err := vk.Get(ctx, sessionKeyPrefix+token)
+func ValidateSession(ctx context.Context, d Deps, token string) (Session, bool, error) {
+	raw, exists, err := d.Valkey.Get(ctx, sessionKeyPrefix+token)
 	if err != nil {
 		return Session{}, false, err
 	}
 	if !exists {
 		return Session{}, false, nil
 	}
-	var sess Session
-	if err := json.Unmarshal([]byte(raw), &sess); err != nil {
+	var stored storedSession
+	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
 		return Session{}, false, fmt.Errorf("auth: decode session: %w", err)
 	}
 
+	masterKey, err := setup.ResolveMasterKey(ctx, d.Pool, d.MasterKeyEnv)
+	if err != nil {
+		return Session{}, false, fmt.Errorf("auth: resolve master key: %w", err)
+	}
+	sess, err := decryptSession(masterKey, stored)
+	if err != nil {
+		return Session{}, false, fmt.Errorf("auth: decrypt session: %w", err)
+	}
+
 	// Slide the window - best effort, non-fatal if Valkey hiccups here.
-	_ = vk.Expire(ctx, sessionKeyPrefix+token, SessionTTL)
-	_ = vk.Expire(ctx, userSessionsKeyPrefix+sess.UserID, SessionTTL)
+	_ = d.Valkey.Expire(ctx, sessionKeyPrefix+token, SessionTTL)
+	_ = d.Valkey.Expire(ctx, userSessionsKeyPrefix+sess.UserID, SessionTTL)
 
 	return sess, true, nil
 }
@@ -187,13 +301,18 @@ func UpdateSessionsRole(ctx context.Context, vk *valkey.Client, subject, role st
 			// lazily, same as RevokeUserSessions).
 			continue
 		}
-		var sess Session
-		if err := json.Unmarshal([]byte(raw), &sess); err != nil {
+		// Unmarshals into storedSession, not Session: Role/Locked are the
+		// only fields this rewrite touches and both stay plaintext in the
+		// stored form (see storedSession's doc comment), so this never
+		// needs the master key to decrypt/re-encrypt the PII fields it
+		// isn't touching - they round-trip through *_enc untouched.
+		var stored storedSession
+		if err := json.Unmarshal([]byte(raw), &stored); err != nil {
 			return fmt.Errorf("auth: decode session for role update: %w", err)
 		}
-		sess.Role = role
-		sess.Locked = locked
-		data, err := json.Marshal(sess)
+		stored.Role = role
+		stored.Locked = locked
+		data, err := json.Marshal(stored)
 		if err != nil {
 			return fmt.Errorf("auth: marshal session for role update: %w", err)
 		}

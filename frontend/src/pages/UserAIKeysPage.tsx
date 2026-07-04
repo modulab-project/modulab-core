@@ -27,7 +27,9 @@ export default function UserAIKeysPage() {
   const refresh = () => {
     const token = getSessionToken();
     if (!token) return;
-    listAIProviders(token).then(({ providers }) => setProviders(providers)).catch(() => {});
+    listAIProviders(token)
+      .then(({ providers }) => { setProviders(providers); setError(null); })
+      .catch(() => setError(t("user.ai.load_error")));
   };
 
   useEffect(() => {

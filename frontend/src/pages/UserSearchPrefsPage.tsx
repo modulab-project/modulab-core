@@ -29,13 +29,15 @@ export default function UserSearchPrefsPage() {
   const [fetching, setFetching] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [saveError, setSaveError] = useState(false);
 
   useEffect(() => {
     const token = getSessionToken();
     if (!token) return;
     getSearchPrefs(token)
       .then(setPrefs)
-      .catch(() => {})
+      .catch(() => setLoadError(true))
       .finally(() => setFetching(false));
   }, []);
 
@@ -46,14 +48,17 @@ export default function UserSearchPrefsPage() {
     setPrefs(next);
     setSaving(true);
     setSaved(false);
+    setSaveError(false);
     try {
       const updated = await updateSearchPrefs(token, next);
       setPrefs(updated);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch {
-      // Roll back on error.
+      // Roll back on error, and say so - a control that visibly reverts
+      // is confusing without an explanation.
       setPrefs(prefs);
+      setSaveError(true);
     } finally {
       setSaving(false);
     }
@@ -77,6 +82,12 @@ export default function UserSearchPrefsPage() {
             </span>
           )}
         </div>
+
+        {(loadError || saveError) && (
+          <p className="mb-4 text-sm text-red-600 dark:text-red-400">
+            {loadError ? t("user.search.load_error") : t("user.search.save_error")}
+          </p>
+        )}
 
         {fetching ? (
           <div className="flex flex-col gap-4">

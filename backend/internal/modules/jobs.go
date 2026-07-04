@@ -124,14 +124,27 @@ func (r *JobRunner) tick(ctx context.Context, now time.Time) {
 	}
 
 	for _, row := range installed {
-		if row.Tier < 2 || row.Status != "active" || row.Manifest == nil {
+		if row.Tier < 2 || row.Status != "active" {
+			continue
+		}
+		if row.Manifest == nil {
+			// An active tier >= 2 module should always have a manifest —
+			// this is a genuinely unexpected state (not "module just has no
+			// jobs", which is the common case handled below), so it's
+			// worth a log line: this module's scheduled jobs are silently
+			// disabled until whatever wrote this row is fixed.
+			log.Printf("modules: jobrunner: %q is active but has no manifest, skipping its jobs", row.Name)
 			continue
 		}
 		var mf struct {
 			Jobs []ManifestJob `json:"jobs"`
 		}
-		if err := json.Unmarshal(row.Manifest, &mf); err != nil || len(mf.Jobs) == 0 {
+		if err := json.Unmarshal(row.Manifest, &mf); err != nil {
+			log.Printf("modules: jobrunner: %q: manifest is not valid JSON, skipping its jobs: %v", row.Name, err)
 			continue
+		}
+		if len(mf.Jobs) == 0 {
+			continue // normal case: most modules declare no scheduled jobs
 		}
 		if !r.workers.Running(row.Name) {
 			continue // worker not up (e.g. failed to start) — nothing to dispatch to

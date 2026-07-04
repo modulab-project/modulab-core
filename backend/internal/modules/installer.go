@@ -347,6 +347,18 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 
 	// ── 12. Mark active ───────────────────────────────────────────────────
 	if _, err := d.DB.UpdateModuleStatus(ctx, entry.Name, db.ModuleStatusActive); err != nil {
+		// The Deno worker (started in step 11, tier >= 2 only) is already
+		// running at this point but the module never reaches an "active"
+		// row — without this, a failure here left the worker orphaned:
+		// running, consuming resources, reachable by nothing (the proxy
+		// route requires status "active"), and with no code path left to
+		// stop it short of a full Core restart. Mirrors uninstaller.go's
+		// Workers.Stop call for the symmetric teardown case.
+		if mf.Tier >= 2 {
+			if stopErr := d.Workers.Stop(mf.Name); stopErr != nil {
+				log.Printf("modules: install %q: stop orphaned worker after failed activate: %v", entry.Name, stopErr)
+			}
+		}
 		return fmt.Errorf("modules: install %q: mark active: %w", entry.Name, err)
 	}
 

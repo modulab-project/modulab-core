@@ -322,14 +322,14 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 						continue
 					}
 					msg := mail.PendingApprovalMessage(admin.Email, admin.Name, d.FrontendBaseURL, claims.Name, claims.Email)
-					if err := mail.Enqueue(ctx, d.Valkey, msg); err != nil {
+					if err := mail.Enqueue(ctx, d.Valkey, d.Pool, d.MasterKeyEnv, msg); err != nil {
 						log.Printf("auth: failed to enqueue pending-approval mail for %s: %v", admin.Email, err)
 					}
 				}
 			}
 		}
 
-		token, err := CreateSession(ctx, d.Valkey, Session{
+		token, err := CreateSession(ctx, d, Session{
 			UserID:            claims.Subject,
 			Email:             claims.Email,
 			EmailVerified:     claims.EmailVerified,
@@ -395,7 +395,7 @@ func MeHandler(d Deps) http.HandlerFunc {
 		}
 
 		ctx := r.Context()
-		sess, ok, err := ValidateSession(ctx, d.Valkey, token)
+		sess, ok, err := ValidateSession(ctx, d, token)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -441,7 +441,7 @@ func DeleteSelfHandler(d Deps) http.HandlerFunc {
 		}
 
 		ctx := r.Context()
-		sess, ok, err := ValidateSession(ctx, d.Valkey, token)
+		sess, ok, err := ValidateSession(ctx, d, token)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -500,7 +500,7 @@ func DeleteSelfHandler(d Deps) http.HandlerFunc {
 		// succeeded and is the source of truth, so a missed confirmation
 		// email must not turn it into a 500 the caller has to retry.
 		if sess.Email != "" {
-			if err := mail.Enqueue(ctx, d.Valkey, mail.DeletedMessage(sess.Email, sess.Name)); err != nil {
+			if err := mail.Enqueue(ctx, d.Valkey, d.Pool, d.MasterKeyEnv, mail.DeletedMessage(sess.Email, sess.Name)); err != nil {
 				log.Printf("auth: delete-self: failed to enqueue mail for %s: %v", sess.UserID, err)
 			}
 		}
@@ -529,7 +529,7 @@ func UserPrefsHandler(d Deps) http.HandlerFunc {
 			return
 		}
 		ctx := r.Context()
-		sess, ok, err := ValidateSession(ctx, d.Valkey, token)
+		sess, ok, err := ValidateSession(ctx, d, token)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -589,7 +589,7 @@ func ExportSelfHandler(d Deps) http.HandlerFunc {
 			return
 		}
 		ctx := r.Context()
-		sess, ok, err := ValidateSession(ctx, d.Valkey, token)
+		sess, ok, err := ValidateSession(ctx, d, token)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

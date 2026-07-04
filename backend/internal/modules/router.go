@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
@@ -41,10 +42,7 @@ func recordModuleAuditEvents(ctx context.Context, authDeps auth.Deps, moduleName
 			log.Printf("modules: %q: rejected audit event with invalid type %q", moduleName, ev.EventType)
 			continue
 		}
-		details := ev.Details
-		if len(details) > maxModuleAuditDetailsLen {
-			details = details[:maxModuleAuditDetailsLen]
-		}
+		details := truncateUTF8(ev.Details, maxModuleAuditDetailsLen)
 		logModuleAudit(ctx, authDeps, audit.LogParams{
 			EventType:   "module." + moduleName + "." + ev.EventType,
 			ActorID:     sess.UserID,
@@ -54,6 +52,23 @@ func recordModuleAuditEvents(ctx context.Context, authDeps auth.Deps, moduleName
 			Details:     details,
 		})
 	}
+}
+
+// truncateUTF8 cuts s to at most maxBytes bytes without splitting a
+// multi-byte UTF-8 rune in half. Plain byte-slicing (s[:maxBytes]) can leave
+// a truncated rune at the end, which fails Postgres's UTF-8 validation on
+// insert — silently dropping the whole audit entry under the existing
+// log-and-continue error handling. Backing off rune-by-rune from maxBytes
+// is O(4) worst case (max UTF-8 rune width), not a real cost.
+func truncateUTF8(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	b := []byte(s)[:maxBytes]
+	for len(b) > 0 && !utf8.RuneStart(b[len(b)-1]) {
+		b = b[:len(b)-1]
+	}
+	return string(b)
 }
 
 // maxUploadBytes is the per-request upload cap for module image uploads.

@@ -59,6 +59,16 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - docker-socket-proxy-internal
+    healthcheck:
+      # Alpine-based image, so plain busybox wget is available without
+      # installing anything extra. Hits the proxy's own forwarded /version
+      # endpoint (allowed above via VERSION: 1) to confirm it is actually
+      # accepting requests, not just that the process has started - so
+      # Traefik's depends_on below can wait for "ready", not just "running".
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:2375/version"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
   # ── Traefik (edge proxy + TLS) ───────────────────────────────────────────────
   traefik:
@@ -99,7 +109,8 @@ services:
     volumes:
       - traefik-acme:/letsencrypt
     depends_on:
-      - docker-socket-proxy
+      docker-socket-proxy:
+        condition: service_healthy
     networks:
       - modulab-internal
       - docker-socket-proxy-internal
@@ -227,7 +238,17 @@ services:
       - searxng-data:/etc/searxng
       - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
     depends_on:
-      - valkey
+      valkey:
+        condition: service_healthy
+    healthcheck:
+      # SearXNG's image is also Alpine-based; hits its own home page rather
+      # than a dedicated /healthz (SearXNG has none) to confirm the app
+      # server itself is answering, not just that the container started.
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.searxng.rule=Host(`${MODULAB_DOMAIN}`) && PathPrefix(`/searxng`)"

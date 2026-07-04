@@ -75,7 +75,7 @@ export default function AdminAIPage() {
           setRpmInput(String(s.chat_rpm_limit));
           setBodyInput(String(s.max_body_bytes));
         })
-        .catch(() => {});
+        .catch(() => setError(t("admin.ai.settings.load_error")));
     }
   }, [session, navigate, refresh]);
 

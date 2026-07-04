@@ -383,6 +383,8 @@ export function QuickLinksGrid({
   const { t } = useTranslation();
   const [tiles, setTiles] = useState<Tile[]>(initialTiles);
   const [showAdd, setShowAdd] = useState(false);
+  const [reorderError, setReorderError] = useState(false);
+  const [deleteError, setDeleteError] = useState(false);
 
   // Sync when the parent delivers fetched tiles after first render.
   useEffect(() => {
@@ -396,9 +398,14 @@ export function QuickLinksGrid({
   const persistOrder = useCallback(
     (ordered: Tile[]) => {
       const refs = ordered.map((t) => ({ type: t.type, id: t.id }));
+      setReorderError(false);
       saveOrder(token, refs).catch(() => {
-        // Silent failure: the grid already reflects the new visual order.
-        // The saved order is authoritative only on next page load.
+        // The grid already reflects the new visual order optimistically -
+        // but if the server never got it, the next page load silently
+        // reverts to the old order with no explanation. Surfaced instead
+        // of swallowed so the user knows to retry rather than assuming the
+        // reorder just worked.
+        setReorderError(true);
       });
     },
     [token]
@@ -433,11 +440,14 @@ export function QuickLinksGrid({
   }
 
   async function handleDelete(tile: Tile) {
+    setDeleteError(false);
     try {
       await deleteUserQuickLink(token, tile.id);
       setTiles((prev) => prev.filter((t) => t.id !== tile.id));
     } catch {
-      // ignore — tile remains visible
+      // Tile remains visible - surfaced so the user knows the click
+      // didn't silently do nothing.
+      setDeleteError(true);
     }
   }
 
@@ -448,6 +458,13 @@ export function QuickLinksGrid({
 
   return (
     <div>
+      {(reorderError || deleteError) && (
+        <p className="mb-2 text-sm text-red-600 dark:text-red-400">
+          {reorderError
+            ? t("home.quick_links_reorder_failed")
+            : t("home.quick_links_delete_failed")}
+        </p>
+      )}
       {/* Grid */}
       <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6">
         {tiles.map((tile, idx) => (

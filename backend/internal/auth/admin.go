@@ -57,7 +57,7 @@ func enqueueMail(ctx context.Context, d Deps, action, subject string, build func
 	if !exists || user.Email == "" {
 		return
 	}
-	if err := mail.Enqueue(ctx, d.Valkey, build(user.Email, user.Name)); err != nil {
+	if err := mail.Enqueue(ctx, d.Valkey, d.Pool, d.MasterKeyEnv, build(user.Email, user.Name)); err != nil {
 		log.Printf("auth: %s: failed to enqueue mail for %s: %v", action, subject, err)
 	}
 }
@@ -89,7 +89,7 @@ func requireAdmin(d Deps, w http.ResponseWriter, r *http.Request) (Session, bool
 		http.Error(w, "missing bearer token", http.StatusUnauthorized)
 		return Session{}, false
 	}
-	sess, ok, err := ValidateSession(r.Context(), d.Valkey, token)
+	sess, ok, err := ValidateSession(r.Context(), d, token)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return Session{}, false
@@ -206,7 +206,7 @@ func requireActiveSessionWithToken(d Deps, w http.ResponseWriter, r *http.Reques
 		http.Error(w, "missing bearer token", http.StatusUnauthorized)
 		return Session{}, false
 	}
-	sess, ok, err := ValidateSession(r.Context(), d.Valkey, token)
+	sess, ok, err := ValidateSession(r.Context(), d, token)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return Session{}, false
@@ -522,7 +522,7 @@ func DeleteUserHandler(d Deps) http.HandlerFunc {
 		// a missed confirmation email must not turn it into a 500 the
 		// admin has to retry.
 		if targetExists && target.Email != "" {
-			if err := mail.Enqueue(r.Context(), d.Valkey, mail.DeletedMessage(target.Email, target.Name)); err != nil {
+			if err := mail.Enqueue(r.Context(), d.Valkey, d.Pool, d.MasterKeyEnv, mail.DeletedMessage(target.Email, target.Name)); err != nil {
 				log.Printf("auth: delete: failed to enqueue mail for %s: %v", subject, err)
 			}
 		}

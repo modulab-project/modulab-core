@@ -103,6 +103,7 @@
         "body_label": "Max. Request-Body-Größe (Bytes)",
         "body_hint": "0 = unbegrenzt. Standard: 1048576 (1 MB). Gilt für alle Endpunkte.",
         "save_error": "Einstellungen konnten nicht gespeichert werden.",
+        "load_error": "Einstellungen konnten nicht geladen werden.",
         "saved": "Gespeichert"
       },
       "modal": {
@@ -358,6 +359,8 @@
     "quick_links_remove": "Kachel entfernen",
     "quick_links_empty": "Noch keine Kacheln — klicke auf + um deine erste Verknüpfung anzulegen.",
     "quick_links_error": "Fehler beim Speichern",
+    "quick_links_reorder_failed": "Neue Reihenfolge konnte nicht gespeichert werden — bitte erneut versuchen.",
+    "quick_links_delete_failed": "Kachel konnte nicht entfernt werden — bitte erneut versuchen.",
     "quick_links_mode_url": "URL",
     "quick_links_mode_module": "Modul",
     "quick_links_module_required": "Bitte ein Modul auswählen.",
@@ -575,6 +578,7 @@
       "title": "KI-Anbieter",
       "subtitle": "Eigenen API-Schlüssel hinzufügen, um den ModuLab-Schlüssel zu überschreiben. Mit eigenem Schlüssel kannst du auch das Modell wählen.",
       "empty": "Noch keine KI-Anbieter konfiguriert.",
+      "load_error": "KI-Anbieter konnten nicht geladen werden.",
       "save_key_error": "Schlüssel konnte nicht gespeichert werden.",
       "remove_key_error": "Schlüssel konnte nicht entfernt werden.",
       "fetch_models_error": "Modelle konnten nicht geladen werden.",
@@ -601,14 +605,18 @@
     "feeds": {
       "title": "Meine Feeds",
       "subtitle": "News-Feeds aktivieren oder deaktivieren, um deine Startseite anzupassen.",
-      "empty": "Noch keine Feeds verfügbar. Ein Admin muss zuerst welche hinzufügen."
+      "empty": "Noch keine Feeds verfügbar. Ein Admin muss zuerst welche hinzufügen.",
+      "load_error": "Deine Feeds konnten nicht geladen werden.",
+      "toggle_error": "Änderung konnte nicht gespeichert werden — bitte erneut versuchen."
     },
     "search": {
       "title": "Sucheinstellungen",
       "subtitle": "Diese Einstellungen gelten für alle deine Websuchen.",
       "safesearch_desc": "Explizite Inhalte aus deinen Web- und Bildersuchen filtern.",
       "language_desc": "Ergebnisse in einer bestimmten Sprache bevorzugen.",
-      "saved": "Gespeichert"
+      "saved": "Gespeichert",
+      "load_error": "Deine Sucheinstellungen konnten nicht geladen werden.",
+      "save_error": "Änderung konnte nicht gespeichert werden — bitte erneut versuchen."
     }
   },
   "store": {

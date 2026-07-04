@@ -14,14 +14,17 @@ export default function UserFeedsPage() {
   const [feeds, setFeeds] = useState<Feed[]>([]);
   const [fetching, setFetching] = useState(true);
   const [toggling, setToggling] = useState<number | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [toggleError, setToggleError] = useState(false);
 
   useEffect(() => {
     const token = getSessionToken();
     if (!token) return;
     setFetching(true);
+    setLoadError(false);
     listFeeds(token)
       .then((f) => setFeeds(f ?? []))
-      .catch(() => {})
+      .catch(() => setLoadError(true))
       .finally(() => setFetching(false));
   }, []);
 
@@ -30,11 +33,15 @@ export default function UserFeedsPage() {
     if (!token || toggling !== null) return;
     const next = !feed.enabled;
     setToggling(feed.id);
+    setToggleError(false);
     setFeeds((prev) => prev.map((f) => (f.id === feed.id ? { ...f, enabled: next } : f)));
     try {
       await setFeedSubscription(token, feed.id, next);
     } catch {
+      // Revert the optimistic toggle, and say so - a toggle that visibly
+      // flips back is confusing without an explanation.
       setFeeds((prev) => prev.map((f) => (f.id === feed.id ? { ...f, enabled: feed.enabled } : f)));
+      setToggleError(true);
     } finally {
       setToggling(null);
     }
@@ -49,6 +56,12 @@ export default function UserFeedsPage() {
         <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">
           {t("user.feeds.subtitle")}
         </p>
+
+        {(loadError || toggleError) && (
+          <p className="mb-4 text-sm text-red-600 dark:text-red-400">
+            {loadError ? t("user.feeds.load_error") : t("user.feeds.toggle_error")}
+          </p>
+        )}
 
         {fetching ? (
           <div className="flex flex-col gap-2">

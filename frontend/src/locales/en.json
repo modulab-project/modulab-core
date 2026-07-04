@@ -103,6 +103,7 @@
         "body_label": "Max request body size (bytes)",
         "body_hint": "0 = unlimited. Default: 1048576 (1 MB). Applies to all endpoints.",
         "save_error": "Failed to save settings.",
+        "load_error": "Could not load settings.",
         "saved": "Saved"
       },
       "modal": {
@@ -358,6 +359,8 @@
     "quick_links_remove": "Remove tile",
     "quick_links_empty": "No tiles yet — click \"+\" to add your first link.",
     "quick_links_error": "Error saving",
+    "quick_links_reorder_failed": "Could not save the new order — please try again.",
+    "quick_links_delete_failed": "Could not remove this tile — please try again.",
     "quick_links_mode_url": "URL",
     "quick_links_mode_module": "Module",
     "quick_links_module_required": "Please select a module.",
@@ -575,6 +578,7 @@
       "title": "AI providers",
       "subtitle": "Add your own API key to override the ModuLab key. With your own API key you also choose which model to use.",
       "empty": "No AI providers configured yet.",
+      "load_error": "Could not load AI providers.",
       "save_key_error": "Failed to save key.",
       "remove_key_error": "Failed to remove key.",
       "fetch_models_error": "Could not fetch models.",
@@ -601,14 +605,18 @@
     "feeds": {
       "title": "My feeds",
       "subtitle": "Enable or disable news feeds to personalise your home page.",
-      "empty": "No feeds available yet. An admin needs to add some first."
+      "empty": "No feeds available yet. An admin needs to add some first.",
+      "load_error": "Could not load your feeds.",
+      "toggle_error": "Could not save that change — please try again."
     },
     "search": {
       "title": "Search settings",
       "subtitle": "These preferences apply to all your web searches.",
       "safesearch_desc": "Filter explicit content from your web and image search results.",
       "language_desc": "Prefer results in a specific language.",
-      "saved": "Saved"
+      "saved": "Saved",
+      "load_error": "Could not load your search preferences.",
+      "save_error": "Could not save that change — please try again."
     }
   },
   "store": {
