@@ -541,7 +541,13 @@ func main() {
 
 	// At startup, restart Deno workers for all Tier 2/3 modules that were
 	// active before the last shutdown.
-	if installedAtBoot, err := pool.ListInstalledModules(ctx); err == nil {
+	if installedAtBoot, err := pool.ListInstalledModules(ctx); err != nil {
+		// Previously silently swallowed (no else branch at all): a failure
+		// here skipped the entire worker-restart loop below with zero log
+		// output, indistinguishable from "no modules installed". Logging it
+		// is diagnostic-only - this doesn't change startup behavior.
+		log.Printf("main: startup: could not list installed modules, no Deno workers will be restarted: %v", err)
+	} else {
 		for _, row := range installedAtBoot {
 			if row.Tier >= 2 && row.Status == "active" {
 				entrypoint := ""
