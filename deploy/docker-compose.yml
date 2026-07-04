@@ -5,8 +5,60 @@
 #   cp .env.example .env   # fill in all required values
 #   docker compose up -d
 #   docker compose logs -f core
+#
+# Resource limits: every service below sets mem_limit/cpus. These are
+# non-swarm Compose fields (no `deploy:` key or swarm mode needed) and exist
+# so a single runaway container (e.g. a misbehaving module's Deno subprocess
+# under core, or Postgres under an unexpectedly large query) cannot exhaust
+# the whole host and take every other service down with it - there was
+# previously no ceiling on any service at all. Sizes below are starting
+# points for a typical homelab box, not hard requirements; raise them if a
+# service is actually being throttled (`docker stats` will show it sitting
+# at its cpus/mem_limit ceiling).
 
 services:
+
+  # ── Docker socket proxy ──────────────────────────────────────────────────────
+  # Sits between Traefik and the real Docker socket. A bare `:ro` bind mount
+  # of docker.sock (the previous setup) only restricts the file open mode -
+  # it is not an API-level permission boundary, since the Docker daemon's
+  # Unix-socket protocol is bidirectional regardless of how the socket file
+  # itself was mounted. A container with any access to the raw socket can
+  # still reach write/exec endpoints depending on how the client library
+  # opens the connection, which amounts to root-on-the-host if Traefik is
+  # ever compromised (a real risk: it's the one container directly exposed
+  # to the internet). This proxy terminates the real socket and only forwards
+  # the handful of read-only, GET-based endpoints Traefik's Docker provider
+  # actually needs (listing containers + their labels, and the events
+  # stream so it notices new containers) - everything else (POST, exec,
+  # volumes, networks, swarm, etc.) is denied by default. Runs on its own
+  # network that nothing else in this stack can reach.
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    restart: unless-stopped
+    environment:
+      # Read-only, GET-only endpoints Traefik's Docker provider needs:
+      CONTAINERS: 1
+      EVENTS: 1
+      PING: 1
+      VERSION: 1
+      # Explicit belt-and-suspenders: everything else this image can gate is
+      # off by default, but naming the sensitive ones here documents intent
+      # (POST/exec/networks/volumes/swarm all denied).
+      POST: 0
+      EXEC: 0
+      NETWORKS: 0
+      VOLUMES: 0
+      SERVICES: 0
+      SWARM: 0
+      SYSTEM: 0
+      TASKS: 0
+    mem_limit: 64m
+    cpus: 0.25
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - docker-socket-proxy-internal
 
   # ── Traefik (edge proxy + TLS) ───────────────────────────────────────────────
   traefik:
@@ -17,6 +69,10 @@ services:
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
       - "--providers.docker.network=modulab-internal"
+      # Talk to the socket proxy above instead of mounting the real
+      # docker.sock into this container directly - see that service's doc
+      # comment for why.
+      - "--providers.docker.endpoint=tcp://docker-socket-proxy:2375"
       # HTTPS entrypoint
       - "--entrypoints.websecure.address=:443"
       # Redirect plain HTTP → HTTPS
@@ -31,6 +87,8 @@ services:
       - "--certificatesresolvers.le.acme.dnschallenge.resolvers=1.1.1.1:53,8.8.8.8:53"
       - "--certificatesresolvers.le.acme.email=${ACME_EMAIL}"
       - "--certificatesresolvers.le.acme.storage=/letsencrypt/acme.json"
+    mem_limit: 128m
+    cpus: 0.5
     ports:
       - "80:80"
       - "443:443"
@@ -39,10 +97,12 @@ services:
       # Must be exactly 40 characters with no surrounding whitespace.
       - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
       - traefik-acme:/letsencrypt
+    depends_on:
+      - docker-socket-proxy
     networks:
       - modulab-internal
+      - docker-socket-proxy-internal
 
   # ── PostgreSQL ───────────────────────────────────────────────────────────────
   postgres:
@@ -52,6 +112,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    mem_limit: 512m
+    cpus: 1.0
     volumes:
       - postgres-data:/var/lib/postgresql/data
     networks:
@@ -66,6 +128,8 @@ services:
   valkey:
     image: valkey/valkey:8-alpine
     restart: unless-stopped
+    mem_limit: 256m
+    cpus: 0.5
     volumes:
       - valkey-data:/data
     networks:
@@ -92,6 +156,15 @@ services:
       MODULAB_DB_PASSWORD: ${POSTGRES_PASSWORD}
       MODULAB_VALKEY_HOST: valkey
       MODULAB_VALKEY_PORT: "6379"
+    # Higher than the other services on purpose: unlike everything else in
+    # this file, core's cgroup also covers every Tier 2/3 module's Deno
+    # subprocess (they're spawned as children of this same container, see
+    # internal/modules/deno.go's WorkerPool) - so this ceiling has to fit
+    # Core itself plus however many modules are installed, not just one Go
+    # binary. Raise it further if `docker stats` shows this container
+    # pinned at the limit after installing several modules.
+    mem_limit: 1g
+    cpus: 2.0
     volumes:
       - modulab-modules-data:/var/lib/modulab/modules
     depends_on:
@@ -121,6 +194,8 @@ services:
       context: .
       dockerfile: Dockerfile.nginx
     restart: unless-stopped
+    mem_limit: 64m
+    cpus: 0.25
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
@@ -146,6 +221,8 @@ services:
       SEARXNG_BASE_URL: https://${MODULAB_DOMAIN}/searxng/
       SEARXNG_REDIS_URL: redis://valkey:6379/1
       SEARXNG_SECRET_KEY: ${SEARXNG_SECRET_KEY}
+    mem_limit: 256m
+    cpus: 0.5
     volumes:
       - searxng-data:/etc/searxng
       - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
@@ -168,6 +245,12 @@ networks:
     # directory name, which would break Traefik's --providers.docker.network.
     name: modulab-internal
     internal: false
+  # Isolated network for Traefik <-> docker-socket-proxy only - nothing else
+  # in this stack has (or needs) any reason to reach the socket proxy.
+  # internal: true means this network has no outbound route at all, on top
+  # of no other service being attached to it.
+  docker-socket-proxy-internal:
+    internal: true
 
 volumes:
   postgres-data:

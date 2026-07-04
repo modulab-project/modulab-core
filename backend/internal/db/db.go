@@ -70,11 +70,33 @@ func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
 			version TEXT NOT NULL,
 			tier SMALLINT NOT NULL CHECK (tier IN (1, 2, 3)),
 			scope TEXT NOT NULL CHECK (scope IN ('per-location', 'cross-location')),
-			status TEXT NOT NULL DEFAULT 'installing',
+			status TEXT NOT NULL DEFAULT 'installing' CHECK (status IN ('installing', 'active', 'degraded', 'failed', 'isolated')),
 			installed_at TIMESTAMPTZ NOT NULL DEFAULT now()
 		)
 	`); err != nil {
 		return fmt.Errorf("db: ensure installed_modules: %w", err)
+	}
+	// status had no CHECK constraint at all before this (unlike tier/scope
+	// right above it in the same table) despite the ModuleStatus* constants
+	// below implying one always existed - CREATE TABLE IF NOT EXISTS above
+	// is a no-op against any database that already has this table, so an
+	// existing deployment needs this added separately. Postgres has no
+	// ADD CONSTRAINT IF NOT EXISTS, hence the pg_constraint check (same
+	// pattern as EnsureAuditSchema's trigger check below).
+	if _, err := p.Exec(ctx, `
+		DO $$ BEGIN
+			IF NOT EXISTS (
+				SELECT 1 FROM pg_constraint
+				WHERE conname = 'installed_modules_status_check'
+				  AND conrelid = 'installed_modules'::regclass
+			) THEN
+				ALTER TABLE installed_modules
+					ADD CONSTRAINT installed_modules_status_check
+					CHECK (status IN ('installing', 'active', 'degraded', 'failed', 'isolated'));
+			END IF;
+		END $$
+	`); err != nil {
+		return fmt.Errorf("db: ensure installed_modules.status check: %w", err)
 	}
 
 	if _, err := p.Exec(ctx, `
@@ -1875,6 +1897,19 @@ func (p *Pool) EnsureModuleStoreSchema(ctx context.Context) error {
 		)
 	`); err != nil {
 		return fmt.Errorf("db: ensure module_registry: %w", err)
+	}
+
+	// store.ListEntries (internal/store/registry.go) filters
+	// "WHERE ($1 = '' OR source = $1) AND ($2 = '' OR category = $2)" for
+	// the Module Store's source/category filter UI. In practice this table
+	// stays small (a handful to a few dozen modules), so this index is more
+	// about correctness than a real performance need at today's scale - but
+	// free to keep, and correct if the registry ever grows past a trivial
+	// size (e.g. once a larger community index exists).
+	if _, err := p.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_module_registry_source_category ON module_registry (source, category)
+	`); err != nil {
+		return fmt.Errorf("db: ensure idx_module_registry_source_category: %w", err)
 	}
 
 	return nil

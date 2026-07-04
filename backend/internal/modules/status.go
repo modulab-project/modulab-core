@@ -134,11 +134,10 @@ func CheckUpdates(ctx context.Context, d Deps, storeDeps store.Deps) ([]UpdateIn
 	return updates, nil
 }
 
-// CircuitBreaker is a placeholder for the Tier 2/3 module circuit breaker
-// (spec section 4.9). When a Deno worker crashes repeatedly, the circuit
-// breaker transitions the module to ModuleStatusDegraded and prevents
-// automatic restart until an operator intervenes.
-//
-// TODO(post-v1): implement crash counting + exponential back-off once the
-// Deno worker IPC bus (internal/modules/deno.go) is in place.
-type CircuitBreaker struct{}
+// Crash handling (spec section 4.9's circuit breaker) lives in
+// WorkerPool.SetCrashHandler (deno.go), not as a separate type here: a
+// worker that exits unexpectedly is marked ModuleStatusDegraded and reported
+// via notify.AdminChannel, wired up once in main.go. There is deliberately
+// no automatic restart-with-backoff — see SetCrashHandler's doc comment for
+// why "detect and surface to an admin" was chosen over "detect and
+// auto-respawn" for a homelab instance nobody is actively paging on.

@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -37,6 +38,7 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/mail"
 	"github.com/modulab-project/modulab-core/backend/internal/modules"
 	"github.com/modulab-project/modulab-core/backend/internal/news"
+	"github.com/modulab-project/modulab-core/backend/internal/notify"
 	ntpcheck "github.com/modulab-project/modulab-core/backend/internal/ntp"
 	"github.com/modulab-project/modulab-core/backend/internal/quicklinks"
 	"github.com/modulab-project/modulab-core/backend/internal/searxng"
@@ -516,6 +518,27 @@ func main() {
 	workerPool := modules.NewWorkerPool(cfg.ModuleDataDir, dbURL)
 	defer workerPool.StopAll()
 
+	// A worker that crashes on its own (as opposed to Stop/StopAll or a
+	// deliberate restart) used to just go silent: installed_modules.status
+	// stayed "active" and nothing surfaced it anywhere. Mark the module
+	// degraded and reuse the same admin-notification channel
+	// modules.RunUpdateChecks already publishes to, so a connected admin's
+	// SSE stream picks it up live instead of only being discoverable by
+	// noticing the module has stopped responding. See
+	// WorkerPool.SetCrashHandler's doc comment for why this deliberately
+	// does not attempt an automatic restart.
+	workerPool.SetCrashHandler(func(name string) {
+		crashCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if _, err := pool.UpdateModuleStatus(crashCtx, name, db.ModuleStatusDegraded); err != nil {
+			log.Printf("main: crash handler: mark %q degraded: %v", name, err)
+		}
+		ev := notify.Event{Type: "module.crashed", Data: map[string]any{"name": name}}
+		if err := notify.Publish(crashCtx, valkeyClient, notify.AdminChannel(), ev); err != nil {
+			log.Printf("main: crash handler: publish event for %q: %v", name, err)
+		}
+	})
+
 	moduleDeps := modules.Deps{
 		DB:        pool,
 		DataDir:   cfg.ModuleDataDir,
@@ -629,6 +652,16 @@ func main() {
 	handler = maxBodyMiddleware(pool, handler)
 	handler = secHeadersMiddleware(handler)
 	handler = globalRateLimitMiddleware(valkeyClient, handler)
+	// Outermost: must run before every other middleware so a panic anywhere
+	// downstream (a handler, or one of the middlewares above) is still
+	// caught. Go's net/http already recovers a panicking handler goroutine
+	// on its own - one bad request cannot crash the whole process - but
+	// without this, the *only* symptom was the connection dropping with no
+	// response at all and a bare, unstructured stack trace on stdout (no
+	// request context: which route, which method, which IP). This adds a
+	// proper 500 response for the caller and a one-line log with the
+	// context needed to actually find the bug afterward.
+	handler = recoverMiddleware(handler)
 
 	srv := &http.Server{
 		Addr:    cfg.HTTPAddr,
@@ -766,6 +799,29 @@ func secHeadersMiddleware(next http.Handler) http.Handler {
 				"object-src 'none'; "+
 				"frame-ancestors 'none'; "+
 				"base-uri 'none'")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// recoverMiddleware turns a panicking handler into a 500 response with a
+// structured log line instead of a dropped connection and a bare stack
+// trace. debug.Stack() is still logged in full - the goal here is adding
+// request context (method, path, client IP) alongside it, not replacing it,
+// so a panic is still fully debuggable from the log alone.
+//
+// Deliberately does not attempt to keep serving other requests differently
+// than Go already does: net/http recovers a panicking handler on its own
+// goroutine-per-request model, so this middleware only ever affects the one
+// request that panicked, not instance-wide availability.
+func recoverMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.Printf("main: panic recovered: %v\nrequest: %s %s (from %s)\n%s",
+					rec, r.Method, r.URL.Path, clientIP(r), debug.Stack())
+				http.Error(w, "internal server error", http.StatusInternalServerError)
+			}
+		}()
 		next.ServeHTTP(w, r)
 	})
 }

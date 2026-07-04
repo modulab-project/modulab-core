@@ -177,7 +177,7 @@ function QuickLinkForm({
       ) : (
         /* URL form (existing or new URL tile) */
         <>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
                 {t("admin.quick_links.form.title_label")} *
@@ -204,8 +204,8 @@ function QuickLinkForm({
               />
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="col-span-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="sm:col-span-2">
               <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
                 {t("admin.quick_links.form.icon_label")}{" "}
                 <span className="text-gray-400">{t("admin.quick_links.form.icon_hint")}</span>

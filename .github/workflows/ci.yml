@@ -32,6 +32,15 @@ jobs:
         run: go test ./...
       - name: Build
         run: go build ./...
+      # Catches known-vulnerable dependencies actually reachable from this
+      # codebase's own call graph (govulncheck only flags a CVE if code here
+      # calls into the vulnerable function - not just "this dep is in
+      # go.sum somewhere"). Added after this exact gap let two real,
+      # reachable CVEs sit in go.mod during the V1 hardening pass
+      # (GO-2026-5004 in jackc/pgx, GO-2025-3540 in redis/go-redis) until a
+      # manual local run happened to catch them.
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
   frontend:
     runs-on: ubuntu-latest
@@ -49,6 +58,11 @@ jobs:
       - run: npm run build
       - name: a11y checks (axe-core)
         run: npm run test:a11y
+      # --audit-level=high: dev-dependency low/moderate advisories are noisy
+      # and common (build tooling, not shipped to users); high/critical in
+      # anything actually bundled is worth failing CI over.
+      - name: npm audit
+        run: npm audit --audit-level=high
 
   # Deliberately not implemented yet - see the decision below before adding
   # real Playwright coverage here.
@@ -118,3 +132,21 @@ jobs:
           tags: |
             ghcr.io/modulab-project/modulab-core:latest
             ghcr.io/modulab-project/modulab-core:${{ github.event.release.tag_name }}
+      # Scans the image that was just published (OS packages + Deno/Go/npm
+      # dependencies baked into it), not just the source dependency lists -
+      # catches base-image CVEs (debian:bookworm-slim, node:22-alpine,
+      # golang:1.25-alpine) that govulncheck/npm audit above can't see since
+      # those only look at this repo's own go.mod/package.json.
+      # continue-on-error: true is deliberate here (unlike govulncheck/npm
+      # audit, which block backend/frontend outright) - a released image
+      # already got pushed by the step above by the time this runs, and a
+      # base-image CVE with no upstream fix yet shouldn't be able to turn
+      # every release red with nothing actionable to do about it. Findings
+      # still show up in the job log either way.
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@master
+        continue-on-error: true
+        with:
+          image-ref: ghcr.io/modulab-project/modulab-core:${{ github.event.release.tag_name }}
+          severity: HIGH,CRITICAL
+          exit-code: "1"

@@ -62,6 +62,36 @@ type WorkerPool struct {
 
 	mu      sync.RWMutex
 	workers map[string]*denoWorker
+
+	// onCrash, if set, is called (in its own goroutine, never holding p.mu)
+	// whenever a worker's Deno process exits on its own rather than via an
+	// intentional Stop/StopAll/restart. Wired up once in main.go to mark the
+	// module ModuleStatusDegraded and publish an admin notification — see
+	// SetCrashHandler's doc comment for why this is deliberately "detect and
+	// surface", not "detect and auto-respawn".
+	onCrash func(name string)
+}
+
+// SetCrashHandler registers fn to run whenever a worker crashes (its Deno
+// process exits without Stop/StopAll/a restart having been requested first).
+// Must be called once, right after NewWorkerPool, before any Start.
+//
+// This intentionally does not attempt automatic respawning with backoff.
+// Before this existed, a crashed worker just silently stayed dead until
+// Core's own next restart, with installed_modules.status still reading
+// "active" and nothing in the admin UI or logs pointing at it (the exit was
+// only ever logged as "modules: deno worker %q exited" — indistinguishable
+// from a normal Stop). A blind auto-restart loop would hide that same
+// problem behind a busy-loop instead of surfacing it (e.g. a bad manifest
+// change or a crashing handler would just restart forever, burning CPU,
+// while still reporting "active"). Marking the module degraded and
+// notifying admins puts a human in the loop to decide whether to fix and
+// restart it — the safer default for a homelab instance nobody is actively
+// paging on.
+func (p *WorkerPool) SetCrashHandler(fn func(name string)) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.onCrash = fn
 }
 
 // NewWorkerPool creates an empty WorkerPool. Call Start for each installed
@@ -186,6 +216,7 @@ func (p *WorkerPool) startLocked(name, entrypoint string, opts WorkerOptions) er
 		moduleEgressHosts: append([]string(nil), opts.EgressHosts...),
 		skipTLSVerify:     opts.SkipTLSVerify,
 		jobEntrypoints:    jobs,
+		onCrash:           p.onCrash,
 	}
 	if err := w.start(); err != nil {
 		return fmt.Errorf("worker %q: start: %w", name, err)
@@ -499,9 +530,15 @@ type denoWorker struct {
 	cmd    *exec.Cmd
 	cancel context.CancelFunc
 
-	// mu protects conn (the reusable Unix socket connection).
-	mu   sync.Mutex
-	conn net.Conn
+	// onCrash is copied from the owning WorkerPool at construction time (see
+	// startLocked) so the Wait goroutine in start() can call it without
+	// needing a back-reference to the pool itself.
+	onCrash func(name string)
+
+	// mu protects conn (the reusable Unix socket connection) and stopping.
+	mu       sync.Mutex
+	conn     net.Conn
+	stopping bool // set by stop() before cancel(); distinguishes an intentional stop from a crash
 }
 
 // workerBootstrapScript is the small Deno bootstrap that wraps the module's
@@ -783,11 +820,21 @@ func (w *denoWorker) start() error {
 		return fmt.Errorf("exec deno: %w", err)
 	}
 
-	// Clean up the temp script file after the process exits.
+	// Clean up the temp script file after the process exits, and - if this
+	// wasn't an intentional stop - report the crash so it doesn't pass
+	// silently as an indistinguishable "exited" log line (see SetCrashHandler's
+	// doc comment for why this notifies rather than auto-restarting).
 	go func() {
 		_ = w.cmd.Wait()
 		_ = os.Remove(tmpScript.Name())
 		log.Printf("modules: deno worker %q exited", w.name)
+
+		w.mu.Lock()
+		crashed := !w.stopping
+		w.mu.Unlock()
+		if crashed && w.onCrash != nil {
+			w.onCrash(w.name)
+		}
 	}()
 
 	// Wait for the socket to appear (up to 10 s).
@@ -802,6 +849,7 @@ func (w *denoWorker) start() error {
 // stop kills the Deno subprocess and closes the connection.
 func (w *denoWorker) stop() {
 	w.mu.Lock()
+	w.stopping = true
 	if w.conn != nil {
 		_ = w.conn.Close()
 		w.conn = nil

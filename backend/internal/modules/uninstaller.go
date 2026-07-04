@@ -12,8 +12,8 @@ import (
 
 // Uninstall removes the module from the system:
 //  1. Guard: module must be installed and not pinned
-//  2. Mark status "isolated" (stops serving traffic, pre-v1 stub)
-//  3. Deno worker shutdown (post-v1 stub)
+//  2. Mark status "isolated" (stops serving traffic)
+//  3. Deno worker shutdown
 //  4. Delete module files from DataDir/{name}
 //  5. Delete cached rollback ZIP if present
 //  6. Remove DB row
@@ -44,7 +44,17 @@ func Uninstall(ctx context.Context, d Deps, name string) error {
 	}
 
 	// ── 3. Deno worker shutdown ───────────────────────────────────────────
-	// TODO(post-v1): signal the Deno IPC bus to stop the worker for this module.
+	// This TODO was stale: WorkerPool.Stop (deno.go) already exists and is
+	// used elsewhere (Core shutdown, module updates) - it just was never
+	// wired up here. Without it, uninstalling a Tier 2/3 module deleted its
+	// files out from under a still-running worker process and left it
+	// orphaned (no longer reachable via WorkerPool.workers, but never
+	// reaped), and reinstalling the same-named module later could race
+	// against that leftover process. Best-effort: a worker that fails to
+	// stop cleanly shouldn't block the rest of uninstall.
+	if err := d.Workers.Stop(name); err != nil {
+		log.Printf("modules: uninstall %q: warning: stop worker: %v", name, err)
+	}
 
 	// ── 4. Remove module files ────────────────────────────────────────────
 	moduleDir := filepath.Join(d.DataDir, name)
