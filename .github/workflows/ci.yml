@@ -24,9 +24,15 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
+      # v6 + no explicit version installs golangci-lint v1.64.8, which was
+      # itself built with go1.24 - it refuses to lint code targeting go1.25
+      # ("the Go language version (go1.24) used to build golangci-lint is
+      # lower than the targeted Go version"). v9 + pinning a v2.x release
+      # (built with newer Go) is what actually supports go-version 1.25 above.
       - name: Lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
+          version: v2.12
           working-directory: backend
       - name: Test
         run: go test ./...
@@ -53,11 +59,30 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
-      - run: npm run lint
-      - run: npm run test
+      # Deliberately not implemented yet, same reasoning as the e2e job
+      # below: frontend/package.json has no eslint config, no test runner,
+      # and no test files at all yet, so `npm run lint` / `npm run test` /
+      # `npm run test:a11y` are scripts that were never added - not tests
+      # that started failing. continue-on-error + an explicit warning keeps
+      # this visible as a "failed but continued" icon instead of either a
+      # false green check or blocking every push on tooling that doesn't
+      # exist yet. Revisit once real ESLint/Vitest/axe-core setup lands.
+      - name: Lint (not implemented - see step comment)
+        continue-on-error: true
+        run: |
+          echo "::warning::Frontend lint is not implemented yet (no ESLint config in frontend/package.json). This step intentionally fails so CI does not show a false green check."
+          exit 1
+      - name: Test (not implemented - see step comment)
+        continue-on-error: true
+        run: |
+          echo "::warning::Frontend unit tests are not implemented yet (no test runner or test files in frontend/). This step intentionally fails so CI does not show a false green check."
+          exit 1
       - run: npm run build
-      - name: a11y checks (axe-core)
-        run: npm run test:a11y
+      - name: a11y checks (axe-core) (not implemented - see step comment)
+        continue-on-error: true
+        run: |
+          echo "::warning::a11y checks are not implemented yet (no axe-core setup in frontend/). This step intentionally fails so CI does not show a false green check."
+          exit 1
       # --audit-level=high: dev-dependency low/moderate advisories are noisy
       # and common (build tooling, not shipped to users); high/critical in
       # anything actually bundled is worth failing CI over.
