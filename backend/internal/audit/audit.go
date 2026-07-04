@@ -272,6 +272,9 @@ func latestHash(ctx context.Context, pool *db.Pool) (string, error) {
 // different master key, the hashes will not verify.
 func entryHMAC(masterKey, eventType, actorID, targetID, prevHash string) string {
 	mac := hmac.New(sha256.New, []byte(masterKey))
-	fmt.Fprintf(mac, "%s|%s|%s|%s", eventType, actorID, targetID, prevHash)
+	// hash.Hash.Write (which hmac.New's Writer wraps) is documented to
+	// never return an error - safe to discard explicitly rather than
+	// thread an error return through a pure hashing helper.
+	_, _ = fmt.Fprintf(mac, "%s|%s|%s|%s", eventType, actorID, targetID, prevHash)
 	return hex.EncodeToString(mac.Sum(nil))
 }

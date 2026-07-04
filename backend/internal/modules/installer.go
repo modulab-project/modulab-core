@@ -182,7 +182,11 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 	if err != nil {
 		return fmt.Errorf("modules: install %q: create temp dir: %w", entry.Name, err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			log.Printf("modules: install %q: cleanup temp dir %s: %v", entry.Name, tmpDir, err)
+		}
+	}()
 
 	zipPath := filepath.Join(tmpDir, "module.zip")
 	sha256Path := filepath.Join(tmpDir, "module.zip.sha256")

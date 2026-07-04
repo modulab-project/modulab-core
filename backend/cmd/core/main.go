@@ -122,7 +122,11 @@ func main() {
 	}
 
 	valkeyClient := valkey.New(net.JoinHostPort(cfg.ValkeyHost, cfg.ValkeyPort), cfg.ValkeyPassword)
-	defer valkeyClient.Close()
+	defer func() {
+		if err := valkeyClient.Close(); err != nil {
+			log.Printf("valkey: close: %v", err)
+		}
+	}()
 
 	// Checked once, actively, at boot - unlike /healthz's lazy per-request
 	// check below, this gives the operator immediate feedback in the log

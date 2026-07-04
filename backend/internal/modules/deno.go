@@ -755,7 +755,10 @@ func (w *denoWorker) start() error {
 		cancel()
 		return fmt.Errorf("write bootstrap script: %w", err)
 	}
-	tmpScript.Close()
+	if err := tmpScript.Close(); err != nil {
+		cancel()
+		return fmt.Errorf("close bootstrap script: %w", err)
+	}
 
 	// Permission scoping (replaces the previous --allow-all):
 	//   --allow-read  scoped to moduleRoot ({dataDir}/{name}), covering both
@@ -995,7 +998,10 @@ func (p *prefixWriter) Write(b []byte) (int, error) {
 		&bytesReader{b: b},
 	))
 	for scanner.Scan() {
-		fmt.Fprintln(p.w, p.prefix+scanner.Text())
+		// Best-effort log passthrough - if the underlying writer (stdout/
+		// stderr) fails there's nothing more useful this Write can do with
+		// the error, and returning it would abort the worker's log scanner.
+		_, _ = fmt.Fprintln(p.w, p.prefix+scanner.Text())
 	}
 	return len(b), nil
 }

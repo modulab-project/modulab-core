@@ -3,6 +3,7 @@ package mail
 import (
 	"crypto/tls"
 	"fmt"
+	"log"
 	"net/smtp"
 
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
@@ -44,7 +45,9 @@ func send(cfg setup.SMTPRuntimeConfig, msg Message) error {
 		}
 		conn, err = smtp.NewClient(tlsConn, cfg.Host)
 		if err != nil {
-			tlsConn.Close()
+			if closeErr := tlsConn.Close(); closeErr != nil {
+				log.Printf("mail: close tls conn after client error: %v", closeErr)
+			}
 			return fmt.Errorf("smtp client: %w", err)
 		}
 	} else {

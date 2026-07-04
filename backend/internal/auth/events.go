@@ -9,6 +9,7 @@ package auth
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -78,7 +79,11 @@ func EventsHandler(d Deps) http.HandlerFunc {
 			channels = append(channels, notify.AdminChannel())
 		}
 		sub := d.Valkey.Subscribe(ctx, channels...)
-		defer sub.Close()
+		defer func() {
+			if err := sub.Close(); err != nil {
+				log.Printf("auth: events: close subscription: %v", err)
+			}
+		}()
 
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")

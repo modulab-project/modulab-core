@@ -171,7 +171,12 @@ func MaxBodyBytes(ctx context.Context, pool *db.Pool) int64 {
 
 // writeSSE sends a single SSE data line.
 func writeSSE(w http.ResponseWriter, data string) {
-	fmt.Fprintf(w, "data: %s\n\n", data)
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+		// Best-effort: the client may have already disconnected mid-stream,
+		// which is a normal occurrence for SSE, not something to fail on.
+		log.Printf("ai: writeSSE: %v", err)
+		return
+	}
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}
@@ -652,7 +657,9 @@ func fetchDeepSeekBalance(ctx context.Context, apiKey string) (float64, string, 
 	}
 	info := result.BalanceInfos[0]
 	var total float64
-	fmt.Sscanf(info.TotalBalance, "%f", &total)
+	if _, err := fmt.Sscanf(info.TotalBalance, "%f", &total); err != nil {
+		return 0, "", fmt.Errorf("parse balance %q: %w", info.TotalBalance, err)
+	}
 	return total, info.Currency, nil
 }
 
