@@ -15,12 +15,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/modulab-project/modulab-core/backend/internal/adminapi"
@@ -85,7 +89,15 @@ func main() {
 		log.Fatalf("bootstrap: %v", err)
 	}
 
-	ctx := context.Background()
+	// ctx is cancelled the moment the process receives SIGTERM/SIGINT (e.g.
+	// `docker stop`, systemd, or Ctrl-C in a dev shell). Every long-lived
+	// background loop below (store.RunSync, modules.RunUpdateChecks,
+	// mail.RunWorker, jobRunner) already takes this ctx and returns once it
+	// is cancelled, so tying it to the shutdown signal here is what makes
+	// them stop on their own during a graceful shutdown - no separate
+	// per-goroutine stop signal needed for those three.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable",
 		cfg.DBUser, cfg.DBPassword, cfg.DBHost, cfg.DBPort, cfg.DBName)
@@ -461,7 +473,11 @@ func main() {
 	mux.HandleFunc("PATCH /v1/ai/keys/{id}/model", ai.UserSetPreferredModelHandler(authDeps))
 	mux.HandleFunc("GET /v1/ai/keys/{id}/models", ai.UserListModelsHandler(authDeps))
 	mux.HandleFunc("PATCH /v1/ai/preference", ai.UserSetPreferredProviderHandler(authDeps))
-	mux.HandleFunc("POST /v1/ai/chat", ai.ChatHandler(authDeps))
+	// Rate-limited on top of the global backstop below: this is the one
+	// route that forwards to a paid external API per call, so it gets its
+	// own tighter per-IP budget (see aiChatRateLimitWindow/Max's doc comment)
+	// rather than relying solely on the generous global limit.
+	mux.HandleFunc("POST /v1/ai/chat", rateLimitMiddleware(valkeyClient, "ai-chat", aiChatRateLimitWindow, aiChatRateLimitMax, ai.ChatHandler(authDeps)))
 
 	// Quick links / Schnellzugriff-Grid (internal/quicklinks):
 	//   User endpoints: any approved session can list merged tiles, create or
@@ -593,10 +609,10 @@ func main() {
 	// unconditionally even before SMTP has ever been configured, since
 	// RunWorker itself handles "not configured yet" per message (logged,
 	// dropped) rather than needing to be told to start later once it is.
-	// No graceful-shutdown plumbing exists anywhere else in main.go yet
-	// (ListenAndServe below just blocks until it errors), so this matches
-	// that same level of simplicity rather than introducing
-	// signal.NotifyContext just for this one goroutine.
+	// Like store.RunSync and modules.RunUpdateChecks above, it takes the
+	// signal-aware ctx from main's top and returns on its own once that ctx
+	// is cancelled during graceful shutdown (see the select block at the
+	// end of main).
 	go mail.RunWorker(ctx, valkeyClient, pool, cfg.MasterKey)
 
 	// The group prefix has no environment fallback anymore (removed
@@ -612,8 +628,47 @@ func main() {
 	handler := corsMiddleware(cfg.FrontendBaseURL, mux)
 	handler = maxBodyMiddleware(pool, handler)
 	handler = secHeadersMiddleware(handler)
-	if err := http.ListenAndServe(cfg.HTTPAddr, handler); err != nil {
-		log.Fatalf("server: %v", err)
+	handler = globalRateLimitMiddleware(valkeyClient, handler)
+
+	srv := &http.Server{
+		Addr:    cfg.HTTPAddr,
+		Handler: handler,
+	}
+
+	// Serve on a separate goroutine so the main goroutine below can block on
+	// ctx.Done() (the SIGTERM/SIGINT signal) instead of ListenAndServe, which
+	// never returns on its own. http.ErrServerClosed is the expected error
+	// once Shutdown below closes the listener - anything else is a real
+	// startup/runtime failure.
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- srv.ListenAndServe()
+	}()
+
+	select {
+	case err := <-serveErr:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("server: %v", err)
+		}
+	case <-ctx.Done():
+		log.Printf("main: shutdown signal received, draining in-flight requests (up to 15s)")
+
+		// jobRunner/workerPool are stopped explicitly (they don't watch ctx
+		// themselves); RunSync/RunUpdateChecks/mail.RunWorker above already
+		// exit on their own once ctx is cancelled.
+		jobRunner.Stop()
+		workerPool.StopAll()
+
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("main: server shutdown did not complete cleanly: %v", err)
+		}
+		// Wait for ListenAndServe's goroutine to actually return so pool.Close()
+		// and valkeyClient.Close() (deferred above) don't race with in-flight
+		// handlers still using them.
+		<-serveErr
+		log.Printf("main: shutdown complete")
 	}
 }
 
@@ -724,28 +779,78 @@ const (
 	authRateLimitMax    = 20
 )
 
-// authRateLimitMiddleware applies a per-client-IP fixed-window rate limit
-// (via valkey.Client.IncrExpire) to a single handler. label distinguishes
-// the Valkey key namespace per endpoint (e.g. "login" vs "callback") so the
-// two don't share a budget. On a Valkey error the request is let through
-// (fail open) — a cache hiccup should degrade to "no rate limiting" rather
-// than "everyone locked out of login".
-func authRateLimitMiddleware(vk *valkey.Client, label string, next http.HandlerFunc) http.HandlerFunc {
+// aiChatRateLimitWindow/aiChatRateLimitMax bound how often a single client IP
+// may call the AI chat proxy. Unlike login/callback, every call here forwards
+// to a paid external provider (OpenAI/Anthropic/etc. - internal/ai), so an
+// unbounded loop from a single approved-but-compromised account (or a buggy
+// frontend retry) can run up real cost, not just load Core itself. 30/min is
+// generous for interactive chat use (a few messages a minute, per browser
+// tab) while still bounding worst-case spend to a known ceiling.
+const (
+	aiChatRateLimitWindow = time.Minute
+	aiChatRateLimitMax    = 30
+)
+
+// globalRateLimitWindow/globalRateLimitMax is a coarse backstop applied to
+// every route except /healthz (see main's handler chain). It exists because,
+// before this, only /v1/auth/login and /v1/auth/callback had any rate limit
+// at all - anything else (module API proxy, search, news aggregation, etc.)
+// was reachable at unbounded volume by any approved session or, for routes
+// that don't check auth themselves, any caller who can reach Core. The limit
+// is deliberately generous (a self-hosted homelab has a handful of real
+// users, not a fleet of API consumers) - it is meant to catch runaway loops
+// and scripted abuse, not to shape normal interactive traffic.
+const (
+	globalRateLimitWindow = time.Minute
+	globalRateLimitMax    = 600
+)
+
+// rateLimitMiddleware applies a per-client-IP fixed-window rate limit (via
+// valkey.Client.IncrExpire) to a single handler. label distinguishes the
+// Valkey key namespace per endpoint/scope (e.g. "login" vs "callback" vs
+// "ai-chat" vs "global") so budgets don't bleed into each other. max is the
+// number of requests allowed per window. On a Valkey error the request is
+// let through (fail open) — a cache hiccup should degrade to "no rate
+// limiting" rather than locking everyone out.
+func rateLimitMiddleware(vk *valkey.Client, label string, window time.Duration, max int64, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ip := clientIP(r)
-		key := "ratelimit:auth:" + label + ":" + ip
-		count, err := vk.IncrExpire(r.Context(), key, authRateLimitWindow)
+		key := "ratelimit:" + label + ":" + ip
+		count, err := vk.IncrExpire(r.Context(), key, window)
 		if err != nil {
 			log.Printf("main: rate limit check failed (failing open): %v", err)
 			next.ServeHTTP(w, r)
 			return
 		}
-		if count > authRateLimitMax {
+		if count > max {
 			http.Error(w, "too many requests", http.StatusTooManyRequests)
 			return
 		}
 		next.ServeHTTP(w, r)
 	}
+}
+
+// authRateLimitMiddleware is rateLimitMiddleware pinned to the auth-endpoint
+// window/budget (kept as a separate name at call sites for readability).
+func authRateLimitMiddleware(vk *valkey.Client, label string, next http.HandlerFunc) http.HandlerFunc {
+	return rateLimitMiddleware(vk, "auth:"+label, authRateLimitWindow, authRateLimitMax, next)
+}
+
+// globalRateLimitMiddleware wraps an entire http.Handler (not just a single
+// HandlerFunc) with the coarse per-IP backstop described above. Applied once,
+// around the whole mux, in main. /healthz is deliberately exempt: Docker and
+// Traefik healthchecks poll it every few seconds for the container's entire
+// lifetime, which would otherwise burn through the same budget as real
+// traffic and could self-inflict a false "unhealthy" verdict.
+func globalRateLimitMiddleware(vk *valkey.Client, next http.Handler) http.Handler {
+	limited := rateLimitMiddleware(vk, "global", globalRateLimitWindow, globalRateLimitMax, next.ServeHTTP)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		limited(w, r)
+	})
 }
 
 // clientIP extracts the originating client address for rate-limiting

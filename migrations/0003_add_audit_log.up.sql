@@ -36,3 +36,10 @@ $$;
 CREATE TRIGGER audit_log_before_change
     BEFORE UPDATE OR DELETE ON audit_log
     FOR EACH ROW EXECUTE FUNCTION audit_log_immutable();
+
+-- Serves audit.List's "WHERE event_type = $1 AND id < $2 ORDER BY id DESC"
+-- keyset-paginated query (internal/audit/audit.go). id itself is already
+-- covered by the BIGSERIAL PRIMARY KEY, so this only needs to lead with
+-- event_type. Mirrors EnsureAuditSchema in backend/internal/db/db.go — both
+-- must be kept in sync.
+CREATE INDEX idx_audit_log_event_type_id ON audit_log (event_type, id DESC);

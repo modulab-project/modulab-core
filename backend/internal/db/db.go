@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -169,6 +170,19 @@ func (p *Pool) EnsureAuditSchema(ctx context.Context) error {
 		)
 	`); err != nil {
 		return fmt.Errorf("db: ensure audit_log: %w", err)
+	}
+
+	// audit.List (internal/audit/audit.go) filters "WHERE event_type = $1 AND
+	// id < $2 ORDER BY id DESC" for the admin audit-log page's per-type,
+	// keyset-paginated view - without this index that query does a full
+	// table scan once audit_log grows past a trivial size. id itself is
+	// already indexed via the BIGSERIAL PRIMARY KEY, so the composite index
+	// here only needs to lead with event_type; Postgres can use the same
+	// index for the event_type-only query too (no filter on id).
+	if _, err := p.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_audit_log_event_type_id ON audit_log (event_type, id DESC)
+	`); err != nil {
+		return fmt.Errorf("db: ensure idx_audit_log_event_type_id: %w", err)
 	}
 
 	// Trigger function: raises an exception on any UPDATE or DELETE attempt.
@@ -736,7 +750,10 @@ func (p *Pool) SetNewsPrefs(ctx context.Context, userID string, prefs NewsPrefs)
 }
 
 // ListFeeds returns every feed row, sorted alphabetically by label. Used by
-// the admin CRUD and by the news aggregator to look up feed URLs.
+// the admin CRUD and by the news aggregator to look up feed URLs. url is
+// stored encrypted (see CreateFeed's doc comment) and decrypted here so
+// every caller keeps seeing plaintext, same as before this field was
+// encrypted.
 func (p *Pool) ListFeeds(ctx context.Context) ([]FeedRow, error) {
 	rows, err := p.Query(ctx, `
 		SELECT id, url, label, created_at FROM news_feeds ORDER BY lower(label) ASC
@@ -751,32 +768,50 @@ func (p *Pool) ListFeeds(ctx context.Context) ([]FeedRow, error) {
 		if err := rows.Scan(&f.ID, &f.URL, &f.Label, &f.CreatedAt); err != nil {
 			return nil, fmt.Errorf("db: scan feed: %w", err)
 		}
+		if f.URL, err = crypto.DecryptIfNotEmpty(p.masterKey, f.URL); err != nil {
+			return nil, fmt.Errorf("db: decrypt feed %d url: %w", f.ID, err)
+		}
 		out = append(out, f)
 	}
 	return out, rows.Err()
 }
 
 // CreateFeed inserts a new feed and returns the created row (with its
-// server-assigned id and created_at).
+// server-assigned id and created_at). feedURL is a PII-adjacent field (it
+// can reveal a user's/org's reading habits and, for private feeds, internal
+// infrastructure hostnames) and is stored encrypted at rest via
+// crypto.Encrypt, matching the project's PII/URL encryption convention
+// already used for SearXNG's URL and SMTP host - see MigrateToEncryptedStorage
+// for the one-time backfill of rows created before this change.
 func (p *Pool) CreateFeed(ctx context.Context, feedURL, label string) (FeedRow, error) {
+	encURL, err := crypto.Encrypt(p.masterKey, feedURL)
+	if err != nil {
+		return FeedRow{}, fmt.Errorf("db: encrypt feed url: %w", err)
+	}
 	var f FeedRow
-	err := p.QueryRow(ctx, `
+	err = p.QueryRow(ctx, `
 		INSERT INTO news_feeds (url, label) VALUES ($1, $2)
 		RETURNING id, url, label, created_at
-	`, feedURL, label).Scan(&f.ID, &f.URL, &f.Label, &f.CreatedAt)
+	`, encURL, label).Scan(&f.ID, &f.URL, &f.Label, &f.CreatedAt)
 	if err != nil {
 		return FeedRow{}, fmt.Errorf("db: create feed: %w", err)
 	}
+	f.URL = feedURL
 	return f, nil
 }
 
 // UpdateFeed sets url and label for the given feed id. Returns found = false
 // (not an error) when no such id exists, so the handler can return 404
-// without a separate existence check.
+// without a separate existence check. url is encrypted before storage, same
+// as CreateFeed.
 func (p *Pool) UpdateFeed(ctx context.Context, id int, feedURL, label string) (bool, error) {
+	encURL, err := crypto.Encrypt(p.masterKey, feedURL)
+	if err != nil {
+		return false, fmt.Errorf("db: encrypt feed url: %w", err)
+	}
 	tag, err := p.Exec(ctx, `
 		UPDATE news_feeds SET url = $1, label = $2 WHERE id = $3
-	`, feedURL, label, id)
+	`, encURL, label, id)
 	if err != nil {
 		return false, fmt.Errorf("db: update feed %d: %w", id, err)
 	}
@@ -815,6 +850,9 @@ func (p *Pool) ListFeedsForUser(ctx context.Context, userID string) ([]FeedWithS
 		var f FeedWithSub
 		if err := rows.Scan(&f.ID, &f.URL, &f.Label, &f.CreatedAt, &f.Enabled); err != nil {
 			return nil, fmt.Errorf("db: scan feed with sub: %w", err)
+		}
+		if f.URL, err = crypto.DecryptIfNotEmpty(p.masterKey, f.URL); err != nil {
+			return nil, fmt.Errorf("db: decrypt feed %d url: %w", f.ID, err)
 		}
 		out = append(out, f)
 	}
@@ -869,13 +907,19 @@ const encryptionVersionKey = "core_encryption_version"
 // MigrateToEncryptedStorage is a one-time startup migration that encrypts
 // any plaintext PII that existed in the database before the encrypt-
 // everything feature landed. It is safe to call on every boot: the
-// core_encryption_version flag in core_settings makes it a no-op once it
-// has run successfully.
+// core_encryption_version flag in core_settings makes each step a no-op
+// once it has run successfully. The flag is a numeric string so later steps
+// (e.g. version "2" below) can be added without re-running earlier ones on
+// instances that already completed them.
 //
-// Fields migrated here:
+// Fields migrated at version 1:
 //   - users.email, users.name
 //   - core_settings: smtp_host, smtp_username, smtp_from_address,
 //     oidc_issuer_url, oidc_client_id, dns_challenge_provider
+//
+// Fields migrated at version 2:
+//   - news_feeds.url (CreateFeed/UpdateFeed started encrypting new rows
+//     directly; this backfills rows created before that change)
 //
 // The _enc variants (smtp_password_enc, oidc_client_secret_enc,
 // dns_challenge_credentials_enc) were already encrypted before this
@@ -885,10 +929,80 @@ func (p *Pool) MigrateToEncryptedStorage(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("db: migration check: %w", err)
 	}
-	if exists && v == "1" {
+	version := 0
+	if exists {
+		version, _ = strconv.Atoi(v)
+	}
+	if version >= 2 {
 		return nil // already done
 	}
 
+	if version < 1 {
+		if err := p.migrateEncryptionV1(ctx); err != nil {
+			return err
+		}
+	}
+	if version < 2 {
+		if err := p.migrateEncryptionV2NewsFeeds(ctx); err != nil {
+			return err
+		}
+	}
+
+	if err := p.SetSetting(ctx, encryptionVersionKey, "2"); err != nil {
+		return fmt.Errorf("db: migration set version flag: %w", err)
+	}
+	return nil
+}
+
+// migrateEncryptionV2NewsFeeds backfills news_feeds.url for rows written
+// before CreateFeed/UpdateFeed started encrypting it. Detects already-
+// encrypted rows by attempting a decrypt first: crypto.Encrypt's output is
+// never valid as a bare http(s) URL, so a successful decrypt means "already
+// migrated, skip" and a decrypt failure means "still plaintext, encrypt it".
+func (p *Pool) migrateEncryptionV2NewsFeeds(ctx context.Context) error {
+	rows, err := p.Query(ctx, `SELECT id, url FROM news_feeds`)
+	if err != nil {
+		return fmt.Errorf("db: migration list news_feeds: %w", err)
+	}
+	type feedPlain struct {
+		id  int
+		url string
+	}
+	var feeds []feedPlain
+	for rows.Next() {
+		var f feedPlain
+		if err := rows.Scan(&f.id, &f.url); err != nil {
+			rows.Close()
+			return fmt.Errorf("db: migration scan news_feed: %w", err)
+		}
+		feeds = append(feeds, f)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("db: migration rows: %w", err)
+	}
+
+	for _, f := range feeds {
+		if f.url == "" {
+			continue
+		}
+		if _, err := crypto.Decrypt(p.masterKey, f.url); err == nil {
+			continue // already encrypted, skip
+		}
+		enc, err := crypto.Encrypt(p.masterKey, f.url)
+		if err != nil {
+			return fmt.Errorf("db: migration encrypt news_feed %d url: %w", f.id, err)
+		}
+		if _, err := p.Exec(ctx, `UPDATE news_feeds SET url=$1 WHERE id=$2`, enc, f.id); err != nil {
+			return fmt.Errorf("db: migration update news_feed %d: %w", f.id, err)
+		}
+	}
+	return nil
+}
+
+// migrateEncryptionV1 is the original (pre-versioning) migration body,
+// unchanged in behavior from before version tracking was introduced.
+func (p *Pool) migrateEncryptionV1(ctx context.Context) error {
 	// Migrate users table: read id/email/name, encrypt, write back.
 	rows, err := p.Query(ctx, `SELECT id, email, name FROM users`)
 	if err != nil {
@@ -946,9 +1060,9 @@ func (p *Pool) MigrateToEncryptedStorage(ctx context.Context) error {
 		}
 	}
 
-	if err := p.SetSetting(ctx, encryptionVersionKey, "1"); err != nil {
-		return fmt.Errorf("db: migration set version flag: %w", err)
-	}
+	// Version flag is set by the MigrateToEncryptedStorage wrapper after all
+	// applicable steps (this one and any later ones) have succeeded, not
+	// here - see its doc comment.
 	return nil
 }
 
