@@ -20,9 +20,12 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /modulab-core ./cmd/co
 # ── Stage 3: Final image ──────────────────────────────────────────────────────
 FROM debian:bookworm-slim
 
-# Install Deno (required for Tier 2/3 module handlers).
-# Pinned to a specific version for reproducible builds.
+# Install Deno (required for Tier 2/3 module handlers) and cosign (required by
+# VerifyCosign, backend/internal/modules/verifier.go, to check official/community
+# module signatures on install/update). Both pinned to a specific version for
+# reproducible builds.
 ENV DENO_VERSION=2.9.0
+ENV COSIGN_VERSION=3.0.6
 # Detect CPU arch at build time so the image works on both x86_64 and arm64
 # (Apple Silicon via `docker buildx build --platform linux/arm64` or plain
 # `docker build` on an M-series Mac with the default linux/arm64 platform).
@@ -34,8 +37,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         gosu \
     && ARCH="$(dpkg --print-architecture)" \
     && case "$ARCH" in \
-         amd64) DENO_ARCH="x86_64-unknown-linux-gnu" ;; \
-         arm64) DENO_ARCH="aarch64-unknown-linux-gnu" ;; \
+         amd64) DENO_ARCH="x86_64-unknown-linux-gnu"; COSIGN_ARCH="amd64" ;; \
+         arm64) DENO_ARCH="aarch64-unknown-linux-gnu"; COSIGN_ARCH="arm64" ;; \
          *) echo "Unsupported arch: $ARCH" && exit 1 ;; \
        esac \
     && curl -fsSL "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-${DENO_ARCH}.zip" \
@@ -44,6 +47,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm /tmp/deno.zip \
     && chmod +x /usr/local/bin/deno \
     && deno --version \
+    && curl -fsSL "https://github.com/sigstore/cosign/releases/download/v${COSIGN_VERSION}/cosign-linux-${COSIGN_ARCH}" \
+        -o /usr/local/bin/cosign \
+    && chmod +x /usr/local/bin/cosign \
+    && cosign version \
     && apt-get remove -y unzip \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
