@@ -352,7 +352,8 @@
       "installed_desc": "Aktive Module verwalten, Updates prüfen, Installationen anpinnen oder entfernen.",
       "installed_count": "{{count}} installiert",
       "updates_available": "{{count}} Update(s) verfügbar",
-      "all_up_to_date": "Alle Module aktuell"
+      "all_up_to_date": "Alle Module aktuell",
+      "sync_failed": "Registry-Synchronisierung fehlgeschlagen — zeige zwischengespeicherte Daten, die veraltet sein können."
     }
   },
   "home": {

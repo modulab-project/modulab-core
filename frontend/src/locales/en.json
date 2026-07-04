@@ -352,7 +352,8 @@
       "installed_desc": "Manage active modules, check for updates, pin or remove installations.",
       "installed_count": "{{count}} installed",
       "updates_available": "{{count}} update(s) available",
-      "all_up_to_date": "All modules up to date"
+      "all_up_to_date": "All modules up to date",
+      "sync_failed": "Registry sync failed — showing cached data, which may be out of date."
     }
   },
   "home": {

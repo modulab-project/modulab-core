@@ -281,10 +281,16 @@ export default function ModulesPage() {
 }
 
 function TierBadge({ tier }: { tier: number }) {
+  // Tier 2/3 intentionally avoid amber/red here even though they're in the
+  // confirmed-safe Tailwind palette: those two are reserved for status
+  // severity in StatusBadge below (degraded/failed), which can appear right
+  // next to this badge in the same row - reusing them for tier would make
+  // "Tier 3" visually read as a warning. teal/gray-shades keep tier and
+  // status badges unambiguous at a glance.
   const colors: Record<number, string> = {
     1: "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400",
-    2: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
-    3: "bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-300",
+    2: "bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-300",
+    3: "bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300",
   };
   return (
     <span
@@ -299,11 +305,11 @@ function StatusBadge({ status }: { status: InstalledModule["status"] }) {
   const { t } = useTranslation();
   const map: Record<InstalledModule["status"], { cls: string; icon: string }> = {
     active: {
-      cls: "bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-400",
+      cls: "bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-400",
       icon: "ti-circle-check",
     },
     installing: {
-      cls: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
+      cls: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300",
       icon: "ti-loader-2",
     },
     degraded: {

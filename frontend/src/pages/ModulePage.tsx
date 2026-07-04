@@ -229,10 +229,10 @@ function ModuleFallback({
               v{manifest.version}
             </span>
           )}
-          <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-xs text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+          <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-300">
             Tier {mod.tier}
           </span>
-          <span className="rounded-full bg-green-50 px-2.5 py-0.5 text-xs text-green-700 dark:bg-green-950 dark:text-green-300">
+          <span className="rounded-full bg-teal-50 px-2.5 py-0.5 text-xs text-teal-700 dark:bg-teal-950 dark:text-teal-300">
             {mod.status}
           </span>
         </div>

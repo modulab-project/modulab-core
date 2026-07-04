@@ -267,8 +267,8 @@ function SourceBadge({ source }: { source: string }) {
     <span
       className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
         isOfficial
-          ? "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
-          : "bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-300"
+          ? "bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-300"
+          : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
       }`}
     >
       {source}

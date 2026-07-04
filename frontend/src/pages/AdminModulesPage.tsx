@@ -26,6 +26,7 @@ export default function AdminModulesPage() {
   const [installedCount, setInstalledCount] = useState<number | null>(null);
   const [updateCount, setUpdateCount] = useState<number | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState(false);
 
   useEffect(() => {
     if (!session) return;
@@ -38,12 +39,19 @@ export default function AdminModulesPage() {
     if (!token) return;
 
     setSyncing(true);
+    setSyncError(false);
 
     // Step 1: sync registry first so the DB has the latest versions.
     // Step 2: only after sync completes, run update-check + read counts
     // in parallel — otherwise checkModuleUpdates reads stale data.
+    //
+    // A failed sync is still non-fatal (the counts below fall back to
+    // whatever was already cached), but it used to be swallowed entirely
+    // with no feedback at all — an admin had no way to tell "these numbers
+    // might be stale" from "everything's fine". setSyncError surfaces that
+    // via the banner rendered below, without blocking the rest of the page.
     syncStore(token)
-      .catch(() => {}) // sync failure is non-fatal; cached data is still useful
+      .catch(() => setSyncError(true))
       .then(() =>
         Promise.allSettled([
           listStore(token)
@@ -51,7 +59,12 @@ export default function AdminModulesPage() {
             .catch(() => {}),
           checkModuleUpdates(token)
             .then((r) => setUpdateCount(r.count))
-            .catch(() => setUpdateCount(0)),
+            // Was silently defaulting to 0 here, which renders as "all up to
+            // date" (admin.modules.all_up_to_date) - actively misleading,
+            // since a failed check is not the same as a check that found
+            // nothing. Surface it via the same banner as a sync failure
+            // instead of a false all-clear.
+            .catch(() => setSyncError(true)),
           listInstalledModules(token)
             .then((list) => setInstalledCount(list?.length ?? 0))
             .catch(() => setInstalledCount(null)),
@@ -79,6 +92,11 @@ export default function AdminModulesPage() {
               ? t("admin.modules.syncing")
               : t("admin.modules.subtitle")}
           </p>
+          {syncError && (
+            <p className="mt-2 text-sm text-red-600 dark:text-red-400">
+              {t("admin.modules.sync_failed")}
+            </p>
+          )}
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -106,7 +124,7 @@ export default function AdminModulesPage() {
                 </span>
               ) : storeCount !== null ? (
                 <>
-                  <span className="h-1.5 w-1.5 rounded-full bg-blue-400" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-teal-400" />
                   <span className="text-[11px] text-gray-400 dark:text-gray-500">
                     {t("admin.modules.store_count", { count: storeCount })}
                   </span>
@@ -156,7 +174,7 @@ export default function AdminModulesPage() {
                   </>
                 ) : (
                   <>
-                    <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                    <span className="h-1.5 w-1.5 rounded-full bg-teal-500" />
                     <span className="text-[11px] text-gray-400 dark:text-gray-500">
                       {installedCount !== null
                         ? t("admin.modules.installed_count", { count: installedCount })
@@ -166,7 +184,7 @@ export default function AdminModulesPage() {
                 )
               ) : installedCount !== null ? (
                 <>
-                  <span className={`h-1.5 w-1.5 rounded-full ${installedCount > 0 ? "bg-green-500" : "bg-gray-300 dark:bg-gray-600"}`} />
+                  <span className={`h-1.5 w-1.5 rounded-full ${installedCount > 0 ? "bg-teal-500" : "bg-gray-300 dark:bg-gray-600"}`} />
                   <span className="text-[11px] text-gray-400 dark:text-gray-500">
                     {t("admin.modules.installed_count", { count: installedCount })}
                   </span>
