@@ -119,9 +119,11 @@ func Update(ctx context.Context, d Deps, entry store.Entry) error {
 	}
 
 	// ── 5. Cosign verification ─────────────────────────────────────────────
+	// entry.CosignSigURL (official modules) points at a Sigstore bundle (JSON,
+	// see build-module.sh / VerifyCosign doc comment), not a legacy raw signature.
 	if entry.CosignSigURL != "" {
 		if err := downloadFile(dlCtx, entry.CosignSigURL, sigPath, maxSigFileBytes); err != nil {
-			return fmt.Errorf("modules: update %q: download sig: %w", entry.Name, err)
+			return fmt.Errorf("modules: update %q: download cosign bundle: %w", entry.Name, err)
 		}
 		if _, err := VerifyCosign(zipPath, sigPath, d.CosignBin); err != nil {
 			return fmt.Errorf("modules: update %q: cosign verify: %w", entry.Name, err)

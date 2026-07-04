@@ -166,8 +166,11 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 	// ReleaseAsset may be either:
 	//   a) a full URL  (official registry: release_url stored verbatim)
 	//   b) a bare filename  (community entries: reconstructed from source_repo + tag)
-	// SHA256 asset: {zip_url}.sha256
-	// Cosign sig:   {zip_url}.sig
+	// SHA256 asset:      {zip_url}.sha256
+	// Cosign bundle:     {zip_url}.sig  (legacy convention path for community
+	//                    best-effort verification; official modules always use
+	//                    entry.CosignSigURL, which points at the new
+	//                    <zip>.cosign.bundle asset — see build-module.sh)
 	var zipURL string
 	if strings.HasPrefix(entry.ReleaseAsset, "https://") || strings.HasPrefix(entry.ReleaseAsset, "http://") {
 		zipURL = entry.ReleaseAsset
@@ -221,12 +224,18 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 	log.Printf("modules: install %q: sha256 verified (%s)", entry.Name, gotHex)
 
 	// ── 5. Cosign verification ────────────────────────────────────────────
+	// VerifyCosign expects a Sigstore bundle (JSON, `cosign sign-blob --bundle`),
+	// not a legacy raw signature. entry.CosignSigURL (official modules) always
+	// points at a real bundle. The community best-effort `.sig` convention path
+	// below may still be a legacy raw signature from an older tool — that's
+	// fine, VerifyCosign returning an error there just falls through to
+	// cosignSkipped, same as if no sig existed at all.
 	cosignVerified := false
 	cosignSkipped := false
 	if entry.CosignSigURL != "" {
-		// Signature URL explicitly provided — download and verify.
+		// Bundle URL explicitly provided — download and verify.
 		if err := downloadFile(dlCtx, entry.CosignSigURL, sigPath, maxSigFileBytes); err != nil {
-			return fmt.Errorf("modules: install %q: download cosign sig: %w", entry.Name, err)
+			return fmt.Errorf("modules: install %q: download cosign bundle: %w", entry.Name, err)
 		}
 		ok, err := VerifyCosign(zipPath, sigPath, d.CosignBin)
 		if err != nil {

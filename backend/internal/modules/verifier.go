@@ -73,8 +73,9 @@ func VerifySHA256(zipPath, expectedHex string) (string, error) {
 }
 
 // VerifyCosign verifies the Cosign blob signature of zipPath against the
-// embedded official public key. sigPath is the local path to the downloaded
-// .sig file. cosignBin is the path to the cosign binary (use CosignBinaryDefault
+// embedded official public key. bundlePath is the local path to the downloaded
+// Sigstore bundle file (JSON, produced by `cosign sign-blob --bundle`).
+// cosignBin is the path to the cosign binary (use CosignBinaryDefault
 // when empty).
 //
 // Returns:
@@ -85,7 +86,7 @@ func VerifySHA256(zipPath, expectedHex string) (string, error) {
 // For official modules this must return (true, nil) before installation proceeds.
 // Community modules may choose to call this and present a ✅/⚠️ badge based on
 // the result rather than blocking installation.
-func VerifyCosign(zipPath, sigPath, cosignBin string) (bool, error) {
+func VerifyCosign(zipPath, bundlePath, cosignBin string) (bool, error) {
 	if cosignBin == "" {
 		cosignBin = CosignBinaryDefault
 	}
@@ -124,11 +125,11 @@ func VerifyCosign(zipPath, sigPath, cosignBin string) (bool, error) {
 		return false, fmt.Errorf("modules: cosign: close temp key file: %w", err)
 	}
 
-	// cosign verify-blob --key <pubkey> --signature <sig> <zip>
+	// cosign verify-blob --key <pubkey> --bundle <bundle> <zip>
 	cmd := exec.Command(cosignBin,
 		"verify-blob",
 		"--key", keyFile.Name(),
-		"--signature", sigPath,
+		"--bundle", bundlePath,
 		zipPath,
 	)
 	out, err := cmd.CombinedOutput()
