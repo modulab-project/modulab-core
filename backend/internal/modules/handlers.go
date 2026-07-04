@@ -408,6 +408,116 @@ func UnpinHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	}
 }
 
+// ── POST /v1/modules/{name}/restart ───────────────────────────────────────────
+
+// RestartModuleHandler restarts a Tier 2/3 module's Deno worker from its
+// currently-installed manifest, without touching version/source/registry at
+// all. Requires org-admin or super-admin.
+//
+// Exists specifically for the "degraded" recovery gap: WorkerPool's crash
+// handler (deno.go's SetCrashHandler) deliberately never auto-restarts a
+// crashed worker, and the boot-time restart loop (main.go) only restarts
+// modules whose status is already "active" - a module that crashed once
+// stays "degraded" forever otherwise, with no way back to "active" short of
+// an actual version update (UpdateModuleHandler above, which requires
+// available_version to be set - not the case for a module already on the
+// latest release). Before this handler existed, the only recovery path for
+// "degraded, no update available" was a manual UPDATE installed_modules SET
+// status = 'active' in psql (hit in practice 2026-07-04, after the Deno 2.9
+// upgrade's unix-socket --allow-net change - see WorkerPool.Start's doc
+// comment - crashed my-places/recipes/unifi-network and left them stuck).
+func RestartModuleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := auth.RequireAdminSession(authDeps, w, r)
+		if !ok {
+			return
+		}
+
+		name := r.PathValue("name")
+		if name == "" {
+			http.Error(w, "missing module name", http.StatusBadRequest)
+			return
+		}
+
+		row, found, err := d.DB.GetInstalledModule(r.Context(), name)
+		if err != nil {
+			http.Error(w, "failed to look up module", http.StatusInternalServerError)
+			return
+		}
+		if !found {
+			http.Error(w, "module not installed", http.StatusNotFound)
+			return
+		}
+		if row.Tier < 2 {
+			// Tier 1 modules have no Deno worker to restart at all.
+			http.Error(w, "module has no worker to restart", http.StatusBadRequest)
+			return
+		}
+
+		// Same runtime-egress-preservation dance as UpdateModuleHandler above
+		// (see CurrentModuleEgressHosts's doc comment in deno.go): a plain
+		// Stop/Start would otherwise silently drop hosts a dynamic_egress
+		// module discovered at runtime (e.g. unifi-network's configured
+		// gateway IPs) back down to just the manifest's static allowlist.
+		runtimeEgressHosts, hadRuntimeHosts := d.Workers.CurrentModuleEgressHosts(name)
+
+		_ = d.Workers.Stop(name)
+
+		var mf struct {
+			Handler            string        `json:"handler"`
+			EgressAllowlist    []string      `json:"egress_allowlist"`
+			Jobs               []ManifestJob `json:"jobs"`
+			TLSSkipVerify      bool          `json:"tls_skip_verify"`
+			DynamicEgress      bool          `json:"dynamic_egress"`
+			EgressHostsHandler string        `json:"egress_hosts_handler"`
+		}
+		if row.Manifest != nil {
+			_ = json.Unmarshal(row.Manifest, &mf)
+		}
+		if mf.Handler == "" {
+			http.Error(w, "module manifest has no handler", http.StatusUnprocessableEntity)
+			return
+		}
+
+		destDir := filepath.Join(d.DataDir, name)
+		entrypoint := filepath.Join(destDir, mf.Handler)
+		egressHosts := mf.EgressAllowlist
+		if mf.DynamicEgress && hadRuntimeHosts && len(runtimeEgressHosts) > 0 {
+			egressHosts = runtimeEgressHosts
+		}
+		opts := WorkerOptions{
+			EgressHosts:   egressHosts,
+			Jobs:          ResolveJobEntrypoints(destDir, mf.Jobs, mf.EgressHostsHandler),
+			SkipTLSVerify: mf.TLSSkipVerify,
+		}
+		if err := d.Workers.Start(name, entrypoint, opts); err != nil {
+			http.Error(w, fmt.Sprintf("failed to restart worker: %v", err), http.StatusInternalServerError)
+			return
+		}
+		if mf.DynamicEgress && mf.EgressHostsHandler != "" {
+			if hosts, ok := d.Workers.QueryEgressHosts(r.Context(), name); ok {
+				if err := d.Workers.ReloadEgress(name, hosts); err != nil {
+					log.Printf("modules: restart %q: egress hosts reload failed: %v", name, err)
+				}
+			}
+		}
+
+		if _, err := d.DB.UpdateModuleStatus(r.Context(), name, db.ModuleStatusActive); err != nil {
+			log.Printf("modules: restart %q: set status active: %v", name, err)
+		}
+		row, _, _ = d.DB.GetInstalledModule(r.Context(), name)
+
+		logModuleAudit(r.Context(), authDeps, audit.LogParams{
+			EventType:  audit.EventModuleRestarted,
+			ActorID:    sess.UserID,
+			ActorEmail: sess.Email,
+			TargetID:   name,
+		})
+
+		writeModuleJSON(w, http.StatusOK, row)
+	}
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 // writeModuleJSON serialises v as JSON and writes it to w.

@@ -648,6 +648,8 @@
     "check_updates_error": "Update-Prüfung fehlgeschlagen.",
     "update": "Aktualisieren",
     "update_error": "Aktualisierung fehlgeschlagen",
+    "restart": "Neu starten",
+    "restart_error": "Neustart fehlgeschlagen",
     "uninstall": "Deinstallieren",
     "uninstall_confirm": "{{name}} deinstallieren? Die Moduldateien werden entfernt.",
     "uninstall_error": "Deinstallation fehlgeschlagen",

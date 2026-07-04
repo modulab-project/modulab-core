@@ -1133,6 +1133,20 @@ export function updateModule(token: string, name: string): Promise<InstalledModu
   });
 }
 
+// POST /v1/modules/{name}/restart — org-admin/super-admin only. Restarts the
+// Deno worker from the currently-installed manifest (no version/registry
+// change). Exists so a "degraded" module (crashed worker, see
+// WorkerPool.SetCrashHandler in deno.go) can be recovered without an
+// available update to trigger updateModule with - previously the only way
+// back to "active" for a module already on its latest release was a manual
+// DB update.
+export function restartModule(token: string, name: string): Promise<InstalledModule> {
+  return request<InstalledModule>(`/v1/modules/${encodeURIComponent(name)}/restart`, {
+    method: "POST",
+    headers: bearerHeaders(token),
+  });
+}
+
 // POST /v1/modules/{name}/pin — org-admin/super-admin only.
 export function pinModule(token: string, name: string): Promise<{ name: string; pinned: boolean }> {
   return request<{ name: string; pinned: boolean }>(

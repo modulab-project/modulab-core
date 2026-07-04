@@ -7,6 +7,7 @@ import {
   listInstalledModules,
   checkModuleUpdates,
   updateModule,
+  restartModule,
   uninstallModule,
   pinModule,
   unpinModule,
@@ -79,6 +80,20 @@ export default function ModulesPage() {
       setModules((prev) => prev.map((m) => (m.name === name ? updated : m)));
     } catch (e) {
       alert(`${t("modules.update_error")}: ${(e as Error).message}`);
+    } finally {
+      setBusyName(null);
+    }
+  }
+
+  async function handleRestart(name: string) {
+    const token = getSessionToken();
+    if (!token) return;
+    setBusyName(name);
+    try {
+      const updated = await restartModule(token, name);
+      setModules((prev) => prev.map((m) => (m.name === name ? updated : m)));
+    } catch (e) {
+      alert(`${t("modules.restart_error")}: ${(e as Error).message}`);
     } finally {
       setBusyName(null);
     }
@@ -236,6 +251,21 @@ export default function ModulesPage() {
                 {/* Right: actions (admin only) */}
                 {isAdmin && (
                   <div className="flex flex-none items-center gap-2">
+                    {mod.tier >= 2 && (mod.status === "degraded" || mod.status === "failed") && (
+                      <button
+                        type="button"
+                        onClick={() => handleRestart(mod.name)}
+                        disabled={isBusy}
+                        className="flex items-center gap-1 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                      >
+                        {isBusy ? (
+                          <i className="ti ti-loader-2 animate-spin text-[13px]" />
+                        ) : (
+                          <i className="ti ti-refresh text-[13px]" />
+                        )}
+                        {t("modules.restart")}
+                      </button>
+                    )}
                     {hasUpdate && (
                       <button
                         type="button"

@@ -648,6 +648,8 @@
     "check_updates_error": "Update check failed.",
     "update": "Update",
     "update_error": "Update failed",
+    "restart": "Restart",
+    "restart_error": "Restart failed",
     "uninstall": "Uninstall",
     "uninstall_confirm": "Uninstall {{name}}? Module files will be removed.",
     "uninstall_error": "Uninstall failed",

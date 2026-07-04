@@ -67,6 +67,7 @@ const (
 	EventModuleInstalled   = "module.installed"
 	EventModuleUninstalled = "module.uninstalled"
 	EventModuleUpdated     = "module.updated"
+	EventModuleRestarted   = "module.restarted"
 	EventModulePinned      = "module.pinned"
 	EventModuleUnpinned    = "module.unpinned"
 	// Feed management (org-admin/super-admin), internal/news.

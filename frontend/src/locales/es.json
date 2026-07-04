@@ -641,6 +641,8 @@
     "check_updates_error": "Error al comprobar actualizaciones.",
     "update": "Actualizar",
     "update_error": "Error al actualizar",
+    "restart": "Reiniciar",
+    "restart_error": "Error al reiniciar",
     "uninstall": "Desinstalar",
     "uninstall_confirm": "¿Desinstalar {{name}}? Se eliminarán los archivos del módulo.",
     "uninstall_error": "Error al desinstalar",

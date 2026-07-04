@@ -608,6 +608,7 @@ func main() {
 	mux.HandleFunc("POST /v1/modules/install", modules.InstallHandler(moduleDeps, storeDeps, authDeps))
 	mux.HandleFunc("DELETE /v1/modules/{name}", modules.UninstallHandler(moduleDeps, authDeps))
 	mux.HandleFunc("POST /v1/modules/{name}/update", modules.UpdateModuleHandler(moduleDeps, storeDeps, authDeps))
+	mux.HandleFunc("POST /v1/modules/{name}/restart", modules.RestartModuleHandler(moduleDeps, authDeps))
 	mux.HandleFunc("POST /v1/modules/{name}/pin", modules.PinHandler(moduleDeps, authDeps))
 	mux.HandleFunc("DELETE /v1/modules/{name}/pin", modules.UnpinHandler(moduleDeps, authDeps))
 

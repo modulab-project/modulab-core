@@ -641,6 +641,8 @@
     "check_updates_error": "Controleren op updates mislukt.",
     "update": "Bijwerken",
     "update_error": "Bijwerken mislukt",
+    "restart": "Herstarten",
+    "restart_error": "Herstarten mislukt",
     "uninstall": "Verwijderen",
     "uninstall_confirm": "{{name}} verwijderen? De modulebestanden worden gewist.",
     "uninstall_error": "Verwijderen mislukt",
