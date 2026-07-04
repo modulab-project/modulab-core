@@ -31,6 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         unzip \
         passwd \
+        gosu \
     && ARCH="$(dpkg --print-architecture)" \
     && case "$ARCH" in \
          amd64) DENO_ARCH="x86_64-unknown-linux-gnu" ;; \
@@ -63,20 +64,29 @@ COPY --from=frontend-builder /app/frontend/dist/ /app/frontend/dist/
 RUN mkdir -p /var/lib/modulab/modules
 ENV MODULAB_MODULE_DATA_DIR=/var/lib/modulab/modules
 
-# Run as an unprivileged, non-login user rather than root (the default for
-# every FROM debian:... image unless overridden). -r makes it a system
-# account (no password, no aging policy); -d sets its home to the same path
-# Core writes module data under, so the two stay consistent. The chown here
-# runs before docker-compose.yml's named volume is ever created, which
-# matters: Docker seeds a brand-new named volume's initial content from
-# whatever is already in the image at that mount path - including
-# ownership - so a fresh deployment's volume comes up already owned by
-# "modulab", not root.
+# Unprivileged, non-login user the process actually runs as (the default
+# for every FROM debian:... image is root unless overridden). -r makes it a
+# system account (no password, no aging policy); -d sets its home to the
+# same path Core writes module data under, so the two stay consistent.
+#
+# Note there is deliberately no `USER modulab` here: MODULAB_MODULE_DATA_DIR
+# is normally a persistent named volume (docker-compose.yml's
+# modulab-modules-data) that, on any deployment that existed before this
+# non-root migration, was created and populated while Core still ran as
+# root. Docker only seeds a *brand-new* volume's ownership from the image -
+# an existing volume keeps whatever ownership its files already have,
+# unaffected by anything set at build time. So a build-time chown here would
+# be correct for a fresh install and silently wrong (unreadable module
+# files, exactly the "Permission denied" failure seen in practice) for every
+# upgrade of an existing deployment. entrypoint.sh below runs as root at
+# container start, chowns the actual mounted volume once it's in place, and
+# only then drops to this user via gosu - see its comment for the full
+# reasoning.
 RUN groupadd -r modulab \
-    && useradd -r -g modulab -d /var/lib/modulab -s /usr/sbin/nologin modulab \
-    && chown -R modulab:modulab /var/lib/modulab
+    && useradd -r -g modulab -d /var/lib/modulab -s /usr/sbin/nologin modulab
 
-USER modulab
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
 EXPOSE 8080
 
@@ -88,4 +98,5 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -fsS http://localhost:8080/healthz || exit 1
 
-ENTRYPOINT ["/usr/local/bin/modulab-core"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["/usr/local/bin/modulab-core"]
