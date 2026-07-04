@@ -29,6 +29,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/smtp"
 	"strconv"
@@ -516,7 +517,9 @@ func SendTest(cfg SMTPRuntimeConfig, to string) error {
 		var clientErr error
 		conn, clientErr = smtp.NewClient(tlsConn, cfg.Host)
 		if clientErr != nil {
-			tlsConn.Close()
+			if closeErr := tlsConn.Close(); closeErr != nil {
+				log.Printf("setup: mail: close tls conn after client error: %v", closeErr)
+			}
 			return fmt.Errorf("smtp client: %w", clientErr)
 		}
 	} else {
@@ -526,11 +529,17 @@ func SendTest(cfg SMTPRuntimeConfig, to string) error {
 			return fmt.Errorf("dial %s: %w", addr, err)
 		}
 		if err := conn.StartTLS(&tls.Config{ServerName: cfg.Host}); err != nil {
-			conn.Close()
+			if closeErr := conn.Close(); closeErr != nil {
+				log.Printf("setup: mail: close conn after starttls error: %v", closeErr)
+			}
 			return fmt.Errorf("starttls: %w", err)
 		}
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			log.Printf("setup: mail: close smtp conn: %v", err)
+		}
+	}()
 
 	if auth != nil {
 		if err := conn.Auth(auth); err != nil {

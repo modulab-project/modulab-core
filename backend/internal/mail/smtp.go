@@ -61,11 +61,17 @@ func send(cfg setup.SMTPRuntimeConfig, msg Message) error {
 			return fmt.Errorf("dial %s: %w", addr, err)
 		}
 		if err := conn.StartTLS(&tls.Config{ServerName: cfg.Host}); err != nil {
-			conn.Close()
+			if closeErr := conn.Close(); closeErr != nil {
+				log.Printf("mail: close conn after starttls error: %v", closeErr)
+			}
 			return fmt.Errorf("starttls: %w", err)
 		}
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			log.Printf("mail: close smtp conn: %v", err)
+		}
+	}()
 
 	// Shared by both the implicit-TLS and STARTTLS paths from here on -
 	// once the connection is encrypted, auth and the MAIL/RCPT/DATA

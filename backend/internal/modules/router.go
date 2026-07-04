@@ -232,7 +232,11 @@ func saveUploadedFile(r *http.Request, dataDir, moduleName string) (string, erro
 	if err != nil {
 		return "", fmt.Errorf("form file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			log.Printf("modules: saveUploadedFile: close uploaded file: %v", err)
+		}
+	}()
 
 	// Validate MIME type by reading the first 512 bytes (content sniffing).
 	buf := make([]byte, 512)
@@ -266,7 +270,11 @@ func saveUploadedFile(r *http.Request, dataDir, moduleName string) (string, erro
 	if err != nil {
 		return "", fmt.Errorf("create file: %w", err)
 	}
-	defer out.Close()
+	defer func() {
+		if err := out.Close(); err != nil {
+			log.Printf("modules: saveUploadedFile: close %s: %v", dst, err)
+		}
+	}()
 
 	if _, err := io.Copy(out, file); err != nil {
 		return "", fmt.Errorf("write file: %w", err)

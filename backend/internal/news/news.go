@@ -292,7 +292,11 @@ func fetchFeed(ctx context.Context, feedURL, label string) ([]Article, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("news: close response body: %v", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("upstream returned HTTP %d", resp.StatusCode)
@@ -350,7 +354,9 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	w.Write(data)
+	if _, err := w.Write(data); err != nil {
+		log.Printf("news: write response: %v", err)
+	}
 }
 
 // ---- OPML import ------------------------------------------------------------
@@ -421,7 +427,11 @@ func AdminParseOPMLHandler(d auth.Deps) http.HandlerFunc {
 			http.Error(w, "missing file field", http.StatusBadRequest)
 			return
 		}
-		defer file.Close()
+		defer func() {
+			if err := file.Close(); err != nil {
+				log.Printf("news: close uploaded file: %v", err)
+			}
+		}()
 
 		body, err := io.ReadAll(io.LimitReader(file, maxUploadSize))
 		if err != nil {
@@ -1241,7 +1251,11 @@ func catalogFetchRaw(ctx context.Context, d auth.Deps) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch catalog: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("news: close catalog response body: %v", err)
+		}
+	}()
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("catalog returned HTTP %d", resp.StatusCode)
 	}

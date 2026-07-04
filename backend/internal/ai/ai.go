@@ -493,7 +493,11 @@ func fetchModels(ctx context.Context, provType, baseURL, apiKey string) ([]strin
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("ai: close response body: %v", err)
+		}
+	}()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return nil, fmt.Errorf("provider returned %d: %s", resp.StatusCode, body)
@@ -634,7 +638,11 @@ func fetchDeepSeekBalance(ctx context.Context, apiKey string) (float64, string, 
 	if err != nil {
 		return 0, "", fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("ai: deepseek: close response body: %v", err)
+		}
+	}()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	if resp.StatusCode != http.StatusOK {
 		return 0, "", fmt.Errorf("deepseek returned %d: %s", resp.StatusCode, body)
@@ -1096,7 +1104,11 @@ func streamAnthropic(ctx context.Context, w http.ResponseWriter, apiKey, model s
 	if err != nil {
 		return fmt.Errorf("anthropic: request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("ai: anthropic: close response body: %v", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
@@ -1170,7 +1182,11 @@ func streamOpenAICompat(ctx context.Context, w http.ResponseWriter, apiKey, base
 	if err != nil {
 		return fmt.Errorf("openai_compat: request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("ai: openai_compat: close response body: %v", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)

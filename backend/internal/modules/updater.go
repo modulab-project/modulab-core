@@ -81,7 +81,11 @@ func Update(ctx context.Context, d Deps, entry store.Entry) error {
 	if err != nil {
 		return fmt.Errorf("modules: update %q: create temp dir: %w", entry.Name, err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			log.Printf("modules: update %q: cleanup temp dir %s: %v", entry.Name, tmpDir, err)
+		}
+	}()
 
 	zipPath := filepath.Join(tmpDir, "module.zip")
 	sha256Path := filepath.Join(tmpDir, "module.zip.sha256")
@@ -245,7 +249,11 @@ func (d Deps) rollback(ctx context.Context, name, cachedZip string, origErr erro
 		return fmt.Errorf("modules: update %q failed; rollback also failed (tempdir): %w | orig: %v",
 			name, err, origErr)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			log.Printf("modules: update %q: rollback: cleanup temp dir %s: %v", name, tmpDir, err)
+		}
+	}()
 
 	extractDir := filepath.Join(tmpDir, "extracted")
 	if err := extractZIP(cachedZip, extractDir, maxModuleZIPBytes); err != nil {

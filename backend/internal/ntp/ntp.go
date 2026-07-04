@@ -13,6 +13,7 @@ package ntp
 import (
 	"encoding/binary"
 	"fmt"
+	"log"
 	"net"
 	"time"
 )
@@ -46,7 +47,11 @@ func DriftOK(maxDrift time.Duration) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("ntp: dial %s: %w", server, err)
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			log.Printf("ntp: close udp conn: %v", err)
+		}
+	}()
 	if err := conn.SetDeadline(time.Now().Add(udpTimeout)); err != nil {
 		return false, fmt.Errorf("ntp: set deadline: %w", err)
 	}

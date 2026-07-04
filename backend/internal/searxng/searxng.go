@@ -127,7 +127,9 @@ func Ping(ctx context.Context, baseURL string) bool {
 	if err != nil {
 		return false
 	}
-	resp.Body.Close()
+	if err := resp.Body.Close(); err != nil {
+		log.Printf("searxng: ping: close response body: %v", err)
+	}
 	return resp.StatusCode < 500
 }
 
@@ -492,7 +494,11 @@ func fetchPage(ctx context.Context, baseURL, query string, pageno int, sp search
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("searxng: search: close response body: %v", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("searxng returned HTTP %d", resp.StatusCode)

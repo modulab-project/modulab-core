@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"net/http"
 	"net/url"
@@ -146,7 +147,9 @@ func Handler(vk *valkey.Client) http.HandlerFunc {
 		if cached, ok, err := vk.Get(ctx, key); err == nil && ok {
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("X-Weather-Cache", "HIT")
-			fmt.Fprint(w, cached)
+			if _, err := fmt.Fprint(w, cached); err != nil {
+				log.Printf("weather: write cached response: %v", err)
+			}
 			return
 		}
 
@@ -168,7 +171,9 @@ func Handler(vk *valkey.Client) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-Weather-Cache", "MISS")
-		w.Write(data)
+		if _, err := w.Write(data); err != nil {
+			log.Printf("weather: write response: %v", err)
+		}
 	}
 }
 
@@ -196,7 +201,11 @@ func fetchOpenMeteo(ctx context.Context, lat, lon float64) (*Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer httpResp.Body.Close()
+	defer func() {
+		if err := httpResp.Body.Close(); err != nil {
+			log.Printf("weather: close response body: %v", err)
+		}
+	}()
 
 	if httpResp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("open-meteo returned HTTP %d", httpResp.StatusCode)

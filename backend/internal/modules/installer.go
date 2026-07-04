@@ -361,7 +361,11 @@ func downloadFile(ctx context.Context, url, path string, maxBytes int64) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("modules: downloadFile: close response body for %s: %v", url, err)
+		}
+	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
@@ -371,7 +375,11 @@ func downloadFile(ctx context.Context, url, path string, maxBytes int64) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			log.Printf("modules: downloadFile: close %s: %v", path, err)
+		}
+	}()
 
 	if _, err := io.Copy(f, io.LimitReader(resp.Body, maxBytes+1)); err != nil {
 		return err
@@ -411,7 +419,11 @@ func extractZIP(src, destDir string, maxTotalBytes int64) error {
 	if err != nil {
 		return fmt.Errorf("open zip: %w", err)
 	}
-	defer r.Close()
+	defer func() {
+		if err := r.Close(); err != nil {
+			log.Printf("modules: extractZIP: close %s: %v", src, err)
+		}
+	}()
 
 	destDir = filepath.Clean(destDir)
 	var totalWritten int64
@@ -452,13 +464,21 @@ func extractZIPEntry(f *zip.File, target string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer rc.Close()
+	defer func() {
+		if err := rc.Close(); err != nil {
+			log.Printf("modules: extractZIPEntry: close zip entry %s: %v", f.Name, err)
+		}
+	}()
 
 	out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
 	if err != nil {
 		return 0, err
 	}
-	defer out.Close()
+	defer func() {
+		if err := out.Close(); err != nil {
+			log.Printf("modules: extractZIPEntry: close %s: %v", target, err)
+		}
+	}()
 
 	return io.Copy(out, rc)
 }
@@ -504,13 +524,21 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() {
+		if err := in.Close(); err != nil {
+			log.Printf("modules: copyFile: close %s: %v", src, err)
+		}
+	}()
 
 	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer func() {
+		if err := out.Close(); err != nil {
+			log.Printf("modules: copyFile: close %s: %v", dst, err)
+		}
+	}()
 
 	_, err = io.Copy(out, in)
 	return err

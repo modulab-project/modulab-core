@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -52,7 +53,11 @@ func VerifySHA256(zipPath, expectedHex string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("modules: verify sha256: open %q: %w", zipPath, err)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			log.Printf("modules: verify sha256: close %s: %v", zipPath, err)
+		}
+	}()
 
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
@@ -96,14 +101,28 @@ func VerifyCosign(zipPath, sigPath, cosignBin string) (bool, error) {
 		return false, fmt.Errorf("modules: cosign: create temp key file: %w", err)
 	}
 	defer func() {
-		keyFile.Close()
-		os.Remove(keyFile.Name())
+		// Best-effort: keyFile is already explicitly closed above before
+		// cosign runs, so this second Close() is expected to no-op (or
+		// report "already closed") on the success path - only logged in
+		// case an early-return above skipped the explicit close.
+		if err := keyFile.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+			log.Printf("modules: cosign: close temp key file: %v", err)
+		}
+		if err := os.Remove(keyFile.Name()); err != nil {
+			log.Printf("modules: cosign: remove temp key file %s: %v", keyFile.Name(), err)
+		}
 	}()
 
 	if _, err := keyFile.WriteString(officialPublicKey); err != nil {
 		return false, fmt.Errorf("modules: cosign: write key: %w", err)
 	}
-	keyFile.Close()
+	// Closed explicitly (rather than relying on the deferred close above)
+	// so the write is flushed to disk before cosign reads the file below -
+	// a failure here means the key file may be incomplete and verification
+	// must not proceed against it.
+	if err := keyFile.Close(); err != nil {
+		return false, fmt.Errorf("modules: cosign: close temp key file: %w", err)
+	}
 
 	// cosign verify-blob --key <pubkey> --signature <sig> <zip>
 	cmd := exec.Command(cosignBin,
