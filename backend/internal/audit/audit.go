@@ -53,6 +53,10 @@ const (
 	EventConfigAIProvider    = "config.ai_provider"
 	EventConfigAIProviderDel = "config.ai_provider.deleted"
 	EventConfigAIKeyCleared  = "config.ai_provider.key_cleared"
+	// chat_rpm_limit and max_body_bytes (ai.AdminSettingsHandler) - unlike
+	// the provider CRUD above, this one had no audit call at all despite
+	// max_body_bytes being a DoS-relevant limit.
+	EventConfigAISettings = "config.ai_settings"
 	// Setup
 	EventSetupComplete = "setup.completed"
 	// Module lifecycle events (org-admin/super-admin driven, spec section

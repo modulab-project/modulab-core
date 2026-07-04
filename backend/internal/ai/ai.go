@@ -701,6 +701,23 @@ func AdminSettingsHandler(deps auth.Deps) http.HandlerFunc {
 				http.Error(w, "database error", http.StatusInternalServerError)
 				return
 			}
+
+			// Best-effort audit; a failed write must not block the response.
+			// max_body_bytes in particular is a DoS-relevant limit (0 =
+			// unlimited request body size) - this had no audit trail at all
+			// before, unlike every other admin AI setting in this file.
+			sess, _ := auth.SessionFromContext(r.Context())
+			if masterKey, err := setup.ResolveMasterKey(r.Context(), deps.Pool, deps.MasterKeyEnv); err == nil {
+				if err := audit.Log(r.Context(), deps.Pool, masterKey, audit.LogParams{
+					EventType:  audit.EventConfigAISettings,
+					ActorID:    sess.UserID,
+					ActorEmail: sess.Email,
+					Details:    fmt.Sprintf(`{"chat_rpm_limit":%d,"max_body_bytes":%d}`, body.ChatRPMLimit, body.MaxBodyBytes),
+				}); err != nil {
+					log.Printf("ai: audit settings update: %v", err)
+				}
+			}
+
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(aiSettings{
 				ChatRPMLimit: body.ChatRPMLimit,
