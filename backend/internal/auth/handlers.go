@@ -706,7 +706,7 @@ func ExportSelfHandler(d Deps) http.HandlerFunc {
 		// Use the OIDC subject as a filename fragment — it's stable, unique,
 		// and not PII in the filename context (the user is downloading their own
 		// data and already knows their own sub).
-		filename := fmt.Sprintf("modulab-export.json")
+		filename := "modulab-export.json"
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 		w.WriteHeader(http.StatusOK)

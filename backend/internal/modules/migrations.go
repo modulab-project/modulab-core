@@ -185,8 +185,14 @@ func runModuleUpdateMigrations(ctx context.Context, d Deps, moduleName, newMigra
 }
 
 // dropModuleSchema drops the module's Postgres schema and role.
-// Called by the uninstaller only when the admin explicitly requests a data
-// purge (not on standard uninstall, which preserves data per spec section 4.8).
+// Not called yet - written ahead of the /v1/modules/{name}/purge endpoint
+// mentioned in uninstaller.go's doc comment (data purge is explicit-only,
+// never part of standard uninstall, which preserves data per spec section
+// 4.8). Kept in place rather than deleted so that endpoint doesn't need to
+// rewrite this logic from scratch; silenced here rather than left to trip
+// the unused-function check until it's wired up.
+//
+//nolint:unused // reserved for the not-yet-implemented purge endpoint
 func dropModuleSchema(ctx context.Context, d Deps, moduleName string) error {
 	schemaName, roleName, err := moduleIdentifiers(moduleName)
 	if err != nil {

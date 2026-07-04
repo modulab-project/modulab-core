@@ -212,12 +212,3 @@ func officialSourceRepo(releaseURL string) string {
 	return releaseURL
 }
 
-// assetFromURL extracts the filename from the last path segment of a URL.
-// "https://github.com/.../releases/download/tag/rezepte.zip" → "rezepte.zip"
-func assetFromURL(releaseURL string) string {
-	parts := strings.Split(releaseURL, "/")
-	if len(parts) == 0 {
-		return ""
-	}
-	return parts[len(parts)-1]
-}
