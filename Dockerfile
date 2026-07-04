@@ -30,6 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
         unzip \
+        passwd \
     && ARCH="$(dpkg --print-architecture)" \
     && case "$ARCH" in \
          amd64) DENO_ARCH="x86_64-unknown-linux-gnu" ;; \
@@ -42,9 +43,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm /tmp/deno.zip \
     && chmod +x /usr/local/bin/deno \
     && deno --version \
-    && apt-get remove -y curl unzip \
+    && apt-get remove -y unzip \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
+# curl is deliberately kept (not removed like unzip above): the HEALTHCHECK
+# below needs an HTTP client, and Core's own /healthz endpoint has no CLI
+# equivalent to shell out to instead.
 
 # Copy Go binary
 COPY --from=go-builder /modulab-core /usr/local/bin/modulab-core
@@ -59,6 +63,29 @@ COPY --from=frontend-builder /app/frontend/dist/ /app/frontend/dist/
 RUN mkdir -p /var/lib/modulab/modules
 ENV MODULAB_MODULE_DATA_DIR=/var/lib/modulab/modules
 
+# Run as an unprivileged, non-login user rather than root (the default for
+# every FROM debian:... image unless overridden). -r makes it a system
+# account (no password, no aging policy); -d sets its home to the same path
+# Core writes module data under, so the two stay consistent. The chown here
+# runs before docker-compose.yml's named volume is ever created, which
+# matters: Docker seeds a brand-new named volume's initial content from
+# whatever is already in the image at that mount path - including
+# ownership - so a fresh deployment's volume comes up already owned by
+# "modulab", not root.
+RUN groupadd -r modulab \
+    && useradd -r -g modulab -d /var/lib/modulab -s /usr/sbin/nologin modulab \
+    && chown -R modulab:modulab /var/lib/modulab
+
+USER modulab
+
 EXPOSE 8080
+
+# /healthz (main.go) is unauthenticated by design (see its handler's doc
+# comment) specifically so Docker/Traefik healthchecks like this one can hit
+# it without credentials. start-period gives Postgres/Valkey/module-worker
+# startup (main.go connects to both before serving) room to finish before
+# failed checks start counting toward retries.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD curl -fsS http://localhost:8080/healthz || exit 1
 
 ENTRYPOINT ["/usr/local/bin/modulab-core"]

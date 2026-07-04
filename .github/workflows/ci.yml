@@ -4,6 +4,14 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Publishing a GitHub Release is the point this project's own release
+  # process (bump the manifest version, commit, then create the release/tag
+  # by hand - see README/project docs) already treats as "this version is
+  # official". The publish-image job below hooks into exactly that moment
+  # rather than adding a new step to the process: nothing here runs
+  # automatically on every push to main, only when a release is published.
+  release:
+    types: [published]
 
 jobs:
   backend:
@@ -15,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.25"
       - name: Lint
         uses: golangci/golangci-lint-action@v6
         with:
@@ -42,10 +50,71 @@ jobs:
       - name: a11y checks (axe-core)
         run: npm run test:a11y
 
+  # Deliberately not implemented yet - see the decision below before adding
+  # real Playwright coverage here.
+  #
+  # `echo "TODO: ..."` always exits 0, so this job used to show a plain green
+  # check next to backend/frontend - indistinguishable from "tests passed" to
+  # anyone glancing at CI status, even though zero tests actually ran.
+  # continue-on-error below keeps that (a step that fails on purpose still
+  # lets the job - and any check depending on it - complete), but GitHub now
+  # renders it with a "failed but continued" warning icon instead of a plain
+  # check, so the gap is visible rather than silently hidden.
+  #
+  # Why there's still no real test here: every route in this app sits behind
+  # OIDC login (spec section 3.3) - there is no local username/password path
+  # to script around. A real E2E smoke test therefore needs an OIDC provider
+  # to log in against, and running one in CI means standing up a lightweight
+  # mock IdP (e.g. Dex or mock-oauth2-server) alongside Playwright and the
+  # Postgres/Valkey testcontainers already needed - a genuinely new piece of
+  # test infrastructure, not just a test file. For a solo homelab project
+  # without external CI/CD pressure, that setup and its ongoing upkeep isn't
+  # worth it yet - revisit once there are outside contributors, or once a
+  # login/setup-wizard regression actually slips through undetected more than
+  # once (see the news-feed encryption bug this same testing gap let through
+  # during the V1 hardening pass).
   e2e:
     runs-on: ubuntu-latest
     needs: [backend, frontend]
     steps:
       - uses: actions/checkout@v4
-      - name: Playwright smoke tests
-        run: echo "TODO: Setup Wizard, login flow, module installation (spec section 13.3)" 
+      - name: Playwright smoke tests (not implemented - see job comment)
+        continue-on-error: true
+        run: |
+          echo "::warning::E2E smoke tests are not implemented yet (Setup Wizard, login flow, module installation - spec section 13.3). This step intentionally fails so CI does not show a false green check."
+          exit 1
+
+  # Runs only when a GitHub Release is published (see the `on: release`
+  # trigger above) - never on a plain push to main. Builds this repo's own
+  # root Dockerfile (the same multi-stage build reset-and-test.sh runs
+  # locally) and pushes it to ghcr.io tagged with the release's tag name
+  # (e.g. "v0.2.0") and "latest", so docker-compose.yml's
+  # ghcr.io/modulab-project/modulab-core:latest reference resolves to a real,
+  # pullable image for anyone who is not building locally themselves.
+  # GITHUB_TOKEN is sufficient to push to this repo's own ghcr.io package -
+  # no extra secret needed - but the job needs "packages: write" explicitly
+  # since the default token permissions are read-only.
+  publish-image:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    if: github.event_name == 'release'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ghcr.io/modulab-project/modulab-core:latest
+            ghcr.io/modulab-project/modulab-core:${{ github.event.release.tag_name }}
