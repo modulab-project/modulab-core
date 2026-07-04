@@ -11,6 +11,18 @@
 # every start; it's a cheap no-op once ownership is already correct.
 set -e
 
+# /var/lib/modulab is the "modulab" user's $HOME (see Dockerfile's useradd
+# -d), which matters beyond the module volume itself: Deno has no explicit
+# DENO_DIR configured anywhere in this codebase, so it falls back to its own
+# default of $HOME/.cache/deno for the npm-compat cache each Tier 2/3
+# handler's `import "npm:..."` populates on first run. That path is NOT part
+# of the modulab-modules-data volume (only .../modules is mounted) - it's
+# ordinary container-layer filesystem - but it still needs to be owned by
+# modulab, or every worker fails just as soon as it tries to cache its first
+# npm import. A plain (non-recursive) chown of the home dir itself is enough
+# here; it does not descend into the modules/ mount point below it.
+chown modulab:modulab /var/lib/modulab
+
 if [ -d "$MODULAB_MODULE_DATA_DIR" ]; then
     chown -R modulab:modulab "$MODULAB_MODULE_DATA_DIR"
 fi
