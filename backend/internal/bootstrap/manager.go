@@ -135,8 +135,8 @@ func (m *Manager) Middleware(next http.Handler) http.Handler {
 // of this process (spec section 6.5 step 7: "Bootstrap-Token invalidiert,
 // System geht in Normalbetrieb"). Called by setup.CompleteHandler once it
 // has verified every prior wizard step (master key, OIDC, group prefix,
-// DNS-challenge provider, and a bound Super-Admin) is actually persisted -
-// Manager itself does not re-check those, it only flips the gate.
+// and a bound Super-Admin) is actually persisted - Manager itself does not
+// re-check those, it only flips the gate.
 //
 // This flag lives in memory only and starts false on every process start,
 // but main.go also calls Complete unconditionally at startup whenever

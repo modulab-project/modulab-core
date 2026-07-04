@@ -234,26 +234,13 @@ func main() {
 		// ResolveMasterKey only ever returns cfg.MasterKey now (no database
 		// fallback), so this can't actually fail in practice - it's called
 		// per-request rather than once at startup purely to keep this
-		// handler's shape consistent with DNS-challenge configure below.
+		// handler's shape consistent with the group-prefix step below.
 		masterKey, err := setup.ResolveMasterKey(r.Context(), pool, cfg.MasterKey)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusPreconditionFailed)
 			return
 		}
 		setup.OIDCConfigureHandler(pool, masterKey)(w, r)
-	})))
-
-	mux.Handle("/v1/setup/dns-challenge/status", bootstrapMgr.Middleware(setup.DNSChallengeStatusHandler(pool, cfg.MasterKey)))
-	mux.Handle("/v1/setup/dns-challenge/configure", bootstrapMgr.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Same master-key dependency as the OIDC step above, for the same
-		// reason: the DNS-challenge provider's credentials are encrypted
-		// with it before being persisted.
-		masterKey, err := setup.ResolveMasterKey(r.Context(), pool, cfg.MasterKey)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusPreconditionFailed)
-			return
-		}
-		setup.DNSChallengeConfigureHandler(pool, masterKey)(w, r)
 	})))
 
 	mux.Handle("/v1/setup/group-prefix/status", bootstrapMgr.Middleware(setup.GroupPrefixStatusHandler(pool)))
@@ -329,12 +316,12 @@ func main() {
 	// SMTP configuration (spec section 3.5's Mail-Queue) lives in the
 	// ongoing Admin Panel, not the Setup Wizard - see setup/smtp.go's doc
 	// comment for why this is deliberately NOT wrapped in
-	// bootstrapMgr.Middleware the way OIDC/DNS-challenge below are.
+	// bootstrapMgr.Middleware the way OIDC below is.
 	// Super-admin only (auth.RequireSuperAdminMiddleware), same level as
 	// OIDC configuration. The configure handler resolves the master key
-	// per-request, same reasoning as the OIDC/DNS-challenge configure
-	// handlers above: it can't actually fail in practice (no DB fallback
-	// left to resolve), kept this shape purely for consistency.
+	// per-request, same reasoning as the OIDC configure handler above: it
+	// can't actually fail in practice (no DB fallback left to resolve),
+	// kept this shape purely for consistency.
 	superAdminOnly := auth.RequireSuperAdminMiddleware(authDeps)
 	mux.Handle("GET /v1/admin/smtp/status", superAdminOnly(setup.SMTPStatusHandler(pool, cfg.MasterKey)))
 	mux.Handle("POST /v1/admin/smtp/test", superAdminOnly(setup.SMTPTestHandler(pool, cfg.MasterKey)))
@@ -399,14 +386,11 @@ func main() {
 		}
 	})))
 
-	// Admin system page + OIDC/DNS-challenge post-wizard config + audit log.
+	// Admin system page + OIDC post-wizard config + audit log.
 	// All super-admin only (same tier as SMTP above).
 	mux.Handle("GET /v1/admin/system", superAdminOnly(adminapi.SystemStatusHandler(pool, cfg.MasterKey)))
 	mux.Handle("PATCH /v1/admin/oidc", superAdminOnly(adminapi.OIDCUpdateHandler(pool, cfg.MasterKey)))
 	mux.Handle("DELETE /v1/admin/oidc", superAdminOnly(adminapi.OIDCDeleteHandler(pool, cfg.MasterKey)))
-	mux.Handle("PATCH /v1/admin/dns-challenge", superAdminOnly(adminapi.DNSChallengeUpdateHandler(pool, cfg.MasterKey)))
-	mux.Handle("DELETE /v1/admin/dns-challenge", superAdminOnly(adminapi.DNSChallengeDeleteHandler(pool, cfg.MasterKey)))
-	mux.Handle("POST /v1/admin/dns-challenge/verify", superAdminOnly(adminapi.DNSChallengeVerifyHandler(pool, cfg.MasterKey)))
 	mux.Handle("GET /v1/audit-log", superAdminOnly(adminapi.AuditLogHandler(pool, cfg.MasterKey)))
 
 	// Widget endpoints (spec section 8 / Home page). Not wrapped in any

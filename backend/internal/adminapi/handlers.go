@@ -1,20 +1,19 @@
 // Package adminapi provides the super-admin-only endpoints that expose and
 // mutate system configuration post-Setup-Wizard completion:
 //
-//   GET  /v1/admin/system          — OIDC, DNS-challenge, group prefix (read-only)
+//   GET  /v1/admin/system          — OIDC, group prefix (read-only)
 //   PATCH /v1/admin/oidc           — update OIDC configuration
-//   PATCH /v1/admin/dns-challenge  — update DNS-challenge credentials
 //   GET  /v1/audit-log             — paginated, filtered audit log
 //
-// All four require a super-admin session (enforced by the
+// All three require a super-admin session (enforced by the
 // auth.RequireSuperAdminMiddleware wrapper that main.go applies to each
-// route). OIDC and DNS-challenge changes are also written to the audit log.
+// route). OIDC changes are also written to the audit log.
 //
-// Relationship to the Setup Wizard: oidc.go / dnschallenge.go in the setup
-// package handle the wizard steps (behind the bootstrap token, inaccessible
-// post-completion). These handlers reuse the same core_settings keys and
-// crypto helpers but require a live super-admin session instead, making the
-// config editable without re-running the wizard.
+// Relationship to the Setup Wizard: oidc.go in the setup package handles the
+// wizard steps (behind the bootstrap token, inaccessible post-completion).
+// These handlers reuse the same core_settings keys and crypto helpers but
+// require a live super-admin session instead, making the config editable
+// without re-running the wizard.
 package adminapi
 
 import (
@@ -38,9 +37,8 @@ import (
 // non-secret state of every system-level configuration block. The frontend's
 // AdminSystemPage uses this to pre-fill the edit forms.
 type SystemStatusResponse struct {
-	OIDC         OIDCStatus         `json:"oidc"`
-	DNSChallenge DNSChallengeStatus `json:"dns_challenge"`
-	GroupPrefix  string             `json:"group_prefix"`
+	OIDC        OIDCStatus `json:"oidc"`
+	GroupPrefix string     `json:"group_prefix"`
 }
 
 // OIDCStatus mirrors setup.OIDCStatusResponse for the system page.
@@ -48,12 +46,6 @@ type OIDCStatus struct {
 	Configured bool   `json:"configured"`
 	IssuerURL  string `json:"issuer_url,omitempty"`
 	ClientID   string `json:"client_id,omitempty"`
-}
-
-// DNSChallengeStatus mirrors setup.DNSChallengeStatusResponse.
-type DNSChallengeStatus struct {
-	Configured bool   `json:"configured"`
-	Provider   string `json:"provider,omitempty"`
 }
 
 // SystemStatusHandler serves GET /v1/admin/system. masterKey must already be
@@ -84,18 +76,6 @@ func SystemStatusHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 			}
 		}
 
-		// DNS-challenge
-		var dnsStatus DNSChallengeStatus
-		encProvider, providerExists, err := pool.GetSetting(ctx, "dns_challenge_provider")
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if providerExists && encProvider != "" {
-			dnsStatus.Configured = true
-			dnsStatus.Provider, _ = crypto.DecryptIfNotEmpty(masterKey, encProvider)
-		}
-
 		// Group prefix (plaintext)
 		prefix, _, err := pool.GetSetting(ctx, "group_prefix")
 		if err != nil {
@@ -104,9 +84,8 @@ func SystemStatusHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusOK, SystemStatusResponse{
-			OIDC:         oidcStatus,
-			DNSChallenge: dnsStatus,
-			GroupPrefix:  prefix,
+			OIDC:        oidcStatus,
+			GroupPrefix: prefix,
 		})
 	}
 }
@@ -199,80 +178,6 @@ func OIDCUpdateHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 	}
 }
 
-// ---- PATCH /v1/admin/dns-challenge ---------------------------------------------
-
-// DNSChallengeUpdateRequest is the body for PATCH /v1/admin/dns-challenge.
-// Credentials is optional: omit or "" to keep the existing value.
-type DNSChallengeUpdateRequest struct {
-	Provider    string `json:"provider"`
-	Credentials string `json:"credentials"` // "" = keep existing
-}
-
-// DNSChallengeUpdateHandler persists updated DNS-challenge configuration.
-// Mirrors the wizard's DNSChallengeConfigHandler but requires super-admin.
-func DNSChallengeUpdateHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-
-		masterKey, err := setup.ResolveMasterKey(ctx, pool, masterKeyEnv)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusPreconditionFailed)
-			return
-		}
-
-		var req DNSChallengeUpdateRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
-			return
-		}
-		req.Provider = strings.TrimSpace(req.Provider)
-
-		if req.Provider == "" {
-			http.Error(w, "provider is required", http.StatusBadRequest)
-			return
-		}
-
-		encProvider, err := crypto.Encrypt(masterKey, req.Provider)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if err := pool.SetSetting(ctx, "dns_challenge_provider", encProvider); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		if req.Credentials != "" {
-			encCreds, err := crypto.Encrypt(masterKey, req.Credentials)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			if err := pool.SetSetting(ctx, "dns_challenge_credentials_enc", encCreds); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-		}
-
-		// Audit — best-effort.
-		if sess, ok := auth.SessionFromContext(ctx); ok {
-			if err := audit.Log(ctx, pool, masterKey, audit.LogParams{
-				EventType:  audit.EventConfigDNS,
-				ActorID:    sess.UserID,
-				ActorEmail: sess.Email,
-				Details:    fmt.Sprintf(`{"provider":%q}`, req.Provider),
-			}); err != nil {
-				log.Printf("adminapi: audit dns update: %v", err)
-			}
-		}
-
-		writeJSON(w, http.StatusOK, DNSChallengeStatus{
-			Configured: true,
-			Provider:   req.Provider,
-		})
-	}
-}
-
 // ---- DELETE /v1/admin/oidc ----------------------------------------------------
 
 // OIDCDeleteHandler clears all OIDC settings from core_settings.
@@ -305,41 +210,6 @@ func OIDCDeleteHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusOK, OIDCStatus{Configured: false})
-	}
-}
-
-// ---- DELETE /v1/admin/dns-challenge -------------------------------------------
-
-// DNSChallengeDeleteHandler clears all DNS-challenge settings from core_settings.
-func DNSChallengeDeleteHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-
-		masterKey, err := setup.ResolveMasterKey(ctx, pool, masterKeyEnv)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusPreconditionFailed)
-			return
-		}
-
-		for _, key := range []string{"dns_challenge_provider", "dns_challenge_credentials_enc"} {
-			if err := pool.DeleteSetting(ctx, key); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-		}
-
-		// Audit — best-effort.
-		if sess, ok := auth.SessionFromContext(ctx); ok {
-			if err := audit.Log(ctx, pool, masterKey, audit.LogParams{
-				EventType:  audit.EventConfigDNSDel,
-				ActorID:    sess.UserID,
-				ActorEmail: sess.Email,
-			}); err != nil {
-				log.Printf("adminapi: audit dns delete: %v", err)
-			}
-		}
-
-		writeJSON(w, http.StatusOK, DNSChallengeStatus{Configured: false})
 	}
 }
 

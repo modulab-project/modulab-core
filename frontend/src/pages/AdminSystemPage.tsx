@@ -18,7 +18,6 @@ export default function AdminSystemPage() {
   const { session, loading } = useAuthenticatedSession();
 
   const [oidcConfigured, setOidcConfigured] = useState(false);
-  const [dnsConfigured, setDnsConfigured] = useState(false);
   const [groupPrefix, setGroupPrefix] = useState<string | null>(null);
   const [smtpConfigured, setSmtpConfigured] = useState(false);
   const [searxngConfigured, setSearxngConfigured] = useState(false);
@@ -44,7 +43,6 @@ export default function AdminSystemPage() {
     ])
       .then(([sys, smtp, searxng]) => {
         setOidcConfigured(sys.oidc.configured);
-        setDnsConfigured(sys.dns_challenge.configured);
         setGroupPrefix(sys.group_prefix ?? null);
         setSmtpConfigured(smtp.configured);
         setSearxngConfigured(searxng.configured);
@@ -92,16 +90,6 @@ export default function AdminSystemPage() {
             description={t("admin.system.oidc_card_desc")}
             configured={oidcConfigured}
             href="/admin/system/oidc"
-            t={t}
-          />
-
-          {/* DNS-Challenge */}
-          <ConfigCard
-            icon="ti-certificate"
-            title={t("admin.system.dns_title")}
-            description={t("admin.system.dns_card_desc")}
-            configured={dnsConfigured}
-            href="/admin/system/dns"
             t={t}
           />
 

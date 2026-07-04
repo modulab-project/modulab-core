@@ -940,15 +940,16 @@ const encryptionVersionKey = "core_encryption_version"
 // Fields migrated at version 1:
 //   - users.email, users.name
 //   - core_settings: smtp_host, smtp_username, smtp_from_address,
-//     oidc_issuer_url, oidc_client_id, dns_challenge_provider
+//     oidc_issuer_url, oidc_client_id
+//     (dns_challenge_provider was migrated here too until the DNS-challenge
+//     feature was removed entirely - see migration 0005)
 //
 // Fields migrated at version 2:
 //   - news_feeds.url (CreateFeed/UpdateFeed started encrypting new rows
 //     directly; this backfills rows created before that change)
 //
-// The _enc variants (smtp_password_enc, oidc_client_secret_enc,
-// dns_challenge_credentials_enc) were already encrypted before this
-// feature landed and are left untouched.
+// The _enc variants (smtp_password_enc, oidc_client_secret_enc) were
+// already encrypted before this feature landed and are left untouched.
 func (p *Pool) MigrateToEncryptedStorage(ctx context.Context) error {
 	v, exists, err := p.GetSetting(ctx, encryptionVersionKey)
 	if err != nil {
@@ -1066,7 +1067,6 @@ func (p *Pool) migrateEncryptionV1(ctx context.Context) error {
 	settingsToMigrate := []string{
 		"smtp_host", "smtp_username", "smtp_from_address",
 		"oidc_issuer_url", "oidc_client_id",
-		"dns_challenge_provider",
 	}
 	for _, key := range settingsToMigrate {
 		val, exists, err := p.GetSetting(ctx, key)

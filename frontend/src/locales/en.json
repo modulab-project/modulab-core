@@ -287,7 +287,6 @@
       "hub_subtitle": "All system-wide settings in one place — click a section to configure it.",
       "back": "System config",
       "oidc_card_desc": "Manage your identity provider, Client ID, and secret.",
-      "dns_card_desc": "DNS provider and API credentials for automatic TLS certificates.",
       "searxng_card_desc": "Configure the web search instance.",
       "ai_card_desc": "API keys for built-in and custom AI providers.",
       "load_error": "Failed to load system status.",
@@ -302,28 +301,10 @@
       "oidc_validation_error": "Issuer URL and Client ID are required.",
       "secret_placeholder_existing": "Leave blank to keep existing secret",
       "save_oidc": "Save OIDC",
-      "dns_title": "DNS-challenge configuration",
-      "dns_hint": "Enter your DNS provider and the corresponding API credentials. Leave credentials blank to keep the existing value.",
-      "dns_validation_error": "Provider is required.",
-      "dns_provider": "DNS provider",
-      "dns_provider_custom": "Other (enter manually)",
-      "dns_provider_placeholder": "e.g. my-provider",
-      "api_credentials": "API credentials",
-      "api_credentials_placeholder": "API token, JSON credentials, etc.",
-      "credentials_placeholder_existing": "Leave blank to keep existing credentials",
-      "save_dns": "Save DNS-challenge",
       "save": "Save",
       "oidc": {
         "removing": "Removing…",
         "remove": "Remove configuration"
-      },
-      "dns": {
-        "removing": "Removing…",
-        "remove": "Remove configuration",
-        "verifying": "Verifying API key…",
-        "verify_valid": "API key is valid.",
-        "verify_invalid": "API key is invalid",
-        "verify_unsupported": "Automatic key verification is not supported for this provider."
       }
     },
     "audit": {

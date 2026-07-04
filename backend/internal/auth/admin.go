@@ -130,9 +130,8 @@ func RequireSuperAdminMiddleware(d Deps) func(http.Handler) http.Handler {
 				return
 			}
 			// Store the validated session in the context so downstream
-			// handlers (e.g. SMTP/OIDC/DNS-challenge configure) can
-			// retrieve the actor for audit logging without re-parsing the
-			// bearer token.
+			// handlers (e.g. SMTP/OIDC configure) can retrieve the actor
+			// for audit logging without re-parsing the bearer token.
 			next.ServeHTTP(w, r.WithContext(ContextWithSession(r.Context(), sess)))
 		})
 	}

@@ -74,22 +74,6 @@ export function configureOIDC(
   });
 }
 
-export interface DNSChallengeStatus {
-  configured: boolean;
-  provider?: string;
-}
-
-export function configureDNSChallenge(
-  bootstrapToken: string,
-  body: { provider: string; credentials: string },
-): Promise<DNSChallengeStatus> {
-  return request<DNSChallengeStatus>("/v1/setup/dns-challenge/configure", {
-    method: "POST",
-    bootstrapToken,
-    body: JSON.stringify(body),
-  });
-}
-
 export interface GroupPrefixStatus {
   configured: boolean;
   prefix?: string;
@@ -955,18 +939,12 @@ export interface OIDCStatus {
   client_id?: string;
 }
 
-export interface DNSChallengeStatus {
-  configured: boolean;
-  provider?: string;
-}
-
 export interface SystemStatus {
   oidc: OIDCStatus;
-  dns_challenge: DNSChallengeStatus;
   group_prefix: string;
 }
 
-// GET /v1/admin/system — OIDC config, DNS-challenge, group prefix (read-only).
+// GET /v1/admin/system — OIDC config, group prefix (read-only).
 export function getSystemStatus(token: string): Promise<SystemStatus> {
   return request<SystemStatus>("/v1/admin/system", {
     headers: bearerHeaders(token),
@@ -986,42 +964,9 @@ export function updateOIDC(
   });
 }
 
-// PATCH /v1/admin/dns-challenge — update DNS-challenge configuration.
-// credentials is optional; omit or pass "" to keep existing credentials.
-export function updateDNSChallenge(
-  token: string,
-  body: { provider: string; credentials?: string },
-): Promise<DNSChallengeStatus> {
-  return request<DNSChallengeStatus>("/v1/admin/dns-challenge", {
-    method: "PATCH",
-    headers: bearerHeaders(token),
-    body: JSON.stringify(body),
-  });
-}
-
 export function deleteOIDCConfig(token: string): Promise<OIDCStatus> {
   return request<OIDCStatus>("/v1/admin/oidc", {
     method: "DELETE",
-    headers: bearerHeaders(token),
-  });
-}
-
-export function deleteDNSConfig(token: string): Promise<DNSChallengeStatus> {
-  return request<DNSChallengeStatus>("/v1/admin/dns-challenge", {
-    method: "DELETE",
-    headers: bearerHeaders(token),
-  });
-}
-
-export interface DNSVerifyResult {
-  valid: boolean;
-  supported: boolean;
-  message: string;
-}
-
-export function verifyDNSChallenge(token: string): Promise<DNSVerifyResult> {
-  return request<DNSVerifyResult>("/v1/admin/dns-challenge/verify", {
-    method: "POST",
     headers: bearerHeaders(token),
   });
 }

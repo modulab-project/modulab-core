@@ -14,8 +14,8 @@ import (
 // Fields mirror .env.example one-to-one so the mapping stays obvious.
 type Config struct {
 	// MasterKey (MODULAB_MASTER_KEY) is the AES-256 key (64 hex chars, 32
-	// raw bytes) used to encrypt the OIDC client secret and DNS-challenge
-	// provider credentials before they touch Postgres (internal/crypto).
+	// raw bytes) used to encrypt the OIDC client secret before it touches
+	// Postgres (internal/crypto).
 	// It must come from the environment - Load fails outright if it is
 	// missing or the wrong shape (see validateMasterKey) rather than
 	// generating one and falling back to a copy persisted in core_settings,

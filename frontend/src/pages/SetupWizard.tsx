@@ -43,10 +43,6 @@ function saveStep(step: StepNumber) {
 //   4. Super-admin login
 //   5. SMTP (optional, skippable, with test-send)
 //   6. Complete
-// DNS-challenge was step 3 until 2026-06-29; removed so the operator can
-// enter the DNS API key later in the admin panel (/admin/system/dns) once
-// the rest of the setup is done - forcing it here blocked setups where the
-// DNS provider credentials are not yet at hand.
 // SMTP is deliberately placed *after* step 4's super-admin login: those
 // earlier steps are gated by the bootstrap token (bootstrap.Manager's
 // middleware, no session exists yet), but SMTP configuration lives behind

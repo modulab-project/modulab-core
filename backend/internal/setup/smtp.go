@@ -1,20 +1,20 @@
 // This file implements SMTP configuration for spec section 3.5's
 // Mail-Queue ("SMTP-Konfiguration im Admin-Panel. Kompatibel mit
 // self-hosted Lösungen (Postfix, Mailcow, Stalwart) – kein externer
-// Mail-Service erforderlich."). Unlike OIDC/DNS-challenge (oidc.go,
-// dnschallenge.go), this is deliberately NOT part of the Setup Wizard's
-// fixed 6-step sequence or its bootstrap-token gate: the spec places it in
-// the ongoing Admin Panel, not first-run setup, since a fresh install is
-// perfectly usable without outbound mail (SSE notifications alone already
-// cover the same events in real time for anyone currently connected - see
-// internal/notify). main.go wires this behind a super-admin session check
-// instead of bootstrap.Manager's middleware.
+// Mail-Service erforderlich."). Unlike OIDC (oidc.go), this is deliberately
+// NOT part of the Setup Wizard's fixed 6-step sequence or its
+// bootstrap-token gate: the spec places it in the ongoing Admin Panel, not
+// first-run setup, since a fresh install is perfectly usable without
+// outbound mail (SSE notifications alone already cover the same events in
+// real time for anyone currently connected - see internal/notify). main.go
+// wires this behind a super-admin session check instead of
+// bootstrap.Manager's middleware.
 //
-// Same encrypted-at-rest treatment as the OIDC client secret and
-// DNS-challenge credentials: the password is the one field spec section
-// 2.4's data-category table would classify 🔴 Kritisch (OAuth-Secrets/
-// API-Tokens tier, Class B/AES-GCM), so it goes through crypto.Encrypt
-// before ever reaching core_settings, exactly like oidc.go's ClientSecret.
+// Same encrypted-at-rest treatment as the OIDC client secret: the password
+// is the one field spec section 2.4's data-category table would classify
+// 🔴 Kritisch (OAuth-Secrets/API-Tokens tier, Class B/AES-GCM), so it goes
+// through crypto.Encrypt before ever reaching core_settings, exactly like
+// oidc.go's ClientSecret.
 //
 // Host/Username/FromAddress are encrypted with AES-256-GCM alongside the
 // password, following spec section 2.4's encrypt-everything principle.

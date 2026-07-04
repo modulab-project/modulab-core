@@ -287,7 +287,6 @@
       "hub_subtitle": "Tous les paramètres système en un seul endroit — cliquez sur une section pour la configurer.",
       "back": "Config. système",
       "oidc_card_desc": "Gérez votre fournisseur d'identité, Client ID et secret.",
-      "dns_card_desc": "Fournisseur DNS et identifiants API pour les certificats TLS automatiques.",
       "searxng_card_desc": "Configurez l'instance de recherche web.",
       "ai_card_desc": "Clés API pour les fournisseurs IA intégrés et personnalisés.",
       "load_error": "Échec du chargement de l'état système.",
@@ -302,28 +301,10 @@
       "oidc_validation_error": "L'URL de l'émetteur et le Client ID sont obligatoires.",
       "secret_placeholder_existing": "Laisser vide pour conserver le secret existant",
       "save_oidc": "Enregistrer OIDC",
-      "dns_title": "Configuration du challenge DNS",
-      "dns_hint": "Entrez votre fournisseur DNS et les identifiants API correspondants. Laissez les identifiants vides pour conserver la valeur existante.",
-      "dns_validation_error": "Le fournisseur est obligatoire.",
-      "dns_provider": "Fournisseur DNS",
-      "dns_provider_custom": "Autre (saisir manuellement)",
-      "dns_provider_placeholder": "ex. mon-fournisseur",
-      "api_credentials": "Identifiants API",
-      "api_credentials_placeholder": "Token API, identifiants JSON, etc.",
-      "credentials_placeholder_existing": "Laisser vide pour conserver les identifiants existants",
-      "save_dns": "Enregistrer le challenge DNS",
       "save": "Enregistrer",
       "oidc": {
         "removing": "Suppression…",
         "remove": "Supprimer la configuration"
-      },
-      "dns": {
-        "removing": "Suppression…",
-        "remove": "Supprimer la configuration",
-        "verifying": "Vérification de la clé API…",
-        "verify_valid": "La clé API est valide.",
-        "verify_invalid": "La clé API est invalide",
-        "verify_unsupported": "La vérification automatique de la clé n'est pas prise en charge pour ce fournisseur."
       }
     },
     "audit": {

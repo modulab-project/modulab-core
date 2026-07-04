@@ -95,11 +95,6 @@ func WizardComplete(ctx context.Context, pool *db.Pool) (bool, error) {
 // run at all, the master key is guaranteed present - there is nothing left
 // to persist or verify for it.
 //
-// DNS-challenge is intentionally NOT required here (removed 2026-06-29):
-// the operator can enter the DNS provider credentials later in the admin
-// panel (/admin/system/dns) once the rest of the setup is done. Forcing
-// it during the wizard blocked fresh installs where the DNS API key is not
-// yet at hand.
 func missingSteps(ctx context.Context, pool *db.Pool) ([]string, error) {
 	var missing []string
 

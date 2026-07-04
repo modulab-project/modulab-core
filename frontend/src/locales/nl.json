@@ -287,7 +287,6 @@
       "hub_subtitle": "Alle systeeminstellingen op één plek — klik op een sectie om het te configureren.",
       "back": "Systeemconfig.",
       "oidc_card_desc": "Beheer uw identiteitsprovider, Client ID en geheim.",
-      "dns_card_desc": "DNS-provider en API-referenties voor automatische TLS-certificaten.",
       "searxng_card_desc": "Configureer de webzoekinstantie.",
       "ai_card_desc": "API-sleutels voor ingebouwde en aangepaste AI-providers.",
       "load_error": "Laden van systeemstatus mislukt.",
@@ -302,28 +301,10 @@
       "oidc_validation_error": "Uitgevers-URL en Client ID zijn verplicht.",
       "secret_placeholder_existing": "Leeg laten om bestaand geheim te behouden",
       "save_oidc": "OIDC opslaan",
-      "dns_title": "DNS-challenge-configuratie",
-      "dns_hint": "Voer uw DNS-provider en bijbehorende API-referenties in. Laat referenties leeg om de bestaande waarde te behouden.",
-      "dns_validation_error": "Provider is verplicht.",
-      "dns_provider": "DNS-provider",
-      "dns_provider_custom": "Overige (handmatig invoeren)",
-      "dns_provider_placeholder": "bijv. mijn-provider",
-      "api_credentials": "API-referenties",
-      "api_credentials_placeholder": "API-token, JSON-referenties, enz.",
-      "credentials_placeholder_existing": "Leeg laten om bestaande referenties te behouden",
-      "save_dns": "DNS-challenge opslaan",
       "save": "Opslaan",
       "oidc": {
         "removing": "Verwijderen…",
         "remove": "Configuratie verwijderen"
-      },
-      "dns": {
-        "removing": "Verwijderen…",
-        "remove": "Configuratie verwijderen",
-        "verifying": "API-sleutel verifiëren…",
-        "verify_valid": "API-sleutel is geldig.",
-        "verify_invalid": "API-sleutel is ongeldig",
-        "verify_unsupported": "Automatische sleutelverificatie wordt niet ondersteund voor deze provider."
       }
     },
     "audit": {

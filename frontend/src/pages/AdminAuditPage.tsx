@@ -22,7 +22,6 @@ const EVENT_TYPES = [
   "config.smtp",
   "config.smtp.deleted",
   "config.oidc",
-  "config.dns_challenge",
   "config.searxng",
   "config.searxng.deleted",
   "config.ai_provider",

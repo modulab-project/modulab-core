@@ -287,7 +287,6 @@
       "hub_subtitle": "Alle systemweiten Einstellungen an einem Ort – klicke auf einen Bereich, um ihn zu konfigurieren.",
       "back": "Systemkonfiguration",
       "oidc_card_desc": "Anmeldeprovider, Client-ID und Secret verwalten.",
-      "dns_card_desc": "DNS-Provider und API-Zugangsdaten für automatische TLS-Zertifikate.",
       "searxng_card_desc": "Websuche-Instanz konfigurieren.",
       "ai_card_desc": "API-Schlüssel für integrierte und benutzerdefinierte KI-Anbieter.",
       "load_error": "Systemstatus konnte nicht geladen werden.",
@@ -302,28 +301,10 @@
       "oidc_validation_error": "Issuer-URL und Client-ID sind erforderlich.",
       "secret_placeholder_existing": "Leer lassen, um bestehendes Secret zu behalten",
       "save_oidc": "OIDC speichern",
-      "dns_title": "DNS-Challenge-Konfiguration",
-      "dns_hint": "Hinterlege deinen DNS-Provider und die zugehörigen API-Credentials. Credentials leer lassen, um den bestehenden Wert zu behalten.",
-      "dns_validation_error": "Provider ist erforderlich.",
-      "dns_provider": "DNS-Provider",
-      "dns_provider_custom": "Anderer (manuell eingeben)",
-      "dns_provider_placeholder": "z. B. mein-provider",
-      "api_credentials": "API-Zugangsdaten",
-      "api_credentials_placeholder": "API-Token, JSON-Credentials o. Ä.",
-      "credentials_placeholder_existing": "Leer lassen, um bestehende Credentials zu behalten",
-      "save_dns": "DNS-Challenge speichern",
       "save": "Speichern",
       "oidc": {
         "removing": "Wird entfernt…",
         "remove": "Konfiguration entfernen"
-      },
-      "dns": {
-        "removing": "Wird entfernt…",
-        "remove": "Konfiguration entfernen",
-        "verifying": "API-Key wird geprüft…",
-        "verify_valid": "API-Key ist gültig.",
-        "verify_invalid": "API-Key ist ungültig",
-        "verify_unsupported": "Automatische Key-Prüfung wird für diesen Provider nicht unterstützt."
       }
     },
     "audit": {

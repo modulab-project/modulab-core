@@ -1,6 +1,6 @@
 // Package audit writes and reads the append-only audit log (spec section
 // 10.5). Every security-relevant admin action - user approve/lock/unlock/
-// delete, SMTP/OIDC/DNS-Challenge configuration changes - produces one row.
+// delete, SMTP/OIDC configuration changes - produces one row.
 //
 // Immutability is enforced at two layers:
 //   - A PostgreSQL trigger (migrations/0003_add_audit_log.up.sql) raises an
@@ -48,8 +48,6 @@ const (
 	EventConfigSMTPDel      = "config.smtp.deleted"
 	EventConfigOIDC         = "config.oidc"
 	EventConfigOIDCDel      = "config.oidc.deleted"
-	EventConfigDNS          = "config.dns_challenge"
-	EventConfigDNSDel       = "config.dns_challenge.deleted"
 	EventConfigSearXNG      = "config.searxng"
 	EventConfigSearXNGDel   = "config.searxng.deleted"
 	EventConfigAIProvider    = "config.ai_provider"

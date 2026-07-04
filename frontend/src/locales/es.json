@@ -287,7 +287,6 @@
       "hub_subtitle": "Toda la configuración del sistema en un solo lugar — haga clic en una sección para configurarla.",
       "back": "Config. del sistema",
       "oidc_card_desc": "Gestione su proveedor de identidad, Client ID y secreto.",
-      "dns_card_desc": "Proveedor DNS y credenciales API para certificados TLS automáticos.",
       "searxng_card_desc": "Configure la instancia de búsqueda web.",
       "ai_card_desc": "Claves API para proveedores de IA integrados y personalizados.",
       "load_error": "Error al cargar el estado del sistema.",
@@ -302,28 +301,10 @@
       "oidc_validation_error": "La URL del emisor y el Client ID son obligatorios.",
       "secret_placeholder_existing": "Dejar en blanco para mantener el secreto existente",
       "save_oidc": "Guardar OIDC",
-      "dns_title": "Configuración de challenge DNS",
-      "dns_hint": "Ingrese su proveedor DNS y las credenciales API correspondientes. Deje las credenciales en blanco para mantener el valor existente.",
-      "dns_validation_error": "El proveedor es obligatorio.",
-      "dns_provider": "Proveedor DNS",
-      "dns_provider_custom": "Otro (ingresar manualmente)",
-      "dns_provider_placeholder": "p. ej. mi-proveedor",
-      "api_credentials": "Credenciales API",
-      "api_credentials_placeholder": "Token API, credenciales JSON, etc.",
-      "credentials_placeholder_existing": "Dejar en blanco para mantener las credenciales existentes",
-      "save_dns": "Guardar challenge DNS",
       "save": "Guardar",
       "oidc": {
         "removing": "Eliminando…",
         "remove": "Eliminar configuración"
-      },
-      "dns": {
-        "removing": "Eliminando…",
-        "remove": "Eliminar configuración",
-        "verifying": "Verificando clave API…",
-        "verify_valid": "La clave API es válida.",
-        "verify_invalid": "La clave API no es válida",
-        "verify_unsupported": "La verificación automática de clave no es compatible con este proveedor."
       }
     },
     "audit": {

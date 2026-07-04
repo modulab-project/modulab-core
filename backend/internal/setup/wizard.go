@@ -68,8 +68,8 @@ func InitHandler(pool *db.Pool) http.HandlerFunc {
 //
 // Kept as a function with this exact signature, rather than callers just
 // reading cfg.MasterKey directly, because internal/auth's resolveProvider
-// and main.go's OIDC/DNS-challenge configure handlers all call it - this
-// way the database-fallback removal only had to happen in one place.
+// and main.go's OIDC configure handler all call it - this way the
+// database-fallback removal only had to happen in one place.
 func ResolveMasterKey(ctx context.Context, pool *db.Pool, envValue string) (string, error) {
 	if envValue == "" {
 		return "", fmt.Errorf("setup: MODULAB_MASTER_KEY is not set - this should be unreachable, since config.Load refuses to start Core without it")
