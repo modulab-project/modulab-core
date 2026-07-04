@@ -115,9 +115,11 @@
         "api_key": "API-Schlüssel",
         "api_key_keep": "API-Schlüssel (leer lassen, um bestehenden zu behalten)",
         "api_key_optional": "API-Schlüssel (optional)",
+        "api_key_placeholder": "Leer lassen, falls nicht erforderlich",
         "custom_title_edit": "Benutzerdefinierten Anbieter bearbeiten",
         "custom_title_add": "Benutzerdefinierten Anbieter hinzufügen",
         "name": "Name",
+        "name_placeholder": "Ollama (homelab)",
         "id": "ID (wird automatisch aus dem Namen generiert, wenn leer)",
         "base_url": "Basis-URL",
         "user_override": "Benutzern erlauben, eigenen Schlüssel zu verwenden",
@@ -566,6 +568,7 @@
     "finishing": "Anmeldung wird abgeschlossen…"
   },
   "common": {
+    "logo_alt": "ModuLab-Logo",
     "cancel": "Abbrechen",
     "save": "Speichern",
     "saving": "Wird gespeichert…",
@@ -678,6 +681,7 @@
     "not_active": "Dieses Modul ist nicht aktiv (Status: {{status}}).",
     "no_ui_bundle": "Dieses Modul hat kein eigenes Frontend. Die API ist direkt erreichbar.",
     "no_default_export": "Das Modul-Bundle hat keinen Standard-Export.",
+    "fetch_error": "Modul konnte nicht geladen werden ({{message}}).",
     "api_base": "API-Basis"
   }
 }

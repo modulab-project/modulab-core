@@ -69,7 +69,7 @@ export default function ModulePage() {
           setLoadError(`module_page.not_active:${m.status}`);
         }
       })
-      .catch((e) => setLoadError(String(e)))
+      .catch((e) => setLoadError(`module_page.fetch_error:${e instanceof Error ? e.message : String(e)}`))
       .finally(() => setFetching(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, moduleName]);
@@ -153,7 +153,7 @@ export default function ModulePage() {
         }
       })
       .catch((e) => {
-        setLoadError(String(e));
+        setLoadError(`module_page.fetch_error:${e instanceof Error ? e.message : String(e)}`);
       })
       .finally(() => {
         if (blobUrl) URL.revokeObjectURL(blobUrl);
@@ -179,9 +179,21 @@ export default function ModulePage() {
 
         {loadError && (
           <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
-            {loadError.startsWith("module_page.")
-              ? t(loadError.split(":")[0], { status: loadError.split(":")[1] })
-              : loadError}
+            {(() => {
+              if (!loadError.startsWith("module_page.")) return loadError;
+              // Split on the *first* colon only — the trailing part (a status
+              // slug or a raw error message) may itself contain colons
+              // (e.g. some fetch/network error strings), which a naive
+              // split(":")[1] would truncate.
+              const sep = loadError.indexOf(":");
+              const key = sep === -1 ? loadError : loadError.slice(0, sep);
+              const param = sep === -1 ? "" : loadError.slice(sep + 1);
+              return key === "module_page.not_active"
+                ? t(key, { status: param })
+                : key === "module_page.fetch_error"
+                  ? t(key, { message: param })
+                  : t(key);
+            })()}
           </div>
         )}
 

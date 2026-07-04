@@ -1,4 +1,5 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 
 // Shared visual shell for the three "no session yet" pages (Login,
 // SetupWizard, Pending) so they look like part of the same product as
@@ -59,8 +60,9 @@ export function AuthShell({
 // just ProfilePage.tsx's header - can reuse the exact same artwork instead
 // of a third copy-pasted copy of this SVG drifting out of sync over time.
 export function Logo({ className = "h-11 w-11" }: { className?: string }) {
+  const { t } = useTranslation();
   return (
-    <svg viewBox="0 0 130 120" className={className} role="img" aria-label="ModuLab logo">
+    <svg viewBox="0 0 130 120" className={className} role="img" aria-label={t("common.logo_alt")}>
       <polygon
         points="95,25 117,37 117,63 95,75 73,63 73,37"
         fill="none"

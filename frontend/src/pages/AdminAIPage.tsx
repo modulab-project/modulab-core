@@ -729,7 +729,7 @@ function CustomProviderModal({
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Ollama (homelab)"
+              placeholder={t("admin.ai.modal.name_placeholder")}
               className={inputCls}
             />
           </Field>
@@ -754,7 +754,7 @@ function CustomProviderModal({
           <div>
             <div className="mb-1 flex items-center justify-between">
               <label className="text-xs text-gray-500 dark:text-gray-400">
-                Default model <span className="ml-0.5 text-red-500">*</span>
+                {t("admin.ai.modal.default_model")} <span className="ml-0.5 text-red-500">*</span>
               </label>
               {existing?.has_admin_key && (
                 <button
@@ -795,7 +795,7 @@ function CustomProviderModal({
               autoComplete="off"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="Leave empty if not required"
+              placeholder={t("admin.ai.modal.api_key_placeholder")}
               className={inputCls}
             />
           </Field>

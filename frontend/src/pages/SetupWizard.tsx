@@ -491,7 +491,7 @@ function StepSMTP({ onDone }: { onDone: () => void }) {
         id="smtp-username"
         value={username}
         onChange={setUsername}
-        placeholder="leave empty for an unauthenticated relay"
+        placeholder={t("admin.smtp.username_placeholder")}
       />
       <AuthField
         label={t("setup.step5.password")}
