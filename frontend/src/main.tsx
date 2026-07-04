@@ -3,7 +3,7 @@ import ReactDOM from "react-dom/client";
 import * as ReactJSXRuntime from "react/jsx-runtime";
 import i18next from "i18next";
 import * as ReactI18next from "react-i18next";
-import { BrowserRouter } from "react-router-dom";
+import { BrowserRouter } from "react-router";
 import App from "./App";
 import "./index.css";
 import "./lib/i18n";

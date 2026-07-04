@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 // Port 5173 is Vite's own default - made explicit here because
 // backend/internal/config's MODULAB_FRONTEND_BASE_URL default
@@ -16,7 +17,7 @@ import react from "@vitejs/plugin-react";
 // same origin as the frontend, which also eliminates CORS preflight issues
 // when accessing from a non-localhost device.
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   server: {
     port: 5173,
     host: true,

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { getAuditLog, type AuditEntry } from "../lib/api";
 import { getSessionToken } from "../lib/session";

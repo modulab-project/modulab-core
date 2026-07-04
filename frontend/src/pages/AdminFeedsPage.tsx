@@ -6,7 +6,7 @@
 // Gate is enforced server-side (requireAdminDeps in internal/news/news.go);
 // client-side we additionally redirect non-admins to / via isAdminRole.
 import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import {
   adminListFeeds,

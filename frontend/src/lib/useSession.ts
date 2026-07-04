@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { getMe, getHealth, ApiError, type Session } from "./api";
 import { clearSessionToken, getSessionToken } from "./session";
 

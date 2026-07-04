@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router";
 import SetupWizard from "./pages/SetupWizard";
 import AuthComplete from "./pages/AuthComplete";
 import Login from "./pages/Login";

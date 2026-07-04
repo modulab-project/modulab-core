@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { safeHref } from "../lib/url";

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { configureSmtp, deleteSmtpConfig, smtpStatus, type SMTPStatus } from "../lib/api";
 import { getSessionToken } from "../lib/session";

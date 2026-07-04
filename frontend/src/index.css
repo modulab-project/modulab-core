@@ -1,3 +1,6 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/* v3 used darkMode: "class" in tailwind.config.js; v4 has no JS config
+   auto-detection, so the same "dark" class strategy is defined explicitly
+   here (toggled on <html> by AppShell/AuthShell). */
+@custom-variant dark (&:where(.dark, .dark *));

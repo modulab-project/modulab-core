@@ -1,7 +1,7 @@
 // Installed modules management page (/admin/modules/installed).
 // Admin-only. Lists all installed modules with status, version, and admin actions.
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import {
   listInstalledModules,

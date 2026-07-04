@@ -2,7 +2,7 @@
 // Admin-only. Shows all known modules from the registry cache (official + community).
 // Only org-admin/super-admin can access, install, or sync.
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import {
   listStore,

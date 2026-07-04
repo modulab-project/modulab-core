@@ -10,7 +10,7 @@
 //
 // For v1 (no external bundle yet), a fallback is shown when no bundle is found.
 import { useEffect, useState } from "react";
-import { useParams, useNavigate, useSearchParams } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import i18n from "../lib/i18n";
 import { getSessionToken } from "../lib/session";
