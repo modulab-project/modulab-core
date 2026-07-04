@@ -468,6 +468,46 @@ type WorkerResponse struct {
 	// ModuleNotification's doc comment for why the payload carries
 	// pre-rendered text rather than a type+data pair Core would interpret.
 	Notifications []ModuleNotification `json:"notifications,omitempty"`
+	// AuditEvents, when non-empty, asks Core to append one entry per event
+	// to the central audit_log (internal/audit) — e.g. a RADIUS module
+	// recording "account_created"/"account_deleted" for its own accounts.
+	// This is the Core-side half of the module audit bridge; no module SDK
+	// helper calls this yet (module code is out of scope here), but the
+	// wire format and Core-side enforcement are in place so a module only
+	// needs to add AuditEvents to the JSON it already returns. See
+	// ModuleAuditEvent's doc comment for the trust boundary: neither the
+	// event-type prefix nor the actor identity is taken from the module.
+	AuditEvents []ModuleAuditEvent `json:"auditEvents,omitempty"`
+}
+
+// ModuleAuditEvent is a single audit_log entry a module handler wants Core
+// to record on its behalf, carried in WorkerResponse.AuditEvents.
+//
+// Trust boundary — deliberately asymmetric between fields:
+//
+//   - EventType is NOT used verbatim. ModuleProxyHandler (router.go) always
+//     rewrites it to "module.<moduleName>.<EventType>" before writing, and
+//     rejects the event entirely if EventType contains anything outside
+//     [a-z0-9_.] (see moduleAuditEventSuffix in router.go). This makes it
+//     impossible for a module — compromised, buggy, or malicious — to write
+//     an entry into Core's own event-type namespace (e.g. "user.approved",
+//     "config.smtp"); the "module.<name>." prefix is structural, not a
+//     convention the module could opt out of.
+//   - ActorID/ActorEmail are NOT read from this struct at all. Core already
+//     knows who made the request (the session ModuleProxyHandler validated
+//     before ever reaching Deno), so the actor of a module audit event is
+//     always the calling user. A module has no field through which it could
+//     attribute its action to a different user.
+//   - TargetID/TargetEmail/Details ARE module-supplied, since only the
+//     module knows what its own action affected (e.g. which RADIUS account
+//     was created). Details is truncated to a fixed cap before writing
+//     (see maxModuleAuditDetailsLen, router.go) since audit_log is
+//     append-only and never pruned.
+type ModuleAuditEvent struct {
+	EventType   string `json:"eventType"`
+	TargetID    string `json:"targetId,omitempty"`
+	TargetEmail string `json:"targetEmail,omitempty"`
+	Details     string `json:"details,omitempty"`
 }
 
 // ModuleNotification is a single event a module's job or handler wants

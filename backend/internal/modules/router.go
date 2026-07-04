@@ -1,6 +1,7 @@
 package modules
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,11 +10,51 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
+	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
 	"github.com/modulab-project/modulab-core/backend/internal/notify"
 )
+
+// maxModuleAuditDetailsLen caps the Details field a module can attach to an
+// audit event (ModuleAuditEvent) — audit_log is append-only and never
+// pruned, so an unbounded module-supplied blob would grow it forever.
+const maxModuleAuditDetailsLen = 2000
+
+// moduleAuditEventSuffix is the allowed shape of the module-controlled part
+// of an audit event type: lowercase alphanumerics, underscore, and dot as a
+// separator. A malformed EventType is rejected outright (logged, not
+// written) rather than sanitised, so it never silently becomes a different,
+// unintended event. See ModuleAuditEvent's doc comment (deno.go) for the
+// full trust-boundary rationale.
+var moduleAuditEventSuffix = regexp.MustCompile(`^[a-z0-9_]+(\.[a-z0-9_]+)*$`)
+
+// recordModuleAuditEvents writes one audit_log entry per ModuleAuditEvent a
+// module handler's response asked Core to record. Event type is always
+// re-prefixed with "module.<moduleName>." and actor identity always comes
+// from the already-verified session — never from the module's own claims.
+func recordModuleAuditEvents(ctx context.Context, authDeps auth.Deps, moduleName string, sess auth.Session, events []ModuleAuditEvent) {
+	for _, ev := range events {
+		if !moduleAuditEventSuffix.MatchString(ev.EventType) {
+			log.Printf("modules: %q: rejected audit event with invalid type %q", moduleName, ev.EventType)
+			continue
+		}
+		details := ev.Details
+		if len(details) > maxModuleAuditDetailsLen {
+			details = details[:maxModuleAuditDetailsLen]
+		}
+		logModuleAudit(ctx, authDeps, audit.LogParams{
+			EventType:   "module." + moduleName + "." + ev.EventType,
+			ActorID:     sess.UserID,
+			ActorEmail:  sess.Email,
+			TargetID:    ev.TargetID,
+			TargetEmail: ev.TargetEmail,
+			Details:     details,
+		})
+	}
+}
 
 // maxUploadBytes is the per-request upload cap for module image uploads.
 // Separate from Core's global max_body_bytes because module storage is
@@ -153,6 +194,16 @@ func ModuleProxyHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 					log.Printf("modules: %q: publish notification: %v", moduleName, err)
 				}
 			}
+		}
+
+		// A handler can also ask Core to record an audit_log entry for a
+		// security-relevant action it just performed on its own data (e.g.
+		// a RADIUS module creating/deleting an account) — see
+		// ModuleAuditEvent's doc comment (deno.go) for why the event type
+		// prefix and actor identity are enforced here rather than trusted
+		// from the module's response.
+		if len(resp.AuditEvents) > 0 {
+			recordModuleAuditEvents(r.Context(), authDeps, moduleName, sess, resp.AuditEvents)
 		}
 	}
 }
