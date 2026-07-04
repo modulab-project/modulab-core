@@ -781,13 +781,24 @@ func (w *denoWorker) start() error {
 	//                 this one module's own directory, not the rest of the
 	//                 host. Missing this caused every worker to crash with
 	//                 NotCapable on Deno.listen at first deploy (2026-07-02).
-	//   --allow-net   limited to the hostnames from the module's manifest
-	//                 egress_allowlist (opts.EgressHosts). No entry = no
-	//                 outbound network for this worker at all. There is no
-	//                 wildcard/"allow everything" host — modules whose
-	//                 destination is only known at runtime must call
-	//                 ReloadEgress once the destination is known (see
-	//                 WorkerResponse.RestartHosts).
+	//   --allow-net   always includes "unix:" + sockPath (the worker's own
+	//                 Unix socket, see sockPath above), plus the hostnames
+	//                 from the module's manifest egress_allowlist
+	//                 (opts.EgressHosts). No egress-host entry = no outbound
+	//                 TCP for this worker at all, but the socket grant is
+	//                 unconditional. There is no wildcard/"allow everything"
+	//                 host — modules whose destination is only known at
+	//                 runtime must call ReloadEgress once the destination is
+	//                 known (see WorkerResponse.RestartHosts).
+	//                 The unix-socket grant became necessary after the Deno
+	//                 2.9.0 upgrade (was 2.3.6): Deno.listen({transport:
+	//                 "unix"}) now also gates on --allow-net for the exact
+	//                 socket path ("unix:<path>"), on top of the
+	//                 --allow-read/--allow-write above, which used to be
+	//                 sufficient on their own. Without this every worker
+	//                 failed at Deno.listen with "NotCapable: Requires net
+	//                 access to \"unix:.../worker.sock\"" regardless of
+	//                 whether the module had any egress hosts at all.
 	//   --allow-env   limited to MODULAB_DB_URL/MODULAB_ENCRYPTION_KEY (what
 	//                 a module could plausibly need) plus a "PG*" prefix
 	//                 wildcard. The PG* grant isn't for the module's own
@@ -819,9 +830,8 @@ func (w *denoWorker) start() error {
 		"--allow-write=" + w.moduleRoot,
 		"--allow-env=MODULAB_DB_URL,MODULAB_ENCRYPTION_KEY,PG*",
 	}
-	if len(w.egressHosts) > 0 {
-		args = append(args, "--allow-net="+strings.Join(w.egressHosts, ","))
-	}
+	netGrants := append([]string{"unix:" + w.sockPath}, w.egressHosts...)
+	args = append(args, "--allow-net="+strings.Join(netGrants, ","))
 	// unifi-network's gateways are addressed by private IP (2026-07-02
 	// decision — see unifi-client.ts's unifiFetch comment): a controller
 	// reachable only on a private IP has no public FQDN to hold a CA-issued
