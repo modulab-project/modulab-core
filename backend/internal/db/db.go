@@ -894,6 +894,9 @@ func (p *Pool) EnabledFeedsForUser(ctx context.Context, userID string) ([]FeedRo
 		if err := rows.Scan(&f.ID, &f.URL, &f.Label, &f.CreatedAt); err != nil {
 			return nil, fmt.Errorf("db: scan enabled feed: %w", err)
 		}
+		if f.URL, err = crypto.DecryptIfNotEmpty(p.masterKey, f.URL); err != nil {
+			return nil, fmt.Errorf("db: decrypt feed %d url: %w", f.ID, err)
+		}
 		out = append(out, f)
 	}
 	return out, rows.Err()

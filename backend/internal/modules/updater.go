@@ -180,6 +180,21 @@ func Update(ctx context.Context, d Deps, entry store.Entry) error {
 		return d.rollback(ctx, entry.Name, cachedZip,
 			fmt.Errorf("move new dir: %w", err))
 	}
+	// User-uploaded content (router.go's saveUploadedFile writes to
+	// {DataDir}/{name}/storage/uploads/) lives inside the same directory as
+	// the module's own code, but the freshly extracted zip above never
+	// contains a "storage" directory - it's created lazily on first upload.
+	// Without this step, the RemoveAll(oldDir) below would silently delete
+	// every image/file a user has ever uploaded to this module on every
+	// single update. Move it back into the new destDir before the old
+	// directory is discarded.
+	oldStorageDir := filepath.Join(oldDir, "storage")
+	if _, err := os.Stat(oldStorageDir); err == nil {
+		newStorageDir := filepath.Join(destDir, "storage")
+		if err := os.Rename(oldStorageDir, newStorageDir); err != nil {
+			log.Printf("modules: update %q: could not preserve storage dir (uploaded files may be lost): %v", entry.Name, err)
+		}
+	}
 	_ = os.RemoveAll(oldDir) // best-effort cleanup of superseded files
 
 	// ── 9. Module migrations ──────────────────────────────────────────────
