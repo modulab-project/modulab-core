@@ -66,6 +66,17 @@ type healthStatus struct {
 	// is within 30 s of pool.ntp.org; false means it is dangerously off and
 	// TLS / JWT / audit-log timestamps may be wrong.
 	NTPDriftOK *bool `json:"ntp_drift_ok,omitempty"`
+	// ModulesActive/ModulesDegraded/ModulesFailed summarise
+	// installed_modules.status across every installed module, so an admin
+	// glancing at the System Status panel can see "1 of 3 modules is
+	// degraded" without opening the Modules admin page separately. Degraded
+	// is the status WorkerPool.SetCrashHandler (modules/deno.go) writes when
+	// a Tier 2/3 Deno worker exits unexpectedly - before this field existed,
+	// that crash was only visible via an SSE toast at the moment it happened
+	// or by manually checking /admin/modules afterward.
+	ModulesActive   int `json:"modules_active"`
+	ModulesDegraded int `json:"modules_degraded"`
+	ModulesFailed   int `json:"modules_failed"`
 }
 
 func main() {
@@ -220,6 +231,24 @@ func main() {
 		// latency /healthz adds beyond the SearXNG ping above.
 		if ok, err := ntpcheck.DriftOK(30 * time.Second); err == nil {
 			status.NTPDriftOK = &ok
+		}
+		// Module worker health summary - best-effort, same as the checks
+		// above: a failed lookup here must not break /healthz itself, it
+		// just leaves the counts at zero (indistinguishable from "no
+		// modules installed", which is an acceptable ambiguity for a
+		// monitoring endpoint that already treats most fields as
+		// best-effort).
+		if installed, err := pool.ListInstalledModules(r.Context()); err == nil {
+			for _, m := range installed {
+				switch m.Status {
+				case db.ModuleStatusActive:
+					status.ModulesActive++
+				case db.ModuleStatusDegraded:
+					status.ModulesDegraded++
+				case db.ModuleStatusFailed:
+					status.ModulesFailed++
+				}
+			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(status)

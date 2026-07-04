@@ -121,6 +121,13 @@ export interface HealthResponse {
   // Absent when the NTP UDP check timed out or was blocked by the firewall.
   // true = clock within 30 s of pool.ntp.org; false = dangerous drift.
   ntp_drift_ok?: boolean;
+  // Counts across every row in installed_modules, by status. degraded is
+  // the status a Deno worker gets flipped to when it exits unexpectedly
+  // (WorkerPool.SetCrashHandler) - surfaced here so the System Status panel
+  // can show it without a separate trip to the Modules admin page.
+  modules_active: number;
+  modules_degraded: number;
+  modules_failed: number;
 }
 
 // /healthz needs no bootstrap token - it's exempt from that gate in main.go

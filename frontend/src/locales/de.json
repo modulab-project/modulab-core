@@ -474,7 +474,10 @@
       "ntp": "Systemuhr (NTP)",
       "reachable": "Erreichbar",
       "unreachable": "Nicht erreichbar",
-      "not_configured": "Nicht konfiguriert"
+      "not_configured": "Nicht konfiguriert",
+      "modules": "Module",
+      "modules_all_active": "{{count}} aktiv",
+      "modules_issues": "{{active}} aktiv · {{degraded}} degradiert · {{failed}} fehlgeschlagen"
     },
     "notifications_panel": {
       "checking": "Ausstehende Genehmigungen werden geprüft…",

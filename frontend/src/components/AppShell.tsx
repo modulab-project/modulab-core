@@ -857,11 +857,37 @@ function relativeTime(at: number): string {
 
 function StatusPanelContent({ health }: { health: HealthResponse }) {
   const { t } = useTranslation();
+
+  // /healthz's uptime_seconds is a snapshot from the moment it was fetched
+  // (AppShell only calls getHealth() once, on mount) - without this ticker
+  // the panel would show a frozen number until the whole page is reloaded.
+  // Purely a client-side display tick; never re-fetches from the backend.
+  const [elapsedTick, setElapsedTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setElapsedTick((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const uptimeSeconds = health.uptime_seconds + elapsedTick;
+
+  // Module worker health - see healthStatus's ModulesActive/Degraded/Failed
+  // doc comment (main.go) for what "degraded" means. Hidden entirely when
+  // no modules are installed at all (0/0/0), since a "0 active" row would
+  // read as a problem to someone who simply hasn't installed anything yet.
+  const modulesTotal = health.modules_active + health.modules_degraded + health.modules_failed;
+  const modulesHaveIssues = health.modules_degraded > 0 || health.modules_failed > 0;
+  const modulesValue = modulesHaveIssues
+    ? t("shell.status.modules_issues", {
+        active: health.modules_active,
+        degraded: health.modules_degraded,
+        failed: health.modules_failed,
+      })
+    : t("shell.status.modules_all_active", { count: health.modules_active });
+
   return (
     <div className="text-sm">
       <StatusRow icon="ti-server" label={t("shell.status.backend_version")} value={health.version} />
       <StatusRow icon="ti-browser" label={t("shell.status.frontend_version")} value={FRONTEND_VERSION} />
-      <StatusRow icon="ti-clock" label={t("shell.status.uptime")} value={formatUptime(health.uptime_seconds)} />
+      <StatusRow icon="ti-clock" label={t("shell.status.uptime")} value={formatUptime(uptimeSeconds)} />
       <StatusRow icon="ti-database" label={t("shell.status.postgres")} ok={health.postgres_reachable} />
       <StatusRow icon="ti-bolt" label={t("shell.status.valkey")} ok={health.valkey_reachable} />
       {health.searxng_configured ? (
@@ -872,6 +898,14 @@ function StatusPanelContent({ health }: { health: HealthResponse }) {
       {health.ntp_drift_ok !== undefined && (
         <StatusRow icon="ti-clock-check" label={t("shell.status.ntp")} ok={health.ntp_drift_ok} />
       )}
+      {modulesTotal > 0 && (
+        <StatusRow
+          icon="ti-puzzle"
+          label={t("shell.status.modules")}
+          value={modulesValue}
+          tone={modulesHaveIssues ? "warn" : "ok"}
+        />
+      )}
     </div>
   );
 }
@@ -881,20 +915,32 @@ function StatusRow({
   label,
   value,
   ok,
+  tone,
 }: {
   icon: string;
   label: string;
   value?: string;
   ok?: boolean;
+  // Only meaningful together with value (the ok/unreachable dot below
+  // already has its own green/red logic) - lets a value row like the
+  // module summary draw attention (warn) or confirm health (ok) instead of
+  // always rendering as neutral gray text.
+  tone?: "ok" | "warn";
 }) {
   const { t } = useTranslation();
+  const valueClass =
+    tone === "warn"
+      ? "text-amber-600 dark:text-amber-400 font-medium"
+      : tone === "ok"
+        ? "text-green-700 dark:text-green-400 font-medium"
+        : "text-gray-500";
   return (
     <div className="flex items-center justify-between border-b border-gray-100 px-1 py-2.5 last:border-0 dark:border-gray-800">
       <span className="flex items-center gap-2.5">
         <i className={`ti ${icon} text-[15px] text-gray-400`} /> {label}
       </span>
       {value !== undefined ? (
-        <span className="text-xs text-gray-500">{value}</span>
+        <span className={`text-xs ${valueClass}`}>{value}</span>
       ) : (
         <span
           className={`flex items-center gap-1.5 text-xs font-medium ${ok ? "text-green-700 dark:text-green-400" : "text-red-600"}`}

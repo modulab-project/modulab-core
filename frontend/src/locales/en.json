@@ -474,7 +474,10 @@
       "ntp": "System clock (NTP)",
       "reachable": "Reachable",
       "unreachable": "Unreachable",
-      "not_configured": "Not configured"
+      "not_configured": "Not configured",
+      "modules": "Modules",
+      "modules_all_active": "{{count}} active",
+      "modules_issues": "{{active}} active · {{degraded}} degraded · {{failed}} failed"
     },
     "notifications_panel": {
       "checking": "Checking pending approvals…",
