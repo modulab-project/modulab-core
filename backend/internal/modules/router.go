@@ -304,7 +304,7 @@ func ModuleLocaleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 		}
 		// Sanitise: only allow simple language codes like "en", "de", "en-US".
 		for _, c := range lng {
-			if !(c >= 'a' && c <= 'z') && !(c >= 'A' && c <= 'Z') && c != '-' {
+			if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && c != '-' {
 				http.Error(w, "invalid language code", http.StatusBadRequest)
 				return
 			}
@@ -343,7 +343,7 @@ func ModuleBundleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 		}
 		// Sanitise: only allow simple module names (alphanumeric, dash, underscore).
 		for _, c := range moduleName {
-			if !(c >= 'a' && c <= 'z') && !(c >= 'A' && c <= 'Z') && !(c >= '0' && c <= '9') && c != '-' && c != '_' {
+			if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '-' && c != '_' {
 				http.Error(w, "invalid module name", http.StatusBadRequest)
 				return
 			}
@@ -381,7 +381,7 @@ func ModuleStorageHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 		}
 		// Sanitise module name.
 		for _, c := range moduleName {
-			if !(c >= 'a' && c <= 'z') && !(c >= 'A' && c <= 'Z') && !(c >= '0' && c <= '9') && c != '-' && c != '_' {
+			if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '-' && c != '_' {
 				http.Error(w, "invalid module name", http.StatusBadRequest)
 				return
 			}
