@@ -47,12 +47,11 @@ func Connect(ctx context.Context, dsn, masterKey string) (*Pool, error) {
 }
 
 // EnsureCoreSchema creates Core's bootstrap tables if they do not exist yet.
-// This mirrors migrations/0001_init_core_schema.up.sql and
-// migrations/0002_add_users.up.sql, and lets a fresh Core instance boot
-// without a separate migration step having been run first. Once a real
-// golang-migrate runner is wired in, this becomes redundant and can be
-// removed - tracked as a follow-up, not done here to keep this commit
-// reviewable.
+// This is the schema mechanism for the whole project (see "Schema changes"
+// in the README): every future additive change (new column/table/index)
+// is added here as another idempotent statement, so a running instance
+// picks it up automatically on its next boot - no separate migration
+// tool or step to run.
 func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
 	if _, err := p.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS core_settings (
@@ -175,7 +174,6 @@ func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
 // EnsureAuditSchema creates the audit_log table and its immutable-row trigger
 // if they do not exist yet. Called from EnsureCoreSchema so a fresh instance
 // has the table on first boot without running a separate migration step.
-// Mirrors migrations/0003_add_audit_log.up.sql — both must be kept in sync.
 func (p *Pool) EnsureAuditSchema(ctx context.Context) error {
 	if _, err := p.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS audit_log (
@@ -1810,7 +1808,6 @@ func (p *Pool) SetUserTileOrder(ctx context.Context, userID string, refs []TileR
 // pipeline (spec section 4.3/4.9/4.10), and creates the module_registry table
 // for the daily registry-sync cache (spec section 4.10).
 //
-// Mirrors migrations/0004_add_module_store.up.sql — both must be kept in sync.
 // All ALTERs use ADD COLUMN IF NOT EXISTS so this is safe to run on every boot.
 func (p *Pool) EnsureModuleStoreSchema(ctx context.Context) error {
 	// ── installed_modules: extend the stub with new columns ──────────────────
@@ -1900,12 +1897,12 @@ func (p *Pool) EnsureModuleStoreSchema(ctx context.Context) error {
 		return fmt.Errorf("db: ensure module_registry: %w", err)
 	}
 
-	// cosign_sig_url: added after the table's initial release (mirrors
-	// migrations/0006_add_cosign_sig_url.up.sql). ADD COLUMN IF NOT EXISTS so
-	// this is a no-op on fresh installs (already in the CREATE TABLE above)
-	// and safely backfills existing installations on next boot. Without this,
-	// store.Entry.CosignSigURL was silently dropped between FetchOfficialRegistry
-	// and installer.go's Cosign check, so verification was always skipped.
+	// cosign_sig_url: added after the table's initial release. ADD COLUMN IF
+	// NOT EXISTS so this is a no-op on fresh installs (already in the CREATE
+	// TABLE above) and safely backfills existing installations on next boot.
+	// Without this, store.Entry.CosignSigURL was silently dropped between
+	// FetchOfficialRegistry and installer.go's Cosign check, so verification
+	// was always skipped.
 	if _, err := p.Exec(ctx, `
 		ALTER TABLE module_registry ADD COLUMN IF NOT EXISTS cosign_sig_url TEXT
 	`); err != nil {

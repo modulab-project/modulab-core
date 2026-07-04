@@ -10,7 +10,14 @@ The backend is written in Go. It serves the REST API under /v1/, runs the Setup 
 
 ## Repository layout
 
-The backend/ directory holds the Go module: API, auth, module orchestrator, and Deno-subprocess supervisor. The frontend/ directory holds the React/Vite app and the @modulab/ui component library. The migrations/ directory holds Core's own PostgreSQL schema migrations (golang-migrate). The deploy/ directory holds docker-compose.yml, the production stack (Core, Postgres, PgBouncer, Valkey, Traefik), and docker-compose.dev.yml, the local dev stack (Postgres and Valkey only, with Core running on the host). There is also a .env.example at the repository root.
+The backend/ directory holds the Go module: API, auth, module orchestrator, and Deno-subprocess supervisor. The frontend/ directory holds the React/Vite app and the @modulab/ui component library. The deploy/ directory holds docker-compose.yml, the production stack (Core, Postgres, PgBouncer, Valkey, Traefik), and docker-compose.dev.yml, the local dev stack (Postgres and Valkey only, with Core running on the host). There is also a .env.example at the repository root.
+
+## Schema changes
+
+Core's own PostgreSQL schema (as opposed to a module's own per-schema tables) has no separate migration tool or SQL files - it is created and evolved directly in Go, via the `Ensure*Schema` functions in `backend/internal/db/db.go` (`EnsureCoreSchema`, `EnsureAuditSchema`, `EnsureModuleStoreSchema`, and so on). These run on every boot and are fully idempotent (`CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`), so a running instance picks up any additive change automatically on its next restart.
+
+- **Additive change** (new column, new table, new index): add another idempotent statement to the relevant `Ensure*Schema` function, or a new `EnsureXSchema` function called from `EnsureCoreSchema` in the correct dependency order if it's a new feature area.
+- **Non-additive change** (rename/retype a column, backfill or transform existing data): `IF NOT EXISTS` can't express this. Follow the pattern in `MigrateToEncryptedStorage` (`backend/internal/db/db.go`, called once at boot from `main.go`): a one-time function guarded by a version flag in `core_settings`, so it runs exactly once per instance and is a no-op afterward.
 
 ## First module to build
 

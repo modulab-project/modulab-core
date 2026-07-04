@@ -3,10 +3,10 @@
 // delete, SMTP/OIDC configuration changes - produces one row.
 //
 // Immutability is enforced at two layers:
-//   - A PostgreSQL trigger (migrations/0003_add_audit_log.up.sql) raises an
-//     exception on any UPDATE or DELETE, making tampering impossible without
-//     dropping the trigger (a DB-superuser operation, not available to the
-//     app role).
+//   - A PostgreSQL trigger (created in EnsureAuditSchema, internal/db/db.go)
+//     raises an exception on any UPDATE or DELETE, making tampering
+//     impossible without dropping the trigger (a DB-superuser operation,
+//     not available to the app role).
 //   - A HMAC-SHA256 chain: each entry records prev_hash (the hash of the
 //     entry before it) and hash (the HMAC of its own fields including
 //     prev_hash). Any retroactive modification breaks the chain and is
