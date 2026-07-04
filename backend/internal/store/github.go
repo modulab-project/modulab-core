@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -17,13 +19,27 @@ const (
 	// in the modulab-modules monorepo. No API token needed for public repos.
 	officialRegistryURL = "https://raw.githubusercontent.com/modulab-project/modulab-modules/main/registry.json"
 
-	// communityIndexURL is the GitHub Contents API URL that lists all .json
-	// files in the modulab-community/modules/ directory. Returns a JSON array
-	// of file objects, each with a "download_url" field we can fetch directly.
-	communityIndexURL = "https://api.github.com/repos/modulab-project/modulab-community/contents/modules"
+	// communityRepoRootURL is the GitHub Contents API URL for the root of
+	// modulab-community. Per that repo's own README/CONTRIBUTING, one
+	// subdirectory per module lives directly at repo root (no "modules/"
+	// wrapper directory) - each containing a single manifest.yaml, the same
+	// format every module already ships in its own module.zip.
+	communityRepoRootURL = "https://api.github.com/repos/modulab-project/modulab-community/contents/"
+
+	// communityManifestRawURLFmt fetches a given module directory's
+	// manifest.yaml directly from the main branch, given the directory name.
+	communityManifestRawURLFmt = "https://raw.githubusercontent.com/modulab-project/modulab-community/main/%s/manifest.yaml"
 
 	githubAPITimeout = 15 * time.Second
 )
+
+// communityExcludedDirs are root-level directories in modulab-community that
+// are never real module entries: "example-module" is the CONTRIBUTING.md
+// template (its manifest.yaml has placeholder source_repo/release_url
+// values), and any dot-prefixed directory (".github" etc.) is repo tooling.
+var communityExcludedDirs = map[string]bool{
+	"example-module": true,
+}
 
 // officialEntry is the shape of one element in the official registry.json.
 type officialEntry struct {
@@ -35,19 +51,25 @@ type officialEntry struct {
 	Category     string `json:"category"`
 }
 
-// communityIndexItem is one file object returned by the GitHub Contents API
-// for the modulab-community/modules/ directory listing.
-type communityIndexItem struct {
-	Name        string `json:"name"`        // e.g. "unifi-radius.json"
-	DownloadURL string `json:"download_url"` // raw file URL
+// communityRepoItem is one entry returned by the GitHub Contents API for the
+// modulab-community repo root listing. Type is "dir" for module directories
+// or "file" for root-level files like README.md.
+type communityRepoItem struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
 }
 
-// communityEntry is the shape of one modulab-community modules/*.json file.
-type communityEntry struct {
-	Name         string `json:"name"`
-	SourceRepo   string `json:"source_repo"`
-	ReleaseAsset string `json:"release_asset"`
-	Category     string `json:"category"`
+// communityManifest is the subset of a modulab-community module directory's
+// manifest.yaml this package needs. It is the same manifest.yaml format every
+// module already ships in its own module.zip, plus three fields CONTRIBUTING.md
+// requires specifically for the discovery entry: source_repo, manifest_path
+// (where manifest.yaml lives within the module's own repo - not used for
+// sync itself, only by human reviewers), and release_url.
+type communityManifest struct {
+	Version    string `yaml:"version"`
+	Category   string `yaml:"category"`
+	SourceRepo string `yaml:"source_repo"`
+	ReleaseURL string `yaml:"release_url"`
 }
 
 // githubRelease is the subset of fields the GitHub Releases API returns that
@@ -97,46 +119,58 @@ func FetchOfficialRegistry(ctx context.Context) ([]Entry, error) {
 	return out, nil
 }
 
-// FetchCommunityRegistry downloads the modulab-community index (one JSON file
-// per module in modules/) and returns all valid entries. Files that cannot be
-// fetched or parsed are logged and skipped, not fatal.
+// FetchCommunityRegistry downloads the modulab-community index: one
+// subdirectory per module at the repo root, each containing a manifest.yaml
+// (see communityManifest and CONTRIBUTING.md in that repo). Directories that
+// cannot be fetched or parsed are logged and skipped, not fatal - one broken
+// community submission must not take down the whole sync.
 func FetchCommunityRegistry(ctx context.Context) ([]Entry, error) {
 	ctx, cancel := context.WithTimeout(ctx, githubAPITimeout)
 	defer cancel()
 
-	data, err := httpGet(ctx, communityIndexURL)
+	data, err := httpGet(ctx, communityRepoRootURL)
 	if err != nil {
 		return nil, fmt.Errorf("store: fetch community index: %w", err)
 	}
 
-	var items []communityIndexItem
+	var items []communityRepoItem
 	if err := json.Unmarshal(data, &items); err != nil {
 		return nil, fmt.Errorf("store: parse community index: %w", err)
 	}
 
 	var out []Entry
 	for _, item := range items {
-		if !strings.HasSuffix(item.Name, ".json") {
+		if item.Type != "dir" || strings.HasPrefix(item.Name, ".") || communityExcludedDirs[item.Name] {
 			continue
 		}
-		entryData, err := httpGet(ctx, item.DownloadURL)
+
+		manifestURL := fmt.Sprintf(communityManifestRawURLFmt, item.Name)
+		manifestData, err := httpGet(ctx, manifestURL)
 		if err != nil {
 			// Best-effort: skip unreadable entries, don't abort the whole sync.
+			log.Printf("store: community: fetch manifest for %q: %v", item.Name, err)
 			continue
 		}
-		var e communityEntry
-		if err := json.Unmarshal(entryData, &e); err != nil {
+		var m communityManifest
+		if err := yaml.Unmarshal(manifestData, &m); err != nil {
+			log.Printf("store: community: parse manifest for %q: %v", item.Name, err)
 			continue
 		}
-		if e.Name == "" || e.SourceRepo == "" || e.ReleaseAsset == "" {
+		if m.SourceRepo == "" || m.ReleaseURL == "" {
+			log.Printf("store: community: %q missing source_repo or release_url, skipping", item.Name)
 			continue // malformed entry
 		}
 		out = append(out, Entry{
-			Name:         e.Name,
-			Source:       "community",
-			SourceRepo:   e.SourceRepo,
-			ReleaseAsset: e.ReleaseAsset,
-			Category:     e.Category,
+			// The directory name is already the short module name (README:
+			// "named after the module's name field with the modulab-mod-
+			// prefix removed"), so it's used directly rather than the
+			// manifest's own (prefixed) name field.
+			Name:          item.Name,
+			Source:        "community",
+			SourceRepo:    m.SourceRepo,
+			ReleaseAsset:  m.ReleaseURL,
+			Category:      m.Category,
+			LatestVersion: m.Version,
 		})
 	}
 	return out, nil
