@@ -1890,6 +1890,7 @@ func (p *Pool) EnsureModuleStoreSchema(ctx context.Context) error {
 		    source          TEXT        NOT NULL CHECK (source IN ('official', 'community')),
 		    source_repo     TEXT        NOT NULL,
 		    release_asset   TEXT        NOT NULL,
+		    cosign_sig_url  TEXT,
 		    category        TEXT        NOT NULL,
 		    latest_version  TEXT,
 		    manifest_cache  JSONB,
@@ -1897,6 +1898,18 @@ func (p *Pool) EnsureModuleStoreSchema(ctx context.Context) error {
 		)
 	`); err != nil {
 		return fmt.Errorf("db: ensure module_registry: %w", err)
+	}
+
+	// cosign_sig_url: added after the table's initial release (mirrors
+	// migrations/0006_add_cosign_sig_url.up.sql). ADD COLUMN IF NOT EXISTS so
+	// this is a no-op on fresh installs (already in the CREATE TABLE above)
+	// and safely backfills existing installations on next boot. Without this,
+	// store.Entry.CosignSigURL was silently dropped between FetchOfficialRegistry
+	// and installer.go's Cosign check, so verification was always skipped.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE module_registry ADD COLUMN IF NOT EXISTS cosign_sig_url TEXT
+	`); err != nil {
+		return fmt.Errorf("db: ensure module_registry.cosign_sig_url: %w", err)
 	}
 
 	// store.ListEntries (internal/store/registry.go) filters

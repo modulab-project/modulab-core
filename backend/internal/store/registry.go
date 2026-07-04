@@ -50,17 +50,18 @@ func UpsertEntry(ctx context.Context, pool *db.Pool, e Entry) error {
 	}
 	_, err := pool.Exec(ctx, `
 		INSERT INTO module_registry
-		    (name, source, source_repo, release_asset, category, latest_version, manifest_cache, synced_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+		    (name, source, source_repo, release_asset, cosign_sig_url, category, latest_version, manifest_cache, synced_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
 		ON CONFLICT (name) DO UPDATE SET
 		    source         = EXCLUDED.source,
 		    source_repo    = EXCLUDED.source_repo,
 		    release_asset  = EXCLUDED.release_asset,
+		    cosign_sig_url = EXCLUDED.cosign_sig_url,
 		    category       = EXCLUDED.category,
 		    latest_version = EXCLUDED.latest_version,
 		    manifest_cache = EXCLUDED.manifest_cache,
 		    synced_at      = now()
-	`, e.Name, e.Source, e.SourceRepo, e.ReleaseAsset, e.Category,
+	`, e.Name, e.Source, e.SourceRepo, e.ReleaseAsset, nullableString(e.CosignSigURL), e.Category,
 		nullableString(e.LatestVersion), manifest)
 	if err != nil {
 		return fmt.Errorf("store: upsert entry %q: %w", e.Name, err)
@@ -73,7 +74,7 @@ func UpsertEntry(ctx context.Context, pool *db.Pool, e Entry) error {
 // category ("" for all).
 func ListEntries(ctx context.Context, pool *db.Pool, source, category string) ([]Entry, error) {
 	query := `
-		SELECT name, source, source_repo, release_asset, category,
+		SELECT name, source, source_repo, release_asset, COALESCE(cosign_sig_url, ''), category,
 		       COALESCE(latest_version, ''), manifest_cache, synced_at
 		FROM module_registry
 		WHERE ($1 = '' OR source = $1)
@@ -90,7 +91,7 @@ func ListEntries(ctx context.Context, pool *db.Pool, source, category string) ([
 	for rows.Next() {
 		var e Entry
 		var manifest []byte
-		if err := rows.Scan(&e.Name, &e.Source, &e.SourceRepo, &e.ReleaseAsset,
+		if err := rows.Scan(&e.Name, &e.Source, &e.SourceRepo, &e.ReleaseAsset, &e.CosignSigURL,
 			&e.Category, &e.LatestVersion, &manifest, &e.SyncedAt); err != nil {
 			return nil, fmt.Errorf("store: scan entry: %w", err)
 		}
@@ -106,11 +107,11 @@ func GetEntry(ctx context.Context, pool *db.Pool, name string) (Entry, bool, err
 	var e Entry
 	var manifest []byte
 	err := pool.QueryRow(ctx, `
-		SELECT name, source, source_repo, release_asset, category,
+		SELECT name, source, source_repo, release_asset, COALESCE(cosign_sig_url, ''), category,
 		       COALESCE(latest_version, ''), manifest_cache, synced_at
 		FROM module_registry
 		WHERE name = $1
-	`, name).Scan(&e.Name, &e.Source, &e.SourceRepo, &e.ReleaseAsset,
+	`, name).Scan(&e.Name, &e.Source, &e.SourceRepo, &e.ReleaseAsset, &e.CosignSigURL,
 		&e.Category, &e.LatestVersion, &manifest, &e.SyncedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
