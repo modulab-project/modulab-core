@@ -16,7 +16,7 @@ import {
   type SystemInfoModule,
   type SystemInfoTimer,
 } from "../lib/api";
-import { getSessionToken } from "../lib/session";
+import { clearSessionToken, getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
 import packageJson from "../../package.json";
@@ -82,6 +82,18 @@ export default function AdminSystemInfoPage() {
     setRevokingIds((prev) => new Set(prev).add(target.id));
     revokeSession(token, target.id)
       .then(() => {
+        // Ending your OWN session (found 2026-07-05): the bearer token this
+        // very tab is using was just revoked server-side, but until now
+        // nothing told the tab that — it kept the token around and looked
+        // fully logged in until the next API call happened to 401. Since
+        // this action can only ever be the admin's own doing (confirmed via
+        // the confirm-dialog above), clear the token and leave for /login
+        // immediately instead of waiting for that to happen.
+        if (target.current) {
+          clearSessionToken();
+          navigate("/login", { replace: true });
+          return;
+        }
         setInfo((prev) =>
           prev
             ? { ...prev, active_sessions: (prev.active_sessions ?? []).filter((s) => s.id !== target.id) }
