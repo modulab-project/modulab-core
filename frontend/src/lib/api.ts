@@ -977,6 +977,7 @@ export interface SystemInfoModule {
 }
 
 export interface ActiveSession {
+  name?: string;
   email?: string;
   role: string;
   expires_in_seconds?: number;

@@ -192,7 +192,7 @@ export default function AdminSystemInfoPage() {
                     <thead>
                       <tr className="border-b border-gray-200 bg-gray-50 text-left dark:border-gray-800 dark:bg-gray-900">
                         <th className="px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                          {t("admin.system_info.col_email")}
+                          {t("admin.system_info.col_name")}
                         </th>
                         <th className="px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
                           {t("admin.system_info.col_role")}
@@ -346,7 +346,7 @@ function SessionRow({ session, even }: { session: ActiveSession; even: boolean }
   return (
     <tr className={`border-b border-gray-100 last:border-0 dark:border-gray-800 ${even ? "" : "bg-gray-50/50 dark:bg-gray-900/30"}`}>
       <td className="px-4 py-2.5 text-gray-700 dark:text-gray-300">
-        {session.email || <span className="text-gray-300 dark:text-gray-600">—</span>}
+        {session.name || session.email || <span className="text-gray-300 dark:text-gray-600">—</span>}
       </td>
       <td className="px-4 py-2.5 text-xs text-gray-600 dark:text-gray-400">{session.role}</td>
       <td className="px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">

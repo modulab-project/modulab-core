@@ -333,7 +333,7 @@
       "section_sessions_one": "Sesión activa ({{count}})",
       "section_sessions_other": "Sesiones activas ({{count}})",
       "no_sessions": "No hay sesiones activas.",
-      "col_email": "Correo electrónico",
+      "col_name": "Nombre",
       "col_role": "Rol",
       "col_expires": "Caduca",
       "expires_in": "en {{duration}}",

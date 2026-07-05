@@ -278,11 +278,12 @@ func ValidateSession(ctx context.Context, d Deps, token string) (Session, bool, 
 // System Info page (GET /v1/admin/system/info) shows for each currently
 // logged-in browser tab/device. Deliberately does not include the session
 // token itself (no reason for that to ever leave Valkey/the browser that
-// holds it) or Name/PreferredUsername/Picture (Email + Role is already
+// holds it) or PreferredUsername/Picture (Name + Email + Role is already
 // enough to identify who's logged in where, matching the level of detail
 // AdminUsersPage already shows for every user - not exposing more PII here
 // than that page does).
 type ActiveSession struct {
+	Name             string `json:"name,omitempty"`
 	Email            string `json:"email,omitempty"`
 	Role             string `json:"role"`
 	ExpiresInSeconds int64  `json:"expires_in_seconds,omitempty"`
@@ -322,7 +323,7 @@ func ListActiveSessions(ctx context.Context, d Deps) ([]ActiveSession, error) {
 		if err != nil {
 			continue
 		}
-		as := ActiveSession{Email: sess.Email, Role: sess.Role}
+		as := ActiveSession{Name: sess.Name, Email: sess.Email, Role: sess.Role}
 		if ttl, ok, err := d.Valkey.TTL(ctx, key); err == nil && ok {
 			as.ExpiresInSeconds = int64(ttl / time.Second)
 		}

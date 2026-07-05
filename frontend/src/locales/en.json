@@ -334,7 +334,7 @@
       "section_sessions_one": "Active session ({{count}})",
       "section_sessions_other": "Active sessions ({{count}})",
       "no_sessions": "No active sessions.",
-      "col_email": "Email",
+      "col_name": "Name",
       "col_role": "Role",
       "col_expires": "Expires",
       "expires_in": "in {{duration}}",
