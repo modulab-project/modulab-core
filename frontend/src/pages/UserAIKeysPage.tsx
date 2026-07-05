@@ -134,6 +134,7 @@ export default function UserAIKeysPage() {
                       <input
                         type="password"
                         autoComplete="off"
+                        // eslint-disable-next-line jsx-a11y/no-autofocus -- input appears only after explicit user click on "edit", not on page load
                         autoFocus
                         value={keyInput}
                         onChange={(e) => setKeyInput(e.target.value)}

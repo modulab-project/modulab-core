@@ -98,7 +98,6 @@ export default function SetupWizard() {
         goTo(5);
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function goTo(next: StepNumber) {

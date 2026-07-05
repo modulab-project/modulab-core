@@ -324,9 +324,13 @@ export function AppShell({
       )}
 
       {openPanel && (
+        // Decorative click-outside-to-close backdrop - Escape (handled by
+        // each SlidePanel) is the keyboard equivalent, so no separate
+        // keydown handler is needed on this non-interactive, aria-hidden element.
         <div
           className="fixed inset-x-0 top-[60px] bottom-[44px] z-10 bg-black/35"
           onClick={() => setOpenPanel(null)}
+          aria-hidden="true"
         />
       )}
       <SlidePanel open={openPanel === "profile"} onClose={() => setOpenPanel(null)} title={t("profile.title")}>

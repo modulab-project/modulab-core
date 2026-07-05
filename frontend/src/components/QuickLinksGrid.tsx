@@ -117,10 +117,15 @@ function AddTileModal({
     }`;
 
   return (
+    // Click-outside-to-close backdrop; the inner div below only stops
+    // propagation so clicking the dialog itself doesn't also close it -
+    // neither has real keyboard-actionable semantics of its own.
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
       onClick={onClose}
     >
+      {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
       <div
         className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-xl dark:border-gray-700 dark:bg-gray-900"
         onClick={(e) => e.stopPropagation()}

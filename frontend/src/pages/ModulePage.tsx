@@ -71,7 +71,6 @@ export default function ModulePage() {
       })
       .catch((e) => setLoadError(`module_page.fetch_error:${e instanceof Error ? e.message : String(e)}`))
       .finally(() => setFetching(false));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, moduleName]);
 
   // Load the module's own locale files and register them in i18next under the
@@ -158,7 +157,6 @@ export default function ModulePage() {
       .finally(() => {
         if (blobUrl) URL.revokeObjectURL(blobUrl);
       });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mod]);
 
   if (loading || !session) return null;

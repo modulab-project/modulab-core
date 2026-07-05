@@ -533,9 +533,19 @@ function CatalogLangModal({
   onSelect: (lang: string) => void;
 }) {
   const { t } = useTranslation();
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-black/40" onClick={onClose} />
+      {/* click-outside-to-close backdrop; Escape (above) is the keyboard equivalent */}
+      <div className="fixed inset-0 z-40 bg-black/40" onClick={onClose} aria-hidden="true" />
       <div className="fixed inset-x-4 top-[25%] z-50 mx-auto max-w-sm rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-gray-800 dark:bg-gray-950">
         <h2 className="mb-1 text-base font-semibold">{t("admin.feeds.catalog_modal.pick_title")}</h2>
         <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
@@ -621,6 +631,14 @@ function OPMLSelectionModal({
   const [importing, setImporting] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
 
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   // Selectable = not already in DB and reachable.
   const selectable = entries.filter((e) => !e.already_exists && e.reachable);
   const allSelectableSelected = selectable.length > 0 && selectable.every((e) => selected.has(e.url));
@@ -660,8 +678,8 @@ function OPMLSelectionModal({
 
   return (
     <>
-      {/* Backdrop */}
-      <div className="fixed inset-0 z-40 bg-black/40" onClick={onClose} />
+      {/* Backdrop - Escape (registered above) is the keyboard equivalent */}
+      <div className="fixed inset-0 z-40 bg-black/40" onClick={onClose} aria-hidden="true" />
       {/* Dialog */}
       <div className="fixed inset-x-4 top-[8%] z-50 mx-auto flex max-w-lg flex-col rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-gray-950"
         style={{ maxHeight: "80vh" }}>
@@ -781,6 +799,14 @@ function FeedModal({
   const [checking, setChecking] = useState(false);
   const [checkResult, setCheckResult] = useState<FeedCheckResult | null>(null);
 
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   async function handleCheck() {
     if (!url.trim()) return;
     const token = getSessionToken();
@@ -819,10 +845,11 @@ function FeedModal({
 
   return (
     <>
-      {/* Backdrop */}
+      {/* Backdrop - Escape (registered above) is the keyboard equivalent */}
       <div
         className="fixed inset-0 z-40 bg-black/40"
         onClick={onClose}
+        aria-hidden="true"
       />
       {/* Dialog */}
       <div className="fixed inset-x-4 top-[20%] z-50 mx-auto max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-gray-800 dark:bg-gray-950">
@@ -831,8 +858,9 @@ function FeedModal({
         </h2>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="mb-1 block text-sm font-medium">{t("admin.feeds.modal.label")}</label>
+            <label htmlFor="feed-modal-label" className="mb-1 block text-sm font-medium">{t("admin.feeds.modal.label")}</label>
             <input
+              id="feed-modal-label"
               type="text"
               value={label}
               onChange={(e) => setLabel(e.target.value)}
@@ -842,9 +870,10 @@ function FeedModal({
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium">{t("admin.feeds.modal.url")}</label>
+            <label htmlFor="feed-modal-url" className="mb-1 block text-sm font-medium">{t("admin.feeds.modal.url")}</label>
             <div className="flex gap-2">
               <input
+                id="feed-modal-url"
                 type="url"
                 value={url}
                 onChange={(e) => { setUrl(e.target.value); setCheckResult(null); }}

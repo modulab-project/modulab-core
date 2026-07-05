@@ -295,16 +295,19 @@ function EventBadge({ type }: { type: string }) {
 
 // Pretty-print the details JSON blob if valid, otherwise show raw string.
 function DetailsCell({ raw }: { raw: string }) {
+  let entries: [string, string][] | null = null;
   try {
     const parsed = JSON.parse(raw);
-    const entries = Object.entries(parsed as Record<string, string>);
-    if (entries.length === 0) return <span className="text-gray-300 dark:text-gray-600">—</span>;
-    return (
-      <span title={raw}>
-        {entries.map(([k, v]) => `${k}: ${v}`).join(" · ")}
-      </span>
-    );
+    entries = Object.entries(parsed as Record<string, string>);
   } catch {
-    return <span>{raw}</span>;
+    // entries stays null - raw is shown as-is below.
   }
+
+  if (entries === null) return <span>{raw}</span>;
+  if (entries.length === 0) return <span className="text-gray-300 dark:text-gray-600">—</span>;
+  return (
+    <span title={raw}>
+      {entries.map(([k, v]) => `${k}: ${v}`).join(" · ")}
+    </span>
+  );
 }

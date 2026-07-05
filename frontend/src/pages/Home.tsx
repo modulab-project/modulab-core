@@ -739,12 +739,13 @@ function WeatherPanel({
 
   return (
     <>
-      {/* Backdrop — sits between AppShell (z-20) and the panel (z-30) */}
+      {/* Backdrop — sits between AppShell (z-20) and the panel (z-30). Escape (registered above) is the keyboard equivalent. */}
       <div
         className={`fixed inset-x-0 top-[60px] bottom-[44px] z-[25] bg-black/35 transition-opacity duration-200 ${
           open ? "opacity-100" : "pointer-events-none opacity-0"
         }`}
         onClick={onClose}
+        aria-hidden="true"
       />
 
       {/* Slide panel — same dimensions as AppShell's own panels */}
@@ -1057,11 +1058,13 @@ function NewsAllPanel({
 
   return (
     <>
+      {/* Escape (registered above) is the keyboard equivalent for this click-outside-to-close backdrop */}
       <div
         className={`fixed inset-x-0 top-[60px] bottom-[44px] z-[25] bg-black/35 transition-opacity duration-200 ${
           open ? "opacity-100" : "pointer-events-none opacity-0"
         }`}
         onClick={onClose}
+        aria-hidden="true"
       />
       <div
         className={`fixed top-[60px] bottom-[44px] right-0 z-30 flex w-full flex-col border-l border-gray-200 bg-white shadow-xl transition-transform duration-200 sm:w-[420px] dark:border-gray-800 dark:bg-gray-950 ${
@@ -1260,9 +1263,11 @@ function FeedsPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
     <>
       {open && (
+        // Escape (registered above) is the keyboard equivalent for this click-outside-to-close backdrop
         <div
           className="fixed inset-x-0 top-[60px] bottom-[44px] z-[25] bg-black/35"
           onClick={onClose}
+          aria-hidden="true"
         />
       )}
       <div
