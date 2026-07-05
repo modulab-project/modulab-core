@@ -81,10 +81,14 @@ const (
 	// Manual Module Store registry sync trigger, internal/store.
 	EventStoreSyncTriggered = "store.sync_triggered"
 	// A per-client rate limit (login/callback/ai-chat/global/chat, see
-	// cmd/core/main.go's rateLimitMiddleware) was exceeded. ActorID is the
-	// client IP (or, for the per-user AI chat limiter, the user's OIDC sub) -
-	// there is often no authenticated session yet (login/callback trip
-	// before auth succeeds), so the IP/sub is the only "who" available.
+	// cmd/core/main.go's rateLimitMiddleware) was exceeded. ActorID is
+	// whatever the limiter bucketed by: the client IP for login/callback/
+	// ai-chat and for any anonymous request against the global backstop, or
+	// "user:<OIDC sub>" for the per-user AI chat limiter and for the global
+	// backstop once a request carries a valid session (added 2026-07-05,
+	// see identifyBySessionOrIP) - there is often no authenticated session
+	// yet at all (login/callback trip before auth succeeds), so the IP is
+	// the only "who" available in that case.
 	// Added 2026-07-05 alongside the System Info "rate limits" section, so a
 	// trip is discoverable after the fact even once the live Valkey counter
 	// itself has expired.

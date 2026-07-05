@@ -500,7 +500,7 @@ func main() {
 	// route that forwards to a paid external API per call, so it gets its
 	// own tighter per-IP budget (see aiChatRateLimitWindow/Max's doc comment)
 	// rather than relying solely on the generous global limit.
-	mux.HandleFunc("POST /v1/ai/chat", rateLimitMiddleware(valkeyClient, pool, cfg.MasterKey, "ai-chat", aiChatRateLimitWindow, aiChatRateLimitMax, ai.ChatHandler(authDeps)))
+	mux.HandleFunc("POST /v1/ai/chat", rateLimitMiddleware(valkeyClient, pool, cfg.MasterKey, "ai-chat", aiChatRateLimitWindow, aiChatRateLimitMax, identifyByIP, ai.ChatHandler(authDeps)))
 
 	// Quick links / Schnellzugriff-Grid (internal/quicklinks):
 	//   User endpoints: any approved session can list merged tiles, create or
@@ -712,7 +712,7 @@ func main() {
 	handler := corsMiddleware(cfg.FrontendBaseURL, mux)
 	handler = maxBodyMiddleware(pool, handler)
 	handler = secHeadersMiddleware(handler)
-	handler = globalRateLimitMiddleware(valkeyClient, pool, cfg.MasterKey, handler)
+	handler = globalRateLimitMiddleware(valkeyClient, pool, cfg.MasterKey, authDeps, handler)
 	// Outermost: must run before every other middleware so a panic anywhere
 	// downstream (a handler, or one of the middlewares above) is still
 	// caught. Go's net/http already recovers a panicking handler goroutine
@@ -922,13 +922,17 @@ const (
 	globalRateLimitMax    = 600
 )
 
-// rateLimitMiddleware applies a per-client-IP fixed-window rate limit (via
+// rateLimitMiddleware applies a fixed-window rate limit (via
 // valkey.Client.IncrExpire) to a single handler. label distinguishes the
 // Valkey key namespace per endpoint/scope (e.g. "login" vs "callback" vs
 // "ai-chat" vs "global") so budgets don't bleed into each other. max is the
-// number of requests allowed per window. On a Valkey error the request is
-// let through (fail open) — a cache hiccup should degrade to "no rate
-// limiting" rather than locking everyone out.
+// number of requests allowed per window. identify computes the bucket key
+// per request (see identifyByIP/identifyBySessionOrIP below) — pulled out
+// as a parameter (2026-07-05) rather than hardcoded to clientIP so the
+// global backstop can bucket authenticated requests by user instead of IP
+// (see globalRateLimitMiddleware's doc comment for why). On a Valkey error
+// the request is let through (fail open) — a cache hiccup should degrade to
+// "no rate limiting" rather than locking everyone out.
 //
 // pool/masterKeyEnv (added 2026-07-05, alongside System Info's "rate
 // limits" section) are used only on the rare trip branch, to write an
@@ -936,13 +940,12 @@ const (
 // limit is active right now, but says nothing about one that already
 // expired by the time an admin goes looking, which is exactly what
 // happened investigating an earlier "too many requests" report. ActorID is
-// the client IP; there is usually no authenticated session yet at this
-// layer (login/callback trip before auth even succeeds, and the global
-// backstop wraps the whole mux before any handler has parsed a session).
-func rateLimitMiddleware(vk *valkey.Client, pool *db.Pool, masterKeyEnv string, label string, window time.Duration, max int64, next http.HandlerFunc) http.HandlerFunc {
+// whatever identify returned (an IP, or "user:<id>" for an authenticated
+// request at the global layer).
+func rateLimitMiddleware(vk *valkey.Client, pool *db.Pool, masterKeyEnv string, label string, window time.Duration, max int64, identify func(*http.Request) string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ip := clientIP(r)
-		key := "ratelimit:" + label + ":" + ip
+		identifier := identify(r)
+		key := "ratelimit:" + label + ":" + identifier
 		count, err := vk.IncrExpire(r.Context(), key, window)
 		if err != nil {
 			log.Printf("main: rate limit check failed (failing open): %v", err)
@@ -956,11 +959,11 @@ func rateLimitMiddleware(vk *valkey.Client, pool *db.Pool, masterKeyEnv string, 
 			// or client IP was actually involved. See IncrExpire's doc
 			// comment for the counter-never-resets bug this line's silence
 			// was hiding.
-			log.Printf("main: rate limit exceeded: label=%q ip=%q count=%d max=%d", label, ip, count, max)
+			log.Printf("main: rate limit exceeded: label=%q identifier=%q count=%d max=%d", label, identifier, count, max)
 			if masterKey, mkErr := setup.ResolveMasterKey(r.Context(), pool, masterKeyEnv); mkErr == nil {
 				if auditErr := audit.Log(r.Context(), pool, masterKey, audit.LogParams{
 					EventType: audit.EventRateLimitExceeded,
-					ActorID:   ip,
+					ActorID:   identifier,
 					Details:   fmt.Sprintf(`{"label":%q,"count":%d,"max":%d}`, label, count, max),
 				}); auditErr != nil {
 					log.Printf("main: audit rate limit exceeded: %v", auditErr)
@@ -973,20 +976,64 @@ func rateLimitMiddleware(vk *valkey.Client, pool *db.Pool, masterKeyEnv string, 
 	}
 }
 
+// identifyByIP is rateLimitMiddleware's original, always-per-IP bucketing —
+// used everywhere except the global backstop, since login/callback trip
+// before auth even succeeds (no session to key by yet) and the ai-chat
+// per-route limiter here is a coarse IP-based ceiling layered on top of
+// ai.go's own separate per-user "chat" limiter (see that file), not a
+// replacement for it.
+func identifyByIP(r *http.Request) string {
+	return clientIP(r)
+}
+
 // authRateLimitMiddleware is rateLimitMiddleware pinned to the auth-endpoint
 // window/budget (kept as a separate name at call sites for readability).
 func authRateLimitMiddleware(vk *valkey.Client, pool *db.Pool, masterKeyEnv string, label string, next http.HandlerFunc) http.HandlerFunc {
-	return rateLimitMiddleware(vk, pool, masterKeyEnv, "auth:"+label, authRateLimitWindow, authRateLimitMax, next)
+	return rateLimitMiddleware(vk, pool, masterKeyEnv, "auth:"+label, authRateLimitWindow, authRateLimitMax, identifyByIP, next)
+}
+
+// identifyBySessionOrIP is the global backstop's bucket key (added
+// 2026-07-05, replacing a plain clientIP call): if the request carries a
+// valid session, bucket by the user's OIDC subject ("user:<id>") instead of
+// IP, so several people working concurrently from behind the same NAT/
+// shared IP (same house, same office egress) don't drain one shared
+// 600/minute budget on each other's behalf. Falls back to IP for anonymous
+// requests (no bearer token, or one that doesn't resolve to a live
+// session) — those still need *some* per-client bucket, and there is no
+// user identity to bucket by yet.
+//
+// auth.ValidateSession is a Valkey GET plus a master-key resolution and an
+// AES-GCM decrypt (see its doc comment) — heavier than the plain IP read,
+// but it now runs on every request once, here, instead of only inside
+// whichever handler already required a session; acceptable at homelab
+// scale, and still just one extra Valkey round trip on top of the
+// IncrExpire counter itself.
+func identifyBySessionOrIP(authDeps auth.Deps) func(*http.Request) string {
+	return func(r *http.Request) string {
+		const prefix = "Bearer "
+		h := r.Header.Get("Authorization")
+		if len(h) > len(prefix) && strings.EqualFold(h[:len(prefix)], prefix) {
+			token := strings.TrimSpace(h[len(prefix):])
+			if token != "" {
+				if sess, ok, err := auth.ValidateSession(r.Context(), authDeps, token); err == nil && ok {
+					return "user:" + sess.UserID
+				}
+			}
+		}
+		return clientIP(r)
+	}
 }
 
 // globalRateLimitMiddleware wraps an entire http.Handler (not just a single
-// HandlerFunc) with the coarse per-IP backstop described above. Applied once,
-// around the whole mux, in main. /healthz is deliberately exempt: Docker and
-// Traefik healthchecks poll it every few seconds for the container's entire
+// HandlerFunc) with the coarse backstop described above. Applied once,
+// around the whole mux, in main. Buckets by user identity when a valid
+// session is present (identifyBySessionOrIP) and falls back to per-IP
+// otherwise. /healthz is deliberately exempt: Docker and Traefik
+// healthchecks poll it every few seconds for the container's entire
 // lifetime, which would otherwise burn through the same budget as real
 // traffic and could self-inflict a false "unhealthy" verdict.
-func globalRateLimitMiddleware(vk *valkey.Client, pool *db.Pool, masterKeyEnv string, next http.Handler) http.Handler {
-	limited := rateLimitMiddleware(vk, pool, masterKeyEnv, "global", globalRateLimitWindow, globalRateLimitMax, next.ServeHTTP)
+func globalRateLimitMiddleware(vk *valkey.Client, pool *db.Pool, masterKeyEnv string, authDeps auth.Deps, next http.Handler) http.Handler {
+	limited := rateLimitMiddleware(vk, pool, masterKeyEnv, "global", globalRateLimitWindow, globalRateLimitMax, identifyBySessionOrIP(authDeps), next.ServeHTTP)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" {
 			next.ServeHTTP(w, r)
