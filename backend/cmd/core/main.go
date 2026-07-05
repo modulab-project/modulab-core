@@ -603,7 +603,7 @@ func main() {
 	// next module-update check, see above), so "I published a release, why
 	// hasn't ModuLab noticed yet" has a concrete answer instead of "wait and
 	// see".
-	mux.Handle("GET /v1/admin/system/info", superAdminOnly(systemInfoHandler(pool, valkeyClient, cfg, startTime, storeDeps)))
+	mux.Handle("GET /v1/admin/system/info", superAdminOnly(systemInfoHandler(pool, valkeyClient, cfg, startTime, storeDeps, authDeps)))
 
 	// At startup, restart Deno workers for all Tier 2/3 modules that were
 	// active before the last shutdown.
@@ -1039,10 +1039,12 @@ type systemInfoResponse struct {
 	LatestCoreVersion  string `json:"latest_core_version,omitempty"`
 	CoreUpdateAvailable bool  `json:"core_update_available"`
 
-	// ActiveSessions counts current "session:*" keys in Valkey (one per
-	// logged-in browser tab/device, not per user - someone logged in on
-	// phone and laptop counts as two). Nil if the SCAN itself failed.
-	ActiveSessions *int64 `json:"active_sessions,omitempty"`
+	// ActiveSessions lists every currently active session (one per logged-in
+	// browser tab/device, not per user - see auth.ListActiveSessions' doc
+	// comment). Nil if the underlying SCAN failed outright; individual
+	// undecryptable/expired-between-scan-and-read entries are just skipped
+	// rather than failing the whole list.
+	ActiveSessions []auth.ActiveSession `json:"active_sessions,omitempty"`
 
 	// TLSCertExpiresAt/TLSCertDaysLeft: read from a live TLS handshake
 	// against Traefik (see internal/tlscheck), not from acme.json directly -
@@ -1065,7 +1067,7 @@ type systemInfoResponse struct {
 // the registry-sync countdown and the per-module version table, neither of
 // which /healthz carries since it's meant to stay a cheap, unauthenticated
 // monitoring probe.
-func systemInfoHandler(pool *db.Pool, valkeyClient *valkey.Client, cfg config.Config, startTime time.Time, storeDeps store.Deps) http.HandlerFunc {
+func systemInfoHandler(pool *db.Pool, valkeyClient *valkey.Client, cfg config.Config, startTime time.Time, storeDeps store.Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1106,11 +1108,11 @@ func systemInfoHandler(pool *db.Pool, valkeyClient *valkey.Client, cfg config.Co
 			resp.CoreUpdateAvailable = normalized != version.Version
 		}
 
-		// Active sessions: one Valkey key per logged-in browser tab/device
-		// (see auth.SessionKeyPrefix's doc comment) - best-effort, nil if the
-		// SCAN itself failed rather than showing a misleading zero.
-		if n, err := valkeyClient.CountKeysWithPrefix(ctx, auth.SessionKeyPrefix); err == nil {
-			resp.ActiveSessions = &n
+		// Active sessions: who's currently logged in and from how many
+		// tabs/devices (see auth.ActiveSession's doc comment for exactly
+		// what's shown) - best-effort, nil if the underlying SCAN failed.
+		if sessions, err := auth.ListActiveSessions(ctx, authDeps); err == nil {
+			resp.ActiveSessions = sessions
 		}
 
 		// TLS certificate expiry - see internal/tlscheck's doc comment for

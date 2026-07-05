@@ -8,7 +8,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, Link } from "react-router";
 import { useTranslation } from "react-i18next";
-import { getSystemInfo, type SystemInfo, type SystemInfoModule, type SystemInfoTimer } from "../lib/api";
+import {
+  getSystemInfo,
+  type ActiveSession,
+  type SystemInfo,
+  type SystemInfoModule,
+  type SystemInfoTimer,
+} from "../lib/api";
 import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
@@ -130,13 +136,6 @@ export default function AdminSystemInfoPage() {
                 {info.ntp_drift_ok !== undefined && (
                   <InfraRow icon="ti-clock" label={t("admin.system_info.ntp_drift")} ok={info.ntp_drift_ok} />
                 )}
-                {info.active_sessions !== undefined && (
-                  <InfraRow
-                    icon="ti-users"
-                    label={t("admin.system_info.active_sessions")}
-                    text={String(info.active_sessions)}
-                  />
-                )}
                 {info.tls_cert_days_left !== undefined && (
                   <InfraRow
                     icon="ti-certificate"
@@ -174,6 +173,38 @@ export default function AdminSystemInfoPage() {
                     <tbody>
                       {info.modules.map((m, i) => (
                         <ModuleRow key={m.name} mod={m} even={i % 2 === 0} />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Section>
+
+            {/* Active sessions */}
+            <Section
+              title={t("admin.system_info.section_sessions", { count: info.active_sessions?.length ?? 0 })}
+            >
+              {!info.active_sessions || info.active_sessions.length === 0 ? (
+                <p className="text-sm text-gray-400 dark:text-gray-500">{t("admin.system_info.no_sessions")}</p>
+              ) : (
+                <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200 bg-gray-50 text-left dark:border-gray-800 dark:bg-gray-900">
+                        <th className="px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                          {t("admin.system_info.col_email")}
+                        </th>
+                        <th className="px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                          {t("admin.system_info.col_role")}
+                        </th>
+                        <th className="px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                          {t("admin.system_info.col_expires")}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {info.active_sessions.map((s, i) => (
+                        <SessionRow key={i} session={s} even={i % 2 === 0} />
                       ))}
                     </tbody>
                   </table>
@@ -306,6 +337,23 @@ function ModuleRow({ mod, even }: { mod: SystemInfoModule; even: boolean }) {
         <span className="text-xs text-gray-600 dark:text-gray-400">{t(`modules.status.${mod.status}`)}</span>
       </td>
       <td className="px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">{mod.source}</td>
+    </tr>
+  );
+}
+
+function SessionRow({ session, even }: { session: ActiveSession; even: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <tr className={`border-b border-gray-100 last:border-0 dark:border-gray-800 ${even ? "" : "bg-gray-50/50 dark:bg-gray-900/30"}`}>
+      <td className="px-4 py-2.5 text-gray-700 dark:text-gray-300">
+        {session.email || <span className="text-gray-300 dark:text-gray-600">—</span>}
+      </td>
+      <td className="px-4 py-2.5 text-xs text-gray-600 dark:text-gray-400">{session.role}</td>
+      <td className="px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">
+        {session.expires_in_seconds !== undefined
+          ? t("admin.system_info.expires_in", { duration: formatDuration(session.expires_in_seconds) })
+          : "—"}
+      </td>
     </tr>
   );
 }

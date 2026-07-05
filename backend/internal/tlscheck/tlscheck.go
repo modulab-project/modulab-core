@@ -17,6 +17,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"log"
 	"net"
 	"time"
 )
@@ -49,7 +50,11 @@ func Expiry(ctx context.Context, addr, serverName string) (time.Time, error) {
 	if err != nil {
 		return time.Time{}, fmt.Errorf("tlscheck: dial %q: %w", addr, err)
 	}
-	defer rawConn.Close()
+	defer func() {
+		if err := rawConn.Close(); err != nil {
+			log.Printf("tlscheck: close raw connection to %q: %v", addr, err)
+		}
+	}()
 
 	// Deadline on the handshake itself too - DialContext above only bounds
 	// the TCP connect, not the TLS handshake that follows.
@@ -61,7 +66,11 @@ func Expiry(ctx context.Context, addr, serverName string) (time.Time, error) {
 		ServerName:         serverName,
 		InsecureSkipVerify: true,
 	})
-	defer tlsConn.Close()
+	defer func() {
+		if err := tlsConn.Close(); err != nil {
+			log.Printf("tlscheck: close TLS connection to %q: %v", addr, err)
+		}
+	}()
 
 	if err := tlsConn.HandshakeContext(dialCtx); err != nil {
 		return time.Time{}, fmt.Errorf("tlscheck: handshake with %q: %w", addr, err)

@@ -976,6 +976,12 @@ export interface SystemInfoModule {
   tier: number;
 }
 
+export interface ActiveSession {
+  email?: string;
+  role: string;
+  expires_in_seconds?: number;
+}
+
 export interface SystemInfo {
   version: string;
   uptime_seconds: number;
@@ -988,7 +994,7 @@ export interface SystemInfo {
   modules: SystemInfoModule[];
   latest_core_version?: string;
   core_update_available: boolean;
-  active_sessions?: number;
+  active_sessions?: ActiveSession[];
   tls_cert_expires_at?: string;
   tls_cert_days_left?: number;
 }

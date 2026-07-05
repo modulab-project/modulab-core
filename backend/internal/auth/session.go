@@ -274,6 +274,63 @@ func ValidateSession(ctx context.Context, d Deps, token string) (Session, bool, 
 	return sess, true, nil
 }
 
+// ActiveSession is one entry in ListActiveSessions' result - the fields the
+// System Info page (GET /v1/admin/system/info) shows for each currently
+// logged-in browser tab/device. Deliberately does not include the session
+// token itself (no reason for that to ever leave Valkey/the browser that
+// holds it) or Name/PreferredUsername/Picture (Email + Role is already
+// enough to identify who's logged in where, matching the level of detail
+// AdminUsersPage already shows for every user - not exposing more PII here
+// than that page does).
+type ActiveSession struct {
+	Email            string `json:"email,omitempty"`
+	Role             string `json:"role"`
+	ExpiresInSeconds int64  `json:"expires_in_seconds,omitempty"`
+}
+
+// ListActiveSessions decrypts and returns every currently active session
+// (one entry per logged-in browser tab/device - a user on both phone and
+// laptop appears twice). Best-effort per entry: a session key that has
+// expired between the SCAN and the Get, or fails to decode/decrypt, is
+// silently skipped rather than failing the whole list - same reasoning as
+// RevokeUserSessions treating a missing key as "already gone", not an error.
+func ListActiveSessions(ctx context.Context, d Deps) ([]ActiveSession, error) {
+	keys, err := d.Valkey.ScanKeysWithPrefix(ctx, sessionKeyPrefix)
+	if err != nil {
+		return nil, fmt.Errorf("auth: list active sessions: scan: %w", err)
+	}
+	if len(keys) == 0 {
+		return nil, nil
+	}
+
+	masterKey, err := setup.ResolveMasterKey(ctx, d.Pool, d.MasterKeyEnv)
+	if err != nil {
+		return nil, fmt.Errorf("auth: list active sessions: resolve master key: %w", err)
+	}
+
+	out := make([]ActiveSession, 0, len(keys))
+	for _, key := range keys {
+		raw, exists, err := d.Valkey.Get(ctx, key)
+		if err != nil || !exists {
+			continue
+		}
+		var stored storedSession
+		if err := json.Unmarshal([]byte(raw), &stored); err != nil {
+			continue
+		}
+		sess, err := decryptSession(masterKey, stored)
+		if err != nil {
+			continue
+		}
+		as := ActiveSession{Email: sess.Email, Role: sess.Role}
+		if ttl, ok, err := d.Valkey.TTL(ctx, key); err == nil && ok {
+			as.ExpiresInSeconds = int64(ttl / time.Second)
+		}
+		out = append(out, as)
+	}
+	return out, nil
+}
+
 // DeleteSession invalidates token immediately (logout).
 func DeleteSession(ctx context.Context, vk *valkey.Client, token string) error {
 	return vk.Del(ctx, sessionKeyPrefix+token)

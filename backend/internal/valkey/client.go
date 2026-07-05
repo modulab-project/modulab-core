@@ -204,6 +204,44 @@ func (c *Client) BLPop(ctx context.Context, timeout time.Duration, key string) (
 	return result[1], true, nil
 }
 
+// ScanKeysWithPrefix returns every key matching prefix+"*" using SCAN rather
+// than KEYS (see CountKeysWithPrefix's doc comment for why). Used by the
+// System Info page to enumerate active sessions ("session:*") so their
+// details (email, role, TTL) can be read one by one afterwards.
+func (c *Client) ScanKeysWithPrefix(ctx context.Context, prefix string) ([]string, error) {
+	var (
+		cursor uint64
+		keys   []string
+	)
+	for {
+		batch, next, err := c.rdb.Scan(ctx, cursor, prefix+"*", 200).Result()
+		if err != nil {
+			return nil, fmt.Errorf("valkey: scan %q*: %w", prefix, err)
+		}
+		keys = append(keys, batch...)
+		cursor = next
+		if cursor == 0 {
+			break
+		}
+	}
+	return keys, nil
+}
+
+// TTL returns the remaining time-to-live of key. A key with no expiry set
+// returns (0, false); a missing/already-expired key returns (0, false) too -
+// callers that need to tell the two apart should check existence separately
+// (e.g. via Get) first, since neither case is an error here.
+func (c *Client) TTL(ctx context.Context, key string) (time.Duration, bool, error) {
+	d, err := c.rdb.TTL(ctx, key).Result()
+	if err != nil {
+		return 0, false, fmt.Errorf("valkey: ttl %q: %w", key, err)
+	}
+	if d <= 0 {
+		return 0, false, nil
+	}
+	return d, true, nil
+}
+
 // CountKeysWithPrefix counts keys matching prefix+"*" using SCAN rather than
 // KEYS - KEYS walks the entire keyspace in one blocking call, which on a
 // shared single-threaded Valkey instance would stall every other request
