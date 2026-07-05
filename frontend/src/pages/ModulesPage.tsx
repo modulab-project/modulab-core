@@ -15,7 +15,8 @@ import {
 } from "../lib/api";
 import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
-import { AppShell, isAdminRole } from "../components/AppShell";
+import { AppShell } from "../components/AppShell";
+import { isAdminRole } from "../lib/roles";
 
 export default function ModulesPage() {
   const { t } = useTranslation();

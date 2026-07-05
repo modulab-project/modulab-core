@@ -26,7 +26,15 @@ export interface ServerEvent {
 // does that.
 export function useNotificationEvents(token: string | null, onEvent: (event: ServerEvent) => void): void {
   const onEventRef = useRef(onEvent);
-  onEventRef.current = onEvent;
+  // Assigning a ref during render is flagged by react-hooks/refs (React
+  // Compiler treats it as a side effect); moving it into its own
+  // dependency-free effect keeps the "always call the latest onEvent"
+  // behavior (this effect re-runs on every commit, always before the
+  // EventSource effect below could fire onEventRef.current) without
+  // touching the ref during render.
+  useEffect(() => {
+    onEventRef.current = onEvent;
+  });
 
   useEffect(() => {
     if (!token) {

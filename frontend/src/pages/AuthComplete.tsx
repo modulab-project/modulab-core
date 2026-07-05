@@ -3,17 +3,7 @@ import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { getHealth } from "../lib/api";
 import { storeSessionToken } from "../lib/session";
-
-// Mirrors what backend/internal/auth/handlers.go's CallbackHandler puts in
-// the URL fragment - keep these two in sync.
-export interface AuthResult {
-  token?: string;
-  email?: string;
-  role?: string;
-  error?: string;
-}
-
-const STORAGE_KEY = "modulab_auth_result";
+import { AUTH_RESULT_STORAGE_KEY, type AuthResult } from "../lib/authResult";
 
 // This page is the single landing spot for the redirect CallbackHandler
 // sends the browser to once the OIDC round-trip with the IdP is done (see
@@ -66,7 +56,7 @@ export default function AuthComplete() {
       role: params.get("role") ?? undefined,
       error: params.get("error") ?? undefined,
     };
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(result));
+    sessionStorage.setItem(AUTH_RESULT_STORAGE_KEY, JSON.stringify(result));
     window.history.replaceState(null, "", window.location.pathname);
 
     if (result.token) {
@@ -89,19 +79,4 @@ export default function AuthComplete() {
   }, [navigate]);
 
   return <p className="p-8 text-center text-sm text-gray-500">{t("auth_complete.finishing")}</p>;
-}
-
-// consumeAuthResult reads and clears the stashed result - "consume" because
-// a stale leftover result must never be replayed against a later step.
-export function consumeAuthResult(): AuthResult | null {
-  const raw = sessionStorage.getItem(STORAGE_KEY);
-  if (!raw) {
-    return null;
-  }
-  sessionStorage.removeItem(STORAGE_KEY);
-  try {
-    return JSON.parse(raw) as AuthResult;
-  } catch {
-    return null;
-  }
 }

@@ -12,7 +12,7 @@ import {
   getHealth,
 } from "../lib/api";
 import { authErrorKey } from "../lib/authErrors";
-import { consumeAuthResult } from "./AuthComplete";
+import { consumeAuthResult } from "../lib/authResult";
 import { getSessionToken } from "../lib/session";
 import { AuthButton, AuthField, AuthSecondaryButton, AuthShell } from "../components/AuthShell";
 

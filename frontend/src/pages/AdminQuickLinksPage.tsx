@@ -3,7 +3,8 @@ import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { getSessionToken } from "../lib/session";
-import { AppShell, isAdminRole } from "../components/AppShell";
+import { AppShell } from "../components/AppShell";
+import { isAdminRole } from "../lib/roles";
 import {
   type AdminTile,
   createAdminQuickLink,

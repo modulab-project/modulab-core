@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { loginRedirectUrl } from "../lib/api";
 import { authErrorKey } from "../lib/authErrors";
-import { consumeAuthResult } from "./AuthComplete";
+import { consumeAuthResult } from "../lib/authResult";
 import { AuthButton, AuthShell } from "../components/AuthShell";
 
 // Spec section 6.4's "/login" route ("OIDC Login-Screen", Public access).

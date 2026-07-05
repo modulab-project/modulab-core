@@ -11,7 +11,8 @@ import {
 } from "../lib/api";
 import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
-import { AppShell, isAdminRole } from "../components/AppShell";
+import { AppShell } from "../components/AppShell";
+import { isAdminRole } from "../lib/roles";
 
 // "/admin/users" - replaces the manual "UPDATE users SET approved = true"
 // (and, before this page, no way at all to lock or delete someone) with a

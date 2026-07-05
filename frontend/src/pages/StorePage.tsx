@@ -14,7 +14,8 @@ import {
 } from "../lib/api";
 import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
-import { AppShell, isAdminRole } from "../components/AppShell";
+import { AppShell } from "../components/AppShell";
+import { isAdminRole } from "../lib/roles";
 import { safeHref } from "../lib/url";
 
 type SourceFilter = "all" | "official" | "community";

@@ -20,7 +20,9 @@ import {
 } from "../lib/api";
 import { clearSessionToken, getSessionToken } from "../lib/session";
 import { useNotificationEvents, type ServerEvent } from "../lib/useEvents";
-import { useToasts, ToastStack } from "./Toast";
+import { isAdminRole } from "../lib/roles";
+import { useToasts } from "../lib/toasts";
+import { ToastStack } from "./Toast";
 import { Logo } from "./AuthShell";
 import packageJson from "../../package.json";
 
@@ -49,17 +51,8 @@ const FEED_LIMIT = 20;
 
 const FRONTEND_VERSION = packageJson.version;
 const THEME_KEY = "modulab_theme";
-const ADMIN_ROLES = ["org-admin", "super-admin"];
 const PROJECT_URL = "https://modulab.app";
 const GITHUB_URL = "https://github.com/modulab-project/modulab-core";
-
-// Exported so other admin-only pages (currently AdminUsersPage.tsx) can
-// gate themselves with the exact same definition AppShell itself uses for
-// the status panel and the profile menu's "Admin" section, instead of a
-// second copy of this list drifting out of sync.
-export function isAdminRole(role: string): boolean {
-  return ADMIN_ROLES.includes(role);
-}
 
 // Shared chrome - header, profile/status slide panels, footer - for every
 // page reachable once a user has a fully-approved session: Home ("/") and
