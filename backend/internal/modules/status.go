@@ -65,6 +65,19 @@ func RunUpdateChecks(ctx context.Context, d Deps, storeDeps store.Deps) {
 // A background pass that finds nothing new does not publish anything: there
 // is no "still zero updates" event, matching user.pending's pattern of only
 // ever announcing a change, not a steady state.
+// RunUpdateCheckOnce runs a single CheckUpdates pass and publishes the same
+// "module.updates_available" notification runUpdateCheck below does on the
+// ticker. Exported so store.RunSync/store.TriggerSync (backend/internal/store)
+// can trigger a check immediately after a registry sync completes, instead of
+// only ever finding out up to updateCheckInterval later — closes the gap
+// where a newly-synced registry entry could otherwise sit unnoticed for up
+// to 15 more minutes purely because the ticker hadn't fired yet (reported
+// 2026-07-05: the admin never saw the live notification because they'd
+// already manually updated the module before the next tick ran).
+func RunUpdateCheckOnce(ctx context.Context, d Deps, storeDeps store.Deps) {
+	runUpdateCheck(ctx, d, storeDeps)
+}
+
 func runUpdateCheck(ctx context.Context, d Deps, storeDeps store.Deps) {
 	updates, err := CheckUpdates(ctx, d, storeDeps)
 	if err != nil {

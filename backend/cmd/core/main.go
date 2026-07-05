@@ -513,15 +513,16 @@ func main() {
 
 	// Module Store registry sync (internal/store): fetches official + community
 	// registry on startup and every 24 hours. Errors are logged, never fatal.
+	// The background goroutine itself is started further down (after
+	// moduleDeps exists, see onStoreSynced below) — storeDeps is declared
+	// here because the route handlers below need it right away.
 	storeDeps := store.Deps{Pool: pool, Valkey: valkeyClient}
-	go store.RunSync(ctx, storeDeps)
 
 	// Store browse endpoints (spec section 4.10).
 	// GET /v1/store and GET /v1/store/{name} require any active session.
 	// POST /v1/store/sync requires org-admin or super-admin.
 	mux.HandleFunc("GET /v1/store", store.ListHandler(storeDeps, authDeps))
 	mux.HandleFunc("GET /v1/store/{name}", store.DetailHandler(storeDeps, authDeps))
-	mux.HandleFunc("POST /v1/store/sync", store.SyncHandler(storeDeps, authDeps))
 
 	// Module management endpoints (spec section 4.6–4.9).
 	// List/detail: any active session. Install/uninstall/update/pin: org-admin+.
@@ -564,12 +565,34 @@ func main() {
 		Valkey:    valkeyClient,
 	}
 
+	// onStoreSynced runs a module-update check immediately after every
+	// registry sync (manual click or the hourly background one below),
+	// instead of only finding out up to updateCheckInterval (15 min) later
+	// purely because the ticker hadn't fired yet since the sync. Reported
+	// 2026-07-05: an admin who manually synced and then updated a module
+	// within minutes never saw the "update available" notification at all,
+	// because the 15-minute tick simply hadn't happened yet by the time they
+	// acted manually. store (internal/store) cannot import modules itself
+	// (modules already imports store, so the reverse would cycle) — passing
+	// this closure in is how the two meet without that.
+	onStoreSynced := func(syncCtx context.Context) {
+		modules.RunUpdateCheckOnce(syncCtx, moduleDeps, storeDeps)
+	}
+
+	// Now that moduleDeps exists, start the registry-sync goroutine and wire
+	// the manual-sync route — both call onStoreSynced above after every sync.
+	go store.RunSync(ctx, storeDeps, onStoreSynced)
+	mux.HandleFunc("POST /v1/store/sync", store.SyncHandler(storeDeps, authDeps, onStoreSynced))
+
 	// Background check for installed-module updates (separate from
 	// store.RunSync above, which only refreshes the registry listing).
 	// Runs every 15 minutes and publishes a notify.AdminChannel() event
 	// when it finds something new, so connected admins see it via SSE
 	// without needing to click "check updates" or reload — see
-	// modules.RunUpdateChecks's doc comment for the full rationale.
+	// modules.RunUpdateChecks's doc comment for the full rationale. Still
+	// kept alongside onStoreSynced above: this is the fallback for whatever
+	// time passes between syncs, onStoreSynced is what closes the "just
+	// synced, why didn't I get notified yet" gap specifically.
 	go modules.RunUpdateChecks(ctx, moduleDeps, storeDeps)
 
 	// At startup, restart Deno workers for all Tier 2/3 modules that were

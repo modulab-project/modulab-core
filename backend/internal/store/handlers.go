@@ -115,15 +115,18 @@ func DetailHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 
 // SyncHandler serves POST /v1/store/sync. Triggers an immediate registry sync
 // and waits for it to complete before responding. Requires org-admin or
-// super-admin role.
-func SyncHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
+// super-admin role. onSynced (may be nil) is forwarded to TriggerSync — see
+// onSyncedFunc's doc comment; main.go wires it to modules.RunUpdateCheckOnce
+// so a manual sync also surfaces any newly-available module update right
+// away instead of waiting for the next background tick.
+func SyncHandler(d Deps, authDeps auth.Deps, onSynced onSyncedFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := auth.RequireAdminSession(authDeps, w, r)
 		if !ok {
 			return
 		}
 
-		if err := TriggerSync(r.Context(), d); err != nil {
+		if err := TriggerSync(r.Context(), d, onSynced); err != nil {
 			logStoreAudit(r.Context(), authDeps, audit.LogParams{
 				EventType:  audit.EventStoreSyncTriggered,
 				ActorID:    sess.UserID,

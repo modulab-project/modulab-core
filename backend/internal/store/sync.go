@@ -9,14 +9,25 @@ import (
 
 const syncInterval = 1 * time.Hour
 
+// onSynced is called after every sync attempt (manual or scheduled),
+// regardless of whether it fully succeeded — a partial sync (one source
+// failed) still persists whatever it did manage to fetch, and running a
+// module-update check against that partial-but-fresher cache is harmless
+// even in the worst case (it just won't find anything new for the module(s)
+// whose source failed). May be nil, in which case it is simply not called;
+// this package cannot depend on modules (it imports store, not the other way
+// around), so the check itself lives there — see modules.RunUpdateCheckOnce.
+type onSyncedFunc func(ctx context.Context)
+
 // RunSync is the long-running background goroutine for registry synchronisation.
 // It runs once immediately on startup, then again every hour. Designed to
-// be started with `go store.RunSync(ctx, deps)` from main.go, mirroring the
-// same pattern as mail.RunWorker. Stopping ctx stops the goroutine cleanly.
-func RunSync(ctx context.Context, d Deps) {
+// be started with `go store.RunSync(ctx, deps, onSynced)` from main.go,
+// mirroring the same pattern as mail.RunWorker. Stopping ctx stops the
+// goroutine cleanly.
+func RunSync(ctx context.Context, d Deps, onSynced onSyncedFunc) {
 	// Run immediately on first start so the store is populated before any
 	// admin opens the UI, rather than showing an empty list for up to 1h.
-	runSync(ctx, d)
+	runSync(ctx, d, onSynced)
 
 	ticker := time.NewTicker(syncInterval)
 	defer ticker.Stop()
@@ -24,7 +35,7 @@ func RunSync(ctx context.Context, d Deps) {
 	for {
 		select {
 		case <-ticker.C:
-			runSync(ctx, d)
+			runSync(ctx, d, onSynced)
 		case <-ctx.Done():
 			return
 		}
@@ -33,9 +44,13 @@ func RunSync(ctx context.Context, d Deps) {
 
 // TriggerSync performs a one-off manual sync. Called by POST /v1/store/sync.
 // Returns an error summary if either source failed; partial results are still
-// persisted so the cache reflects whatever was reachable.
-func TriggerSync(ctx context.Context, d Deps) error {
+// persisted so the cache reflects whatever was reachable. onSynced still
+// runs even on a partial/full failure — see onSyncedFunc's doc comment.
+func TriggerSync(ctx context.Context, d Deps, onSynced onSyncedFunc) error {
 	offErr, comErr := syncBoth(ctx, d)
+	if onSynced != nil {
+		onSynced(ctx)
+	}
 	if offErr != nil && comErr != nil {
 		return fmt.Errorf("official: %v; community: %v", offErr, comErr)
 	}
@@ -50,7 +65,7 @@ func TriggerSync(ctx context.Context, d Deps) error {
 
 // runSync is the internal sync driver. Errors are logged but never fatal —
 // the hourly goroutine must keep running regardless of transient GitHub outages.
-func runSync(ctx context.Context, d Deps) {
+func runSync(ctx context.Context, d Deps, onSynced onSyncedFunc) {
 	offErr, comErr := syncBoth(ctx, d)
 	if offErr != nil {
 		log.Printf("store: sync: official registry: %v", offErr)
@@ -60,6 +75,9 @@ func runSync(ctx context.Context, d Deps) {
 	}
 	if offErr == nil && comErr == nil {
 		log.Printf("store: sync: completed successfully")
+	}
+	if onSynced != nil {
+		onSynced(ctx)
 	}
 }
 
