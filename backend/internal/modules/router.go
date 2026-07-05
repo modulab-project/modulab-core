@@ -270,8 +270,16 @@ func saveUploadedFile(r *http.Request, dataDir, moduleName string) (string, erro
 	}
 
 	// Sanitise filename — keep only the base name, no path traversal.
+	// filepath.Base does NOT collapse ".." the way filepath.Clean/Join would
+	// — for an input of exactly ".." (no slashes) it returns ".." unchanged,
+	// which filepath.Join below would then resolve to uploadDir's parent
+	// directory. Today that's only incidentally harmless (os.Create fails on
+	// an existing directory rather than writing into it), not a deliberate
+	// guarantee — reject it explicitly rather than relying on that (found
+	// 2026-07-05, alongside the same class of check added to the modules'
+	// own file_path validation).
 	safeName := filepath.Base(header.Filename)
-	if safeName == "." || safeName == "/" {
+	if safeName == "." || safeName == ".." || safeName == "/" {
 		return "", fmt.Errorf("invalid filename")
 	}
 
