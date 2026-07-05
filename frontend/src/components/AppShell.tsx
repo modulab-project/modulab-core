@@ -475,7 +475,18 @@ function FooterBar({
   onTogglePanel: (panel: Exclude<OpenPanel, null>) => void;
 }) {
   const { t } = useTranslation();
-  const allOk = !!health && health.postgres_reachable && health.valkey_reachable;
+  // Bugfix (2026-07-05): this previously only looked at postgres/valkey, so
+  // the footer badge could say "all systems normal" while the System Status
+  // page's own Infrastructure section showed SearXNG as unreachable right
+  // next to it - the two disagreed about what "ok" means. searxng only
+  // counts against allOk when it's actually configured (an instance that
+  // never set it up isn't "broken"), matching the same
+  // searxng_configured/searxng_reachable pairing AdminSystemInfoPage uses.
+  const allOk =
+    !!health &&
+    health.postgres_reachable &&
+    health.valkey_reachable &&
+    (!health.searxng_configured || !!health.searxng_reachable);
 
   return (
     <footer className="flex flex-none flex-wrap items-center justify-center gap-2 border-t border-gray-200 px-3 py-2 text-xs text-gray-500 sm:gap-6 dark:border-gray-800 dark:text-gray-400">
