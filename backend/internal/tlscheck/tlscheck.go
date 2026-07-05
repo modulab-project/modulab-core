@@ -50,9 +50,21 @@ func Expiry(ctx context.Context, addr, serverName string) (time.Time, error) {
 	if err != nil {
 		return time.Time{}, fmt.Errorf("tlscheck: dial %q: %w", addr, err)
 	}
+	// closeRaw tracks whether rawConn still needs closing directly. Once
+	// tls.Client below wraps it, tlsConn.Close() closes the underlying
+	// rawConn too - closing both would be a double-close, and the second
+	// Close() always fails with "use of closed network connection" (logged
+	// on every single check, found 2026-07-05 right after the errcheck fix
+	// added this defer without accounting for that overlap). Flipping this
+	// off once tlsConn takes over keeps exactly one deferred Close() active
+	// on any given return path: rawConn's own if the handshake setup fails
+	// before tlsConn exists, tlsConn's otherwise.
+	closeRaw := true
 	defer func() {
-		if err := rawConn.Close(); err != nil {
-			log.Printf("tlscheck: close raw connection to %q: %v", addr, err)
+		if closeRaw {
+			if err := rawConn.Close(); err != nil {
+				log.Printf("tlscheck: close raw connection to %q: %v", addr, err)
+			}
 		}
 	}()
 
@@ -66,6 +78,7 @@ func Expiry(ctx context.Context, addr, serverName string) (time.Time, error) {
 		ServerName:         serverName,
 		InsecureSkipVerify: true,
 	})
+	closeRaw = false
 	defer func() {
 		if err := tlsConn.Close(); err != nil {
 			log.Printf("tlscheck: close TLS connection to %q: %v", addr, err)
