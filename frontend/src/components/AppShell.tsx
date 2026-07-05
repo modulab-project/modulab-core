@@ -230,9 +230,9 @@ export function AppShell({
       refreshPendingCount();
     }
     if (event.type === "module.updates_available" && isAdmin) {
-      // Published by modules.RunUpdateChecks (backend/internal/modules/
-      // status.go) — a background pass (every 15 min) found at least one
-      // installed module with a newer version. Previously moduleUpdateCount
+      // Published by modules.RunUpdateCheckOnce (backend/internal/modules/
+      // status.go) — triggered right after every registry sync, it found at
+      // least one installed module with a newer version. Previously moduleUpdateCount
       // only ever refreshed on mount or when the notifications panel was
       // opened, so a background-discovered update sat invisible until an
       // admin happened to look; this makes it show up the same way

@@ -21,6 +21,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"runtime/debug"
@@ -44,6 +45,7 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/searxng"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
 	"github.com/modulab-project/modulab-core/backend/internal/store"
+	"github.com/modulab-project/modulab-core/backend/internal/tlscheck"
 	"github.com/modulab-project/modulab-core/backend/internal/valkey"
 	"github.com/modulab-project/modulab-core/backend/internal/version"
 	"github.com/modulab-project/modulab-core/backend/internal/weather"
@@ -104,11 +106,11 @@ func main() {
 
 	// ctx is cancelled the moment the process receives SIGTERM/SIGINT (e.g.
 	// `docker stop`, systemd, or Ctrl-C in a dev shell). Every long-lived
-	// background loop below (store.RunSync, modules.RunUpdateChecks,
-	// mail.RunWorker, jobRunner) already takes this ctx and returns once it
-	// is cancelled, so tying it to the shutdown signal here is what makes
-	// them stop on their own during a graceful shutdown - no separate
-	// per-goroutine stop signal needed for those three.
+	// background loop below (store.RunSync, mail.RunWorker, jobRunner)
+	// already takes this ctx and returns once it is cancelled, so tying it
+	// to the shutdown signal here is what makes them stop on their own
+	// during a graceful shutdown - no separate per-goroutine stop signal
+	// needed for those.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -539,9 +541,9 @@ func main() {
 	// A worker that crashes on its own (as opposed to Stop/StopAll or a
 	// deliberate restart) used to just go silent: installed_modules.status
 	// stayed "active" and nothing surfaced it anywhere. Mark the module
-	// degraded and reuse the same admin-notification channel
-	// modules.RunUpdateChecks already publishes to, so a connected admin's
-	// SSE stream picks it up live instead of only being discoverable by
+	// degraded and reuse the same notify.AdminChannel() an update-check's
+	// "module.updates_available" event already publishes to, so a connected
+	// admin's SSE stream picks it up live instead of only being discoverable by
 	// noticing the module has stopped responding. See
 	// WorkerPool.SetCrashHandler's doc comment for why this deliberately
 	// does not attempt an automatic restart.
@@ -584,25 +586,23 @@ func main() {
 	go store.RunSync(ctx, storeDeps, onStoreSynced)
 	mux.HandleFunc("POST /v1/store/sync", store.SyncHandler(storeDeps, authDeps, onStoreSynced))
 
-	// Background check for installed-module updates (separate from
-	// store.RunSync above, which only refreshes the registry listing).
-	// Runs every 15 minutes and publishes a notify.AdminChannel() event
-	// when it finds something new, so connected admins see it via SSE
-	// without needing to click "check updates" or reload — see
-	// modules.RunUpdateChecks's doc comment for the full rationale. Still
-	// kept alongside onStoreSynced above: this is the fallback for whatever
-	// time passes between syncs, onStoreSynced is what closes the "just
-	// synced, why didn't I get notified yet" gap specifically.
-	go modules.RunUpdateChecks(ctx, moduleDeps, storeDeps)
+	// Installed-module update checking has no background loop of its own
+	// (see modules.RunUpdateCheckOnce's doc comment for why a separate
+	// 15-minute ticker was removed 2026-07-05 as pure redundancy): it is
+	// entirely driven by onStoreSynced above, which fires right after every
+	// registry sync - manual or the hourly background one - so connected
+	// admins see new updates via SSE without needing to click "check
+	// updates" or reload, without a second timer polling data that only
+	// ever changes when a sync runs anyway.
 
 	// GET /v1/admin/system/info — read-only diagnostics page (spec: "System
 	// Info" card on /admin/system) aggregating everything an admin previously
 	// had to piece together from /healthz, the Installed Modules page, and
 	// the Store page separately: version/uptime, dependency reachability,
-	// and — the actual reason this endpoint exists — countdowns until the
-	// next background module-update check and registry sync, so "I published
-	// a release, why hasn't ModuLab noticed yet" has a concrete answer
-	// instead of "wait up to 15 minutes / 1 hour and see".
+	// and a countdown until the next registry sync (which also drives the
+	// next module-update check, see above), so "I published a release, why
+	// hasn't ModuLab noticed yet" has a concrete answer instead of "wait and
+	// see".
 	mux.Handle("GET /v1/admin/system/info", superAdminOnly(systemInfoHandler(pool, valkeyClient, cfg, startTime, storeDeps)))
 
 	// At startup, restart Deno workers for all Tier 2/3 modules that were
@@ -689,7 +689,7 @@ func main() {
 	// unconditionally even before SMTP has ever been configured, since
 	// RunWorker itself handles "not configured yet" per message (logged,
 	// dropped) rather than needing to be told to start later once it is.
-	// Like store.RunSync and modules.RunUpdateChecks above, it takes the
+	// Like store.RunSync above, it takes the
 	// signal-aware ctx from main's top and returns on its own once that ctx
 	// is cancelled during graceful shutdown (see the select block at the
 	// end of main).
@@ -744,8 +744,8 @@ func main() {
 		log.Printf("main: shutdown signal received, draining in-flight requests (up to 15s)")
 
 		// jobRunner/workerPool are stopped explicitly (they don't watch ctx
-		// themselves); RunSync/RunUpdateChecks/mail.RunWorker above already
-		// exit on their own once ctx is cancelled.
+		// themselves); RunSync/mail.RunWorker above already exit on their
+		// own once ctx is cancelled.
 		jobRunner.Stop()
 		workerPool.StopAll()
 
@@ -987,12 +987,15 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
-// systemInfoTimer describes a recurring background loop's schedule so the
+// systemInfoTimer describes the registry-sync loop's schedule so the
 // frontend can render a "next run in X" countdown instead of the admin
-// wondering whether the loop is running at all. LastRunAt/NextRunAt are nil
-// until the loop has completed its first pass (in practice within a second
-// or two of Core starting, since both loops run once immediately at boot
-// before starting their ticker).
+// wondering whether it's running at all. A registry sync also drives the
+// next installed-module update check (see modules.RunUpdateCheckOnce) - the
+// two are the same event as far as an admin needs to know, which is why
+// there is only one of these in the response, not one per background loop.
+// LastRunAt/NextRunAt are nil until the loop has completed its first pass
+// (in practice within a second or two of Core starting, since it runs once
+// immediately at boot before starting its ticker).
 type systemInfoTimer struct {
 	LastRunAt       *string `json:"last_run_at,omitempty"`
 	NextRunAt       *string `json:"next_run_at,omitempty"`
@@ -1015,25 +1018,53 @@ type systemInfoModule struct {
 
 // systemInfoResponse is the JSON body of GET /v1/admin/system/info.
 type systemInfoResponse struct {
-	Version           string              `json:"version"`
-	UptimeSeconds     int64               `json:"uptime_seconds"`
-	PostgresReachable bool                `json:"postgres_reachable"`
-	ValkeyReachable   bool                `json:"valkey_reachable"`
-	SearxngConfigured bool                `json:"searxng_configured"`
-	SearxngReachable  *bool               `json:"searxng_reachable,omitempty"`
-	NTPDriftOK        *bool               `json:"ntp_drift_ok,omitempty"`
-	ModuleUpdateCheck systemInfoTimer     `json:"module_update_check"`
-	RegistrySync      systemInfoTimer     `json:"registry_sync"`
-	Modules           []systemInfoModule  `json:"modules"`
+	Version           string             `json:"version"`
+	UptimeSeconds     int64              `json:"uptime_seconds"`
+	PostgresReachable bool               `json:"postgres_reachable"`
+	ValkeyReachable   bool               `json:"valkey_reachable"`
+	SearxngConfigured bool               `json:"searxng_configured"`
+	SearxngReachable  *bool              `json:"searxng_reachable,omitempty"`
+	NTPDriftOK        *bool              `json:"ntp_drift_ok,omitempty"`
+	RegistrySync      systemInfoTimer    `json:"registry_sync"`
+	Modules           []systemInfoModule `json:"modules"`
+
+	// LatestCoreVersion/CoreUpdateAvailable: best-effort check against
+	// modulab-core's own GitHub releases, reusing the same
+	// store.FetchLatestRelease call the module registry sync already uses
+	// for community modules - Core checking its own repo the same way it
+	// checks every module's is one code path, not two. Nil/false when the
+	// check failed (offline homelab, GitHub rate limit, etc.) rather than
+	// blocking the page - same "nil = unknown" convention as SearxngReachable
+	// and NTPDriftOK above.
+	LatestCoreVersion  string `json:"latest_core_version,omitempty"`
+	CoreUpdateAvailable bool  `json:"core_update_available"`
+
+	// ActiveSessions counts current "session:*" keys in Valkey (one per
+	// logged-in browser tab/device, not per user - someone logged in on
+	// phone and laptop counts as two). Nil if the SCAN itself failed.
+	ActiveSessions *int64 `json:"active_sessions,omitempty"`
+
+	// TLSCertExpiresAt/TLSCertDaysLeft: read from a live TLS handshake
+	// against Traefik (see internal/tlscheck), not from acme.json directly -
+	// that file lives in a Docker volume only Traefik's container mounts,
+	// and it holds the private key alongside the cert, so reading it from
+	// Core would mean either sharing that volume (a real secret) or parsing
+	// Traefik's internal storage format. Dialing the already-public TLS
+	// endpoint and reading the handshake's own certificate is the same
+	// technique any external uptime/cert monitor uses, and it works
+	// regardless of what's actually terminating TLS. Nil when the check
+	// itself couldn't run (e.g. local dev without Traefik in front).
+	TLSCertExpiresAt *string `json:"tls_cert_expires_at,omitempty"`
+	TLSCertDaysLeft  *int    `json:"tls_cert_days_left,omitempty"`
 }
 
 // systemInfoHandler serves GET /v1/admin/system/info (super-admin only).
 // Reuses the same best-effort checks as /healthz for the shared fields
 // (dependency reachability, NTP drift, SearXNG) rather than duplicating a
 // second, subtly-different implementation of each — the difference here is
-// the two background-loop countdowns and the per-module version table,
-// neither of which /healthz carries since it's meant to stay a cheap,
-// unauthenticated monitoring probe.
+// the registry-sync countdown and the per-module version table, neither of
+// which /healthz carries since it's meant to stay a cheap, unauthenticated
+// monitoring probe.
 func systemInfoHandler(pool *db.Pool, valkeyClient *valkey.Client, cfg config.Config, startTime time.Time, storeDeps store.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -1063,20 +1094,44 @@ func systemInfoHandler(pool *db.Pool, valkeyClient *valkey.Client, cfg config.Co
 			resp.NTPDriftOK = &ok
 		}
 
-		// Background loop #1: per-installed-module update check (15 min).
-		updateCheckInterval := modules.UpdateCheckInterval()
-		resp.ModuleUpdateCheck = systemInfoTimer{IntervalSeconds: int64(updateCheckInterval / time.Second)}
-		if last, next, ok := modules.UpdateCheckTimer(); ok {
-			lastStr := last.UTC().Format(time.RFC3339)
-			nextStr := next.UTC().Format(time.RFC3339)
-			resp.ModuleUpdateCheck.LastRunAt = &lastStr
-			resp.ModuleUpdateCheck.NextRunAt = &nextStr
+		// Core's own update check - reuses the exact same GitHub Releases
+		// lookup CheckUpdates already uses for community modules, just
+		// pointed at modulab-core's own repo instead of an installed
+		// module's source_repo. version.Version has no leading "v" (see that
+		// constant's doc comment); GitHub release tags conventionally do, so
+		// both sides are normalized before comparing.
+		if latest, err := store.FetchLatestRelease(ctx, "https://github.com/modulab-project/modulab-core"); err == nil && latest != "" {
+			normalized := strings.TrimPrefix(strings.TrimSpace(latest), "v")
+			resp.LatestCoreVersion = normalized
+			resp.CoreUpdateAvailable = normalized != version.Version
 		}
 
-		// Background loop #2: registry sync (1h). last_synced_at is already
+		// Active sessions: one Valkey key per logged-in browser tab/device
+		// (see auth.SessionKeyPrefix's doc comment) - best-effort, nil if the
+		// SCAN itself failed rather than showing a misleading zero.
+		if n, err := valkeyClient.CountKeysWithPrefix(ctx, auth.SessionKeyPrefix); err == nil {
+			resp.ActiveSessions = &n
+		}
+
+		// TLS certificate expiry - see internal/tlscheck's doc comment for
+		// why this dials the reverse proxy directly instead of reading
+		// Traefik's acme.json. serverName comes from PublicBaseURL so a
+		// multi-vhost proxy returns the same certificate a real browser
+		// would see; the dial target is the internal Docker address
+		// (cfg.TLSCheckAddr), not that hostname itself.
+		if u, err := url.Parse(cfg.PublicBaseURL); err == nil && u.Hostname() != "" {
+			if expiry, err := tlscheck.Expiry(ctx, cfg.TLSCheckAddr, u.Hostname()); err == nil {
+				expiryStr := expiry.UTC().Format(time.RFC3339)
+				daysLeft := int(time.Until(expiry).Hours() / 24)
+				resp.TLSCertExpiresAt = &expiryStr
+				resp.TLSCertDaysLeft = &daysLeft
+			}
+		}
+
+		// Registry sync (1h) - also drives the next installed-module update
+		// check, see systemInfoTimer's doc comment. last_synced_at is already
 		// persisted in module_registry (used by GET /v1/store today), so no
-		// extra in-memory tracking is needed here the way the update-check
-		// loop above requires it.
+		// extra in-memory tracking is needed for this one.
 		syncInterval := store.SyncInterval()
 		resp.RegistrySync = systemInfoTimer{IntervalSeconds: int64(syncInterval / time.Second)}
 		if lastSync, err := store.LastSyncedAt(ctx, pool); err == nil && !lastSync.IsZero() {

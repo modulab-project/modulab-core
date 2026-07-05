@@ -65,26 +65,6 @@ export default function AdminSystemPage() {
         )}
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {/* System Info — read-only diagnostics, no configured/not-configured
-              status dot like the cards below (nothing to configure here). */}
-          <Link
-            to="/admin/system/info"
-            className="group flex flex-col rounded-xl border border-gray-200 p-4 transition-colors hover:border-teal-400 hover:bg-teal-50/40 dark:border-gray-800 dark:hover:border-teal-700 dark:hover:bg-teal-950/30"
-          >
-            <div className="flex items-start justify-between gap-3 mb-2">
-              <div className="flex items-center gap-2.5">
-                <i className="ti ti-info-circle text-[18px] text-gray-400 group-hover:text-teal-600 dark:group-hover:text-teal-400" />
-                <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
-                  {t("admin.system_info.title")}
-                </span>
-              </div>
-              <i className="ti ti-chevron-right flex-none text-gray-300 group-hover:text-teal-500 dark:text-gray-600 dark:group-hover:text-teal-400" />
-            </div>
-            <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2">
-              {t("admin.system_info.card_desc")}
-            </p>
-          </Link>
-
           {/* Group prefix — read-only, no sub-page */}
           <div className="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
             <div className="flex items-start justify-between gap-3">
@@ -149,6 +129,28 @@ export default function AdminSystemPage() {
             </div>
             <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2">
               {t("admin.system.ai_card_desc")}
+            </p>
+          </Link>
+
+          {/* System Info — always last: read-only diagnostics, no
+              configured/not-configured status dot like the cards above
+              (nothing to configure here), so it's visually the "everything
+              else" card that belongs at the end of the hub. */}
+          <Link
+            to="/admin/system/info"
+            className="group flex flex-col rounded-xl border border-gray-200 p-4 transition-colors hover:border-teal-400 hover:bg-teal-50/40 dark:border-gray-800 dark:hover:border-teal-700 dark:hover:bg-teal-950/30"
+          >
+            <div className="flex items-start justify-between gap-3 mb-2">
+              <div className="flex items-center gap-2.5">
+                <i className="ti ti-info-circle text-[18px] text-gray-400 group-hover:text-teal-600 dark:group-hover:text-teal-400" />
+                <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
+                  {t("admin.system_info.title")}
+                </span>
+              </div>
+              <i className="ti ti-chevron-right flex-none text-gray-300 group-hover:text-teal-500 dark:text-gray-600 dark:group-hover:text-teal-400" />
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2">
+              {t("admin.system_info.card_desc")}
             </p>
           </Link>
         </div>

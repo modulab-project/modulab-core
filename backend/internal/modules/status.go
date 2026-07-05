@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"sync"
 	"time"
 
 	"github.com/modulab-project/modulab-core/backend/internal/db"
@@ -22,106 +21,29 @@ type UpdateInfo struct {
 	LastChecked      time.Time `json:"last_checked"`
 }
 
-// updateCheckInterval is how often RunUpdateChecks re-compares installed
-// modules against the registry cache in the background. 15 minutes was
-// chosen over store.syncInterval's 1h (the registry-listing sync — a
-// different, slower-moving thing, see store/sync.go) because a fresh
-// GitHub release should become visible in ModuLab reasonably quickly
-// without the admin needing to know to click "check updates" — reported by
-// the user 2026-07-04 ("dauert manchmal bis zu 15 min das ich es in
-// ModuLab sehe", at a time when there was in fact no background check at
-// all, only the manual button and the unrelated hourly registry sync).
-const updateCheckInterval = 15 * time.Minute
-
-// lastCheckMu guards lastCheckAt below. runUpdateCheck is called from three
-// independent triggers (the ticker, RunUpdateCheckOnce right after a registry
-// sync, and — indirectly — nothing else, the manual button calls CheckUpdates
-// directly and does not update this timestamp), so a plain package-level
-// time.Time would be a data race without the mutex.
-var (
-	lastCheckMu sync.Mutex
-	lastCheckAt time.Time
-)
-
-// UpdateCheckInterval exposes updateCheckInterval to callers outside this
-// package (the GET /v1/admin/system/info handler in cmd/core).
-func UpdateCheckInterval() time.Duration {
-	return updateCheckInterval
-}
-
-// UpdateCheckTimer reports when the background update-check loop last ran and
-// when it is next due, so the admin UI can show a countdown instead of the
-// admin only finding out up to 15 minutes after the fact (see
-// updateCheckInterval's doc comment for the incident that motivated the
-// background loop itself). ok is false until the first check has run — in
-// practice within a second or two of Core starting, since RunUpdateChecks
-// runs one pass immediately before starting its ticker.
-func UpdateCheckTimer() (last time.Time, next time.Time, ok bool) {
-	lastCheckMu.Lock()
-	defer lastCheckMu.Unlock()
-	if lastCheckAt.IsZero() {
-		return time.Time{}, time.Time{}, false
-	}
-	return lastCheckAt, lastCheckAt.Add(updateCheckInterval), true
-}
-
-// RunUpdateChecks is the long-running background goroutine that keeps
-// installed_modules.available_version current without requiring an admin
-// to click "check updates" or reload the page. Mirrors store.RunSync's
-// shape exactly (run once immediately, then on a ticker, stop on ctx.Done).
+// RunUpdateCheckOnce runs a single CheckUpdates pass and, if it found
+// anything new, publishes a "module.updates_available" event to
+// notify.AdminChannel so every currently-connected admin session's SSE
+// stream (auth/events.go) picks it up live — the same delivery path already
+// used for "user.pending". A pass that finds nothing new does not publish
+// anything: there is no "still zero updates" event, matching user.pending's
+// pattern of only ever announcing a change, not a steady state.
 //
-// Before this existed, CheckUpdates only ever ran from the manual
-// POST /v1/modules/updates handler — an admin publishing a new GitHub
-// release for a module had no way to see it in ModuLab except clicking
-// that button (or restarting Core), regardless of store.RunSync's hourly
-// registry-listing sync having already picked up the new LatestVersion.
-func RunUpdateChecks(ctx context.Context, d Deps, storeDeps store.Deps) {
-	runUpdateCheck(ctx, d, storeDeps)
-
-	ticker := time.NewTicker(updateCheckInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			runUpdateCheck(ctx, d, storeDeps)
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-// runUpdateCheck runs one CheckUpdates pass and, if it found anything new,
-// publishes a single "module.updates_available" event to notify.AdminChannel
-// so every currently-connected admin session's SSE stream (auth/events.go)
-// picks it up live — the same delivery path already used for "user.pending".
-// A background pass that finds nothing new does not publish anything: there
-// is no "still zero updates" event, matching user.pending's pattern of only
-// ever announcing a change, not a steady state.
-// RunUpdateCheckOnce runs a single CheckUpdates pass and publishes the same
-// "module.updates_available" notification runUpdateCheck below does on the
-// ticker. Exported so store.RunSync/store.TriggerSync (backend/internal/store)
-// can trigger a check immediately after a registry sync completes, instead of
-// only ever finding out up to updateCheckInterval later — closes the gap
-// where a newly-synced registry entry could otherwise sit unnoticed for up
-// to 15 more minutes purely because the ticker hadn't fired yet (reported
-// 2026-07-05: the admin never saw the live notification because they'd
-// already manually updated the module before the next tick ran).
+// Called from store.RunSync/store.TriggerSync (via the onStoreSynced
+// closure in cmd/core/main.go) right after every registry sync completes -
+// manual or the hourly background one. This used to run on its own separate
+// 15-minute ticker too (RunUpdateChecks, removed 2026-07-05), but that was
+// pure redundancy: the registry cache CheckUpdates compares against only
+// ever changes when a sync runs, and a sync already triggers this
+// immediately - a standalone timer in between could only ever re-check data
+// it had already checked moments (or up to an hour) earlier. Relying solely
+// on the sync trigger means one code path instead of two, and the System
+// Info page now shows one merged "next check" countdown instead of two
+// timers that always converged on the same event anyway.
 func RunUpdateCheckOnce(ctx context.Context, d Deps, storeDeps store.Deps) {
-	runUpdateCheck(ctx, d, storeDeps)
-}
-
-func runUpdateCheck(ctx context.Context, d Deps, storeDeps store.Deps) {
-	// Recorded unconditionally, even on error below: a failed CheckUpdates
-	// pass still "ran" for the purposes of the countdown - it will simply be
-	// retried at the next tick, same as before this timer existed.
-	lastCheckMu.Lock()
-	lastCheckAt = time.Now()
-	lastCheckMu.Unlock()
-
 	updates, err := CheckUpdates(ctx, d, storeDeps)
 	if err != nil {
-		log.Printf("modules: background update check: %v", err)
+		log.Printf("modules: update check: %v", err)
 		return
 	}
 	if len(updates) == 0 || d.Valkey == nil {
@@ -129,7 +51,7 @@ func runUpdateCheck(ctx context.Context, d Deps, storeDeps store.Deps) {
 	}
 	ev := notify.Event{Type: "module.updates_available", Data: map[string]any{"count": len(updates)}}
 	if err := notify.Publish(ctx, d.Valkey, notify.AdminChannel(), ev); err != nil {
-		log.Printf("modules: background update check: publish event: %v", err)
+		log.Printf("modules: update check: publish event: %v", err)
 	}
 }
 
@@ -137,12 +59,9 @@ func runUpdateCheck(ctx context.Context, d Deps, storeDeps store.Deps) {
 // records any newer version in installed_modules.available_version.
 // Returns the list of modules that have an update waiting.
 //
-// Called from three places: the background RunUpdateChecks goroutine above,
-// on demand via POST /v1/modules/updates (handlers.go, the manual "check
-// updates" button), and nowhere else — despite an earlier version of this
-// doc comment claiming store/sync.go's registry sync called it too; it never
-// did (that goroutine only refreshes the registry listing's LatestVersion,
-// a different cache this function reads from).
+// Called from two places: RunUpdateCheckOnce above (itself triggered right
+// after every registry sync) and on demand via POST /v1/modules/updates
+// (handlers.go, the manual "check updates" button).
 func CheckUpdates(ctx context.Context, d Deps, storeDeps store.Deps) ([]UpdateInfo, error) {
 	installed, err := d.DB.ListInstalledModules(ctx)
 	if err != nil {

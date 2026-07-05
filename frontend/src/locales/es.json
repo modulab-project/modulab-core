@@ -318,8 +318,7 @@
       "section_timers": "Procesos en segundo plano",
       "section_infra": "Infraestructura",
       "section_modules": "Módulos instalados",
-      "update_check_title": "Búsqueda de actualizaciones de módulos",
-      "registry_sync_title": "Sincronización del registro",
+      "registry_sync_title": "Sincronización del registro y búsqueda de actualizaciones",
       "ntp_drift": "Sincronización horaria (NTP)",
       "col_module": "Módulo",
       "col_version": "Versión",
@@ -329,7 +328,12 @@
       "next_run_in": "Próxima comprobación en {{duration}}",
       "next_run_soon": "Próxima comprobación en breve",
       "not_run_yet": "Aún no se ha ejecutado",
-      "interval": "Intervalo: cada {{duration}}"
+      "interval": "Intervalo: cada {{duration}}",
+      "core_update_available": "Nueva versión de ModuLab disponible: {{version}}",
+      "active_sessions": "Sesiones activas",
+      "tls_cert": "Certificado TLS",
+      "tls_cert_days_one": "caduca en {{count}} día",
+      "tls_cert_days_other": "caduca en {{count}} días"
     },
     "audit": {
       "title": "Registro de auditoría",

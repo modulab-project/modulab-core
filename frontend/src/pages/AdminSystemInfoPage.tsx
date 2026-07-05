@@ -83,6 +83,12 @@ export default function AdminSystemInfoPage() {
           <div className="flex flex-col gap-6">
             {/* Version & uptime */}
             <Section title={t("admin.system_info.section_version")}>
+              {info.core_update_available && info.latest_core_version && (
+                <div className="mb-3 flex items-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-4 py-2.5 text-sm text-teal-700 dark:border-teal-800 dark:bg-teal-950 dark:text-teal-300">
+                  <i className="ti ti-arrow-big-up-lines text-[16px]" />
+                  {t("admin.system_info.core_update_available", { version: info.latest_core_version })}
+                </div>
+              )}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <Stat label={t("shell.status.backend_version")} value={info.version} />
                 <Stat label={t("shell.status.frontend_version")} value={FRONTEND_VERSION} />
@@ -93,22 +99,18 @@ export default function AdminSystemInfoPage() {
               </div>
             </Section>
 
-            {/* Background loop timers */}
+            {/* Registry sync — also drives the next installed-module update
+                check (the update check runs immediately after every sync,
+                see the backend's RunUpdateCheckOnce), so this one countdown
+                covers both instead of showing two timers that always
+                converged on the same event anyway. */}
             <Section title={t("admin.system_info.section_timers")}>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <TimerCard
-                  icon="ti-refresh"
-                  title={t("admin.system_info.update_check_title")}
-                  timer={info.module_update_check}
-                  t={t}
-                />
-                <TimerCard
-                  icon="ti-cloud-download"
-                  title={t("admin.system_info.registry_sync_title")}
-                  timer={info.registry_sync}
-                  t={t}
-                />
-              </div>
+              <TimerCard
+                icon="ti-cloud-download"
+                title={t("admin.system_info.registry_sync_title")}
+                timer={info.registry_sync}
+                t={t}
+              />
             </Section>
 
             {/* Infrastructure */}
@@ -127,6 +129,21 @@ export default function AdminSystemInfoPage() {
                 )}
                 {info.ntp_drift_ok !== undefined && (
                   <InfraRow icon="ti-clock" label={t("admin.system_info.ntp_drift")} ok={info.ntp_drift_ok} />
+                )}
+                {info.active_sessions !== undefined && (
+                  <InfraRow
+                    icon="ti-users"
+                    label={t("admin.system_info.active_sessions")}
+                    text={String(info.active_sessions)}
+                  />
+                )}
+                {info.tls_cert_days_left !== undefined && (
+                  <InfraRow
+                    icon="ti-certificate"
+                    label={t("admin.system_info.tls_cert")}
+                    text={t("admin.system_info.tls_cert_days", { count: info.tls_cert_days_left })}
+                    warn={info.tls_cert_days_left <= 14}
+                  />
                 )}
               </div>
             </Section>
@@ -195,11 +212,13 @@ function InfraRow({
   label,
   ok,
   text,
+  warn,
 }: {
   icon: string;
   label: string;
   ok?: boolean;
   text?: string;
+  warn?: boolean;
 }) {
   return (
     <div className="flex items-center justify-between rounded-xl border border-gray-200 px-3 py-2.5 dark:border-gray-800">
@@ -208,7 +227,11 @@ function InfraRow({
         {label}
       </div>
       {text ? (
-        <span className="text-xs text-gray-400 dark:text-gray-500">{text}</span>
+        <span
+          className={`text-xs ${warn ? "font-medium text-amber-600 dark:text-amber-400" : "text-gray-400 dark:text-gray-500"}`}
+        >
+          {text}
+        </span>
       ) : (
         <span className={`h-2 w-2 rounded-full ${ok ? "bg-green-500" : "bg-red-500"}`} />
       )}

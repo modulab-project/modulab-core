@@ -204,6 +204,33 @@ func (c *Client) BLPop(ctx context.Context, timeout time.Duration, key string) (
 	return result[1], true, nil
 }
 
+// CountKeysWithPrefix counts keys matching prefix+"*" using SCAN rather than
+// KEYS - KEYS walks the entire keyspace in one blocking call, which on a
+// shared single-threaded Valkey instance would stall every other request
+// (session lookups, rate limiting, notifications) for however long the scan
+// takes. SCAN does the same walk incrementally via a cursor, so any other
+// command can interleave between batches. Used by the System Info page to
+// count active sessions ("session:*") without risking a hiccup for anyone
+// actively using ModuLab while the count runs.
+func (c *Client) CountKeysWithPrefix(ctx context.Context, prefix string) (int64, error) {
+	var (
+		cursor uint64
+		count  int64
+	)
+	for {
+		keys, next, err := c.rdb.Scan(ctx, cursor, prefix+"*", 200).Result()
+		if err != nil {
+			return 0, fmt.Errorf("valkey: scan %q*: %w", prefix, err)
+		}
+		count += int64(len(keys))
+		cursor = next
+		if cursor == 0 {
+			break
+		}
+	}
+	return count, nil
+}
+
 // IncrExpire atomically increments key and (re)sets its TTL to ttl via a
 // pipeline. Returns the new counter value. Intended for fixed-window rate
 // limiting: the TTL is refreshed on every increment so the window slides

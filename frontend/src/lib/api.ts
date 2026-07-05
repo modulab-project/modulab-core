@@ -984,9 +984,13 @@ export interface SystemInfo {
   searxng_configured: boolean;
   searxng_reachable?: boolean;
   ntp_drift_ok?: boolean;
-  module_update_check: SystemInfoTimer;
   registry_sync: SystemInfoTimer;
   modules: SystemInfoModule[];
+  latest_core_version?: string;
+  core_update_available: boolean;
+  active_sessions?: number;
+  tls_cert_expires_at?: string;
+  tls_cert_days_left?: number;
 }
 
 // GET /v1/admin/system/info — version/uptime, dependency reachability, and

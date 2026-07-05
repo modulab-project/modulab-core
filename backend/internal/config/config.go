@@ -70,6 +70,17 @@ type Config struct {
 	// be overridden for local development without touching the documented
 	// env surface.
 	HTTPAddr string
+
+	// TLSCheckAddr (MODULAB_TLS_CHECK_ADDR) is the host:port the System Info
+	// page's TLS-certificate-expiry check dials to read the live certificate
+	// (see internal/tlscheck) - not PublicBaseURL's own host:443, because
+	// that would require public DNS to resolve back into the LAN (NAT
+	// hairpinning, unsupported by many home routers) just to reach a
+	// container that is already reachable directly on the Docker network.
+	// Defaults to "traefik:443", the edge-proxy service name from
+	// deploy/docker-compose.yml - overridable for anyone who swaps Traefik
+	// for something else, or runs Core outside that compose file entirely.
+	TLSCheckAddr string
 }
 
 // Load reads configuration from the process environment. Before reading any
@@ -127,6 +138,8 @@ func Load() (Config, error) {
 		FrontendBaseURL: getEnvDefault("MODULAB_FRONTEND_BASE_URL", "http://localhost:5173"),
 
 		HTTPAddr: getEnvDefault("MODULAB_HTTP_ADDR", ":8080"),
+
+		TLSCheckAddr: getEnvDefault("MODULAB_TLS_CHECK_ADDR", "traefik:443"),
 	}
 
 	return cfg, nil

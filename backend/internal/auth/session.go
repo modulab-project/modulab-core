@@ -24,6 +24,12 @@ const SessionTTL = 24 * time.Hour
 
 const sessionKeyPrefix = "session:"
 
+// SessionKeyPrefix exposes sessionKeyPrefix to callers outside this package
+// (the GET /v1/admin/system/info handler in cmd/core, which counts active
+// sessions via valkey.CountKeysWithPrefix) without duplicating the literal
+// string in a second place that could silently drift out of sync.
+const SessionKeyPrefix = sessionKeyPrefix
+
 // userSessionsKeyPrefix indexes session tokens by the subject they belong
 // to (key: userSessionsKeyPrefix+UserID, value: a Valkey set of tokens) -
 // see CreateSession and RevokeUserSessions. Needed because the session key
