@@ -228,28 +228,28 @@ export default function AdminSystemInfoPage() {
                   <table className="min-w-full text-sm">
                     <thead>
                       <tr className="border-b border-gray-200 bg-gray-50 text-left dark:border-gray-800 dark:bg-gray-900">
-                        <th className="px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
                           {t("admin.system_info.col_name")}
                         </th>
-                        <th className="px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
                           {t("admin.system_info.col_role")}
                         </th>
-                        <th className="px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
                           {t("admin.system_info.col_login")}
                         </th>
-                        <th className="px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
                           {t("admin.system_info.col_ip")}
                         </th>
-                        <th className="px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
                           {t("admin.system_info.col_device")}
                         </th>
-                        <th className="px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
                           {t("admin.system_info.col_last_active")}
                         </th>
-                        <th className="px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
                           {t("admin.system_info.col_expires")}
                         </th>
-                        <th className="px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
                           <span className="sr-only">{t("admin.system_info.col_actions")}</span>
                         </th>
                       </tr>
@@ -411,33 +411,37 @@ function SessionRow({
   const device = session.user_agent ? parseUserAgent(session.user_agent) : null;
   return (
     <tr className={`border-b border-gray-100 last:border-0 dark:border-gray-800 ${session.current ? "bg-teal-50/60 dark:bg-teal-950/30" : ""}`}>
-      <td className="px-4 py-2.5 text-gray-700 dark:text-gray-300">
-        {session.name || session.email || <span className="text-gray-300 dark:text-gray-600">—</span>}
-        {session.current && (
-          <span className="ml-1.5 rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-medium text-teal-700 dark:bg-teal-900 dark:text-teal-300">
-            {t("admin.system_info.session_current")}
-          </span>
-        )}
+      <td className="whitespace-nowrap px-4 py-2.5 text-gray-700 dark:text-gray-300">
+        <div className="flex flex-col items-start gap-1">
+          <span>{session.name || session.email || <span className="text-gray-300 dark:text-gray-600">—</span>}</span>
+          {session.current && (
+            <span className="whitespace-nowrap rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-medium text-teal-700 dark:bg-teal-900 dark:text-teal-300">
+              {t("admin.system_info.session_current")}
+            </span>
+          )}
+        </div>
       </td>
-      <td className="px-4 py-2.5 text-xs text-gray-600 dark:text-gray-400">{session.role}</td>
-      <td className="px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">
+      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-600 dark:text-gray-400">{session.role}</td>
+      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">
         {session.created_at ? new Date(session.created_at).toLocaleString() : "—"}
       </td>
-      <td className="px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">{session.ip || "—"}</td>
-      <td className="px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500" title={session.user_agent}>
+      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">
+        {session.ip || "—"}
+      </td>
+      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500" title={session.user_agent}>
         {device ? `${device.browser} · ${device.os}` : "—"}
       </td>
-      <td className="px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">
+      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">
         {session.last_active_seconds_ago !== undefined
           ? t("admin.system_info.last_active_ago", { duration: formatDuration(session.last_active_seconds_ago) })
           : "—"}
       </td>
-      <td className="px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">
+      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">
         {session.expires_in_seconds !== undefined
           ? t("admin.system_info.expires_in", { duration: formatDuration(session.expires_in_seconds) })
           : "—"}
       </td>
-      <td className="px-4 py-2.5 text-right">
+      <td className="whitespace-nowrap px-4 py-2.5 text-right">
         <button
           type="button"
           onClick={onRevoke}
