@@ -937,6 +937,13 @@ func rateLimitMiddleware(vk *valkey.Client, label string, window time.Duration, 
 			return
 		}
 		if count > max {
+			// Logged (2026-07-05): previously silent, so a real trip of this
+			// limit left zero trace in the logs — reported by a user as
+			// "too many requests" with no way to tell which endpoint/label
+			// or client IP was actually involved. See IncrExpire's doc
+			// comment for the counter-never-resets bug this line's silence
+			// was hiding.
+			log.Printf("main: rate limit exceeded: label=%q ip=%q count=%d max=%d", label, ip, count, max)
 			http.Error(w, "too many requests", http.StatusTooManyRequests)
 			return
 		}

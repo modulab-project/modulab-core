@@ -283,19 +283,36 @@ func (c *Client) CountKeysWithPrefix(ctx context.Context, prefix string) (int64,
 	return count, nil
 }
 
-// IncrExpire atomically increments key and (re)sets its TTL to ttl via a
-// pipeline. Returns the new counter value. Intended for fixed-window rate
-// limiting: the TTL is refreshed on every increment so the window slides
-// forward from the last request, which is slightly stricter than a pure
-// fixed window but simpler and requires no Lua scripting. On Valkey/Redis
-// error the caller should fail open (let the request through) rather than
-// blocking everyone on a cache hiccup.
+// IncrExpire atomically increments key and returns the new counter value.
+// Intended for fixed-window rate limiting: ttl is set ONLY the first time
+// this key is seen in a window (count == 1) and left alone on every
+// subsequent increment, so the window actually expires ttl after it first
+// opened, however much traffic arrives in between.
+//
+// Bugfix (2026-07-05): this previously re-set the TTL on every single call
+// ("the window slides forward from the last request"), which sounds like a
+// harmless stricter variant but is not — for a key that keeps receiving
+// requests more often than ttl (e.g. a dashboard's own background polling:
+// module-update badge, notification SSE reconnects, health checks), the key
+// never goes far enough between requests to actually expire, so the counter
+// climbed forever across the client's entire session instead of resetting
+// every window. Once it crossed max, that client stayed rate-limited until
+// traffic stopped completely for a full ttl - reported as "too many
+// requests" appearing sometime after a successful login, not during it: the
+// login itself was fine, the count had simply been quietly accumulating
+// across normal dashboard use until it tipped over.
+//
+// On Valkey/Redis error the caller should fail open (let the request
+// through) rather than blocking everyone on a cache hiccup.
 func (c *Client) IncrExpire(ctx context.Context, key string, ttl time.Duration) (int64, error) {
-	pipe := c.rdb.Pipeline()
-	incr := pipe.Incr(ctx, key)
-	pipe.Expire(ctx, key, ttl)
-	if _, err := pipe.Exec(ctx); err != nil {
+	count, err := c.rdb.Incr(ctx, key).Result()
+	if err != nil {
 		return 0, fmt.Errorf("valkey: incr-expire %q: %w", key, err)
 	}
-	return incr.Val(), nil
+	if count == 1 {
+		if err := c.rdb.Expire(ctx, key, ttl).Err(); err != nil {
+			return 0, fmt.Errorf("valkey: incr-expire %q: set ttl: %w", key, err)
+		}
+	}
+	return count, nil
 }
