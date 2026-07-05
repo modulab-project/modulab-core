@@ -351,7 +351,16 @@
       "end_session_error": "Could not end the session.",
       "tls_cert": "TLS certificate",
       "tls_cert_days_one": "expires in {{count}} day",
-      "tls_cert_days_other": "expires in {{count}} days"
+      "tls_cert_days_other": "expires in {{count}} days",
+      "section_rate_limits_one": "Rate limit ({{count}})",
+      "section_rate_limits_other": "Rate limits ({{count}})",
+      "no_rate_limits": "No rate limits currently active.",
+      "col_label": "Label",
+      "col_identifier": "IP / user",
+      "col_count": "Count",
+      "col_resets_in": "Resets",
+      "rate_limit_reset": "Reset",
+      "rate_limit_reset_error": "Could not reset the rate limit."
     },
     "audit": {
       "title": "Audit log",

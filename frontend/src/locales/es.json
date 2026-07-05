@@ -350,7 +350,16 @@
       "end_session_error": "No se pudo finalizar la sesión.",
       "tls_cert": "Certificado TLS",
       "tls_cert_days_one": "caduca en {{count}} día",
-      "tls_cert_days_other": "caduca en {{count}} días"
+      "tls_cert_days_other": "caduca en {{count}} días",
+      "section_rate_limits_one": "Límite de tasa ({{count}})",
+      "section_rate_limits_other": "Límites de tasa ({{count}})",
+      "no_rate_limits": "No hay límites de tasa activos actualmente.",
+      "col_label": "Etiqueta",
+      "col_identifier": "IP / usuario",
+      "col_count": "Cantidad",
+      "col_resets_in": "Restablece",
+      "rate_limit_reset": "Restablecer",
+      "rate_limit_reset_error": "No se pudo restablecer el límite de tasa."
     },
     "audit": {
       "title": "Registro de auditoría",

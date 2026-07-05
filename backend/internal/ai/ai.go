@@ -981,6 +981,17 @@ func ChatHandler(deps auth.Deps) http.HandlerFunc {
 			if rlErr != nil {
 				log.Printf("ai: rate limit check failed for %s: %v", sess.UserID, rlErr)
 			} else if count > int64(rpmLimit) {
+				log.Printf("ai: rate limit exceeded for %s: count=%d max=%d", sess.UserID, count, rpmLimit)
+				if masterKey, mkErr := setup.ResolveMasterKey(r.Context(), deps.Pool, deps.MasterKeyEnv); mkErr == nil {
+					if auditErr := audit.Log(r.Context(), deps.Pool, masterKey, audit.LogParams{
+						EventType:  audit.EventRateLimitExceeded,
+						ActorID:    sess.UserID,
+						ActorEmail: sess.Email,
+						Details:    fmt.Sprintf(`{"label":"chat","count":%d,"max":%d}`, count, rpmLimit),
+					}); auditErr != nil {
+						log.Printf("ai: audit rate limit exceeded: %v", auditErr)
+					}
+				}
 				w.Header().Set("Retry-After", "60")
 				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 				return

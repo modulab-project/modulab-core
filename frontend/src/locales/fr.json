@@ -350,7 +350,16 @@
       "end_session_error": "Impossible de terminer la session.",
       "tls_cert": "Certificat TLS",
       "tls_cert_days_one": "expire dans {{count}} jour",
-      "tls_cert_days_other": "expire dans {{count}} jours"
+      "tls_cert_days_other": "expire dans {{count}} jours",
+      "section_rate_limits_one": "Limite de débit ({{count}})",
+      "section_rate_limits_other": "Limites de débit ({{count}})",
+      "no_rate_limits": "Aucune limite de débit active actuellement.",
+      "col_label": "Label",
+      "col_identifier": "IP / utilisateur",
+      "col_count": "Nombre",
+      "col_resets_in": "Réinitialisation",
+      "rate_limit_reset": "Réinitialiser",
+      "rate_limit_reset_error": "Impossible de réinitialiser la limite de débit."
     },
     "audit": {
       "title": "Journal d'audit",

@@ -80,6 +80,15 @@ const (
 	EventQuickLinkDeleted = "quicklink.deleted"
 	// Manual Module Store registry sync trigger, internal/store.
 	EventStoreSyncTriggered = "store.sync_triggered"
+	// A per-client rate limit (login/callback/ai-chat/global/chat, see
+	// cmd/core/main.go's rateLimitMiddleware) was exceeded. ActorID is the
+	// client IP (or, for the per-user AI chat limiter, the user's OIDC sub) -
+	// there is often no authenticated session yet (login/callback trip
+	// before auth succeeds), so the IP/sub is the only "who" available.
+	// Added 2026-07-05 alongside the System Info "rate limits" section, so a
+	// trip is discoverable after the fact even once the live Valkey counter
+	// itself has expired.
+	EventRateLimitExceeded = "rate_limit.exceeded"
 )
 
 // Entry is one row from the audit_log table, returned by List. All PII

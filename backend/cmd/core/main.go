@@ -25,6 +25,8 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -310,8 +312,8 @@ func main() {
 	// upstream-directed request whose volume this instance controls).
 	// authRateLimitMiddleware fails open on a Valkey hiccup rather than
 	// locking everyone out because of a cache blip — see its doc comment.
-	mux.HandleFunc("/v1/auth/login", authRateLimitMiddleware(valkeyClient, "login", auth.LoginHandler(authDeps)))
-	mux.HandleFunc("/v1/auth/callback", authRateLimitMiddleware(valkeyClient, "callback", auth.CallbackHandler(authDeps)))
+	mux.HandleFunc("/v1/auth/login", authRateLimitMiddleware(valkeyClient, pool, cfg.MasterKey, "login", auth.LoginHandler(authDeps)))
+	mux.HandleFunc("/v1/auth/callback", authRateLimitMiddleware(valkeyClient, pool, cfg.MasterKey, "callback", auth.CallbackHandler(authDeps)))
 	mux.HandleFunc("/v1/auth/me", auth.MeHandler(authDeps))
 	// Method-specific pattern alongside the bare "/v1/auth/me" above - Go's
 	// ServeMux treats the two as non-conflicting (the method-specific one
@@ -498,7 +500,7 @@ func main() {
 	// route that forwards to a paid external API per call, so it gets its
 	// own tighter per-IP budget (see aiChatRateLimitWindow/Max's doc comment)
 	// rather than relying solely on the generous global limit.
-	mux.HandleFunc("POST /v1/ai/chat", rateLimitMiddleware(valkeyClient, "ai-chat", aiChatRateLimitWindow, aiChatRateLimitMax, ai.ChatHandler(authDeps)))
+	mux.HandleFunc("POST /v1/ai/chat", rateLimitMiddleware(valkeyClient, pool, cfg.MasterKey, "ai-chat", aiChatRateLimitWindow, aiChatRateLimitMax, ai.ChatHandler(authDeps)))
 
 	// Quick links / Schnellzugriff-Grid (internal/quicklinks):
 	//   User endpoints: any approved session can list merged tiles, create or
@@ -605,6 +607,7 @@ func main() {
 	// see".
 	mux.Handle("GET /v1/admin/system/info", superAdminOnly(systemInfoHandler(pool, valkeyClient, cfg, startTime, storeDeps, authDeps)))
 	mux.Handle("DELETE /v1/admin/sessions/{id}", superAdminOnly(revokeSessionHandler(authDeps)))
+	mux.Handle("DELETE /v1/admin/system/rate-limits", superAdminOnly(resetRateLimitHandler(valkeyClient)))
 
 	// At startup, restart Deno workers for all Tier 2/3 modules that were
 	// active before the last shutdown.
@@ -709,7 +712,7 @@ func main() {
 	handler := corsMiddleware(cfg.FrontendBaseURL, mux)
 	handler = maxBodyMiddleware(pool, handler)
 	handler = secHeadersMiddleware(handler)
-	handler = globalRateLimitMiddleware(valkeyClient, handler)
+	handler = globalRateLimitMiddleware(valkeyClient, pool, cfg.MasterKey, handler)
 	// Outermost: must run before every other middleware so a panic anywhere
 	// downstream (a handler, or one of the middlewares above) is still
 	// caught. Go's net/http already recovers a panicking handler goroutine
@@ -926,7 +929,17 @@ const (
 // number of requests allowed per window. On a Valkey error the request is
 // let through (fail open) — a cache hiccup should degrade to "no rate
 // limiting" rather than locking everyone out.
-func rateLimitMiddleware(vk *valkey.Client, label string, window time.Duration, max int64, next http.HandlerFunc) http.HandlerFunc {
+//
+// pool/masterKeyEnv (added 2026-07-05, alongside System Info's "rate
+// limits" section) are used only on the rare trip branch, to write an
+// audit.EventRateLimitExceeded entry — a live Valkey counter tells you a
+// limit is active right now, but says nothing about one that already
+// expired by the time an admin goes looking, which is exactly what
+// happened investigating an earlier "too many requests" report. ActorID is
+// the client IP; there is usually no authenticated session yet at this
+// layer (login/callback trip before auth even succeeds, and the global
+// backstop wraps the whole mux before any handler has parsed a session).
+func rateLimitMiddleware(vk *valkey.Client, pool *db.Pool, masterKeyEnv string, label string, window time.Duration, max int64, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ip := clientIP(r)
 		key := "ratelimit:" + label + ":" + ip
@@ -944,6 +957,15 @@ func rateLimitMiddleware(vk *valkey.Client, label string, window time.Duration, 
 			// comment for the counter-never-resets bug this line's silence
 			// was hiding.
 			log.Printf("main: rate limit exceeded: label=%q ip=%q count=%d max=%d", label, ip, count, max)
+			if masterKey, mkErr := setup.ResolveMasterKey(r.Context(), pool, masterKeyEnv); mkErr == nil {
+				if auditErr := audit.Log(r.Context(), pool, masterKey, audit.LogParams{
+					EventType: audit.EventRateLimitExceeded,
+					ActorID:   ip,
+					Details:   fmt.Sprintf(`{"label":%q,"count":%d,"max":%d}`, label, count, max),
+				}); auditErr != nil {
+					log.Printf("main: audit rate limit exceeded: %v", auditErr)
+				}
+			}
 			http.Error(w, "too many requests", http.StatusTooManyRequests)
 			return
 		}
@@ -953,8 +975,8 @@ func rateLimitMiddleware(vk *valkey.Client, label string, window time.Duration, 
 
 // authRateLimitMiddleware is rateLimitMiddleware pinned to the auth-endpoint
 // window/budget (kept as a separate name at call sites for readability).
-func authRateLimitMiddleware(vk *valkey.Client, label string, next http.HandlerFunc) http.HandlerFunc {
-	return rateLimitMiddleware(vk, "auth:"+label, authRateLimitWindow, authRateLimitMax, next)
+func authRateLimitMiddleware(vk *valkey.Client, pool *db.Pool, masterKeyEnv string, label string, next http.HandlerFunc) http.HandlerFunc {
+	return rateLimitMiddleware(vk, pool, masterKeyEnv, "auth:"+label, authRateLimitWindow, authRateLimitMax, next)
 }
 
 // globalRateLimitMiddleware wraps an entire http.Handler (not just a single
@@ -963,8 +985,8 @@ func authRateLimitMiddleware(vk *valkey.Client, label string, next http.HandlerF
 // Traefik healthchecks poll it every few seconds for the container's entire
 // lifetime, which would otherwise burn through the same budget as real
 // traffic and could self-inflict a false "unhealthy" verdict.
-func globalRateLimitMiddleware(vk *valkey.Client, next http.Handler) http.Handler {
-	limited := rateLimitMiddleware(vk, "global", globalRateLimitWindow, globalRateLimitMax, next.ServeHTTP)
+func globalRateLimitMiddleware(vk *valkey.Client, pool *db.Pool, masterKeyEnv string, next http.Handler) http.Handler {
+	limited := rateLimitMiddleware(vk, pool, masterKeyEnv, "global", globalRateLimitWindow, globalRateLimitMax, next.ServeHTTP)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" {
 			next.ServeHTTP(w, r)
@@ -993,6 +1015,122 @@ func clientIP(r *http.Request) string {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+// knownRateLimitLabels lists every label a rate limiter in this codebase
+// currently uses (see rateLimitMiddleware's call sites and ai.go's own
+// "chat" one). Matched as an exact prefix (label+":") rather than splitting
+// a scanned key on its last ":", because an IPv6 client address contains
+// colons itself and would otherwise be silently split apart. "chat"'s max is
+// left at 0/omitted here rather than resolved from the DB (chatRPMLimit) -
+// that's an admin-configurable setting, not a compile-time constant, and
+// doing a DB round trip per live key just to fill in a number isn't worth it
+// for a diagnostics page; the UI shows count-only for that one label.
+var knownRateLimitLabels = []string{"auth:login", "auth:callback", "ai-chat", "global", "chat"}
+
+func rateLimitMax(label string) int64 {
+	switch label {
+	case "auth:login", "auth:callback":
+		return authRateLimitMax
+	case "ai-chat":
+		return aiChatRateLimitMax
+	case "global":
+		return globalRateLimitMax
+	default:
+		return 0
+	}
+}
+
+// activeRateLimits enumerates every currently-live "ratelimit:*" Valkey key
+// for System Info's "rate limits" section — a live counter says whether a
+// limit is active right now, which is the one thing the audit-log entries
+// (audit.EventRateLimitExceeded) added alongside this can't: those persist
+// past the key's own TTL, this doesn't. Best-effort per key: a key that
+// disappears between the SCAN and the follow-up Get/TTL calls (its window
+// simply elapsed in the meantime) is skipped rather than treated as an
+// error, since that's the expected common case, not a failure.
+func activeRateLimits(ctx context.Context, vk *valkey.Client) []systemInfoRateLimit {
+	keys, err := vk.ScanKeysWithPrefix(ctx, "ratelimit:")
+	if err != nil {
+		log.Printf("main: system info: scan rate limit keys: %v", err)
+		return nil
+	}
+
+	limits := make([]systemInfoRateLimit, 0, len(keys))
+	for _, key := range keys {
+		rest := strings.TrimPrefix(key, "ratelimit:")
+		label, identifier := rest, ""
+		for _, l := range knownRateLimitLabels {
+			if strings.HasPrefix(rest, l+":") {
+				label = l
+				identifier = strings.TrimPrefix(rest, l+":")
+				break
+			}
+		}
+
+		valueStr, ok, err := vk.Get(ctx, key)
+		if err != nil || !ok {
+			continue
+		}
+		count, err := strconv.ParseInt(valueStr, 10, 64)
+		if err != nil {
+			continue
+		}
+
+		ttl, ok, err := vk.TTL(ctx, key)
+		if err != nil || !ok {
+			continue
+		}
+
+		limits = append(limits, systemInfoRateLimit{
+			Key:            key,
+			Label:          label,
+			Identifier:     identifier,
+			Count:          count,
+			Max:            rateLimitMax(label),
+			ResetInSeconds: int64(ttl / time.Second),
+		})
+	}
+
+	// Highest count first - whichever client is closest to (or already
+	// past) its limit is the most actionable row, regardless of label.
+	sort.Slice(limits, func(i, j int) bool { return limits[i].Count > limits[j].Count })
+	return limits
+}
+
+// resetRateLimitHandler serves DELETE /v1/admin/system/rate-limits
+// (super-admin only) - the reset button next to each row in System Info's
+// live rate-limit table, for the rare case a client gets stuck (e.g. the
+// counter-never-resets bug IncrExpire's doc comment describes) or an admin
+// just wants to manually clear a legitimate trip early. Takes the exact
+// Valkey key from the request body rather than reconstructing it from
+// separate label/identifier fields, so activeRateLimits above stays the only
+// place that knows how these keys are shaped. The "ratelimit:" prefix check
+// is required, not optional - without it this becomes a generic "delete any
+// Valkey key" primitive, which must never be reachable from an HTTP body.
+func resetRateLimitHandler(vk *valkey.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var body struct {
+			Key string `json:"key"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Key == "" {
+			http.Error(w, "missing key", http.StatusBadRequest)
+			return
+		}
+		if !strings.HasPrefix(body.Key, "ratelimit:") {
+			http.Error(w, "invalid key", http.StatusBadRequest)
+			return
+		}
+		if err := vk.Del(r.Context(), body.Key); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 // systemInfoTimer describes the registry-sync loop's schedule so the
@@ -1066,6 +1204,27 @@ type systemInfoResponse struct {
 	// itself couldn't run (e.g. local dev without Traefik in front).
 	TLSCertExpiresAt *string `json:"tls_cert_expires_at,omitempty"`
 	TLSCertDaysLeft  *int    `json:"tls_cert_days_left,omitempty"`
+
+	// RateLimits: every currently-live rate-limit counter (see
+	// rateLimitMiddleware/activeRateLimits), added 2026-07-05 after a "too
+	// many requests" report that turned out to be a stuck counter with
+	// nothing in the logs to explain it. Nil if the underlying Valkey SCAN
+	// failed outright.
+	RateLimits []systemInfoRateLimit `json:"rate_limits,omitempty"`
+}
+
+// systemInfoRateLimit is one row of System Info's "rate limits" table - one
+// currently-live Valkey counter from rateLimitMiddleware (or ai.go's
+// per-user chat limiter). Key is the raw Valkey key, exposed so the reset
+// button can name exactly what to delete without the frontend needing to
+// reconstruct it from the other fields.
+type systemInfoRateLimit struct {
+	Key            string `json:"key"`
+	Label          string `json:"label"`
+	Identifier     string `json:"identifier"`
+	Count          int64  `json:"count"`
+	Max            int64  `json:"max,omitempty"`
+	ResetInSeconds int64  `json:"reset_in_seconds"`
 }
 
 // bearerToken extracts the raw token from an "Authorization: Bearer ..."
@@ -1178,6 +1337,8 @@ func systemInfoHandler(pool *db.Pool, valkeyClient *valkey.Client, cfg config.Co
 			resp.RegistrySync.LastRunAt = &lastStr
 			resp.RegistrySync.NextRunAt = &nextStr
 		}
+
+		resp.RateLimits = activeRateLimits(ctx, valkeyClient)
 
 		if installed, err := pool.ListInstalledModules(ctx); err == nil {
 			resp.Modules = make([]systemInfoModule, 0, len(installed))

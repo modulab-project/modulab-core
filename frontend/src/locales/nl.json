@@ -350,7 +350,16 @@
       "end_session_error": "Sessie kon niet worden beëindigd.",
       "tls_cert": "TLS-certificaat",
       "tls_cert_days_one": "verloopt over {{count}} dag",
-      "tls_cert_days_other": "verloopt over {{count}} dagen"
+      "tls_cert_days_other": "verloopt over {{count}} dagen",
+      "section_rate_limits_one": "Rate limit ({{count}})",
+      "section_rate_limits_other": "Rate limits ({{count}})",
+      "no_rate_limits": "Momenteel geen actieve rate limits.",
+      "col_label": "Label",
+      "col_identifier": "IP / gebruiker",
+      "col_count": "Aantal",
+      "col_resets_in": "Reset",
+      "rate_limit_reset": "Resetten",
+      "rate_limit_reset_error": "Rate limit kon niet worden gereset."
     },
     "audit": {
       "title": "Auditlogboek",

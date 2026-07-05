@@ -11,9 +11,11 @@ import { useTranslation } from "react-i18next";
 import {
   getSystemInfo,
   revokeSession,
+  resetRateLimit,
   type ActiveSession,
   type SystemInfo,
   type SystemInfoModule,
+  type SystemInfoRateLimit,
   type SystemInfoTimer,
 } from "../lib/api";
 import { clearSessionToken, getSessionToken } from "../lib/session";
@@ -105,6 +107,35 @@ export default function AdminSystemInfoPage() {
         setRevokingIds((prev) => {
           const next = new Set(prev);
           next.delete(target.id);
+          return next;
+        });
+      });
+  }
+
+  // Same in-flight/error pattern as the sessions table above, keyed by the
+  // raw Valkey key (unique per label+identifier) rather than an id field
+  // since rate-limit entries have no separate id of their own.
+  const [resettingKeys, setResettingKeys] = useState<Set<string>>(new Set());
+  const [resetError, setResetError] = useState<string | null>(null);
+
+  function handleResetRateLimit(target: SystemInfoRateLimit) {
+    const token = getSessionToken();
+    if (!token) return;
+    setResetError(null);
+    setResettingKeys((prev) => new Set(prev).add(target.key));
+    resetRateLimit(token, target.key)
+      .then(() => {
+        setInfo((prev) =>
+          prev
+            ? { ...prev, rate_limits: (prev.rate_limits ?? []).filter((r) => r.key !== target.key) }
+            : prev,
+        );
+      })
+      .catch(() => setResetError(t("admin.system_info.rate_limit_reset_error")))
+      .finally(() => {
+        setResettingKeys((prev) => {
+          const next = new Set(prev);
+          next.delete(target.key);
           return next;
         });
       });
@@ -273,6 +304,56 @@ export default function AdminSystemInfoPage() {
                           session={s}
                           revoking={revokingIds.has(s.id)}
                           onRevoke={() => handleRevoke(s)}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Section>
+
+            {/* Rate limits — live Valkey counters, so an admin can see
+                whether an IP (or user, for the "chat" label) is currently
+                rate-limited without SSH-ing into Valkey, and clear it early
+                if it's a false positive (shared office IP, misbehaving
+                script now fixed, etc). Trips also land in the audit log
+                (event_type "rate_limit.exceeded") so they're discoverable
+                after the live counter has already expired. */}
+            <Section
+              title={t("admin.system_info.section_rate_limits", { count: info.rate_limits?.length ?? 0 })}
+            >
+              {resetError && <p className="mb-2 text-sm text-red-600 dark:text-red-400">{resetError}</p>}
+              {!info.rate_limits || info.rate_limits.length === 0 ? (
+                <p className="text-sm text-gray-400 dark:text-gray-500">{t("admin.system_info.no_rate_limits")}</p>
+              ) : (
+                <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200 bg-gray-50 text-left dark:border-gray-800 dark:bg-gray-900">
+                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                          {t("admin.system_info.col_label")}
+                        </th>
+                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                          {t("admin.system_info.col_identifier")}
+                        </th>
+                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                          {t("admin.system_info.col_count")}
+                        </th>
+                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                          {t("admin.system_info.col_resets_in")}
+                        </th>
+                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                          <span className="sr-only">{t("admin.system_info.col_actions")}</span>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {info.rate_limits.map((r) => (
+                        <RateLimitRow
+                          key={r.key}
+                          entry={r}
+                          resetting={resettingKeys.has(r.key)}
+                          onReset={() => handleResetRateLimit(r)}
                         />
                       ))}
                     </tbody>
@@ -461,6 +542,45 @@ function SessionRow({
           className="text-xs font-medium text-red-600 hover:text-red-700 disabled:opacity-50 dark:text-red-400 dark:hover:text-red-300"
         >
           {revoking ? t("common.loading") : t("admin.system_info.end_session")}
+        </button>
+      </td>
+    </tr>
+  );
+}
+
+function RateLimitRow({
+  entry,
+  resetting,
+  onReset,
+}: {
+  entry: SystemInfoRateLimit;
+  resetting: boolean;
+  onReset: () => void;
+}) {
+  const { t } = useTranslation();
+  const overLimit = entry.max !== undefined && entry.max > 0 && entry.count > entry.max;
+  return (
+    <tr className="border-b border-gray-100 last:border-0 dark:border-gray-800">
+      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-600 dark:text-gray-400">{entry.label}</td>
+      <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-gray-700 dark:text-gray-300">
+        {entry.identifier || "—"}
+      </td>
+      <td className="whitespace-nowrap px-4 py-2.5 text-xs">
+        <span className={overLimit ? "font-medium text-red-600 dark:text-red-400" : "text-gray-600 dark:text-gray-400"}>
+          {entry.max ? `${entry.count} / ${entry.max}` : entry.count}
+        </span>
+      </td>
+      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">
+        {t("admin.system_info.expires_in", { duration: formatDuration(entry.reset_in_seconds) })}
+      </td>
+      <td className="whitespace-nowrap px-4 py-2.5 text-right">
+        <button
+          type="button"
+          onClick={onReset}
+          disabled={resetting}
+          className="text-xs font-medium text-red-600 hover:text-red-700 disabled:opacity-50 dark:text-red-400 dark:hover:text-red-300"
+        >
+          {resetting ? t("common.loading") : t("admin.system_info.rate_limit_reset")}
         </button>
       </td>
     </tr>

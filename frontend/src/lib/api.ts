@@ -989,6 +989,19 @@ export interface ActiveSession {
   current?: boolean;
 }
 
+// One active fixed-window rate-limit counter in Valkey (key
+// "ratelimit:<label>:<identifier>"). Surfaced in System Info so an admin can
+// see, without SSH-ing into Valkey, whether a given IP (or user, for the
+// "chat" label) is currently rate-limited and when it will clear on its own.
+export interface SystemInfoRateLimit {
+  key: string;
+  label: string;
+  identifier: string;
+  count: number;
+  max?: number;
+  reset_in_seconds: number;
+}
+
 export interface SystemInfo {
   version: string;
   uptime_seconds: number;
@@ -1002,6 +1015,7 @@ export interface SystemInfo {
   latest_core_version?: string;
   core_update_available: boolean;
   active_sessions?: ActiveSession[];
+  rate_limits?: SystemInfoRateLimit[];
   tls_cert_expires_at?: string;
   tls_cert_days_left?: number;
 }
@@ -1021,6 +1035,19 @@ export function revokeSession(token: string, id: string): Promise<void> {
   return request<void>(`/v1/admin/sessions/${encodeURIComponent(id)}`, {
     method: "DELETE",
     headers: bearerHeaders(token),
+  });
+}
+
+// DELETE /v1/admin/system/rate-limits — manually clears one rate-limit
+// counter (System Info page's per-row "reset" button). key is
+// SystemInfoRateLimit.key, the raw Valkey key ("ratelimit:<label>:<id>"),
+// sent in the request body since it contains characters not safe for a path
+// segment (colons).
+export function resetRateLimit(token: string, key: string): Promise<void> {
+  return request<void>("/v1/admin/system/rate-limits", {
+    method: "DELETE",
+    headers: bearerHeaders(token),
+    body: JSON.stringify({ key }),
   });
 }
 

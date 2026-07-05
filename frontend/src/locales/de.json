@@ -351,7 +351,16 @@
       "end_session_error": "Sitzung konnte nicht beendet werden.",
       "tls_cert": "TLS-Zertifikat",
       "tls_cert_days_one": "läuft in {{count}} Tag ab",
-      "tls_cert_days_other": "läuft in {{count}} Tagen ab"
+      "tls_cert_days_other": "läuft in {{count}} Tagen ab",
+      "section_rate_limits_one": "Rate Limit ({{count}})",
+      "section_rate_limits_other": "Rate Limits ({{count}})",
+      "no_rate_limits": "Aktuell sind keine Rate Limits aktiv.",
+      "col_label": "Label",
+      "col_identifier": "IP / Nutzer",
+      "col_count": "Anzahl",
+      "col_resets_in": "Zurücksetzung",
+      "rate_limit_reset": "Zurücksetzen",
+      "rate_limit_reset_error": "Rate Limit konnte nicht zurückgesetzt werden."
     },
     "audit": {
       "title": "Audit-Log",
