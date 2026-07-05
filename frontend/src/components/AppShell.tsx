@@ -478,15 +478,25 @@ function FooterBar({
   // Bugfix (2026-07-05): this previously only looked at postgres/valkey, so
   // the footer badge could say "all systems normal" while the System Status
   // page's own Infrastructure section showed SearXNG as unreachable right
-  // next to it - the two disagreed about what "ok" means. searxng only
-  // counts against allOk when it's actually configured (an instance that
-  // never set it up isn't "broken"), matching the same
-  // searxng_configured/searxng_reachable pairing AdminSystemInfoPage uses.
+  // next to it - the two disagreed about what "ok" means. Extended the same
+  // day to also fold in every other per-instance signal already present in
+  // this same /healthz payload (no extra request): searxng (only when
+  // configured - an instance that never set it up isn't "broken"), ntp_drift
+  // (only when the check actually ran - absent means it timed out/was
+  // blocked, which is itself not evidence of drift), and degraded/failed
+  // module workers. TLS cert expiry and Cosign availability are NOT included
+  // here - they only exist in the fuller /v1/admin/system/info response,
+  // fetching that just for this badge would reintroduce the extra
+  // network round trip on every page that version.go's removal (2026-06-21)
+  // was meant to avoid; those two stay System-Status-page-only.
   const allOk =
     !!health &&
     health.postgres_reachable &&
     health.valkey_reachable &&
-    (!health.searxng_configured || !!health.searxng_reachable);
+    (!health.searxng_configured || !!health.searxng_reachable) &&
+    (health.ntp_drift_ok === undefined || health.ntp_drift_ok) &&
+    health.modules_degraded === 0 &&
+    health.modules_failed === 0;
 
   return (
     <footer className="flex flex-none flex-wrap items-center justify-center gap-2 border-t border-gray-200 px-3 py-2 text-xs text-gray-500 sm:gap-6 dark:border-gray-800 dark:text-gray-400">
