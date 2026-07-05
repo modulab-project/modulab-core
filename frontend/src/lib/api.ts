@@ -977,10 +977,16 @@ export interface SystemInfoModule {
 }
 
 export interface ActiveSession {
+  id: string;
   name?: string;
   email?: string;
   role: string;
+  created_at?: string;
+  ip?: string;
+  user_agent?: string;
+  last_active_seconds_ago?: number;
   expires_in_seconds?: number;
+  current?: boolean;
 }
 
 export interface SystemInfo {
@@ -1004,6 +1010,16 @@ export interface SystemInfo {
 // countdowns until the next background module-update check / registry sync.
 export function getSystemInfo(token: string): Promise<SystemInfo> {
   return request<SystemInfo>("/v1/admin/system/info", {
+    headers: bearerHeaders(token),
+  });
+}
+
+// DELETE /v1/admin/sessions/{id} — ends exactly one active session (System
+// Info page's per-row "end session" button). id is ActiveSession.id (a
+// one-way hash), never the session's bearer token itself.
+export function revokeSession(token: string, id: string): Promise<void> {
+  return request<void>(`/v1/admin/sessions/${encodeURIComponent(id)}`, {
+    method: "DELETE",
     headers: bearerHeaders(token),
   });
 }

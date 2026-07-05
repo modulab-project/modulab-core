@@ -3,9 +3,12 @@ package auth
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/modulab-project/modulab-core/backend/internal/crypto"
@@ -70,15 +73,25 @@ const userSessionsKeyPrefix = "usersessions:"
 // screen can show the right message for each. omitempty keeps it out of
 // the JSON entirely for the (overwhelming majority) of sessions where it's
 // false, rather than spelling out "locked": false on every response.
+// CreatedAt, IP, and UserAgent are captured once at login time (see
+// CreateSession's callers) purely for display on the System Info page's
+// active-sessions table ("logged in since", "from which address/device") -
+// none of the three are ever read back for any access-control decision, so
+// getting one wrong or missing (e.g. IP absent in a local dev setup with no
+// reverse proxy in front) only degrades a diagnostic display, never login
+// itself.
 type Session struct {
-	UserID            string `json:"user_id"`
-	Email             string `json:"email"`
-	EmailVerified     bool   `json:"email_verified"`
-	Name              string `json:"name"`
-	PreferredUsername string `json:"preferred_username"`
-	Picture           string `json:"picture"`
-	Role              string `json:"role"`
-	Locked            bool   `json:"locked,omitempty"`
+	UserID            string    `json:"user_id"`
+	Email             string    `json:"email"`
+	EmailVerified     bool      `json:"email_verified"`
+	Name              string    `json:"name"`
+	PreferredUsername string    `json:"preferred_username"`
+	Picture           string    `json:"picture"`
+	Role              string    `json:"role"`
+	Locked            bool      `json:"locked,omitempty"`
+	CreatedAt         time.Time `json:"created_at"`
+	IP                string    `json:"ip,omitempty"`
+	UserAgent         string    `json:"user_agent,omitempty"`
 }
 
 // storedSession is the on-the-wire (Valkey) representation of a Session.
@@ -103,15 +116,24 @@ type Session struct {
 // PreferredUsername/Picture until that session's next login — UserID/Role
 // still round-trip correctly, so access itself is unaffected. No migration
 // needed given SessionTTL is only 24h.
+// IPEnc and UserAgentEnc get the same AES-256-GCM treatment as Email/Name/
+// PreferredUsername/Picture above - an IP address and a browser/OS string
+// are just as identifying as an email address, so the same
+// feedback_encrypt_at_implementation_time policy applies. CreatedAt stays
+// plaintext: it's a timestamp, explicitly exempt by that same policy (like
+// EmailVerified/Role/Locked below).
 type storedSession struct {
-	UserID               string `json:"user_id"`
-	EmailEnc             string `json:"email_enc"`
-	EmailVerified        bool   `json:"email_verified"`
-	NameEnc              string `json:"name_enc"`
-	PreferredUsernameEnc string `json:"preferred_username_enc"`
-	PictureEnc           string `json:"picture_enc"`
-	Role                 string `json:"role"`
-	Locked               bool   `json:"locked,omitempty"`
+	UserID               string    `json:"user_id"`
+	EmailEnc             string    `json:"email_enc"`
+	EmailVerified        bool      `json:"email_verified"`
+	NameEnc              string    `json:"name_enc"`
+	PreferredUsernameEnc string    `json:"preferred_username_enc"`
+	PictureEnc           string    `json:"picture_enc"`
+	Role                 string    `json:"role"`
+	Locked               bool      `json:"locked,omitempty"`
+	CreatedAt            time.Time `json:"created_at"`
+	IPEnc                string    `json:"ip_enc,omitempty"`
+	UserAgentEnc         string    `json:"user_agent_enc,omitempty"`
 }
 
 // encryptSession converts a plaintext Session into its encrypted-at-rest
@@ -133,6 +155,14 @@ func encryptSession(masterKey string, sess Session) (storedSession, error) {
 	if err != nil {
 		return storedSession{}, fmt.Errorf("encrypt picture: %w", err)
 	}
+	ipEnc, err := crypto.EncryptIfNotEmpty(masterKey, sess.IP)
+	if err != nil {
+		return storedSession{}, fmt.Errorf("encrypt ip: %w", err)
+	}
+	userAgentEnc, err := crypto.EncryptIfNotEmpty(masterKey, sess.UserAgent)
+	if err != nil {
+		return storedSession{}, fmt.Errorf("encrypt user_agent: %w", err)
+	}
 	return storedSession{
 		UserID:               sess.UserID,
 		EmailEnc:             emailEnc,
@@ -142,6 +172,9 @@ func encryptSession(masterKey string, sess Session) (storedSession, error) {
 		PictureEnc:           pictureEnc,
 		Role:                 sess.Role,
 		Locked:               sess.Locked,
+		CreatedAt:            sess.CreatedAt,
+		IPEnc:                ipEnc,
+		UserAgentEnc:         userAgentEnc,
 	}, nil
 }
 
@@ -163,6 +196,14 @@ func decryptSession(masterKey string, s storedSession) (Session, error) {
 	if err != nil {
 		return Session{}, fmt.Errorf("decrypt picture: %w", err)
 	}
+	ip, err := crypto.DecryptIfNotEmpty(masterKey, s.IPEnc)
+	if err != nil {
+		return Session{}, fmt.Errorf("decrypt ip: %w", err)
+	}
+	userAgent, err := crypto.DecryptIfNotEmpty(masterKey, s.UserAgentEnc)
+	if err != nil {
+		return Session{}, fmt.Errorf("decrypt user_agent: %w", err)
+	}
 	return Session{
 		UserID:            s.UserID,
 		Email:             email,
@@ -172,13 +213,25 @@ func decryptSession(masterKey string, s storedSession) (Session, error) {
 		Picture:           picture,
 		Role:              s.Role,
 		Locked:            s.Locked,
+		CreatedAt:         s.CreatedAt,
+		IP:                ip,
+		UserAgent:         userAgent,
 	}, nil
 }
 
 // CreateSession mints a new opaque bearer token for sess and stores it
 // (encrypted, see storedSession) in Valkey with TTL SessionTTL. The token is
 // 256 bits of randomness, base64url-encoded.
+//
+// sess.CreatedAt is stamped here if the caller left it zero, rather than
+// requiring every call site to remember time.Now() - CallbackHandler is
+// currently the only caller, but making this the one place that can't
+// forget it means a future second login path (e.g. a password-based flow)
+// gets a correct "logged in since" for free too.
 func CreateSession(ctx context.Context, d Deps, sess Session) (string, error) {
+	if sess.CreatedAt.IsZero() {
+		sess.CreatedAt = time.Now()
+	}
 	token, err := randomToken()
 	if err != nil {
 		return "", err
@@ -234,6 +287,54 @@ func RevokeUserSessions(ctx context.Context, vk *valkey.Client, subject string) 
 	return vk.Del(ctx, userSessionsKeyPrefix+subject)
 }
 
+// RevokeSessionByID ends exactly one active session, identified by the
+// opaque, non-reversible id ActiveSession.ID/SessionID(token) returns -
+// never the raw token itself, which never leaves Valkey/the browser that
+// holds it. Used by the System Info page's per-row "end session" action:
+// unlike RevokeUserSessions (which kills every session belonging to a user,
+// for the existing lock/delete-user admin actions), this targets a single
+// browser tab/device and leaves that same user's other active sessions
+// alone.
+//
+// Has to scan every active session and recompute each one's ID to find the
+// match, since Valkey only indexes these keys by token and by user, never
+// by this derived ID - acceptable because the admin calling this already
+// paid that same scan cost once just to load the list this ID came from.
+// ok is false (not an error) if no session with that ID is currently
+// active - it may have expired or been revoked already between the admin
+// loading the page and clicking the button.
+func RevokeSessionByID(ctx context.Context, d Deps, id string) (bool, error) {
+	keys, err := d.Valkey.ScanKeysWithPrefix(ctx, sessionKeyPrefix)
+	if err != nil {
+		return false, fmt.Errorf("auth: revoke session by id: scan: %w", err)
+	}
+	for _, key := range keys {
+		token := strings.TrimPrefix(key, sessionKeyPrefix)
+		if SessionID(token) != id {
+			continue
+		}
+		raw, exists, err := d.Valkey.Get(ctx, key)
+		if err != nil {
+			return false, fmt.Errorf("auth: revoke session by id: get: %w", err)
+		}
+		if !exists {
+			return false, nil
+		}
+		var stored storedSession
+		if err := json.Unmarshal([]byte(raw), &stored); err != nil {
+			return false, fmt.Errorf("auth: revoke session by id: decode: %w", err)
+		}
+		if err := d.Valkey.Del(ctx, key); err != nil {
+			return false, fmt.Errorf("auth: revoke session by id: delete: %w", err)
+		}
+		if err := d.Valkey.RemoveSetMember(ctx, userSessionsKeyPrefix+stored.UserID, token); err != nil {
+			return true, fmt.Errorf("auth: revoke session by id: unindex: %w", err)
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
 // ValidateSession looks up token in Valkey and returns the session it maps
 // to, if any. A missing or expired token is not an error - ok is simply
 // false.
@@ -282,11 +383,37 @@ func ValidateSession(ctx context.Context, d Deps, token string) (Session, bool, 
 // enough to identify who's logged in where, matching the level of detail
 // AdminUsersPage already shows for every user - not exposing more PII here
 // than that page does).
+//
+// ID is SessionID(token) - a one-way hash, never the token itself - so the
+// frontend can target one specific row (highlighting "this is you", or
+// requesting DELETE /v1/admin/sessions/{id}) without the actual bearer
+// token ever reaching a page that renders other admins' data alongside it.
+// Current is set by the caller (systemInfoHandler), not by
+// ListActiveSessions itself, which has no notion of "the request that's
+// asking" - only whoever holds the incoming request's own token can know
+// that.
 type ActiveSession struct {
-	Name             string `json:"name,omitempty"`
-	Email            string `json:"email,omitempty"`
-	Role             string `json:"role"`
-	ExpiresInSeconds int64  `json:"expires_in_seconds,omitempty"`
+	ID                   string `json:"id"`
+	Name                 string `json:"name,omitempty"`
+	Email                string `json:"email,omitempty"`
+	Role                 string `json:"role"`
+	CreatedAt            string `json:"created_at,omitempty"`
+	IP                   string `json:"ip,omitempty"`
+	UserAgent            string `json:"user_agent,omitempty"`
+	LastActiveSecondsAgo int64  `json:"last_active_seconds_ago,omitempty"`
+	ExpiresInSeconds     int64  `json:"expires_in_seconds,omitempty"`
+	Current              bool   `json:"current,omitempty"`
+}
+
+// SessionID returns a stable, non-reversible identifier for token (the hex
+// SHA-256 digest). Exposed to the frontend as ActiveSession.ID instead of
+// the token itself, and recomputed by RevokeSessionByID to find the
+// matching key again - same one-way-hash approach used to let an admin
+// reference one specific session without it ever being possible to work
+// backwards from the ID to a token that could be replayed.
+func SessionID(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
 }
 
 // ListActiveSessions decrypts and returns every currently active session
@@ -323,9 +450,30 @@ func ListActiveSessions(ctx context.Context, d Deps) ([]ActiveSession, error) {
 		if err != nil {
 			continue
 		}
-		as := ActiveSession{Name: sess.Name, Email: sess.Email, Role: sess.Role}
+		token := strings.TrimPrefix(key, sessionKeyPrefix)
+		as := ActiveSession{
+			ID:        SessionID(token),
+			Name:      sess.Name,
+			Email:     sess.Email,
+			Role:      sess.Role,
+			IP:        sess.IP,
+			UserAgent: sess.UserAgent,
+		}
+		if !sess.CreatedAt.IsZero() {
+			as.CreatedAt = sess.CreatedAt.UTC().Format(time.RFC3339)
+		}
 		if ttl, ok, err := d.Valkey.TTL(ctx, key); err == nil && ok {
 			as.ExpiresInSeconds = int64(ttl / time.Second)
+			// "Last active" is derived from the sliding-window TTL rather
+			// than stored separately: ValidateSession resets the TTL back
+			// to SessionTTL on every authenticated request, so however much
+			// of that window has already been used up (SessionTTL - ttl) is
+			// exactly how long ago the last request on this session was -
+			// no extra Valkey write needed on every single request just to
+			// track this.
+			if elapsed := SessionTTL - ttl; elapsed > 0 {
+				as.LastActiveSecondsAgo = int64(elapsed / time.Second)
+			}
 		}
 		out = append(out, as)
 	}

@@ -10,6 +10,7 @@ import { useNavigate, Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import {
   getSystemInfo,
+  revokeSession,
   type ActiveSession,
   type SystemInfo,
   type SystemInfoModule,
@@ -61,6 +62,41 @@ export default function AdminSystemInfoPage() {
     return () => clearInterval(id);
   }, []);
   const elapsedMs = Date.now() - fetchedAtRef.current;
+
+  // Tracks which session IDs currently have an in-flight or just-failed
+  // revoke request, so the button can disable itself mid-request and the
+  // row can show an inline error without disturbing the rest of the table.
+  const [revokingIds, setRevokingIds] = useState<Set<string>>(new Set());
+  const [revokeError, setRevokeError] = useState<string | null>(null);
+
+  function handleRevoke(target: ActiveSession) {
+    const confirmKey = target.current
+      ? "admin.system_info.end_session_confirm_self"
+      : "admin.system_info.end_session_confirm";
+    if (!window.confirm(t(confirmKey, { name: target.name || target.email || target.role }))) {
+      return;
+    }
+    const token = getSessionToken();
+    if (!token) return;
+    setRevokeError(null);
+    setRevokingIds((prev) => new Set(prev).add(target.id));
+    revokeSession(token, target.id)
+      .then(() => {
+        setInfo((prev) =>
+          prev
+            ? { ...prev, active_sessions: (prev.active_sessions ?? []).filter((s) => s.id !== target.id) }
+            : prev,
+        );
+      })
+      .catch(() => setRevokeError(t("admin.system_info.end_session_error")))
+      .finally(() => {
+        setRevokingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(target.id);
+          return next;
+        });
+      });
+  }
 
   if (loading || !session || session.role !== "super-admin") return null;
 
@@ -184,6 +220,7 @@ export default function AdminSystemInfoPage() {
             <Section
               title={t("admin.system_info.section_sessions", { count: info.active_sessions?.length ?? 0 })}
             >
+              {revokeError && <p className="mb-2 text-sm text-red-600 dark:text-red-400">{revokeError}</p>}
               {!info.active_sessions || info.active_sessions.length === 0 ? (
                 <p className="text-sm text-gray-400 dark:text-gray-500">{t("admin.system_info.no_sessions")}</p>
               ) : (
@@ -198,13 +235,33 @@ export default function AdminSystemInfoPage() {
                           {t("admin.system_info.col_role")}
                         </th>
                         <th className="px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                          {t("admin.system_info.col_login")}
+                        </th>
+                        <th className="px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                          {t("admin.system_info.col_ip")}
+                        </th>
+                        <th className="px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                          {t("admin.system_info.col_device")}
+                        </th>
+                        <th className="px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                          {t("admin.system_info.col_last_active")}
+                        </th>
+                        <th className="px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
                           {t("admin.system_info.col_expires")}
+                        </th>
+                        <th className="px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                          <span className="sr-only">{t("admin.system_info.col_actions")}</span>
                         </th>
                       </tr>
                     </thead>
                     <tbody>
-                      {info.active_sessions.map((s, i) => (
-                        <SessionRow key={i} session={s} even={i % 2 === 0} />
+                      {info.active_sessions.map((s) => (
+                        <SessionRow
+                          key={s.id}
+                          session={s}
+                          revoking={revokingIds.has(s.id)}
+                          onRevoke={() => handleRevoke(s)}
+                        />
                       ))}
                     </tbody>
                   </table>
@@ -341,21 +398,84 @@ function ModuleRow({ mod, even }: { mod: SystemInfoModule; even: boolean }) {
   );
 }
 
-function SessionRow({ session, even }: { session: ActiveSession; even: boolean }) {
+function SessionRow({
+  session,
+  revoking,
+  onRevoke,
+}: {
+  session: ActiveSession;
+  revoking: boolean;
+  onRevoke: () => void;
+}) {
   const { t } = useTranslation();
+  const device = session.user_agent ? parseUserAgent(session.user_agent) : null;
   return (
-    <tr className={`border-b border-gray-100 last:border-0 dark:border-gray-800 ${even ? "" : "bg-gray-50/50 dark:bg-gray-900/30"}`}>
+    <tr className={`border-b border-gray-100 last:border-0 dark:border-gray-800 ${session.current ? "bg-teal-50/60 dark:bg-teal-950/30" : ""}`}>
       <td className="px-4 py-2.5 text-gray-700 dark:text-gray-300">
         {session.name || session.email || <span className="text-gray-300 dark:text-gray-600">—</span>}
+        {session.current && (
+          <span className="ml-1.5 rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-medium text-teal-700 dark:bg-teal-900 dark:text-teal-300">
+            {t("admin.system_info.session_current")}
+          </span>
+        )}
       </td>
       <td className="px-4 py-2.5 text-xs text-gray-600 dark:text-gray-400">{session.role}</td>
+      <td className="px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">
+        {session.created_at ? new Date(session.created_at).toLocaleString() : "—"}
+      </td>
+      <td className="px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">{session.ip || "—"}</td>
+      <td className="px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500" title={session.user_agent}>
+        {device ? `${device.browser} · ${device.os}` : "—"}
+      </td>
+      <td className="px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">
+        {session.last_active_seconds_ago !== undefined
+          ? t("admin.system_info.last_active_ago", { duration: formatDuration(session.last_active_seconds_ago) })
+          : "—"}
+      </td>
       <td className="px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">
         {session.expires_in_seconds !== undefined
           ? t("admin.system_info.expires_in", { duration: formatDuration(session.expires_in_seconds) })
           : "—"}
       </td>
+      <td className="px-4 py-2.5 text-right">
+        <button
+          type="button"
+          onClick={onRevoke}
+          disabled={revoking}
+          className="text-xs font-medium text-red-600 hover:text-red-700 disabled:opacity-50 dark:text-red-400 dark:hover:text-red-300"
+        >
+          {revoking ? t("common.loading") : t("admin.system_info.end_session")}
+        </button>
+      </td>
     </tr>
   );
+}
+
+// parseUserAgent gives a compact, human-friendly reading of a raw
+// User-Agent string ("Chrome · Windows" rather than the full ~120-character
+// header value) - just enough for an admin to recognize which of their own
+// devices a session belongs to. Deliberately a handful of substring checks
+// rather than a full UA-parsing library: this only ever renders for the
+// System Info page's admin-only table, not anywhere accuracy is load-
+// bearing, and covers every mainstream browser/OS combination in practice.
+// Order matters - Edge and Opera both contain "Chrome" in their own UA
+// strings, so those checks must come first.
+function parseUserAgent(ua: string): { browser: string; os: string } {
+  let browser = "Unknown";
+  if (ua.includes("Edg/")) browser = "Edge";
+  else if (ua.includes("OPR/") || ua.includes("Opera")) browser = "Opera";
+  else if (ua.includes("Firefox/")) browser = "Firefox";
+  else if (ua.includes("CriOS") || ua.includes("Chrome/")) browser = "Chrome";
+  else if (ua.includes("Safari/")) browser = "Safari";
+
+  let os = "Unknown";
+  if (ua.includes("Windows")) os = "Windows";
+  else if (ua.includes("Mac OS X") || ua.includes("Macintosh")) os = "macOS";
+  else if (ua.includes("Android")) os = "Android";
+  else if (ua.includes("iPhone") || ua.includes("iPad") || ua.includes("iOS")) os = "iOS";
+  else if (ua.includes("Linux")) os = "Linux";
+
+  return { browser, os };
 }
 
 // formatDuration renders a second count as a compact human string ("45s",

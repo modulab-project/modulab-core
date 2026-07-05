@@ -102,6 +102,20 @@ func (c *Client) AddSetMember(ctx context.Context, key, member string, ttl time.
 	return nil
 }
 
+// RemoveSetMember removes exactly one member from the set at key, leaving
+// the rest of the set (and its TTL) untouched. A no-op, not an error, if
+// key or member does not exist. Used by auth.RevokeSessionByID to end one
+// specific session without touching that same user's other active
+// sessions - unlike RevokeUserSessions (admin.go's lock/delete actions),
+// which deletes the whole per-user index because it means to kill
+// everything at once.
+func (c *Client) RemoveSetMember(ctx context.Context, key, member string) error {
+	if err := c.rdb.SRem(ctx, key, member).Err(); err != nil {
+		return fmt.Errorf("valkey: srem %q: %w", key, err)
+	}
+	return nil
+}
+
 // Expire resets the TTL of an existing key without changing its value. A
 // no-op (not an error) if the key does not exist or has already expired.
 // Used by auth.ValidateSession to slide the session window on every request.

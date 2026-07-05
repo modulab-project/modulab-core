@@ -604,6 +604,7 @@ func main() {
 	// hasn't ModuLab noticed yet" has a concrete answer instead of "wait and
 	// see".
 	mux.Handle("GET /v1/admin/system/info", superAdminOnly(systemInfoHandler(pool, valkeyClient, cfg, startTime, storeDeps, authDeps)))
+	mux.Handle("DELETE /v1/admin/sessions/{id}", superAdminOnly(revokeSessionHandler(authDeps)))
 
 	// At startup, restart Deno workers for all Tier 2/3 modules that were
 	// active before the last shutdown.
@@ -1060,6 +1061,22 @@ type systemInfoResponse struct {
 	TLSCertDaysLeft  *int    `json:"tls_cert_days_left,omitempty"`
 }
 
+// bearerToken extracts the raw token from an "Authorization: Bearer ..."
+// header - header-only, deliberately not the query-parameter fallback
+// auth.BearerTokenAllowQuery offers for asset-serving GETs (see that
+// function's doc comment on why a token in the URL is worse here): every
+// request to this admin JSON endpoint already comes from the SPA via the
+// header, same as auth's own unexported bearerToken this duplicates -
+// can't call that one directly since it is unexported.
+func bearerToken(r *http.Request) string {
+	const prefix = "Bearer "
+	h := r.Header.Get("Authorization")
+	if strings.HasPrefix(h, prefix) {
+		return strings.TrimPrefix(h, prefix)
+	}
+	return ""
+}
+
 // systemInfoHandler serves GET /v1/admin/system/info (super-admin only).
 // Reuses the same best-effort checks as /healthz for the shared fields
 // (dependency reachability, NTP drift, SearXNG) rather than duplicating a
@@ -1111,7 +1128,19 @@ func systemInfoHandler(pool *db.Pool, valkeyClient *valkey.Client, cfg config.Co
 		// Active sessions: who's currently logged in and from how many
 		// tabs/devices (see auth.ActiveSession's doc comment for exactly
 		// what's shown) - best-effort, nil if the underlying SCAN failed.
+		// The viewing admin's own row is flagged Current by recomputing
+		// SessionID from this same request's own bearer token - only the
+		// caller holding that token can know which row is "you", so this
+		// can't happen inside ListActiveSessions itself.
 		if sessions, err := auth.ListActiveSessions(ctx, authDeps); err == nil {
+			if ownID := auth.SessionID(bearerToken(r)); ownID != "" {
+				for i := range sessions {
+					if sessions[i].ID == ownID {
+						sessions[i].Current = true
+						break
+					}
+				}
+			}
 			resp.ActiveSessions = sessions
 		}
 
@@ -1163,6 +1192,34 @@ func systemInfoHandler(pool *db.Pool, valkeyClient *valkey.Client, cfg config.Co
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
+	}
+}
+
+// revokeSessionHandler serves DELETE /v1/admin/sessions/{id} (super-admin
+// only) - the System Info page's per-row "end session" button. id is
+// auth.SessionID(token), never the token itself (see ActiveSession's doc
+// comment), so ending a session an admin can see in that table never
+// requires the raw bearer token to have left Valkey in the first place.
+// Deliberately does not stop an admin from ending their own current
+// session this way - closing your own only tab is equivalent to logging
+// out, just from an unusual place to do it.
+func revokeSessionHandler(authDeps auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, "missing session id", http.StatusBadRequest)
+			return
+		}
+		found, err := auth.RevokeSessionByID(r.Context(), authDeps, id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if !found {
+			http.Error(w, "session not found", http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 

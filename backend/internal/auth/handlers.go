@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -338,6 +339,9 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 			Picture:           claims.Picture,
 			Role:              sessionRole,
 			Locked:            sessionLocked,
+			CreatedAt:         time.Now(),
+			IP:                clientIP(r),
+			UserAgent:         r.Header.Get("User-Agent"),
 		})
 		if err != nil {
 			redirectToFrontend(w, r, target, url.Values{"error": {"server_error"}})
@@ -739,6 +743,27 @@ func bearerToken(r *http.Request) string {
 		return strings.TrimPrefix(h, prefix)
 	}
 	return ""
+}
+
+// clientIP extracts the originating client address for the session's
+// IP field below. Same X-Forwarded-For-first logic as cmd/core/main.go's
+// own clientIP (Core sits behind Traefik, which sets that header - using
+// r.RemoteAddr directly would just record Traefik's own container address
+// for every login) - duplicated here rather than exported from main,
+// since main imports this package and not the other way around, and it's
+// a handful of lines.
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if i := strings.IndexByte(xff, ','); i != -1 {
+			return strings.TrimSpace(xff[:i])
+		}
+		return strings.TrimSpace(xff)
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 // BearerTokenAllowQuery is bearerToken plus a ?t= query-parameter fallback,
