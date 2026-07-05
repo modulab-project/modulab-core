@@ -9,6 +9,13 @@ import (
 
 const syncInterval = 1 * time.Hour
 
+// SyncInterval exposes syncInterval to callers outside this package (the
+// GET /v1/admin/system/info handler in cmd/core, which pairs it with
+// LastSyncedAt to show an admin a "next registry sync in X" countdown).
+func SyncInterval() time.Duration {
+	return syncInterval
+}
+
 // onSynced is called after every sync attempt (manual or scheduled),
 // regardless of whether it fully succeeded — a partial sync (one source
 // failed) still persists whatever it did manage to fetch, and running a

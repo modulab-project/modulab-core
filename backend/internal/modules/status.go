@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/modulab-project/modulab-core/backend/internal/db"
@@ -31,6 +32,38 @@ type UpdateInfo struct {
 // ModuLab sehe", at a time when there was in fact no background check at
 // all, only the manual button and the unrelated hourly registry sync).
 const updateCheckInterval = 15 * time.Minute
+
+// lastCheckMu guards lastCheckAt below. runUpdateCheck is called from three
+// independent triggers (the ticker, RunUpdateCheckOnce right after a registry
+// sync, and — indirectly — nothing else, the manual button calls CheckUpdates
+// directly and does not update this timestamp), so a plain package-level
+// time.Time would be a data race without the mutex.
+var (
+	lastCheckMu sync.Mutex
+	lastCheckAt time.Time
+)
+
+// UpdateCheckInterval exposes updateCheckInterval to callers outside this
+// package (the GET /v1/admin/system/info handler in cmd/core).
+func UpdateCheckInterval() time.Duration {
+	return updateCheckInterval
+}
+
+// UpdateCheckTimer reports when the background update-check loop last ran and
+// when it is next due, so the admin UI can show a countdown instead of the
+// admin only finding out up to 15 minutes after the fact (see
+// updateCheckInterval's doc comment for the incident that motivated the
+// background loop itself). ok is false until the first check has run — in
+// practice within a second or two of Core starting, since RunUpdateChecks
+// runs one pass immediately before starting its ticker.
+func UpdateCheckTimer() (last time.Time, next time.Time, ok bool) {
+	lastCheckMu.Lock()
+	defer lastCheckMu.Unlock()
+	if lastCheckAt.IsZero() {
+		return time.Time{}, time.Time{}, false
+	}
+	return lastCheckAt, lastCheckAt.Add(updateCheckInterval), true
+}
 
 // RunUpdateChecks is the long-running background goroutine that keeps
 // installed_modules.available_version current without requiring an admin
@@ -79,6 +112,13 @@ func RunUpdateCheckOnce(ctx context.Context, d Deps, storeDeps store.Deps) {
 }
 
 func runUpdateCheck(ctx context.Context, d Deps, storeDeps store.Deps) {
+	// Recorded unconditionally, even on error below: a failed CheckUpdates
+	// pass still "ran" for the purposes of the countdown - it will simply be
+	// retried at the next tick, same as before this timer existed.
+	lastCheckMu.Lock()
+	lastCheckAt = time.Now()
+	lastCheckMu.Unlock()
+
 	updates, err := CheckUpdates(ctx, d, storeDeps)
 	if err != nil {
 		log.Printf("modules: background update check: %v", err)

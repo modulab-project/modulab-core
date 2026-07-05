@@ -595,6 +595,16 @@ func main() {
 	// synced, why didn't I get notified yet" gap specifically.
 	go modules.RunUpdateChecks(ctx, moduleDeps, storeDeps)
 
+	// GET /v1/admin/system/info — read-only diagnostics page (spec: "System
+	// Info" card on /admin/system) aggregating everything an admin previously
+	// had to piece together from /healthz, the Installed Modules page, and
+	// the Store page separately: version/uptime, dependency reachability,
+	// and — the actual reason this endpoint exists — countdowns until the
+	// next background module-update check and registry sync, so "I published
+	// a release, why hasn't ModuLab noticed yet" has a concrete answer
+	// instead of "wait up to 15 minutes / 1 hour and see".
+	mux.Handle("GET /v1/admin/system/info", superAdminOnly(systemInfoHandler(pool, valkeyClient, cfg, startTime, storeDeps)))
+
 	// At startup, restart Deno workers for all Tier 2/3 modules that were
 	// active before the last shutdown.
 	if installedAtBoot, err := pool.ListInstalledModules(ctx); err != nil {
@@ -975,6 +985,128 @@ func clientIP(r *http.Request) string {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+// systemInfoTimer describes a recurring background loop's schedule so the
+// frontend can render a "next run in X" countdown instead of the admin
+// wondering whether the loop is running at all. LastRunAt/NextRunAt are nil
+// until the loop has completed its first pass (in practice within a second
+// or two of Core starting, since both loops run once immediately at boot
+// before starting their ticker).
+type systemInfoTimer struct {
+	LastRunAt       *string `json:"last_run_at,omitempty"`
+	NextRunAt       *string `json:"next_run_at,omitempty"`
+	IntervalSeconds int64   `json:"interval_seconds"`
+}
+
+// systemInfoModule is one row of the installed-module table on the System
+// Info page — the same fields ModulesPage.tsx already shows, bundled here so
+// an admin gets one page for "what's the state of everything" instead of
+// needing to cross-reference Installed Modules separately.
+type systemInfoModule struct {
+	Name             string `json:"name"`
+	Version          string `json:"version"`
+	AvailableVersion string `json:"available_version,omitempty"`
+	Status           string `json:"status"`
+	Source           string `json:"source"`
+	Pinned           bool   `json:"pinned"`
+	Tier             int    `json:"tier"`
+}
+
+// systemInfoResponse is the JSON body of GET /v1/admin/system/info.
+type systemInfoResponse struct {
+	Version           string              `json:"version"`
+	UptimeSeconds     int64               `json:"uptime_seconds"`
+	PostgresReachable bool                `json:"postgres_reachable"`
+	ValkeyReachable   bool                `json:"valkey_reachable"`
+	SearxngConfigured bool                `json:"searxng_configured"`
+	SearxngReachable  *bool               `json:"searxng_reachable,omitempty"`
+	NTPDriftOK        *bool               `json:"ntp_drift_ok,omitempty"`
+	ModuleUpdateCheck systemInfoTimer     `json:"module_update_check"`
+	RegistrySync      systemInfoTimer     `json:"registry_sync"`
+	Modules           []systemInfoModule  `json:"modules"`
+}
+
+// systemInfoHandler serves GET /v1/admin/system/info (super-admin only).
+// Reuses the same best-effort checks as /healthz for the shared fields
+// (dependency reachability, NTP drift, SearXNG) rather than duplicating a
+// second, subtly-different implementation of each — the difference here is
+// the two background-loop countdowns and the per-module version table,
+// neither of which /healthz carries since it's meant to stay a cheap,
+// unauthenticated monitoring probe.
+func systemInfoHandler(pool *db.Pool, valkeyClient *valkey.Client, cfg config.Config, startTime time.Time, storeDeps store.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		ctx := r.Context()
+
+		resp := systemInfoResponse{
+			Version:           version.Version,
+			UptimeSeconds:     int64(time.Since(startTime).Seconds()),
+			PostgresReachable: pool.Ping(ctx) == nil,
+			ValkeyReachable:   valkeyClient.Ping(ctx) == nil,
+		}
+
+		if configured, err := searxng.IsConfigured(ctx, pool, cfg.MasterKey); err == nil {
+			resp.SearxngConfigured = configured
+			if configured {
+				if rawURL, _, err := searxng.ResolveURLPublic(ctx, pool, cfg.MasterKey); err == nil {
+					up := searxng.Ping(ctx, rawURL)
+					resp.SearxngReachable = &up
+				}
+			}
+		}
+
+		if ok, err := ntpcheck.DriftOK(30 * time.Second); err == nil {
+			resp.NTPDriftOK = &ok
+		}
+
+		// Background loop #1: per-installed-module update check (15 min).
+		updateCheckInterval := modules.UpdateCheckInterval()
+		resp.ModuleUpdateCheck = systemInfoTimer{IntervalSeconds: int64(updateCheckInterval / time.Second)}
+		if last, next, ok := modules.UpdateCheckTimer(); ok {
+			lastStr := last.UTC().Format(time.RFC3339)
+			nextStr := next.UTC().Format(time.RFC3339)
+			resp.ModuleUpdateCheck.LastRunAt = &lastStr
+			resp.ModuleUpdateCheck.NextRunAt = &nextStr
+		}
+
+		// Background loop #2: registry sync (1h). last_synced_at is already
+		// persisted in module_registry (used by GET /v1/store today), so no
+		// extra in-memory tracking is needed here the way the update-check
+		// loop above requires it.
+		syncInterval := store.SyncInterval()
+		resp.RegistrySync = systemInfoTimer{IntervalSeconds: int64(syncInterval / time.Second)}
+		if lastSync, err := store.LastSyncedAt(ctx, pool); err == nil && !lastSync.IsZero() {
+			lastStr := lastSync.UTC().Format(time.RFC3339)
+			nextStr := lastSync.Add(syncInterval).UTC().Format(time.RFC3339)
+			resp.RegistrySync.LastRunAt = &lastStr
+			resp.RegistrySync.NextRunAt = &nextStr
+		}
+
+		if installed, err := pool.ListInstalledModules(ctx); err == nil {
+			resp.Modules = make([]systemInfoModule, 0, len(installed))
+			for _, m := range installed {
+				mi := systemInfoModule{
+					Name:    m.Name,
+					Version: m.Version,
+					Status:  m.Status,
+					Source:  m.Source,
+					Pinned:  m.Pinned,
+					Tier:    m.Tier,
+				}
+				if m.AvailableVersion != nil {
+					mi.AvailableVersion = *m.AvailableVersion
+				}
+				resp.Modules = append(resp.Modules, mi)
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}
 }
 
 // corsMiddleware allows cfg.FrontendBaseURL's origin to call every route on

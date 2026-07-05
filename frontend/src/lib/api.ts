@@ -958,6 +958,45 @@ export function getSystemStatus(token: string): Promise<SystemStatus> {
   });
 }
 
+// ---- Admin system info (read-only diagnostics page) ---------------------------
+
+export interface SystemInfoTimer {
+  last_run_at?: string;
+  next_run_at?: string;
+  interval_seconds: number;
+}
+
+export interface SystemInfoModule {
+  name: string;
+  version: string;
+  available_version?: string;
+  status: string;
+  source: string;
+  pinned: boolean;
+  tier: number;
+}
+
+export interface SystemInfo {
+  version: string;
+  uptime_seconds: number;
+  postgres_reachable: boolean;
+  valkey_reachable: boolean;
+  searxng_configured: boolean;
+  searxng_reachable?: boolean;
+  ntp_drift_ok?: boolean;
+  module_update_check: SystemInfoTimer;
+  registry_sync: SystemInfoTimer;
+  modules: SystemInfoModule[];
+}
+
+// GET /v1/admin/system/info — version/uptime, dependency reachability, and
+// countdowns until the next background module-update check / registry sync.
+export function getSystemInfo(token: string): Promise<SystemInfo> {
+  return request<SystemInfo>("/v1/admin/system/info", {
+    headers: bearerHeaders(token),
+  });
+}
+
 // PATCH /v1/admin/oidc — update OIDC configuration. client_secret is optional;
 // omit or pass "" to keep the existing secret.
 export function updateOIDC(

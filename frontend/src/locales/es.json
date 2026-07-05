@@ -309,6 +309,28 @@
         "remove": "Eliminar configuración"
       }
     },
+    "system_info": {
+      "title": "Información del sistema",
+      "subtitle": "Versión, tiempo de actividad y estado de todos los procesos en segundo plano de un vistazo.",
+      "card_desc": "Versión, tiempo de actividad, temporizadores de actualización y resumen de módulos.",
+      "load_error": "No se pudo cargar la información del sistema.",
+      "section_version": "Versión y tiempo de actividad",
+      "section_timers": "Procesos en segundo plano",
+      "section_infra": "Infraestructura",
+      "section_modules": "Módulos instalados",
+      "update_check_title": "Búsqueda de actualizaciones de módulos",
+      "registry_sync_title": "Sincronización del registro",
+      "ntp_drift": "Sincronización horaria (NTP)",
+      "col_module": "Módulo",
+      "col_version": "Versión",
+      "col_status": "Estado",
+      "col_source": "Fuente",
+      "last_run": "Última comprobación a las {{time}}",
+      "next_run_in": "Próxima comprobación en {{duration}}",
+      "next_run_soon": "Próxima comprobación en breve",
+      "not_run_yet": "Aún no se ha ejecutado",
+      "interval": "Intervalo: cada {{duration}}"
+    },
     "audit": {
       "title": "Registro de auditoría",
       "subtitle": "Registro inmutable de todas las acciones administrativas relacionadas con la seguridad.",

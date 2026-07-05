@@ -310,6 +310,28 @@
         "remove": "Konfiguration entfernen"
       }
     },
+    "system_info": {
+      "title": "Systeminfo",
+      "subtitle": "Version, Laufzeit und Status aller Hintergrundprozesse auf einen Blick.",
+      "card_desc": "Version, Laufzeit, Update-Timer und Modul-Übersicht.",
+      "load_error": "Systeminfo konnte nicht geladen werden.",
+      "section_version": "Version & Laufzeit",
+      "section_timers": "Hintergrundprozesse",
+      "section_infra": "Infrastruktur",
+      "section_modules": "Installierte Module",
+      "update_check_title": "Modul-Update-Suche",
+      "registry_sync_title": "Registry-Sync",
+      "ntp_drift": "Zeitsynchronisation (NTP)",
+      "col_module": "Modul",
+      "col_version": "Version",
+      "col_status": "Status",
+      "col_source": "Quelle",
+      "last_run": "Zuletzt geprüft um {{time}}",
+      "next_run_in": "Nächste Prüfung in {{duration}}",
+      "next_run_soon": "Nächste Prüfung in Kürze",
+      "not_run_yet": "Noch nicht gelaufen",
+      "interval": "Intervall: alle {{duration}}"
+    },
     "audit": {
       "title": "Audit-Log",
       "subtitle": "Unveränderliches Protokoll aller sicherheitsrelevanten Admin-Aktionen.",

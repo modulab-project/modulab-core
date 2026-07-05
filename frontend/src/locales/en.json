@@ -310,6 +310,28 @@
         "remove": "Remove configuration"
       }
     },
+    "system_info": {
+      "title": "System info",
+      "subtitle": "Version, uptime, and the status of every background process at a glance.",
+      "card_desc": "Version, uptime, update timers, and module overview.",
+      "load_error": "Could not load system info.",
+      "section_version": "Version & Uptime",
+      "section_timers": "Background processes",
+      "section_infra": "Infrastructure",
+      "section_modules": "Installed modules",
+      "update_check_title": "Module update check",
+      "registry_sync_title": "Registry sync",
+      "ntp_drift": "Time sync (NTP)",
+      "col_module": "Module",
+      "col_version": "Version",
+      "col_status": "Status",
+      "col_source": "Source",
+      "last_run": "Last checked at {{time}}",
+      "next_run_in": "Next check in {{duration}}",
+      "next_run_soon": "Next check due shortly",
+      "not_run_yet": "Not run yet",
+      "interval": "Interval: every {{duration}}"
+    },
     "audit": {
       "title": "Audit log",
       "subtitle": "Immutable record of all security-relevant admin actions.",

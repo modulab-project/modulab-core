@@ -309,6 +309,28 @@
         "remove": "Supprimer la configuration"
       }
     },
+    "system_info": {
+      "title": "Informations système",
+      "subtitle": "Version, disponibilité et état de tous les processus en arrière-plan en un coup d'œil.",
+      "card_desc": "Version, disponibilité, minuteries de mise à jour et aperçu des modules.",
+      "load_error": "Impossible de charger les informations système.",
+      "section_version": "Version et disponibilité",
+      "section_timers": "Processus en arrière-plan",
+      "section_infra": "Infrastructure",
+      "section_modules": "Modules installés",
+      "update_check_title": "Recherche de mises à jour des modules",
+      "registry_sync_title": "Synchronisation du registre",
+      "ntp_drift": "Synchronisation horaire (NTP)",
+      "col_module": "Module",
+      "col_version": "Version",
+      "col_status": "Statut",
+      "col_source": "Source",
+      "last_run": "Dernière vérification à {{time}}",
+      "next_run_in": "Prochaine vérification dans {{duration}}",
+      "next_run_soon": "Prochaine vérification imminente",
+      "not_run_yet": "Pas encore exécuté",
+      "interval": "Intervalle : toutes les {{duration}}"
+    },
     "audit": {
       "title": "Journal d'audit",
       "subtitle": "Enregistrement immuable de toutes les actions administratives liées à la sécurité.",

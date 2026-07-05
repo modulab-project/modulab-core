@@ -309,6 +309,28 @@
         "remove": "Configuratie verwijderen"
       }
     },
+    "system_info": {
+      "title": "Systeeminfo",
+      "subtitle": "Versie, uptime en de status van alle achtergrondprocessen in één oogopslag.",
+      "card_desc": "Versie, uptime, update-timers en moduleoverzicht.",
+      "load_error": "Systeeminfo kon niet worden geladen.",
+      "section_version": "Versie & uptime",
+      "section_timers": "Achtergrondprocessen",
+      "section_infra": "Infrastructuur",
+      "section_modules": "Geïnstalleerde modules",
+      "update_check_title": "Module-updatecontrole",
+      "registry_sync_title": "Registersynchronisatie",
+      "ntp_drift": "Tijdsynchronisatie (NTP)",
+      "col_module": "Module",
+      "col_version": "Versie",
+      "col_status": "Status",
+      "col_source": "Bron",
+      "last_run": "Laatst gecontroleerd om {{time}}",
+      "next_run_in": "Volgende controle over {{duration}}",
+      "next_run_soon": "Volgende controle binnenkort",
+      "not_run_yet": "Nog niet uitgevoerd",
+      "interval": "Interval: elke {{duration}}"
+    },
     "audit": {
       "title": "Auditlogboek",
       "subtitle": "Onveranderlijk register van alle beveiligingsgerelateerde beheerdersacties.",
