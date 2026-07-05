@@ -429,6 +429,7 @@ func main() {
 	mux.Handle("PATCH /v1/admin/oidc", superAdminOnly(adminapi.OIDCUpdateHandler(pool, cfg.MasterKey)))
 	mux.Handle("DELETE /v1/admin/oidc", superAdminOnly(adminapi.OIDCDeleteHandler(pool, cfg.MasterKey)))
 	mux.Handle("GET /v1/audit-log", superAdminOnly(adminapi.AuditLogHandler(pool, cfg.MasterKey)))
+	mux.Handle("GET /v1/audit-log/verify", superAdminOnly(adminapi.AuditVerifyHandler(pool, cfg.MasterKey)))
 
 	// Widget endpoints (spec section 8 / Home page). Not wrapped in any
 	// auth middleware: weather data is not sensitive, and the 15-minute
@@ -1043,20 +1044,46 @@ func globalRateLimitMiddleware(vk *valkey.Client, pool *db.Pool, masterKeyEnv st
 // X-Forwarded-For — we take the first (left-most, i.e. original client)
 // entry rather than r.RemoteAddr, which would otherwise always resolve to
 // Traefik's own address and rate-limit the entire instance as a single
-// client. Falls back to RemoteAddr when the header is absent (e.g. direct
-// connections in local dev without Traefik in front).
+// client.
+//
+// X-Forwarded-For is only trusted when the immediate peer (r.RemoteAddr)
+// is itself a private/loopback address (added 2026-07-05, pre-V1 security
+// review) - i.e. the request arrived over the internal Docker network from
+// Traefik, not from a client that reached Core directly. Without this
+// check, anyone able to connect to Core's port directly (an exposed port,
+// a misconfigured reverse proxy, or simply skipping Traefik) could put any
+// value they like in X-Forwarded-For and pick their own rate-limit bucket,
+// defeating login/callback/ai-chat/global limits entirely. A client that
+// connects directly always falls through to its real RemoteAddr instead.
 func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+	remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		remoteHost = r.RemoteAddr
+	}
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" && isTrustedProxyPeer(remoteHost) {
 		if i := strings.IndexByte(xff, ','); i != -1 {
 			return strings.TrimSpace(xff[:i])
 		}
 		return strings.TrimSpace(xff)
 	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
+	if remoteHost != "" {
+		return remoteHost
 	}
-	return host
+	return r.RemoteAddr
+}
+
+// isTrustedProxyPeer reports whether host (the immediate TCP peer, before
+// any X-Forwarded-For is considered) is a loopback or private-range
+// address - Traefik reaches Core over the Docker-internal network, which
+// uses exactly these ranges, so this is "did this hop come from our own
+// reverse proxy" without needing an explicit, easy-to-forget-to-update
+// list of trusted proxy IPs in config.
+func isTrustedProxyPeer(host string) bool {
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate()
 }
 
 // knownRateLimitLabels lists every label a rate limiter in this codebase
@@ -1228,6 +1255,13 @@ type systemInfoModule struct {
 	Source           string `json:"source"`
 	Pinned           bool   `json:"pinned"`
 	Tier             int    `json:"tier"`
+	// CosignVerified (added 2026-07-05) mirrors installed_modules.
+	// cosign_verified - whether the Cosign signature check actually passed
+	// for the currently-installed version. Always false for a "direct"
+	// source install (no registry entry to carry a signature at all), and
+	// for "official"/"community" installs that predate this field being
+	// wired up (need a reinstall/update to pick up a real value).
+	CosignVerified bool `json:"cosign_verified"`
 }
 
 // systemInfoResponse is the JSON body of GET /v1/admin/system/info.
@@ -1252,6 +1286,15 @@ type systemInfoResponse struct {
 	// and NTPDriftOK above.
 	LatestCoreVersion  string `json:"latest_core_version,omitempty"`
 	CoreUpdateAvailable bool  `json:"core_update_available"`
+
+	// CosignAvailable (added 2026-07-05) reports whether the cosign binary
+	// is actually reachable on this instance - if it isn't, every module's
+	// CosignVerified will be false regardless of whether a signature
+	// exists, which would otherwise look identical to "the signature check
+	// failed" instead of "the check never ran". modules.CosignAvailable
+	// itself existed since the initial Cosign support but was never called
+	// anywhere - this is the first caller.
+	CosignAvailable bool `json:"cosign_available"`
 
 	// ActiveSessions lists every currently active session (one per logged-in
 	// browser tab/device, not per user - see auth.ListActiveSessions' doc
@@ -1339,6 +1382,7 @@ func systemInfoHandler(pool *db.Pool, valkeyClient *valkey.Client, cfg config.Co
 			UptimeSeconds:     int64(time.Since(startTime).Seconds()),
 			PostgresReachable: pool.Ping(ctx) == nil,
 			ValkeyReachable:   valkeyClient.Ping(ctx) == nil,
+			CosignAvailable:   modules.CosignAvailable(cfg.CosignBinaryPath),
 		}
 
 		if configured, err := searxng.IsConfigured(ctx, pool, cfg.MasterKey); err == nil {
@@ -1420,12 +1464,13 @@ func systemInfoHandler(pool *db.Pool, valkeyClient *valkey.Client, cfg config.Co
 			resp.Modules = make([]systemInfoModule, 0, len(installed))
 			for _, m := range installed {
 				mi := systemInfoModule{
-					Name:    m.Name,
-					Version: m.Version,
-					Status:  m.Status,
-					Source:  m.Source,
-					Pinned:  m.Pinned,
-					Tier:    m.Tier,
+					Name:           m.Name,
+					Version:        m.Version,
+					Status:         m.Status,
+					Source:         m.Source,
+					Pinned:         m.Pinned,
+					Tier:           m.Tier,
+					CosignVerified: m.CosignVerified,
 				}
 				if m.AvailableVersion != nil {
 					mi.AvailableVersion = *m.AvailableVersion

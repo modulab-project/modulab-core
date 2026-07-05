@@ -283,6 +283,25 @@ func (c *Client) CountKeysWithPrefix(ctx context.Context, prefix string) (int64,
 	return count, nil
 }
 
+// incrExpireScript performs the increment-then-conditionally-expire as a
+// single atomic operation on the server, closing a race in the previous
+// two-roundtrip implementation (INCR, then a separate EXPIRE call): under
+// concurrent first requests for the same brand-new key, more than one caller
+// could observe count == 1 and each attempt to set the TTL - harmless here
+// since they'd all set the same ttl, but the real risk was a request landing
+// between the INCR and the EXPIRE seeing a key with no TTL at all if the
+// process crashed or the connection dropped in between, leaving that key to
+// live forever instead of expiring with its window. Running both commands
+// inside one EVAL makes the pair atomic from Valkey's perspective - no other
+// client's command can interleave between them.
+var incrExpireScript = redis.NewScript(`
+local count = redis.call("INCR", KEYS[1])
+if count == 1 then
+	redis.call("EXPIRE", KEYS[1], ARGV[1])
+end
+return count
+`)
+
 // IncrExpire atomically increments key and returns the new counter value.
 // Intended for fixed-window rate limiting: ttl is set ONLY the first time
 // this key is seen in a window (count == 1) and left alone on every
@@ -302,17 +321,16 @@ func (c *Client) CountKeysWithPrefix(ctx context.Context, prefix string) (int64,
 // login itself was fine, the count had simply been quietly accumulating
 // across normal dashboard use until it tipped over.
 //
+// Bugfix (2026-07-05, later same day): switched from two separate commands
+// (INCR then EXPIRE) to the atomic incrExpireScript above - see its doc
+// comment for the race this closes.
+//
 // On Valkey/Redis error the caller should fail open (let the request
 // through) rather than blocking everyone on a cache hiccup.
 func (c *Client) IncrExpire(ctx context.Context, key string, ttl time.Duration) (int64, error) {
-	count, err := c.rdb.Incr(ctx, key).Result()
+	count, err := incrExpireScript.Run(ctx, c.rdb, []string{key}, int64(ttl.Seconds())).Int64()
 	if err != nil {
 		return 0, fmt.Errorf("valkey: incr-expire %q: %w", key, err)
-	}
-	if count == 1 {
-		if err := c.rdb.Expire(ctx, key, ttl).Err(); err != nil {
-			return 0, fmt.Errorf("valkey: incr-expire %q: set ttl: %w", key, err)
-		}
 	}
 	return count, nil
 }

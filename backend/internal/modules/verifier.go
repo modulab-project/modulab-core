@@ -16,18 +16,19 @@ import (
 	"strings"
 )
 
-// officialPublicKey is the Cosign public key embedded at build time from
-// cosign_pubkey.pem. Replace that file with the real key before the first
-// official module is released. As long as the file contains only a comment
-// (no PEM header), VerifyCosign returns ErrNoPublicKey for official modules.
+// officialPublicKey is the production Cosign public key embedded at build
+// time from cosign_pubkey.pem (confirmed 2026-07-05: real key, not a
+// placeholder). VerifyCosign still checks for the PEM header defensively -
+// if this file is ever replaced with a placeholder/comment-only version
+// during local development, verification degrades to ErrNoPublicKey rather
+// than failing in some less obvious way.
 //
 //go:embed cosign_pubkey.pem
 var officialPublicKey string
 
-// ErrNoPublicKey is returned by VerifyCosign when the embedded key is still
-// the placeholder (no PEM header present). This is expected during development
-// before any official module exists.
-var ErrNoPublicKey = fmt.Errorf("modules: official Cosign public key not yet configured (replace cosign_pubkey.pem before releasing official modules)")
+// ErrNoPublicKey is returned by VerifyCosign when the embedded key doesn't
+// contain a PEM header (e.g. a local dev checkout with a placeholder file).
+var ErrNoPublicKey = fmt.Errorf("modules: official Cosign public key not configured (cosign_pubkey.pem has no PEM header)")
 
 // CosignBinaryPath is the default location of the cosign binary. Override via
 // the MODULAB_COSIGN_BINARY_PATH environment variable (read by config.Load).

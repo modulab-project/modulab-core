@@ -29,6 +29,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/modulab-project/modulab-core/backend/internal/netguard"
+
 	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
@@ -59,6 +61,13 @@ const (
 	httpUserAgent  = "ModuLab-Core/1.0 (https://modulab.app)"
 	maxConcurrency = 10 // parallel feed reachability checks
 )
+
+// safeFeedClient fetches admin-configured feed URLs through netguard's
+// dial-time IP allowlist (see that package's doc comment) rather than
+// http.DefaultClient - a feed URL is arbitrary input from an admin, and
+// without this an admin account could point Core at an internal service
+// or the cloud metadata endpoint and read the response back as "articles".
+var safeFeedClient = netguard.SafeHTTPClient(fetchTimeout)
 
 // ---- Response types ---------------------------------------------------------
 
@@ -288,7 +297,7 @@ func fetchFeed(ctx context.Context, feedURL, label string) ([]Article, error) {
 	req.Header.Set("User-Agent", httpUserAgent)
 	req.Header.Set("Accept", "application/rss+xml, application/atom+xml, application/xml, text/xml, */*")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := safeFeedClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

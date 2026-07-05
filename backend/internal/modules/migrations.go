@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // runModuleMigrations provisions a Postgres schema for the module and executes
@@ -69,7 +71,7 @@ func runModuleMigrations(ctx context.Context, d Deps, moduleName, migrationsDir 
 
 	// Set search_path for this transaction so module SQL can use unqualified
 	// table names and they land in the right schema.
-	if _, err := tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", schemaName)); err != nil {
+	if _, err := tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", quoteIdent(schemaName))); err != nil {
 		return fmt.Errorf("modules: migrations %q: set search_path: %w", moduleName, err)
 	}
 
@@ -152,7 +154,7 @@ func runModuleUpdateMigrations(ctx context.Context, d Deps, moduleName, newMigra
 		}
 	}()
 
-	if _, err := tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", schemaName)); err != nil {
+	if _, err := tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", quoteIdent(schemaName))); err != nil {
 		return fmt.Errorf("modules: update migrations %q: set search_path: %w", moduleName, err)
 	}
 
@@ -200,7 +202,7 @@ func dropModuleSchema(ctx context.Context, d Deps, moduleName string) error {
 	}
 
 	// CASCADE drops all tables, sequences, and other objects in the schema.
-	if _, err := d.DB.Exec(ctx, fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", schemaName)); err != nil {
+	if _, err := d.DB.Exec(ctx, fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", quoteIdent(schemaName))); err != nil {
 		return fmt.Errorf("modules: drop schema %q: %w", schemaName, err)
 	}
 	// Remove migration tracking rows.
@@ -208,7 +210,7 @@ func dropModuleSchema(ctx context.Context, d Deps, moduleName string) error {
 		log.Printf("modules: drop schema %q: could not remove migration tracking rows: %v", moduleName, err)
 	}
 	// Drop the role last (after schema is gone, otherwise role may still own objects).
-	if _, err := d.DB.Exec(ctx, fmt.Sprintf("DROP ROLE IF EXISTS %s", roleName)); err != nil {
+	if _, err := d.DB.Exec(ctx, fmt.Sprintf("DROP ROLE IF EXISTS %s", quoteIdent(roleName))); err != nil {
 		log.Printf("modules: drop schema %q: could not drop role %s: %v", schemaName, roleName, err)
 	}
 
@@ -239,26 +241,42 @@ func moduleIdentifiers(moduleName string) (schemaName, roleName string, err erro
 	return schemaName, roleName, nil
 }
 
+// quoteIdent double-quotes name for use as a Postgres identifier (schema or
+// role name) in a raw SQL string built via fmt.Sprintf. moduleIdentifiers
+// already restricts the underlying value to [a-z_][a-z0-9_]* via
+// safeIdentRe, so this is defense-in-depth rather than the only thing
+// standing between us and injection - but building identifiers with bare
+// fmt.Sprintf is exactly the kind of thing that becomes a real bug the
+// moment safeIdentRe is ever loosened, so every identifier interpolated into
+// SQL below goes through this rather than being trusted as pre-sanitised.
+func quoteIdent(name string) string {
+	return pgx.Identifier{name}.Sanitize()
+}
+
 // provisionSchema creates the Postgres schema and role for a module if they
 // do not already exist, and creates the migration tracking table if absent.
 func provisionSchema(ctx context.Context, d Deps, schemaName, roleName string) error {
 	// Create schema.
-	if _, err := d.DB.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", schemaName)); err != nil {
+	if _, err := d.DB.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", quoteIdent(schemaName))); err != nil {
 		return fmt.Errorf("create schema %s: %w", schemaName, err)
 	}
 	// Create role (no login, no superuser).
-	// IF NOT EXISTS is Postgres 9.5+ — safe here.
+	// IF NOT EXISTS is Postgres 9.5+ — safe here. roleName appears twice: once
+	// as a quoted string literal (pg_roles.rolname comparison - not an
+	// identifier, left as a plain %s since safeIdentRe already guarantees no
+	// quote characters can appear in it) and once as the identifier being
+	// created (quoted via quoteIdent).
 	if _, err := d.DB.Exec(ctx, fmt.Sprintf(`
 		DO $$ BEGIN
 			IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '%s') THEN
 				CREATE ROLE %s NOLOGIN;
 			END IF;
-		END $$`, roleName, roleName),
+		END $$`, roleName, quoteIdent(roleName)),
 	); err != nil {
 		return fmt.Errorf("create role %s: %w", roleName, err)
 	}
 	// Grant usage on the schema to the role.
-	if _, err := d.DB.Exec(ctx, fmt.Sprintf("GRANT USAGE ON SCHEMA %s TO %s", schemaName, roleName)); err != nil {
+	if _, err := d.DB.Exec(ctx, fmt.Sprintf("GRANT USAGE ON SCHEMA %s TO %s", quoteIdent(schemaName), quoteIdent(roleName))); err != nil {
 		return fmt.Errorf("grant usage on %s to %s: %w", schemaName, roleName, err)
 	}
 	// Migration tracking table (in the public schema, owned by Core's superuser).

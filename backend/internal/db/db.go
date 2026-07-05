@@ -1886,6 +1886,20 @@ func (p *Pool) EnsureModuleStoreSchema(ctx context.Context) error {
 		return fmt.Errorf("db: ensure installed_modules.updated_at: %w", err)
 	}
 
+	// cosign_verified: whether installer.go's Cosign check actually passed
+	// for the currently-installed version. Added 2026-07-05 - the
+	// verification itself has run on every install/update since Cosign
+	// support was added, but the result was only ever logged, never
+	// persisted, so there was no way for an admin to see it anywhere. false
+	// covers both "verification failed" and "no signature to check" (source
+	// != official, or no cosign_sig_url yet) - callers that need to tell
+	// those apart already have that detail in the install log.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE installed_modules ADD COLUMN IF NOT EXISTS cosign_verified BOOLEAN NOT NULL DEFAULT FALSE
+	`); err != nil {
+		return fmt.Errorf("db: ensure installed_modules.cosign_verified: %w", err)
+	}
+
 	// ── module_registry ───────────────────────────────────────────────────────
 
 	// Local cache of official registry.json + modulab-community index.
@@ -1957,6 +1971,7 @@ type InstalledModuleRow struct {
 	Manifest         json.RawMessage `json:"manifest,omitempty"` // raw JSONB — RawMessage serialises as-is, not base64
 	Status           string     `json:"status"`
 	Pinned           bool       `json:"pinned"`
+	CosignVerified   bool       `json:"cosign_verified"`
 	CachedZipPath    *string    `json:"cached_zip_path,omitempty"`
 	AvailableVersion *string    `json:"available_version,omitempty"`
 	LastUpdateCheck  *time.Time `json:"last_update_check,omitempty"`
@@ -1967,12 +1982,15 @@ type InstalledModuleRow struct {
 // InsertInstalledModule writes a new module row with status "installing".
 // Called at the start of the install transaction so the UI can show progress
 // via the modul.state_change SSE event before migrations finish.
-func (p *Pool) InsertInstalledModule(ctx context.Context, name, version string, tier int, scope, source, releaseURL, sha256 string, manifest []byte) error {
+// cosignVerified is the result of installer.go's Cosign check for this
+// specific install (added 2026-07-05 - previously computed and logged but
+// discarded, never persisted anywhere an admin could see it).
+func (p *Pool) InsertInstalledModule(ctx context.Context, name, version string, tier int, scope, source, releaseURL, sha256 string, manifest []byte, cosignVerified bool) error {
 	_, err := p.Exec(ctx, `
 		INSERT INTO installed_modules
-		    (name, version, tier, scope, source, release_url, sha256, manifest, status, installed_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'installing', now(), now())
-	`, name, version, tier, scope, source, releaseURL, sha256, manifest)
+		    (name, version, tier, scope, source, release_url, sha256, manifest, status, cosign_verified, installed_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'installing', $9, now(), now())
+	`, name, version, tier, scope, source, releaseURL, sha256, manifest, cosignVerified)
 	if err != nil {
 		return fmt.Errorf("db: insert installed_module %q: %w", name, err)
 	}
@@ -1996,12 +2014,12 @@ func (p *Pool) GetInstalledModule(ctx context.Context, name string) (InstalledMo
 	var r InstalledModuleRow
 	err := p.QueryRow(ctx, `
 		SELECT name, version, tier, scope, source, release_url, sha256, manifest,
-		       status, pinned, cached_zip_path, available_version, last_update_check,
+		       status, pinned, cosign_verified, cached_zip_path, available_version, last_update_check,
 		       installed_at, updated_at
 		FROM installed_modules WHERE name = $1
 	`, name).Scan(
 		&r.Name, &r.Version, &r.Tier, &r.Scope, &r.Source, &r.ReleaseURL, &r.SHA256, &r.Manifest,
-		&r.Status, &r.Pinned, &r.CachedZipPath, &r.AvailableVersion, &r.LastUpdateCheck,
+		&r.Status, &r.Pinned, &r.CosignVerified, &r.CachedZipPath, &r.AvailableVersion, &r.LastUpdateCheck,
 		&r.InstalledAt, &r.UpdatedAt,
 	)
 	if err != nil {
@@ -2017,7 +2035,7 @@ func (p *Pool) GetInstalledModule(ctx context.Context, name string) (InstalledMo
 func (p *Pool) ListInstalledModules(ctx context.Context) ([]InstalledModuleRow, error) {
 	rows, err := p.Query(ctx, `
 		SELECT name, version, tier, scope, source, release_url, sha256, manifest,
-		       status, pinned, cached_zip_path, available_version, last_update_check,
+		       status, pinned, cosign_verified, cached_zip_path, available_version, last_update_check,
 		       installed_at, updated_at
 		FROM installed_modules ORDER BY name ASC
 	`)
@@ -2031,7 +2049,7 @@ func (p *Pool) ListInstalledModules(ctx context.Context) ([]InstalledModuleRow, 
 		var r InstalledModuleRow
 		if err := rows.Scan(
 			&r.Name, &r.Version, &r.Tier, &r.Scope, &r.Source, &r.ReleaseURL, &r.SHA256, &r.Manifest,
-			&r.Status, &r.Pinned, &r.CachedZipPath, &r.AvailableVersion, &r.LastUpdateCheck,
+			&r.Status, &r.Pinned, &r.CosignVerified, &r.CachedZipPath, &r.AvailableVersion, &r.LastUpdateCheck,
 			&r.InstalledAt, &r.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("db: scan installed_module: %w", err)

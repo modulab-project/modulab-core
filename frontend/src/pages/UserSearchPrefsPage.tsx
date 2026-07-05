@@ -5,8 +5,13 @@ import { useAuthenticatedSession } from "../lib/useSession";
 import { getSearchPrefs, updateSearchPrefs, type SearchPrefs } from "../lib/api";
 import { getSessionToken } from "../lib/session";
 
+// Individual language names are intentionally left as native endonyms
+// (Deutsch, English, Français, ...) rather than translated - standard
+// convention for language pickers, so a user's own language always reads
+// correctly regardless of the current UI locale. Only the "all languages"
+// entry is real UI copy and goes through t() at render time below.
 const SEARCH_LANGUAGES = [
-  { value: "all", label: "All languages" },
+  { value: "all", label: "" },
   { value: "de", label: "Deutsch" },
   { value: "en", label: "English" },
   { value: "fr", label: "Français" },
@@ -141,7 +146,7 @@ export default function UserSearchPrefsPage() {
               >
                 {SEARCH_LANGUAGES.map((l) => (
                   <option key={l.value} value={l.value}>
-                    {l.label}
+                    {l.value === "all" ? t("home.search.language_all") : l.label}
                   </option>
                 ))}
               </select>

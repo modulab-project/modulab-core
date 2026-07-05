@@ -321,6 +321,7 @@
       "section_modules": "Installierte Module",
       "registry_sync_title": "ModuLab Modul Registry-Sync & Update-Suche",
       "ntp_drift": "Zeitsynchronisation (NTP)",
+      "cosign_available": "Modul-Signaturprüfung (Cosign)",
       "col_module": "Modul",
       "col_version": "Version",
       "col_status": "Status",
@@ -381,7 +382,12 @@
       "col_event": "Ereignis",
       "col_actor": "Akteur",
       "col_target": "Ziel",
-      "col_details": "Details"
+      "col_details": "Details",
+      "verify": "Integrität prüfen",
+      "verifying": "Wird geprüft…",
+      "verify_ok": "Kette intakt — {{count}} Einträge geprüft.",
+      "verify_broken": "Kette unterbrochen bei Eintrag #{{id}} — dieser oder ein früherer Eintrag wurde möglicherweise manipuliert.",
+      "verify_error": "Audit-Log konnte nicht geprüft werden."
     },
     "modules": {
       "title": "Modulverwaltung",
@@ -728,6 +734,7 @@
     "unpin": "Modul lösen",
     "pin_error": "Pin-Status konnte nicht geändert werden.",
     "pinned": "Angepinnt",
+    "cosign_verified": "Cosign-Signatur verifiziert",
     "status": {
       "installing": "Wird installiert",
       "active": "Aktiv",

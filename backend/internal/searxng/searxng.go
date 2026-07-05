@@ -39,8 +39,15 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
 	"github.com/modulab-project/modulab-core/backend/internal/crypto"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/netguard"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
 )
+
+// safeSearxClient is used for every request to the admin-configured SearXNG
+// base URL (Ping, fetchPage) instead of http.DefaultClient - base_url is
+// arbitrary admin input, so it goes through netguard's dial-time IP
+// allowlist. See netguard's doc comment for why (SSRF/DNS rebinding).
+var safeSearxClient = netguard.SafeHTTPClient(30 * time.Second)
 
 const (
 	settingKeyURL        = "searxng_url_enc"
@@ -123,7 +130,7 @@ func Ping(ctx context.Context, baseURL string) bool {
 		return false
 	}
 	req.Header.Set("User-Agent", "ModuLab-Core/1.0 (https://modulab.app)")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := safeSearxClient.Do(req)
 	if err != nil {
 		return false
 	}
@@ -494,7 +501,7 @@ func fetchPage(ctx context.Context, baseURL, query string, pageno int, sp search
 	}
 	req.Header.Set("User-Agent", "ModuLab-Core/1.0 (https://modulab.app)")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := safeSearxClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

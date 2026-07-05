@@ -257,6 +257,33 @@ func AuditLogHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 	}
 }
 
+// ---- GET /v1/audit-log/verify --------------------------------------------------
+
+// AuditVerifyHandler serves GET /v1/audit-log/verify, walking the whole
+// HMAC hash chain (audit.Verify) and reporting whether it's intact. Exposed
+// as an on-demand action on the Security Info page rather than run
+// automatically on every page load - the full-table scan is cheap at
+// homelab scale but there is no reason to pay it on every visit when the
+// chain only changes by appending, never rewriting.
+func AuditVerifyHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
+		masterKey, err := setup.ResolveMasterKey(ctx, pool, masterKeyEnv)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusPreconditionFailed)
+			return
+		}
+
+		result, err := audit.Verify(ctx, pool, masterKey)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+	}
+}
+
 // writeJSON is a local copy of the same helper from setup/wizard.go and
 // auth/admin.go - each package keeps its own so there is no shared utility
 // dependency just for one line of JSON encoding.

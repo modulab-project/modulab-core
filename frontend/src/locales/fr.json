@@ -320,6 +320,7 @@
       "section_modules": "Modules installés",
       "registry_sync_title": "Synchronisation du registre de modules ModuLab et recherche de mises à jour",
       "ntp_drift": "Synchronisation horaire (NTP)",
+      "cosign_available": "Vérification des signatures de modules (Cosign)",
       "col_module": "Module",
       "col_version": "Version",
       "col_status": "Statut",
@@ -380,7 +381,12 @@
       "col_event": "Événement",
       "col_actor": "Acteur",
       "col_target": "Cible",
-      "col_details": "Détails"
+      "col_details": "Détails",
+      "verify": "Vérifier l'intégrité",
+      "verifying": "Vérification…",
+      "verify_ok": "Chaîne intacte — {{count}} entrées vérifiées.",
+      "verify_broken": "Chaîne rompue à l'entrée #{{id}} — cette entrée ou une précédente a peut-être été altérée.",
+      "verify_error": "Impossible de vérifier le journal d'audit."
     },
     "modules": {
       "title": "Gestion des modules",
@@ -655,14 +661,18 @@
     "feeds": {
       "title": "Mes flux",
       "subtitle": "Activez ou désactivez les flux d'actualités pour personnaliser votre page d'accueil.",
-      "empty": "Aucun flux disponible pour l'instant. Un administrateur doit d'abord en ajouter."
+      "empty": "Aucun flux disponible pour l'instant. Un administrateur doit d'abord en ajouter.",
+      "load_error": "Impossible de charger vos flux.",
+      "toggle_error": "Impossible d'enregistrer cette modification — veuillez réessayer."
     },
     "search": {
       "title": "Paramètres de recherche",
       "subtitle": "Ces préférences s'appliquent à toutes vos recherches web.",
       "safesearch_desc": "Filtrer le contenu explicite de vos résultats de recherche web et d'images.",
       "language_desc": "Préférer les résultats dans une langue spécifique.",
-      "saved": "Enregistré"
+      "saved": "Enregistré",
+      "load_error": "Impossible de charger vos préférences de recherche.",
+      "save_error": "Impossible d'enregistrer cette modification — veuillez réessayer."
     }
   },
   "store": {
@@ -710,6 +720,7 @@
     "unpin": "Désépingler le module",
     "pin_error": "Impossible de modifier l'état d'épinglage.",
     "pinned": "Épinglé",
+    "cosign_verified": "Signature Cosign vérifiée",
     "status": {
       "installing": "Installation",
       "active": "Actif",

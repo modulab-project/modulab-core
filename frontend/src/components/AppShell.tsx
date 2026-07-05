@@ -721,6 +721,9 @@ function ProfilePanelContent({
           }}
           className="rounded-md border border-gray-300 bg-white px-2 py-0.5 text-xs font-medium text-gray-700 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
         >
+          {/* Native endonyms intentionally hardcoded, not run through t() -
+              a language switcher must show each option in its own language
+              regardless of the current UI locale (standard convention). */}
           <option value="en">English</option>
           <option value="de">Deutsch</option>
           <option value="fr">Français</option>

@@ -330,3 +330,62 @@ func entryHMAC(masterKey, eventType, actorID, targetID, prevHash string) string 
 	_, _ = fmt.Fprintf(mac, "%s|%s|%s|%s", eventType, actorID, targetID, prevHash)
 	return hex.EncodeToString(mac.Sum(nil))
 }
+
+// VerifyResult reports the outcome of walking the whole hash chain.
+type VerifyResult struct {
+	OK             bool  `json:"ok"`
+	EntriesChecked int64 `json:"entries_checked"`
+	// BrokenAtID is the id of the first entry whose stored hash does not
+	// match its recomputed value, or whose prev_hash does not match the
+	// previous entry's hash - 0 if OK is true.
+	BrokenAtID int64 `json:"broken_at_id,omitempty"`
+}
+
+// Verify walks every audit_log row in insertion order (oldest first) and
+// recomputes each entry's HMAC from its own fields and the previous row's
+// hash, comparing it against what's stored. Any mismatch - a tampered field,
+// a hash edited in place, or a row deleted/inserted out of band - breaks the
+// chain from that point forward, since every later entry's prev_hash was
+// computed against the untampered original. Read-only: this never writes
+// anything, purely a diagnostic for the Security Info page's "verify
+// integrity" action.
+func Verify(ctx context.Context, pool *db.Pool, masterKey string) (VerifyResult, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT id, event_type, actor_id, target_id, prev_hash, hash
+		FROM audit_log
+		ORDER BY id ASC
+	`)
+	if err != nil {
+		return VerifyResult{}, fmt.Errorf("audit: verify query: %w", err)
+	}
+	defer rows.Close()
+
+	var (
+		checked  int64
+		expected string // prev_hash the current row must carry
+		first    = true
+	)
+	for rows.Next() {
+		var (
+			id                            int64
+			eventType, actorID, targetID  string
+			prevHash, hash                string
+		)
+		if err := rows.Scan(&id, &eventType, &actorID, &targetID, &prevHash, &hash); err != nil {
+			return VerifyResult{}, fmt.Errorf("audit: verify scan: %w", err)
+		}
+		checked++
+		if !first && prevHash != expected {
+			return VerifyResult{OK: false, EntriesChecked: checked, BrokenAtID: id}, nil
+		}
+		first = false
+		if entryHMAC(masterKey, eventType, actorID, targetID, prevHash) != hash {
+			return VerifyResult{OK: false, EntriesChecked: checked, BrokenAtID: id}, nil
+		}
+		expected = hash
+	}
+	if err := rows.Err(); err != nil {
+		return VerifyResult{}, fmt.Errorf("audit: verify rows: %w", err)
+	}
+	return VerifyResult{OK: true, EntriesChecked: checked}, nil
+}

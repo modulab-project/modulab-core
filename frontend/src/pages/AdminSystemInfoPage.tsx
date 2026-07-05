@@ -143,6 +143,11 @@ export default function AdminSystemInfoPage() {
                     warn={info.tls_cert_days_left <= 14}
                   />
                 )}
+                <InfraRow
+                  icon="ti-shield-lock"
+                  label={t("admin.system_info.cosign_available")}
+                  ok={info.cosign_available}
+                />
               </div>
             </Section>
 
@@ -290,6 +295,12 @@ function ModuleRow({ mod, even }: { mod: SystemInfoModule; even: boolean }) {
         <div className="flex items-center gap-1.5">
           {mod.name}
           {mod.pinned && <i className="ti ti-pin text-[12px] text-gray-400" title={t("modules.pinned")} />}
+          {mod.cosign_verified && (
+            <i
+              className="ti ti-shield-check text-[12px] text-teal-600 dark:text-teal-400"
+              title={t("modules.cosign_verified")}
+            />
+          )}
         </div>
       </td>
       <td className="px-4 py-2.5">

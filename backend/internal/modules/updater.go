@@ -121,17 +121,28 @@ func Update(ctx context.Context, d Deps, entry store.Entry) error {
 	// ── 5. Cosign verification ─────────────────────────────────────────────
 	// entry.CosignSigURL (official modules) points at a Sigstore bundle (JSON,
 	// see build-module.sh / VerifyCosign doc comment), not a legacy raw signature.
+	//
+	// cosignVerified (added 2026-07-05, same as installer.go's install path)
+	// is threaded through to updateInstalledModuleRecord below so the result
+	// is actually persisted - previously it was computed here and then
+	// discarded, same gap as the install path had.
+	cosignVerified := false
 	if entry.CosignSigURL != "" {
 		if err := downloadFile(dlCtx, entry.CosignSigURL, sigPath, maxSigFileBytes); err != nil {
 			return fmt.Errorf("modules: update %q: download cosign bundle: %w", entry.Name, err)
 		}
-		if _, err := VerifyCosign(zipPath, sigPath, d.CosignBin); err != nil {
+		ok, err := VerifyCosign(zipPath, sigPath, d.CosignBin)
+		if err != nil {
 			return fmt.Errorf("modules: update %q: cosign verify: %w", entry.Name, err)
 		}
+		cosignVerified = ok
 	} else if entry.Source != "official" {
 		// Community: best-effort with conventional .sig path
 		if dlErr := downloadFile(dlCtx, sigURL, sigPath, maxSigFileBytes); dlErr == nil {
-			if _, err := VerifyCosign(zipPath, sigPath, d.CosignBin); err != nil {
+			ok, err := VerifyCosign(zipPath, sigPath, d.CosignBin)
+			if err == nil {
+				cosignVerified = ok
+			} else {
 				log.Printf("modules: update %q: cosign skipped: %v", entry.Name, err)
 			}
 		}
@@ -231,7 +242,7 @@ func Update(ctx context.Context, d Deps, entry store.Entry) error {
 	}
 
 	// ── 10. Update DB row ─────────────────────────────────────────────────
-	if err := d.updateInstalledModuleRecord(ctx, entry.Name, mf.Version, gotHex, zipURL, manifestJSON); err != nil {
+	if err := d.updateInstalledModuleRecord(ctx, entry.Name, mf.Version, gotHex, zipURL, manifestJSON, cosignVerified); err != nil {
 		return fmt.Errorf("modules: update %q: db update: %w", entry.Name, err)
 	}
 	if _, err := d.DB.UpdateModuleStatus(ctx, entry.Name, db.ModuleStatusActive); err != nil {
@@ -315,19 +326,24 @@ func cacheCurrentZIP(ctx context.Context, releaseURL, path string) error {
 	return downloadFile(dlCtx, releaseURL, path, maxModuleZIPBytes)
 }
 
-// updateInstalledModuleRecord patches the version, sha256, release_url, and
-// manifest columns on the installed_modules row. There is no single DB helper
-// for this combination, so we exec the UPDATE directly.
-func (d Deps) updateInstalledModuleRecord(ctx context.Context, name, version, sha256, releaseURL string, manifest []byte) error {
+// updateInstalledModuleRecord patches the version, sha256, release_url,
+// manifest, and cosign_verified columns on the installed_modules row. There
+// is no single DB helper for this combination, so we exec the UPDATE
+// directly. cosignVerified is this update's own Cosign result (added
+// 2026-07-05) - overwrites whatever was recorded for the previous version,
+// since a signature check is only ever meaningful for the version it was
+// actually run against.
+func (d Deps) updateInstalledModuleRecord(ctx context.Context, name, version, sha256, releaseURL string, manifest []byte, cosignVerified bool) error {
 	_, err := d.DB.Exec(ctx, `
 		UPDATE installed_modules
-		SET version      = $2,
-		    sha256       = $3,
-		    release_url  = $4,
-		    manifest     = $5,
-		    updated_at   = $6
+		SET version         = $2,
+		    sha256          = $3,
+		    release_url     = $4,
+		    manifest        = $5,
+		    cosign_verified = $6,
+		    updated_at      = $7
 		WHERE name = $1
-	`, name, version, sha256, releaseURL, manifest, time.Now())
+	`, name, version, sha256, releaseURL, manifest, cosignVerified, time.Now())
 	if err != nil {
 		return fmt.Errorf("db: update installed_module record %q: %w", name, err)
 	}

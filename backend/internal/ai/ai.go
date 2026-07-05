@@ -47,7 +47,28 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/netguard"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
+)
+
+// safeProviderClient and safeProviderStreamClient are used for requests
+// whose target host comes from an admin-configured AI provider's base_url
+// (fetchModels, streamOpenAICompat) - unlike the fixed
+// api.anthropic.com/api.deepseek.com URLs used elsewhere in this file,
+// base_url for a "custom" provider is arbitrary admin input, so both go
+// through netguard's dial-time IP allowlist instead of http.DefaultClient.
+// See netguard's doc comment for why (SSRF/DNS rebinding).
+//
+// Two separate clients because a client-level Timeout applies to the whole
+// round trip including reading the response body: fine for fetchModels (a
+// quick metadata call), wrong for streamOpenAICompat, which reads an SSE
+// stream that can legitimately run far longer than any fixed timeout - that
+// one relies solely on the caller's request context for cancellation
+// (Timeout: 0 disables the client-level cutoff), same as the existing
+// Anthropic streaming client below already does via http.DefaultClient.
+var (
+	safeProviderClient       = netguard.SafeHTTPClient(30 * time.Second)
+	safeProviderStreamClient = netguard.SafeHTTPClient(0)
 )
 
 // ---- types -----------------------------------------------------------------
@@ -489,7 +510,7 @@ func fetchModels(ctx context.Context, provType, baseURL, apiKey string) ([]strin
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := safeProviderClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
@@ -1189,7 +1210,7 @@ func streamOpenAICompat(ctx context.Context, w http.ResponseWriter, apiKey, base
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := safeProviderStreamClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("openai_compat: request: %w", err)
 	}

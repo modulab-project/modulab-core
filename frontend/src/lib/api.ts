@@ -974,6 +974,11 @@ export interface SystemInfoModule {
   source: string;
   pinned: boolean;
   tier: number;
+  // cosign_verified (added 2026-07-05): whether the Cosign signature check
+  // actually passed for the currently-installed version - false for
+  // "direct" installs (no registry signature to check at all) and for any
+  // official/community install made before this field existed.
+  cosign_verified: boolean;
 }
 
 export interface ActiveSession {
@@ -1013,6 +1018,12 @@ export interface SystemInfo {
   ntp_drift_ok?: boolean;
   registry_sync: SystemInfoTimer;
   modules: SystemInfoModule[];
+  // cosign_available (added 2026-07-05): whether the cosign binary itself
+  // is reachable on this instance. If false, every module's
+  // cosign_verified is false too regardless of whether a signature
+  // exists - shown separately so that doesn't read as "signature check
+  // failed" when it actually means "the check couldn't run at all".
+  cosign_available: boolean;
   latest_core_version?: string;
   core_update_available: boolean;
   active_sessions?: ActiveSession[];
@@ -1104,6 +1115,21 @@ export function getAuditLog(
   if (opts?.limit) params.set("limit", String(opts.limit));
   const qs = params.toString();
   return request<AuditEntry[]>(`/v1/audit-log${qs ? `?${qs}` : ""}`, {
+    headers: bearerHeaders(token),
+  });
+}
+
+export interface AuditVerifyResult {
+  ok: boolean;
+  entries_checked: number;
+  broken_at_id?: number;
+}
+
+// GET /v1/audit-log/verify — walks the whole HMAC hash chain server-side and
+// reports whether it's intact. On-demand only (not called on page load) -
+// see the handler's doc comment for why.
+export function verifyAuditLog(token: string): Promise<AuditVerifyResult> {
+  return request<AuditVerifyResult>("/v1/audit-log/verify", {
     headers: bearerHeaders(token),
   });
 }

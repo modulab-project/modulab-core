@@ -262,7 +262,12 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 		cosignSkipped = true
 		log.Printf("modules: install %q: cosign skipped (no sig URL in registry)", entry.Name)
 	}
-	_ = cosignSkipped // badge logic lives in handlers — stored in VerifyResult if needed
+	// cosignVerified is persisted below (step 8, InsertInstalledModule) so
+	// System Info can show a signature badge - previously computed here and
+	// then discarded. cosignSkipped itself isn't persisted (it's implied by
+	// cosignVerified == false); kept as a local variable only for its log
+	// lines above.
+	_ = cosignSkipped
 
 	// ── 6. Extract ZIP ────────────────────────────────────────────────────
 	extractDir := filepath.Join(tmpDir, "extracted")
@@ -294,7 +299,7 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 	// From this point on, any error must attempt to clean up the DB row.
 	if err := d.DB.InsertInstalledModule(ctx,
 		mf.Name, mf.Version, mf.Tier, mf.Scope,
-		entry.Source, zipURL, gotHex, manifestJSON,
+		entry.Source, zipURL, gotHex, manifestJSON, cosignVerified,
 	); err != nil {
 		return fmt.Errorf("modules: install %q: db insert: %w", entry.Name, err)
 	}

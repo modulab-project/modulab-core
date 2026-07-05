@@ -321,6 +321,7 @@
       "section_modules": "Installed modules",
       "registry_sync_title": "ModuLab module registry sync & update check",
       "ntp_drift": "Time sync (NTP)",
+      "cosign_available": "Module signature verification (Cosign)",
       "col_module": "Module",
       "col_version": "Version",
       "col_status": "Status",
@@ -381,7 +382,12 @@
       "col_event": "Event",
       "col_actor": "Actor",
       "col_target": "Target",
-      "col_details": "Details"
+      "col_details": "Details",
+      "verify": "Verify integrity",
+      "verifying": "Verifying…",
+      "verify_ok": "Chain intact — {{count}} entries verified.",
+      "verify_broken": "Chain broken at entry #{{id}} — this entry or an earlier one may have been tampered with.",
+      "verify_error": "Could not verify the audit log."
     },
     "modules": {
       "title": "Module Management",
@@ -728,6 +734,7 @@
     "unpin": "Unpin module",
     "pin_error": "Could not change pin state.",
     "pinned": "Pinned",
+    "cosign_verified": "Cosign signature verified",
     "status": {
       "installing": "Installing",
       "active": "Active",

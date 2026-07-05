@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
-import { getAuditLog, type AuditEntry } from "../lib/api";
+import { getAuditLog, verifyAuditLog, type AuditEntry, type AuditVerifyResult } from "../lib/api";
 import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
@@ -63,6 +63,24 @@ export default function AdminAuditPage() {
   const [error, setError] = useState<string | null>(null);
   const [fetching, setFetching] = useState(false);
   const [hasMore, setHasMore] = useState(false);
+
+  // Hash-chain integrity check — on-demand only, see verifyAuditLog's doc
+  // comment. verifyResult is null until the admin actually clicks the button.
+  const [verifying, setVerifying] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<AuditVerifyResult | null>(null);
+  const [verifyError, setVerifyError] = useState(false);
+
+  function handleVerify() {
+    const token = getSessionToken();
+    if (!token || verifying) return;
+    setVerifying(true);
+    setVerifyError(false);
+    setVerifyResult(null);
+    verifyAuditLog(token)
+      .then(setVerifyResult)
+      .catch(() => setVerifyError(true))
+      .finally(() => setVerifying(false));
+  }
 
   // Filter state
   const [eventTypeFilter, setEventTypeFilter] = useState("");
@@ -156,10 +174,44 @@ export default function AdminAuditPage() {
                 </option>
               ))}
             </select>
+            <button
+              type="button"
+              onClick={handleVerify}
+              disabled={verifying}
+              className="whitespace-nowrap rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-900"
+            >
+              {verifying ? t("admin.audit.verifying") : t("admin.audit.verify")}
+            </button>
           </div>
         </div>
 
+        {verifyResult && (
+          <p
+            className={`mb-4 flex items-center gap-1.5 text-sm ${
+              verifyResult.ok
+                ? "text-teal-600 dark:text-teal-400"
+                : "text-red-600 dark:text-red-400"
+            }`}
+          >
+            <i className={`ti ${verifyResult.ok ? "ti-shield-check" : "ti-alert-triangle"} text-[14px]`} />
+            {verifyResult.ok
+              ? t("admin.audit.verify_ok", { count: verifyResult.entries_checked })
+              : t("admin.audit.verify_broken", { id: verifyResult.broken_at_id })}
+          </p>
+        )}
+        {verifyError && (
+          <p className="mb-4 text-sm text-red-600 dark:text-red-400">{t("admin.audit.verify_error")}</p>
+        )}
+
         {error && <p className="mb-4 text-sm text-red-600 dark:text-red-400">{error}</p>}
+
+        {entries.length === 0 && fetching && (
+          <div className="flex flex-col gap-2">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="h-10 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-800" />
+            ))}
+          </div>
+        )}
 
         {entries.length === 0 && !fetching && (
           <p className="text-sm text-gray-400 dark:text-gray-500">{t("admin.audit.empty")}</p>

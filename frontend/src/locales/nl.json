@@ -320,6 +320,7 @@
       "section_modules": "Geïnstalleerde modules",
       "registry_sync_title": "ModuLab-moduleregistersynchronisatie & updatecontrole",
       "ntp_drift": "Tijdsynchronisatie (NTP)",
+      "cosign_available": "Modulhandtekeningcontrole (Cosign)",
       "col_module": "Module",
       "col_version": "Versie",
       "col_status": "Status",
@@ -380,7 +381,12 @@
       "col_event": "Gebeurtenis",
       "col_actor": "Actor",
       "col_target": "Doel",
-      "col_details": "Details"
+      "col_details": "Details",
+      "verify": "Integriteit controleren",
+      "verifying": "Controleren…",
+      "verify_ok": "Keten intact — {{count}} items gecontroleerd.",
+      "verify_broken": "Keten verbroken bij item #{{id}} — dit item of een eerder item is mogelijk gewijzigd.",
+      "verify_error": "Audit-log kon niet worden gecontroleerd."
     },
     "modules": {
       "title": "Modulebeheer",
@@ -655,14 +661,18 @@
     "feeds": {
       "title": "Mijn feeds",
       "subtitle": "Schakel nieuwsfeeds in of uit om uw startpagina aan te passen.",
-      "empty": "Nog geen feeds beschikbaar. Een beheerder moet er eerst een toevoegen."
+      "empty": "Nog geen feeds beschikbaar. Een beheerder moet er eerst een toevoegen.",
+      "load_error": "Uw feeds konden niet worden geladen.",
+      "toggle_error": "Deze wijziging kon niet worden opgeslagen — probeer het opnieuw."
     },
     "search": {
       "title": "Zoekinstellingen",
       "subtitle": "Deze voorkeuren zijn van toepassing op al uw webzoekopdrachten.",
       "safesearch_desc": "Expliciete inhoud filteren uit uw web- en afbeeldingszoekresultaten.",
       "language_desc": "Resultaten in een specifieke taal verkiezen.",
-      "saved": "Opgeslagen"
+      "saved": "Opgeslagen",
+      "load_error": "Uw zoekvoorkeuren konden niet worden geladen.",
+      "save_error": "Deze wijziging kon niet worden opgeslagen — probeer het opnieuw."
     }
   },
   "store": {
@@ -710,6 +720,7 @@
     "unpin": "Module losmaken",
     "pin_error": "Kan vastmaakstatus niet wijzigen.",
     "pinned": "Vastgemaakt",
+    "cosign_verified": "Cosign-handtekening geverifieerd",
     "status": {
       "installing": "Installeren",
       "active": "Actief",

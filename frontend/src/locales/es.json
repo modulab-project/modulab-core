@@ -320,6 +320,7 @@
       "section_modules": "Módulos instalados",
       "registry_sync_title": "Sincronización del registro de módulos de ModuLab y búsqueda de actualizaciones",
       "ntp_drift": "Sincronización horaria (NTP)",
+      "cosign_available": "Verificación de firmas de módulos (Cosign)",
       "col_module": "Módulo",
       "col_version": "Versión",
       "col_status": "Estado",
@@ -380,7 +381,12 @@
       "col_event": "Evento",
       "col_actor": "Actor",
       "col_target": "Objetivo",
-      "col_details": "Detalles"
+      "col_details": "Detalles",
+      "verify": "Verificar integridad",
+      "verifying": "Verificando…",
+      "verify_ok": "Cadena intacta — {{count}} entradas verificadas.",
+      "verify_broken": "Cadena rota en la entrada #{{id}} — esta entrada o una anterior pudo haber sido manipulada.",
+      "verify_error": "No se pudo verificar el registro de auditoría."
     },
     "modules": {
       "title": "Gestión de módulos",
@@ -655,14 +661,18 @@
     "feeds": {
       "title": "Mis feeds",
       "subtitle": "Active o desactive feeds de noticias para personalizar su página de inicio.",
-      "empty": "Aún no hay feeds disponibles. Un administrador debe añadir primero."
+      "empty": "Aún no hay feeds disponibles. Un administrador debe añadir primero.",
+      "load_error": "No se pudieron cargar sus feeds.",
+      "toggle_error": "No se pudo guardar ese cambio — inténtelo de nuevo."
     },
     "search": {
       "title": "Configuración de búsqueda",
       "subtitle": "Estas preferencias se aplican a todas sus búsquedas web.",
       "safesearch_desc": "Filtrar contenido explícito de sus resultados de búsqueda web e imágenes.",
       "language_desc": "Preferir resultados en un idioma específico.",
-      "saved": "Guardado"
+      "saved": "Guardado",
+      "load_error": "No se pudieron cargar sus preferencias de búsqueda.",
+      "save_error": "No se pudo guardar ese cambio — inténtelo de nuevo."
     }
   },
   "store": {
@@ -710,6 +720,7 @@
     "unpin": "Desanclar módulo",
     "pin_error": "No se puede cambiar el estado de anclaje.",
     "pinned": "Anclado",
+    "cosign_verified": "Firma Cosign verificada",
     "status": {
       "installing": "Instalando",
       "active": "Activo",
