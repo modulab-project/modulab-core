@@ -997,6 +997,7 @@ export interface SystemInfoRateLimit {
   key: string;
   label: string;
   identifier: string;
+  display_name?: string;
   count: number;
   max?: number;
   reset_in_seconds: number;

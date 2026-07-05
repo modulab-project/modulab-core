@@ -562,8 +562,15 @@ function RateLimitRow({
   return (
     <tr className="border-b border-gray-100 last:border-0 dark:border-gray-800">
       <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-600 dark:text-gray-400">{entry.label}</td>
-      <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-gray-700 dark:text-gray-300">
-        {entry.identifier || "—"}
+      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-700 dark:text-gray-300">
+        {entry.display_name ? (
+          <div className="flex flex-col items-start gap-0.5">
+            <span>{entry.display_name}</span>
+            <span className="font-mono text-[10px] text-gray-400 dark:text-gray-600">{entry.identifier}</span>
+          </div>
+        ) : (
+          <span className="font-mono">{entry.identifier || "—"}</span>
+        )}
       </td>
       <td className="whitespace-nowrap px-4 py-2.5 text-xs">
         <span className={overLimit ? "font-medium text-red-600 dark:text-red-400" : "text-gray-600 dark:text-gray-400"}>

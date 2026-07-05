@@ -1010,14 +1010,9 @@ func authRateLimitMiddleware(vk *valkey.Client, pool *db.Pool, masterKeyEnv stri
 // IncrExpire counter itself.
 func identifyBySessionOrIP(authDeps auth.Deps) func(*http.Request) string {
 	return func(r *http.Request) string {
-		const prefix = "Bearer "
-		h := r.Header.Get("Authorization")
-		if len(h) > len(prefix) && strings.EqualFold(h[:len(prefix)], prefix) {
-			token := strings.TrimSpace(h[len(prefix):])
-			if token != "" {
-				if sess, ok, err := auth.ValidateSession(r.Context(), authDeps, token); err == nil && ok {
-					return "user:" + sess.UserID
-				}
+		if token := bearerToken(r); token != "" {
+			if sess, ok, err := auth.ValidateSession(r.Context(), authDeps, token); err == nil && ok {
+				return "user:" + sess.UserID
 			}
 		}
 		return clientIP(r)
@@ -1096,12 +1091,21 @@ func rateLimitMax(label string) int64 {
 // disappears between the SCAN and the follow-up Get/TTL calls (its window
 // simply elapsed in the meantime) is skipped rather than treated as an
 // error, since that's the expected common case, not a failure.
-func activeRateLimits(ctx context.Context, vk *valkey.Client) []systemInfoRateLimit {
+//
+// pool (added 2026-07-05 alongside identifyBySessionOrIP) resolves a
+// "user:<sub>" identifier to a display name via GetUser, purely cosmetic —
+// a raw OIDC subject is meaningless to an admin at a glance, unlike the
+// active-sessions table which already shows a name. Cached per call via
+// userNameCache so a burst of rows for the same repeat offender doesn't
+// issue one DB round trip each.
+func activeRateLimits(ctx context.Context, vk *valkey.Client, pool *db.Pool) []systemInfoRateLimit {
 	keys, err := vk.ScanKeysWithPrefix(ctx, "ratelimit:")
 	if err != nil {
 		log.Printf("main: system info: scan rate limit keys: %v", err)
 		return nil
 	}
+
+	userNameCache := make(map[string]string)
 
 	limits := make([]systemInfoRateLimit, 0, len(keys))
 	for _, key := range keys {
@@ -1129,10 +1133,27 @@ func activeRateLimits(ctx context.Context, vk *valkey.Client) []systemInfoRateLi
 			continue
 		}
 
+		var displayName string
+		if subject, isUser := strings.CutPrefix(identifier, "user:"); isUser {
+			if cached, seen := userNameCache[subject]; seen {
+				displayName = cached
+			} else {
+				if u, found, err := pool.GetUser(ctx, subject); err == nil && found {
+					if u.Name != "" {
+						displayName = u.Name
+					} else {
+						displayName = u.Email
+					}
+				}
+				userNameCache[subject] = displayName
+			}
+		}
+
 		limits = append(limits, systemInfoRateLimit{
 			Key:            key,
 			Label:          label,
 			Identifier:     identifier,
+			DisplayName:    displayName,
 			Count:          count,
 			Max:            rateLimitMax(label),
 			ResetInSeconds: int64(ttl / time.Second),
@@ -1269,6 +1290,14 @@ type systemInfoRateLimit struct {
 	Key            string `json:"key"`
 	Label          string `json:"label"`
 	Identifier     string `json:"identifier"`
+	// DisplayName (added 2026-07-05, alongside identifyBySessionOrIP)
+	// resolves a "user:<sub>" identifier to the account's name/email via
+	// db.Pool.GetUser, so an admin sees "sookie" instead of a bare OIDC
+	// subject. Omitted entirely for IP-bucketed rows (no lookup possible or
+	// needed) and for a user ID that no longer resolves to any row (account
+	// deleted since the counter was created) - the raw identifier is still
+	// shown in that case, same as before this field existed.
+	DisplayName    string `json:"display_name,omitempty"`
 	Count          int64  `json:"count"`
 	Max            int64  `json:"max,omitempty"`
 	ResetInSeconds int64  `json:"reset_in_seconds"`
@@ -1385,7 +1414,7 @@ func systemInfoHandler(pool *db.Pool, valkeyClient *valkey.Client, cfg config.Co
 			resp.RegistrySync.NextRunAt = &nextStr
 		}
 
-		resp.RateLimits = activeRateLimits(ctx, valkeyClient)
+		resp.RateLimits = activeRateLimits(ctx, valkeyClient, pool)
 
 		if installed, err := pool.ListInstalledModules(ctx); err == nil {
 			resp.Modules = make([]systemInfoModule, 0, len(installed))
