@@ -1,7 +1,11 @@
 use_default_settings: true
 
 server:
-  secret_key: "modulab-dev-secret-key-not-for-production"
+  # Placeholder substituted with the real SEARXNG_SECRET_KEY (from .env)
+  # by the one-shot searxng-config service in docker-compose.yml before
+  # this container starts. Never hardcode a real value here - this file
+  # is version-controlled and would then be the same on every install.
+  secret_key: "__SEARXNG_SECRET_KEY__"
   # Disable rate limiting — ModuLab Core calls SearXNG directly over the
   # Docker network without a reverse proxy, so there is no X-Forwarded-For
   # header. The limiter/botdetection would block every request otherwise.

@@ -1000,7 +1000,13 @@ function StatusRow({
 // it instead of a fourth copy-pasted picture-or-initials fallback.
 export function Avatar({ session, className }: { session: Session; className: string }) {
   if (session.picture) {
-    return <img src={session.picture} alt="" className={`rounded-full object-cover ${className}`} />;
+    return (
+      <img
+        src={session.picture}
+        alt={session.name || session.email}
+        className={`rounded-full object-cover ${className}`}
+      />
+    );
   }
   return (
     <span

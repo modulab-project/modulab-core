@@ -221,6 +221,27 @@ services:
     networks:
       - modulab-internal
 
+  # ── SearXNG config init ──────────────────────────────────────────────────────
+  # One-shot container that writes settings.yml (with the real secret_key
+  # substituted in from .env) into the searxng-data volume before the
+  # actual searxng service starts. Runs on every `up`, but is idempotent -
+  # it just overwrites the file with the same substitution each time, so
+  # re-running it is harmless. This keeps SEARXNG_SECRET_KEY as the single
+  # source of truth in .env, same as every other secret in this stack,
+  # instead of relying on the searxng image to generate/store its own.
+  searxng-config:
+    image: alpine:3.20
+    restart: "no"
+    environment:
+      SEARXNG_SECRET_KEY: ${SEARXNG_SECRET_KEY}
+    volumes:
+      - ./searxng/settings.yml:/template/settings.yml:ro
+      - searxng-data:/etc/searxng
+    command:
+      - sh
+      - -c
+      - "sed \"s|__SEARXNG_SECRET_KEY__|$$SEARXNG_SECRET_KEY|\" /template/settings.yml > /etc/searxng/settings.yml"
+
   # ── SearXNG ───────────────────────────────────────────────────────────────────
   # SearXNG reuses ModuLab's Valkey instance (database index 1) to avoid a
   # second in-memory store. SearXNG namespaces its own keys so there is no
@@ -231,13 +252,13 @@ services:
     environment:
       SEARXNG_BASE_URL: https://${MODULAB_DOMAIN}/searxng/
       SEARXNG_REDIS_URL: redis://valkey:6379/1
-      SEARXNG_SECRET_KEY: ${SEARXNG_SECRET_KEY}
     mem_limit: 256m
     cpus: 0.5
     volumes:
       - searxng-data:/etc/searxng
-      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
     depends_on:
+      searxng-config:
+        condition: service_completed_successfully
       valkey:
         condition: service_healthy
     healthcheck:

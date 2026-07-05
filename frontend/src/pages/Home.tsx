@@ -170,6 +170,14 @@ export default function Home() {
     }
   }, [session, loadNews, loadPrefs, loadSearchPrefs, loadTiles]);
 
+  // Guards against out-of-order responses: if the user fires a second
+  // search (new query, or switching category/time-range) before the first
+  // one's response arrives, a slow first response must not clobber the
+  // second (newer) one's results. Each call to handleSearch claims the
+  // next sequence number; only the response matching the *latest* claimed
+  // number is allowed to update state.
+  const searchSeq = useRef(0);
+
   // handleSearch is called by Hero when the user submits the search box,
   // or by the category tab switcher when the user switches tabs.
   // It updates the URL (?q=...) without a page navigation and fires the
@@ -185,8 +193,10 @@ export default function Home() {
       // flooding the browser history with every keystroke search.
       navigate(trimmed ? `/?q=${encodeURIComponent(trimmed)}` : "/", { replace: true });
 
+      const mySeq = ++searchSeq.current;
+
       if (!trimmed || !searxngAvailable) {
-        setWebResults(null);
+        if (mySeq === searchSeq.current) setWebResults(null);
         return;
       }
 
@@ -197,15 +207,17 @@ export default function Home() {
       setWebResults(null);
       try {
         const results = await searchWeb(token, trimmed, cat, tr);
+        if (mySeq !== searchSeq.current) return; // a newer search has since started - discard
         setWebResults(results);
       } catch (err) {
+        if (mySeq !== searchSeq.current) return;
         if (err instanceof ApiError && err.status === 503) {
           // SearXNG not configured - hide the section silently.
           setSearxngAvailable(false);
         }
         setWebResults([]);
       } finally {
-        setWebLoading(false);
+        if (mySeq === searchSeq.current) setWebLoading(false);
       }
     },
     [searxngAvailable, navigate, category, timeRange],
@@ -1163,7 +1175,7 @@ function ArticleCard({
       {showImage && article.image_url && (
         <img
           src={article.image_url}
-          alt=""
+          alt={article.title}
           className="h-36 w-full object-cover"
           loading="lazy"
         />
@@ -1217,6 +1229,16 @@ function FeedsPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
       .catch(() => {})
       .finally(() => setFetching(false));
   }, [open]);
+
+  // Close on Escape key, same as WeatherPanel/NewsAllPanel.
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e: globalThis.KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
 
   async function handleToggle(feed: Feed) {
     const token = getSessionToken();
