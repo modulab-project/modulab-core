@@ -411,8 +411,12 @@ func SearchHandler(deps auth.Deps, masterKey string) http.HandlerFunc {
 		// Load user search prefs for safesearch + language defaults.
 		prefs, err := deps.Pool.GetSearchPrefs(r.Context(), sess.UserID)
 		if err != nil {
-			// Non-fatal: fall back to defaults.
-			prefs = db.SearchPrefs{Safesearch: 0, Language: "all"}
+			// Non-fatal: fall back to the same defaults GetSearchPrefs itself
+			// uses for a user with no saved row (db.go) - kept in sync there,
+			// this branch is only reached if GetSearchPrefs' own DB call
+			// fails outright, which today it treats as "no row" internally
+			// and never actually surfaces as an error.
+			prefs = db.SearchPrefs{Safesearch: 2, Language: "all"}
 		}
 
 		// Query params can override stored prefs for this request.

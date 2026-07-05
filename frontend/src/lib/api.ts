@@ -1080,8 +1080,13 @@ export interface AuditEntry {
   event_type: string;
   actor_id: string;
   actor_email: string;
+  // actor_name/target_name (added 2026-07-05) resolve to the account's
+  // current name where the subject still matches a users row - prefer
+  // these over *_email when present (see AdminAuditPage's rendering).
+  actor_name?: string;
   target_id: string;
   target_email: string;
+  target_name?: string;
   details: string;       // JSON string, "" if none
   prev_hash: string;
   hash: string;

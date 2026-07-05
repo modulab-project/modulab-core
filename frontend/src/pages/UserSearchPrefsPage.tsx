@@ -25,7 +25,12 @@ const SEARCH_LANGUAGES = [
 export default function UserSearchPrefsPage() {
   const { t } = useTranslation();
   const { session, loading } = useAuthenticatedSession();
-  const [prefs, setPrefs] = useState<SearchPrefs>({ safesearch: 0, language: "all" });
+  // Placeholder only, overwritten the moment getSearchPrefs resolves below -
+  // matches the backend's own no-row defaults (db.GetSearchPrefs: strict
+  // safesearch, language falls back to the user's ModuLab UI language) so
+  // there's no visible flash of different values while the real fetch is
+  // still in flight.
+  const [prefs, setPrefs] = useState<SearchPrefs>({ safesearch: 2, language: "all" });
   const [fetching, setFetching] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);

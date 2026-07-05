@@ -1096,7 +1096,12 @@ type SearchPrefs struct {
 }
 
 // GetSearchPrefs returns stored search preferences for userID, or defaults
-// (safesearch=0, language="all") when no row exists yet.
+// when no row exists yet: safesearch=2 ("strict") and language set to the
+// user's already-configured ModuLab UI language (users.ui_language, via
+// GetUserLanguage), falling back to "all" if that isn't set either.
+// Defaults changed 2026-07-05 per user request - a fresh account should
+// start with the stricter, less surprising SafeSearch level, and reuse a
+// preference ModuLab already has instead of defaulting to every language.
 func (p *Pool) GetSearchPrefs(ctx context.Context, userID string) (SearchPrefs, error) {
 	var prefs SearchPrefs
 	err := p.QueryRow(ctx, `
@@ -1105,7 +1110,11 @@ func (p *Pool) GetSearchPrefs(ctx context.Context, userID string) (SearchPrefs, 
 		WHERE  user_id = $1
 	`, userID).Scan(&prefs.Safesearch, &prefs.Language)
 	if err != nil {
-		return SearchPrefs{Safesearch: 0, Language: "all"}, nil
+		lang := "all"
+		if uiLang, langErr := p.GetUserLanguage(ctx, userID); langErr == nil && uiLang != "" {
+			lang = uiLang
+		}
+		return SearchPrefs{Safesearch: 2, Language: lang}, nil
 	}
 	return prefs, nil
 }

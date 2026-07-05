@@ -22,13 +22,34 @@ const EVENT_TYPES = [
   "config.smtp",
   "config.smtp.deleted",
   "config.oidc",
+  "config.oidc.deleted",
   "config.searxng",
   "config.searxng.deleted",
   "config.ai_provider",
   "config.ai_provider.deleted",
   "config.ai_provider.key_cleared",
+  "config.ai_settings",
   // Setup
   "setup.completed",
+  // Module lifecycle
+  "module.installed",
+  "module.uninstalled",
+  "module.updated",
+  "module.restarted",
+  "module.pinned",
+  "module.unpinned",
+  // Feed management
+  "feed.created",
+  "feed.updated",
+  "feed.deleted",
+  // Quick links
+  "quicklink.created",
+  "quicklink.updated",
+  "quicklink.deleted",
+  // Store registry sync
+  "store.sync_triggered",
+  // Rate limiting
+  "rate_limit.exceeded",
 ];
 
 const PAGE_SIZE = 50;
@@ -171,10 +192,10 @@ export default function AdminAuditPage() {
                       <EventBadge type={e.event_type} />
                     </td>
                     <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
-                      {e.actor_email || e.actor_id}
+                      {e.actor_name || e.actor_email || e.actor_id}
                     </td>
                     <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
-                      {e.target_email || e.target_id || "—"}
+                      {e.target_name || e.target_email || e.target_id || "—"}
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-gray-400 dark:text-gray-500">
                       {e.details ? <DetailsCell raw={e.details} /> : "—"}

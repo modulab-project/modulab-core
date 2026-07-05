@@ -137,18 +137,9 @@ export default function AdminSecurityInfoPage() {
           {t("admin.system.title")}
         </Link>
 
-        <div className="mb-8 flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-semibold mb-1">{t("admin.security_info.title")}</h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400">{t("admin.security_info.subtitle")}</p>
-          </div>
-          <Link
-            to="/admin/system/info"
-            className="mt-1 flex flex-none items-center gap-1 whitespace-nowrap text-xs font-medium text-teal-700 hover:text-teal-800 dark:text-teal-400 dark:hover:text-teal-300"
-          >
-            {t("admin.system_info.title")}
-            <i className="ti ti-arrow-right text-[13px]" />
-          </Link>
+        <div className="mb-8">
+          <h1 className="text-xl font-semibold mb-1">{t("admin.security_info.title")}</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{t("admin.security_info.subtitle")}</p>
         </div>
 
         {error && <p className="mb-6 text-sm text-red-600 dark:text-red-400">{error}</p>}

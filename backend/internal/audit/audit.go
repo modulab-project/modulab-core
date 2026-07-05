@@ -98,16 +98,25 @@ const (
 // Entry is one row from the audit_log table, returned by List. All PII
 // fields are already decrypted so callers can display them directly.
 type Entry struct {
-	ID             int64     `json:"id"`
-	CreatedAt      time.Time `json:"created_at"`
-	EventType      string    `json:"event_type"`
-	ActorID        string    `json:"actor_id"`
-	ActorEmail     string    `json:"actor_email"`
-	TargetID       string    `json:"target_id"`
-	TargetEmail    string    `json:"target_email"`
-	Details        string    `json:"details"`   // plaintext JSON or ""
-	PrevHash       string    `json:"prev_hash"`
-	Hash           string    `json:"hash"`
+	ID          int64     `json:"id"`
+	CreatedAt   time.Time `json:"created_at"`
+	EventType   string    `json:"event_type"`
+	ActorID     string    `json:"actor_id"`
+	ActorEmail  string    `json:"actor_email"`
+	// ActorName/TargetName (added 2026-07-05) resolve actor_id/target_id
+	// (the OIDC subject) against the current users.name via a LEFT JOIN in
+	// List - "" if the subject never matched a row (e.g. a purely IP-keyed
+	// rate-limit entry) or no longer does (the account was since deleted).
+	// A name is friendlier to read than a bare email, so callers should
+	// prefer ActorName/TargetName over the *Email fields when non-empty,
+	// falling back to email, then to the raw ID.
+	ActorName   string    `json:"actor_name,omitempty"`
+	TargetID    string    `json:"target_id"`
+	TargetEmail string    `json:"target_email"`
+	TargetName  string    `json:"target_name,omitempty"`
+	Details     string    `json:"details"` // plaintext JSON or ""
+	PrevHash    string    `json:"prev_hash"`
+	Hash        string    `json:"hash"`
 }
 
 // LogParams carries the fields the caller provides; everything else
@@ -188,37 +197,58 @@ func List(ctx context.Context, pool *db.Pool, masterKey string, p ListParams) ([
 
 	// Build the query depending on filters. Pool embeds *pgxpool.Pool whose
 	// Query method returns (pgx.Rows, error).
+	//
+	// LEFT JOIN users twice (once per subject column) to resolve ActorName/
+	// TargetName (added 2026-07-05) - LEFT, not INNER, because actor_id/
+	// target_id may be a bare IP (rate-limit entries), "" (no target), or a
+	// subject whose users row was since deleted; any of those should still
+	// return the audit row itself, just without a name to show.
+	// COALESCE(..., '') turns the LEFT JOIN's possible NULL into an empty
+	// string so Scan can read straight into a plain string, no
+	// sql.NullString needed.
 	switch {
 	case p.EventType != "" && p.Before > 0:
 		rows, err = pool.Query(ctx, `
-			SELECT id, created_at, event_type, actor_id, actor_email_enc,
-			       target_id, target_email_enc, details_enc, prev_hash, hash
-			FROM audit_log
-			WHERE event_type = $1 AND id < $2
-			ORDER BY id DESC LIMIT $3
+			SELECT a.id, a.created_at, a.event_type, a.actor_id, a.actor_email_enc,
+			       a.target_id, a.target_email_enc, a.details_enc, a.prev_hash, a.hash,
+			       COALESCE(au.name, ''), COALESCE(tu.name, '')
+			FROM audit_log a
+			LEFT JOIN users au ON au.id = a.actor_id
+			LEFT JOIN users tu ON tu.id = a.target_id
+			WHERE a.event_type = $1 AND a.id < $2
+			ORDER BY a.id DESC LIMIT $3
 		`, p.EventType, p.Before, limit)
 	case p.EventType != "":
 		rows, err = pool.Query(ctx, `
-			SELECT id, created_at, event_type, actor_id, actor_email_enc,
-			       target_id, target_email_enc, details_enc, prev_hash, hash
-			FROM audit_log
-			WHERE event_type = $1
-			ORDER BY id DESC LIMIT $2
+			SELECT a.id, a.created_at, a.event_type, a.actor_id, a.actor_email_enc,
+			       a.target_id, a.target_email_enc, a.details_enc, a.prev_hash, a.hash,
+			       COALESCE(au.name, ''), COALESCE(tu.name, '')
+			FROM audit_log a
+			LEFT JOIN users au ON au.id = a.actor_id
+			LEFT JOIN users tu ON tu.id = a.target_id
+			WHERE a.event_type = $1
+			ORDER BY a.id DESC LIMIT $2
 		`, p.EventType, limit)
 	case p.Before > 0:
 		rows, err = pool.Query(ctx, `
-			SELECT id, created_at, event_type, actor_id, actor_email_enc,
-			       target_id, target_email_enc, details_enc, prev_hash, hash
-			FROM audit_log
-			WHERE id < $1
-			ORDER BY id DESC LIMIT $2
+			SELECT a.id, a.created_at, a.event_type, a.actor_id, a.actor_email_enc,
+			       a.target_id, a.target_email_enc, a.details_enc, a.prev_hash, a.hash,
+			       COALESCE(au.name, ''), COALESCE(tu.name, '')
+			FROM audit_log a
+			LEFT JOIN users au ON au.id = a.actor_id
+			LEFT JOIN users tu ON tu.id = a.target_id
+			WHERE a.id < $1
+			ORDER BY a.id DESC LIMIT $2
 		`, p.Before, limit)
 	default:
 		rows, err = pool.Query(ctx, `
-			SELECT id, created_at, event_type, actor_id, actor_email_enc,
-			       target_id, target_email_enc, details_enc, prev_hash, hash
-			FROM audit_log
-			ORDER BY id DESC LIMIT $1
+			SELECT a.id, a.created_at, a.event_type, a.actor_id, a.actor_email_enc,
+			       a.target_id, a.target_email_enc, a.details_enc, a.prev_hash, a.hash,
+			       COALESCE(au.name, ''), COALESCE(tu.name, '')
+			FROM audit_log a
+			LEFT JOIN users au ON au.id = a.actor_id
+			LEFT JOIN users tu ON tu.id = a.target_id
+			ORDER BY a.id DESC LIMIT $1
 		`, limit)
 	}
 	if err != nil {
@@ -231,6 +261,8 @@ func List(ctx context.Context, pool *db.Pool, masterKey string, p ListParams) ([
 		actorEmailEnc  string
 		targetEmailEnc string
 		detailsEnc     string
+		actorNameEnc   string
+		targetNameEnc  string
 	}
 
 	var raws []rawRow
@@ -241,6 +273,7 @@ func List(ctx context.Context, pool *db.Pool, masterKey string, p ListParams) ([
 			&raw.entry.ActorID, &raw.actorEmailEnc,
 			&raw.entry.TargetID, &raw.targetEmailEnc,
 			&raw.detailsEnc, &raw.entry.PrevHash, &raw.entry.Hash,
+			&raw.actorNameEnc, &raw.targetNameEnc,
 		); err != nil {
 			return nil, fmt.Errorf("audit: scan: %w", err)
 		}
@@ -259,6 +292,12 @@ func List(ctx context.Context, pool *db.Pool, masterKey string, p ListParams) ([
 		}
 		if raw.detailsEnc != "" {
 			e.Details, _ = crypto.Decrypt(masterKey, raw.detailsEnc)
+		}
+		if raw.actorNameEnc != "" {
+			e.ActorName, _ = crypto.Decrypt(masterKey, raw.actorNameEnc)
+		}
+		if raw.targetNameEnc != "" {
+			e.TargetName, _ = crypto.Decrypt(masterKey, raw.targetNameEnc)
 		}
 		entries = append(entries, e)
 	}
