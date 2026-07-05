@@ -159,14 +159,6 @@ export default function ModulesPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => navigate("/admin/modules/store")}
-              className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-900"
-            >
-              <i className="ti ti-building-store text-[14px]" />
-              {t("modules.browse_store")}
-            </button>
             {isAdmin && (
               <button
                 type="button"
@@ -199,14 +191,6 @@ export default function ModulesPage() {
             <p className="mt-3 text-sm text-gray-400 dark:text-gray-500">
               {t("modules.empty")}
             </p>
-            <button
-              type="button"
-              onClick={() => navigate("/admin/modules/store")}
-              className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
-            >
-              <i className="ti ti-building-store text-[14px]" />
-              {t("modules.go_to_store")}
-            </button>
           </div>
         )}
 

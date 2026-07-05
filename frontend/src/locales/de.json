@@ -653,8 +653,6 @@
     "subtitle": "Module auf dieser ModuLab-Instanz verwalten.",
     "load_error": "Installierte Module konnten nicht geladen werden.",
     "empty": "Noch keine Module installiert.",
-    "go_to_store": "Zum Modul-Store",
-    "browse_store": "Modul-Store",
     "check_updates": "Updates prüfen",
     "checking": "Prüfe…",
     "no_updates": "Alle Module sind aktuell.",

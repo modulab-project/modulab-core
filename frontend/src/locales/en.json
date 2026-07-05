@@ -653,8 +653,6 @@
     "subtitle": "Manage modules installed on this ModuLab instance.",
     "load_error": "Could not load installed modules.",
     "empty": "No modules installed yet.",
-    "go_to_store": "Browse Module Store",
-    "browse_store": "Module Store",
     "check_updates": "Check for updates",
     "checking": "Checking…",
     "no_updates": "All modules are up to date.",

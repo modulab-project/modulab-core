@@ -859,15 +859,26 @@ function StatusPanelContent({ health }: { health: HealthResponse }) {
   const { t } = useTranslation();
 
   // /healthz's uptime_seconds is a snapshot from the moment it was fetched
-  // (AppShell only calls getHealth() once, on mount) - without this ticker
-  // the panel would show a frozen number until the whole page is reloaded.
-  // Purely a client-side display tick; never re-fetches from the backend.
-  const [elapsedTick, setElapsedTick] = useState(0);
+  // (AppShell only calls getHealth() once, on mount) - without a ticker the
+  // panel would show a frozen number until the whole page is reloaded.
+  //
+  // This used to count ticks (setElapsedTick(s => s + 1)) instead of reading
+  // the clock. Bug found 2026-07-05: setInterval is throttled/paused by the
+  // browser while the tab is backgrounded or the device sleeps, and missed
+  // ticks are never made up - so after e.g. a laptop sleep, the counter fell
+  // far behind Docker's real "Up X" uptime even though the backend process
+  // itself never restarted. Anchoring on Date.now() instead of counting
+  // fixes this: the interval only forces a re-render, the displayed value is
+  // always derived from the actual wall-clock difference, so it self-heals
+  // the moment the tab wakes up again.
+  const fetchedAtRef = useRef(Date.now());
+  const [, forceTick] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => setElapsedTick((s) => s + 1), 1000);
+    const id = setInterval(() => forceTick((s) => s + 1), 1000);
     return () => clearInterval(id);
   }, []);
-  const uptimeSeconds = health.uptime_seconds + elapsedTick;
+  const uptimeSeconds =
+    health.uptime_seconds + Math.floor((Date.now() - fetchedAtRef.current) / 1000);
 
   // Module worker health - see healthStatus's ModulesActive/Degraded/Failed
   // doc comment (main.go) for what "degraded" means. Hidden entirely when

@@ -635,8 +635,6 @@
     "subtitle": "Gestione los módulos instalados en esta instancia de ModuLab.",
     "load_error": "No se pueden cargar los módulos instalados.",
     "empty": "Aún no hay módulos instalados.",
-    "go_to_store": "Explorar la tienda de módulos",
-    "browse_store": "Tienda de módulos",
     "check_updates": "Comprobar actualizaciones",
     "checking": "Comprobando…",
     "no_updates": "Todos los módulos están actualizados.",

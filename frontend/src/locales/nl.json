@@ -635,8 +635,6 @@
     "subtitle": "Beheer geïnstalleerde modules op deze ModuLab-instantie.",
     "load_error": "Kan geïnstalleerde modules niet laden.",
     "empty": "Nog geen modules geïnstalleerd.",
-    "go_to_store": "Modulewinkel verkennen",
-    "browse_store": "Modulewinkel",
     "check_updates": "Controleren op updates",
     "checking": "Controleren…",
     "no_updates": "Alle modules zijn up-to-date.",
