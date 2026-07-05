@@ -132,10 +132,9 @@ export default function AdminSystemPage() {
             </p>
           </Link>
 
-          {/* System Info — always last: read-only diagnostics, no
-              configured/not-configured status dot like the cards above
-              (nothing to configure here), so it's visually the "everything
-              else" card that belongs at the end of the hub. */}
+          {/* System Info — read-only diagnostics, no configured/not-
+              configured status dot like the cards above (nothing to
+              configure here). */}
           <Link
             to="/admin/system/info"
             className="group flex flex-col rounded-xl border border-gray-200 p-4 transition-colors hover:border-teal-400 hover:bg-teal-50/40 dark:border-gray-800 dark:hover:border-teal-700 dark:hover:bg-teal-950/30"
@@ -151,6 +150,29 @@ export default function AdminSystemPage() {
             </div>
             <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2">
               {t("admin.system_info.card_desc")}
+            </p>
+          </Link>
+
+          {/* Security Info — always last: split out from System Info
+              (2026-07-05) so "is Core healthy" and "who/what is currently
+              active or rate-limited" are two separate, focused pages
+              instead of one page trying to be both. Same read-only-
+              diagnostics treatment as the System Info card above. */}
+          <Link
+            to="/admin/security/info"
+            className="group flex flex-col rounded-xl border border-gray-200 p-4 transition-colors hover:border-teal-400 hover:bg-teal-50/40 dark:border-gray-800 dark:hover:border-teal-700 dark:hover:bg-teal-950/30"
+          >
+            <div className="flex items-start justify-between gap-3 mb-2">
+              <div className="flex items-center gap-2.5">
+                <i className="ti ti-shield-lock text-[18px] text-gray-400 group-hover:text-teal-600 dark:group-hover:text-teal-400" />
+                <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
+                  {t("admin.security_info.title")}
+                </span>
+              </div>
+              <i className="ti ti-chevron-right flex-none text-gray-300 group-hover:text-teal-500 dark:text-gray-600 dark:group-hover:text-teal-400" />
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2">
+              {t("admin.security_info.card_desc")}
             </p>
           </Link>
         </div>

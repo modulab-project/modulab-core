@@ -361,6 +361,12 @@
       "rate_limit_reset": "Réinitialiser",
       "rate_limit_reset_error": "Impossible de réinitialiser la limite de débit."
     },
+    "security_info": {
+      "title": "Informations de sécurité",
+      "subtitle": "Sessions actives et limites de débit en un coup d'œil.",
+      "card_desc": "Sessions actives et compteurs de limite de débit en direct.",
+      "load_error": "Impossible de charger les informations de sécurité."
+    },
     "audit": {
       "title": "Journal d'audit",
       "subtitle": "Enregistrement immuable de toutes les actions administratives liées à la sécurité.",

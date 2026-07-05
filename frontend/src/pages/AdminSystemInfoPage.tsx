@@ -5,20 +5,16 @@
 // exists — countdowns until the next background module-update check and
 // registry sync, so "I published a release, why hasn't ModuLab noticed yet"
 // has a concrete answer instead of "wait and see".
+//
+// Active sessions and rate limits used to live here too, until they were
+// split out into AdminSecurityInfoPage (2026-07-05, /admin/security/info) —
+// this page answers "is Core healthy", that one answers "who/what is
+// active right now"; bundling both under one heading was getting crowded.
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, Link } from "react-router";
 import { useTranslation } from "react-i18next";
-import {
-  getSystemInfo,
-  revokeSession,
-  resetRateLimit,
-  type ActiveSession,
-  type SystemInfo,
-  type SystemInfoModule,
-  type SystemInfoRateLimit,
-  type SystemInfoTimer,
-} from "../lib/api";
-import { clearSessionToken, getSessionToken } from "../lib/session";
+import { getSystemInfo, type SystemInfo, type SystemInfoModule, type SystemInfoTimer } from "../lib/api";
+import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
 import packageJson from "../../package.json";
@@ -65,82 +61,6 @@ export default function AdminSystemInfoPage() {
   }, []);
   const elapsedMs = Date.now() - fetchedAtRef.current;
 
-  // Tracks which session IDs currently have an in-flight or just-failed
-  // revoke request, so the button can disable itself mid-request and the
-  // row can show an inline error without disturbing the rest of the table.
-  const [revokingIds, setRevokingIds] = useState<Set<string>>(new Set());
-  const [revokeError, setRevokeError] = useState<string | null>(null);
-
-  function handleRevoke(target: ActiveSession) {
-    const confirmKey = target.current
-      ? "admin.system_info.end_session_confirm_self"
-      : "admin.system_info.end_session_confirm";
-    if (!window.confirm(t(confirmKey, { name: target.name || target.email || target.role }))) {
-      return;
-    }
-    const token = getSessionToken();
-    if (!token) return;
-    setRevokeError(null);
-    setRevokingIds((prev) => new Set(prev).add(target.id));
-    revokeSession(token, target.id)
-      .then(() => {
-        // Ending your OWN session (found 2026-07-05): the bearer token this
-        // very tab is using was just revoked server-side, but until now
-        // nothing told the tab that — it kept the token around and looked
-        // fully logged in until the next API call happened to 401. Since
-        // this action can only ever be the admin's own doing (confirmed via
-        // the confirm-dialog above), clear the token and leave for /login
-        // immediately instead of waiting for that to happen.
-        if (target.current) {
-          clearSessionToken();
-          navigate("/login", { replace: true });
-          return;
-        }
-        setInfo((prev) =>
-          prev
-            ? { ...prev, active_sessions: (prev.active_sessions ?? []).filter((s) => s.id !== target.id) }
-            : prev,
-        );
-      })
-      .catch(() => setRevokeError(t("admin.system_info.end_session_error")))
-      .finally(() => {
-        setRevokingIds((prev) => {
-          const next = new Set(prev);
-          next.delete(target.id);
-          return next;
-        });
-      });
-  }
-
-  // Same in-flight/error pattern as the sessions table above, keyed by the
-  // raw Valkey key (unique per label+identifier) rather than an id field
-  // since rate-limit entries have no separate id of their own.
-  const [resettingKeys, setResettingKeys] = useState<Set<string>>(new Set());
-  const [resetError, setResetError] = useState<string | null>(null);
-
-  function handleResetRateLimit(target: SystemInfoRateLimit) {
-    const token = getSessionToken();
-    if (!token) return;
-    setResetError(null);
-    setResettingKeys((prev) => new Set(prev).add(target.key));
-    resetRateLimit(token, target.key)
-      .then(() => {
-        setInfo((prev) =>
-          prev
-            ? { ...prev, rate_limits: (prev.rate_limits ?? []).filter((r) => r.key !== target.key) }
-            : prev,
-        );
-      })
-      .catch(() => setResetError(t("admin.system_info.rate_limit_reset_error")))
-      .finally(() => {
-        setResettingKeys((prev) => {
-          const next = new Set(prev);
-          next.delete(target.key);
-          return next;
-        });
-      });
-  }
-
   if (loading || !session || session.role !== "super-admin") return null;
 
   return (
@@ -154,9 +74,18 @@ export default function AdminSystemInfoPage() {
           {t("admin.system.title")}
         </Link>
 
-        <div className="mb-8">
-          <h1 className="text-xl font-semibold mb-1">{t("admin.system_info.title")}</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">{t("admin.system_info.subtitle")}</p>
+        <div className="mb-8 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-semibold mb-1">{t("admin.system_info.title")}</h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400">{t("admin.system_info.subtitle")}</p>
+          </div>
+          <Link
+            to="/admin/security/info"
+            className="mt-1 flex flex-none items-center gap-1 whitespace-nowrap text-xs font-medium text-teal-700 hover:text-teal-800 dark:text-teal-400 dark:hover:text-teal-300"
+          >
+            {t("admin.security_info.title")}
+            <i className="ti ti-arrow-right text-[13px]" />
+          </Link>
         </div>
 
         {error && <p className="mb-6 text-sm text-red-600 dark:text-red-400">{error}</p>}
@@ -252,109 +181,6 @@ export default function AdminSystemInfoPage() {
                     <tbody>
                       {info.modules.map((m, i) => (
                         <ModuleRow key={m.name} mod={m} even={i % 2 === 0} />
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </Section>
-
-            {/* Active sessions */}
-            <Section
-              title={t("admin.system_info.section_sessions", { count: info.active_sessions?.length ?? 0 })}
-            >
-              {revokeError && <p className="mb-2 text-sm text-red-600 dark:text-red-400">{revokeError}</p>}
-              {!info.active_sessions || info.active_sessions.length === 0 ? (
-                <p className="text-sm text-gray-400 dark:text-gray-500">{t("admin.system_info.no_sessions")}</p>
-              ) : (
-                <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800">
-                  <table className="min-w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-200 bg-gray-50 text-left dark:border-gray-800 dark:bg-gray-900">
-                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                          {t("admin.system_info.col_name")}
-                        </th>
-                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                          {t("admin.system_info.col_role")}
-                        </th>
-                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                          {t("admin.system_info.col_login")}
-                        </th>
-                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                          {t("admin.system_info.col_ip")}
-                        </th>
-                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                          {t("admin.system_info.col_device")}
-                        </th>
-                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                          {t("admin.system_info.col_last_active")}
-                        </th>
-                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                          {t("admin.system_info.col_expires")}
-                        </th>
-                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                          <span className="sr-only">{t("admin.system_info.col_actions")}</span>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {info.active_sessions.map((s) => (
-                        <SessionRow
-                          key={s.id}
-                          session={s}
-                          revoking={revokingIds.has(s.id)}
-                          onRevoke={() => handleRevoke(s)}
-                        />
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </Section>
-
-            {/* Rate limits — live Valkey counters, so an admin can see
-                whether an IP (or user, for the "chat" label) is currently
-                rate-limited without SSH-ing into Valkey, and clear it early
-                if it's a false positive (shared office IP, misbehaving
-                script now fixed, etc). Trips also land in the audit log
-                (event_type "rate_limit.exceeded") so they're discoverable
-                after the live counter has already expired. */}
-            <Section
-              title={t("admin.system_info.section_rate_limits", { count: info.rate_limits?.length ?? 0 })}
-            >
-              {resetError && <p className="mb-2 text-sm text-red-600 dark:text-red-400">{resetError}</p>}
-              {!info.rate_limits || info.rate_limits.length === 0 ? (
-                <p className="text-sm text-gray-400 dark:text-gray-500">{t("admin.system_info.no_rate_limits")}</p>
-              ) : (
-                <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800">
-                  <table className="min-w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-200 bg-gray-50 text-left dark:border-gray-800 dark:bg-gray-900">
-                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                          {t("admin.system_info.col_label")}
-                        </th>
-                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                          {t("admin.system_info.col_identifier")}
-                        </th>
-                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                          {t("admin.system_info.col_count")}
-                        </th>
-                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                          {t("admin.system_info.col_resets_in")}
-                        </th>
-                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                          <span className="sr-only">{t("admin.system_info.col_actions")}</span>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {info.rate_limits.map((r) => (
-                        <RateLimitRow
-                          key={r.key}
-                          entry={r}
-                          resetting={resettingKeys.has(r.key)}
-                          onReset={() => handleResetRateLimit(r)}
-                        />
                       ))}
                     </tbody>
                   </table>
@@ -489,136 +315,6 @@ function ModuleRow({ mod, even }: { mod: SystemInfoModule; even: boolean }) {
       <td className="px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">{mod.source}</td>
     </tr>
   );
-}
-
-function SessionRow({
-  session,
-  revoking,
-  onRevoke,
-}: {
-  session: ActiveSession;
-  revoking: boolean;
-  onRevoke: () => void;
-}) {
-  const { t } = useTranslation();
-  const device = session.user_agent ? parseUserAgent(session.user_agent) : null;
-  return (
-    <tr className={`border-b border-gray-100 last:border-0 dark:border-gray-800 ${session.current ? "bg-teal-50/60 dark:bg-teal-950/30" : ""}`}>
-      <td className="whitespace-nowrap px-4 py-2.5 text-gray-700 dark:text-gray-300">
-        <div className="flex flex-col items-start gap-1">
-          <span>{session.name || session.email || <span className="text-gray-300 dark:text-gray-600">—</span>}</span>
-          {session.current && (
-            <span className="whitespace-nowrap rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-medium text-teal-700 dark:bg-teal-900 dark:text-teal-300">
-              {t("admin.system_info.session_current")}
-            </span>
-          )}
-        </div>
-      </td>
-      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-600 dark:text-gray-400">{session.role}</td>
-      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">
-        {session.created_at ? new Date(session.created_at).toLocaleString() : "—"}
-      </td>
-      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">
-        {session.ip || "—"}
-      </td>
-      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500" title={session.user_agent}>
-        {device ? `${device.browser} · ${device.os}` : "—"}
-      </td>
-      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">
-        {session.last_active_seconds_ago !== undefined
-          ? t("admin.system_info.last_active_ago", { duration: formatDuration(session.last_active_seconds_ago) })
-          : "—"}
-      </td>
-      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">
-        {session.expires_in_seconds !== undefined
-          ? t("admin.system_info.expires_in", { duration: formatDuration(session.expires_in_seconds) })
-          : "—"}
-      </td>
-      <td className="whitespace-nowrap px-4 py-2.5 text-right">
-        <button
-          type="button"
-          onClick={onRevoke}
-          disabled={revoking}
-          className="text-xs font-medium text-red-600 hover:text-red-700 disabled:opacity-50 dark:text-red-400 dark:hover:text-red-300"
-        >
-          {revoking ? t("common.loading") : t("admin.system_info.end_session")}
-        </button>
-      </td>
-    </tr>
-  );
-}
-
-function RateLimitRow({
-  entry,
-  resetting,
-  onReset,
-}: {
-  entry: SystemInfoRateLimit;
-  resetting: boolean;
-  onReset: () => void;
-}) {
-  const { t } = useTranslation();
-  const overLimit = entry.max !== undefined && entry.max > 0 && entry.count > entry.max;
-  return (
-    <tr className="border-b border-gray-100 last:border-0 dark:border-gray-800">
-      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-600 dark:text-gray-400">{entry.label}</td>
-      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-700 dark:text-gray-300">
-        {entry.display_name ? (
-          <div className="flex flex-col items-start gap-0.5">
-            <span>{entry.display_name}</span>
-            <span className="font-mono text-[10px] text-gray-400 dark:text-gray-600">{entry.identifier}</span>
-          </div>
-        ) : (
-          <span className="font-mono">{entry.identifier || "—"}</span>
-        )}
-      </td>
-      <td className="whitespace-nowrap px-4 py-2.5 text-xs">
-        <span className={overLimit ? "font-medium text-red-600 dark:text-red-400" : "text-gray-600 dark:text-gray-400"}>
-          {entry.max ? `${entry.count} / ${entry.max}` : entry.count}
-        </span>
-      </td>
-      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">
-        {t("admin.system_info.expires_in", { duration: formatDuration(entry.reset_in_seconds) })}
-      </td>
-      <td className="whitespace-nowrap px-4 py-2.5 text-right">
-        <button
-          type="button"
-          onClick={onReset}
-          disabled={resetting}
-          className="text-xs font-medium text-red-600 hover:text-red-700 disabled:opacity-50 dark:text-red-400 dark:hover:text-red-300"
-        >
-          {resetting ? t("common.loading") : t("admin.system_info.rate_limit_reset")}
-        </button>
-      </td>
-    </tr>
-  );
-}
-
-// parseUserAgent gives a compact, human-friendly reading of a raw
-// User-Agent string ("Chrome · Windows" rather than the full ~120-character
-// header value) - just enough for an admin to recognize which of their own
-// devices a session belongs to. Deliberately a handful of substring checks
-// rather than a full UA-parsing library: this only ever renders for the
-// System Info page's admin-only table, not anywhere accuracy is load-
-// bearing, and covers every mainstream browser/OS combination in practice.
-// Order matters - Edge and Opera both contain "Chrome" in their own UA
-// strings, so those checks must come first.
-function parseUserAgent(ua: string): { browser: string; os: string } {
-  let browser = "Unknown";
-  if (ua.includes("Edg/")) browser = "Edge";
-  else if (ua.includes("OPR/") || ua.includes("Opera")) browser = "Opera";
-  else if (ua.includes("Firefox/")) browser = "Firefox";
-  else if (ua.includes("CriOS") || ua.includes("Chrome/")) browser = "Chrome";
-  else if (ua.includes("Safari/")) browser = "Safari";
-
-  let os = "Unknown";
-  if (ua.includes("Windows")) os = "Windows";
-  else if (ua.includes("Mac OS X") || ua.includes("Macintosh")) os = "macOS";
-  else if (ua.includes("Android")) os = "Android";
-  else if (ua.includes("iPhone") || ua.includes("iPad") || ua.includes("iOS")) os = "iOS";
-  else if (ua.includes("Linux")) os = "Linux";
-
-  return { browser, os };
 }
 
 // formatDuration renders a second count as a compact human string ("45s",

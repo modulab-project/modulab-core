@@ -361,6 +361,12 @@
       "rate_limit_reset": "Resetten",
       "rate_limit_reset_error": "Rate limit kon niet worden gereset."
     },
+    "security_info": {
+      "title": "Beveiligingsinfo",
+      "subtitle": "Actieve sessies en rate limits in één oogopslag.",
+      "card_desc": "Actieve sessies en live rate-limit-tellers.",
+      "load_error": "Beveiligingsinfo kon niet worden geladen."
+    },
     "audit": {
       "title": "Auditlogboek",
       "subtitle": "Onveranderlijk register van alle beveiligingsgerelateerde beheerdersacties.",

@@ -361,6 +361,12 @@
       "rate_limit_reset": "Restablecer",
       "rate_limit_reset_error": "No se pudo restablecer el límite de tasa."
     },
+    "security_info": {
+      "title": "Información de seguridad",
+      "subtitle": "Sesiones activas y límites de tasa de un vistazo.",
+      "card_desc": "Sesiones activas y contadores de límite de tasa en vivo.",
+      "load_error": "No se pudo cargar la información de seguridad."
+    },
     "audit": {
       "title": "Registro de auditoría",
       "subtitle": "Registro inmutable de todas las acciones administrativas relacionadas con la seguridad.",

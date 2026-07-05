@@ -362,6 +362,12 @@
       "rate_limit_reset": "Zurücksetzen",
       "rate_limit_reset_error": "Rate Limit konnte nicht zurückgesetzt werden."
     },
+    "security_info": {
+      "title": "Sicherheitsinfos",
+      "subtitle": "Aktive Sitzungen und Rate Limits auf einen Blick.",
+      "card_desc": "Aktive Sitzungen und Live-Rate-Limit-Zähler.",
+      "load_error": "Sicherheitsinfos konnten nicht geladen werden."
+    },
     "audit": {
       "title": "Audit-Log",
       "subtitle": "Unveränderliches Protokoll aller sicherheitsrelevanten Admin-Aktionen.",

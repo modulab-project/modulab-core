@@ -362,6 +362,12 @@
       "rate_limit_reset": "Reset",
       "rate_limit_reset_error": "Could not reset the rate limit."
     },
+    "security_info": {
+      "title": "Security info",
+      "subtitle": "Active sessions and rate limits at a glance.",
+      "card_desc": "Active sessions and live rate-limit counters.",
+      "load_error": "Could not load security info."
+    },
     "audit": {
       "title": "Audit log",
       "subtitle": "Immutable record of all security-relevant admin actions.",

@@ -17,6 +17,7 @@ import AdminAIPage from "./pages/AdminAIPage";
 import AdminQuickLinksPage from "./pages/AdminQuickLinksPage";
 import AdminSystemPage from "./pages/AdminSystemPage";
 import AdminSystemInfoPage from "./pages/AdminSystemInfoPage";
+import AdminSecurityInfoPage from "./pages/AdminSecurityInfoPage";
 import AdminAuditPage from "./pages/AdminAuditPage";
 import UserAIKeysPage from "./pages/UserAIKeysPage";
 import StorePage from "./pages/StorePage";
@@ -66,6 +67,7 @@ export default function App() {
       <Route path="/admin/quick-links" element={<AdminQuickLinksPage />} />
       <Route path="/admin/system" element={<AdminSystemPage />} />
       <Route path="/admin/system/info" element={<AdminSystemInfoPage />} />
+      <Route path="/admin/security/info" element={<AdminSecurityInfoPage />} />
       <Route path="/admin/system/oidc" element={<AdminSystemOIDCPage />} />
       <Route path="/admin/system/smtp" element={<AdminSystemSmtpPage />} />
       <Route path="/admin/system/searxng" element={<AdminSystemSearxngPage />} />
