@@ -20,6 +20,7 @@ import {
 } from "../lib/api";
 import { clearSessionToken, getSessionToken } from "../lib/session";
 import { useNotificationEvents, type ServerEvent } from "../lib/useEvents";
+import { useNow } from "../lib/useNow";
 import { isAdminRole } from "../lib/roles";
 import { useToasts } from "../lib/toasts";
 import { ToastStack } from "./Toast";
@@ -888,18 +889,13 @@ function StatusPanelContent({ health }: { health: HealthResponse }) {
   // browser while the tab is backgrounded or the device sleeps, and missed
   // ticks are never made up - so after e.g. a laptop sleep, the counter fell
   // far behind Docker's real "Up X" uptime even though the backend process
-  // itself never restarted. Anchoring on Date.now() instead of counting
-  // fixes this: the interval only forces a re-render, the displayed value is
-  // always derived from the actual wall-clock difference, so it self-heals
-  // the moment the tab wakes up again.
-  const fetchedAtRef = useRef(Date.now());
-  const [, forceTick] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => forceTick((s) => s + 1), 1000);
-    return () => clearInterval(id);
-  }, []);
-  const uptimeSeconds =
-    health.uptime_seconds + Math.floor((Date.now() - fetchedAtRef.current) / 1000);
+  // itself never restarted. useNow() (lib/useNow.ts) anchors on Date.now()
+  // instead of counting to fix this: the interval only forces a re-render,
+  // the displayed value is always derived from the actual wall-clock
+  // difference, so it self-heals the moment the tab wakes up again.
+  const [fetchedAt] = useState(() => Date.now());
+  const now = useNow();
+  const uptimeSeconds = health.uptime_seconds + Math.floor((now - fetchedAt) / 1000);
 
   // Module worker health - see healthStatus's ModulesActive/Degraded/Failed
   // doc comment (main.go) for what "degraded" means. Hidden entirely when

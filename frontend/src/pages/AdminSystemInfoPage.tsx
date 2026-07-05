@@ -16,6 +16,7 @@ import { useTranslation } from "react-i18next";
 import { getSystemInfo, type SystemInfo, type SystemInfoModule, type SystemInfoTimer } from "../lib/api";
 import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
+import { useNow } from "../lib/useNow";
 import { AppShell } from "../components/AppShell";
 import packageJson from "../../package.json";
 
@@ -46,20 +47,18 @@ export default function AdminSystemInfoPage() {
       .catch(() => setError(t("admin.system_info.load_error")));
   }, [session, navigate, t]);
 
-  // Anchored on Date.now() rather than counting ticks — see AppShell's
-  // uptime ticker fix (2026-07-05): a plain "+1 every second" counter falls
-  // behind after the tab is backgrounded or the device sleeps, since
-  // setInterval is throttled/paused in both cases and missed ticks are never
-  // made up. Anchoring on the real clock instead means the displayed value
-  // self-heals the moment the tab wakes up, regardless of how many ticks
-  // were actually delivered while it was asleep.
-  const fetchedAtRef = useRef(Date.now());
-  const [, forceTick] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => forceTick((s) => s + 1), 1000);
-    return () => clearInterval(id);
-  }, []);
-  const elapsedMs = Date.now() - fetchedAtRef.current;
+  // Anchored on the real clock via useNow() (lib/useNow.ts) rather than
+  // counting ticks — see AppShell's uptime ticker fix (2026-07-05): a plain
+  // "+1 every second" counter falls behind after the tab is backgrounded or
+  // the device sleeps, since setInterval is throttled/paused in both cases
+  // and missed ticks are never made up. Anchoring on the real clock instead
+  // means the displayed value self-heals the moment the tab wakes up,
+  // regardless of how many ticks were actually delivered while it was
+  // asleep. Also shared by TimerCard below, via the `now` prop, for the
+  // "next run in" countdowns.
+  const [fetchedAt] = useState(() => Date.now());
+  const now = useNow();
+  const elapsedMs = now - fetchedAt;
 
   if (loading || !session || session.role !== "super-admin") return null;
 
@@ -115,6 +114,7 @@ export default function AdminSystemInfoPage() {
                 title={t("admin.system_info.registry_sync_title")}
                 timer={info.registry_sync}
                 t={t}
+                now={now}
               />
             </Section>
 
@@ -252,13 +252,15 @@ function TimerCard({
   title,
   timer,
   t,
+  now,
 }: {
   icon: string;
   title: string;
   timer: SystemInfoTimer;
   t: (key: string, opts?: Record<string, unknown>) => string;
+  now: number;
 }) {
-  const nextInMs = timer.next_run_at ? new Date(timer.next_run_at).getTime() - Date.now() : null;
+  const nextInMs = timer.next_run_at ? new Date(timer.next_run_at).getTime() - now : null;
 
   return (
     <div className="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
