@@ -665,7 +665,7 @@ function WebResultCard({ result }: { result: WebResult }) {
       className="group flex flex-col gap-0.5 px-5 py-3.5 first:rounded-t-2xl last:rounded-b-2xl hover:bg-gray-50 dark:hover:bg-gray-900"
     >
       <p className="text-[11px] text-gray-400 dark:text-gray-500">{host}</p>
-      <p className="text-sm font-medium leading-snug text-blue-700 group-hover:underline dark:text-blue-400">
+      <p className="text-sm font-medium leading-snug text-teal-700 group-hover:underline dark:text-teal-400">
         {result.title}
       </p>
       {result.snippet && (

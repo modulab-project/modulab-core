@@ -103,6 +103,7 @@
         "body_label": "Maximale grootte van verzoekbody (bytes)",
         "body_hint": "0 = onbeperkt. Standaard: 1048576 (1 MB). Van toepassing op alle eindpunten.",
         "save_error": "Opslaan van instellingen mislukt.",
+        "load_error": "Kan instellingen niet laden.",
         "saved": "Opgeslagen"
       },
       "modal": {
@@ -391,12 +392,16 @@
     "modules": {
       "title": "Modulebeheer",
       "subtitle": "Installeer, update en beheer modules op deze ModuLab-instantie.",
+      "syncing": "Register synchroniseren en controleren op updates…",
       "store_title": "Modulewinkel",
       "store_desc": "Blader door en installeer modules uit het officiële register en de community.",
       "store_count": "{{count}} modules beschikbaar",
       "installed_title": "Geïnstalleerde modules",
       "installed_desc": "Beheer actieve modules, controleer op updates, vastmaken of installaties verwijderen.",
-      "installed_count": "{{count}} geïnstalleerd"
+      "installed_count": "{{count}} geïnstalleerd",
+      "updates_available": "{{count}} update(s) beschikbaar",
+      "all_up_to_date": "Alle modules zijn up-to-date",
+      "sync_failed": "Synchronisatie van register mislukt — gecachte gegevens worden getoond, deze kunnen verouderd zijn."
     }
   },
   "home": {
@@ -411,6 +416,7 @@
     "quick_links_add": "Tegel toevoegen",
     "quick_links_add_modal_title": "Tegel toevoegen",
     "quick_links_tile_title": "Titel",
+    "quick_links_tile_title_placeholder": "bijv. Nextcloud",
     "quick_links_tile_url": "URL",
     "quick_links_tile_icon": "Pictogram",
     "quick_links_tile_desc": "Beschrijving",
@@ -420,6 +426,8 @@
     "quick_links_remove": "Tegel verwijderen",
     "quick_links_empty": "Geen tegels — klik op \"+\" om uw eerste koppeling toe te voegen.",
     "quick_links_error": "Fout bij opslaan",
+    "quick_links_reorder_failed": "Kon de nieuwe volgorde niet opslaan — probeer het opnieuw.",
+    "quick_links_delete_failed": "Kon deze tegel niet verwijderen — probeer het opnieuw.",
     "quick_links_mode_url": "URL",
     "quick_links_mode_module": "Module",
     "quick_links_module_required": "Selecteer een module.",
@@ -531,7 +539,10 @@
       "ntp": "Systeemklok (NTP)",
       "reachable": "Bereikbaar",
       "unreachable": "Niet bereikbaar",
-      "not_configured": "Niet geconfigureerd"
+      "not_configured": "Niet geconfigureerd",
+      "modules": "Modules",
+      "modules_all_active": "{{count}} actief",
+      "modules_issues": "{{active}} actief · {{degraded}} verminderd · {{failed}} mislukt"
     },
     "notifications_panel": {
       "checking": "Controleren op lopende goedkeuringen…",
@@ -541,7 +552,10 @@
       "recent_activity": "Recente activiteit",
       "nothing_yet": "Nog niets — dit toont alleen wat er is gebeurd terwijl dit tabblad open was.",
       "review": "Bekijken",
-      "waiting_toast": "{{name}} wacht op goedkeuring."
+      "waiting_toast": "{{name}} wacht op goedkeuring.",
+      "no_module_updates": "Alle modules zijn up-to-date",
+      "module_updates_one": "{{count}} module-update beschikbaar",
+      "module_updates_many": "{{count}} module-updates beschikbaar"
     },
     "chat": {
       "no_provider": "Geen provider",
@@ -635,6 +649,7 @@
       "title": "AI-providers",
       "subtitle": "Voeg uw eigen API-sleutel toe om de ModuLab-sleutel te overschrijven. Met uw eigen sleutel kiest u ook welk model u wilt gebruiken.",
       "empty": "Nog geen AI-providers geconfigureerd.",
+      "load_error": "Kan AI-providers niet laden.",
       "save_key_error": "Opslaan van sleutel mislukt.",
       "remove_key_error": "Verwijderen van sleutel mislukt.",
       "fetch_models_error": "Kan modellen niet laden.",

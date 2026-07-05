@@ -112,7 +112,7 @@ export default function UserAIKeysPage() {
                           p.has_user_key
                             ? "bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-400"
                             : p.has_admin_key
-                            ? "bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-400"
+                            ? "bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-400"
                             : "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400"
                         }`}
                       >

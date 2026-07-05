@@ -210,7 +210,7 @@ function ConfigCard({
       </div>
       <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 mb-3">{description}</p>
       <div className="mt-auto flex items-center gap-1.5">
-        <span className={`h-1.5 w-1.5 rounded-full ${configured ? "bg-green-500" : "bg-gray-300 dark:bg-gray-600"}`} />
+        <span className={`h-1.5 w-1.5 rounded-full ${configured ? "bg-teal-500" : "bg-gray-300 dark:bg-gray-600"}`} />
         <span className="text-[11px] text-gray-400 dark:text-gray-500">
           {configured ? t("admin.smtp.status_configured") : t("admin.smtp.status_not_configured")}
         </span>

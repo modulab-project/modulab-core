@@ -236,7 +236,7 @@ function InfraRow({
           {text}
         </span>
       ) : (
-        <span className={`h-2 w-2 rounded-full ${ok ? "bg-green-500" : "bg-red-500"}`} />
+        <span className={`h-2 w-2 rounded-full ${ok ? "bg-teal-500" : "bg-red-500"}`} />
       )}
     </div>
   );

@@ -115,13 +115,13 @@ export default function ProfilePage() {
               <span
                 className={`flex items-center gap-1.5 text-xs font-medium ${
                   session.email_verified
-                    ? "text-green-700 dark:text-green-400"
+                    ? "text-teal-700 dark:text-teal-400"
                     : "text-gray-500 dark:text-gray-400"
                 }`}
               >
                 <span
                   className={`h-1.5 w-1.5 rounded-full ${
-                    session.email_verified ? "bg-green-600" : "bg-gray-400"
+                    session.email_verified ? "bg-teal-600" : "bg-gray-400"
                   }`}
                 />
                 {session.email_verified ? t("profile.verified") : t("profile.not_verified")}

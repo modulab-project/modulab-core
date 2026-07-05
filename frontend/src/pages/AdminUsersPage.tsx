@@ -191,7 +191,7 @@ function StatusBadge({ status }: { status: RowStatus }) {
   const { t } = useTranslation();
   const styles: Record<RowStatus, string> = {
     pending: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400",
-    active: "bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-400",
+    active: "bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-400",
     locked: "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-400",
   };
   return (

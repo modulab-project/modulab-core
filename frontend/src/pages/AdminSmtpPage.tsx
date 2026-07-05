@@ -159,7 +159,7 @@ export default function AdminSmtpPage() {
           <h1 className="text-xl font-semibold">{t("admin.smtp.title")}</h1>
           {status && (
             <span className="flex items-center gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
-              <span className={`h-2 w-2 rounded-full ${status.configured ? "bg-green-600" : "bg-red-600"}`} />
+              <span className={`h-2 w-2 rounded-full ${status.configured ? "bg-teal-600" : "bg-red-600"}`} />
               {status.configured ? t("admin.smtp.status_configured") : t("admin.smtp.status_not_configured")}
             </span>
           )}
@@ -175,7 +175,7 @@ export default function AdminSmtpPage() {
         )}
         {error && <p className="mb-4 text-sm text-red-600 dark:text-red-400">{error}</p>}
         {savedAt && !error && (
-          <p className="mb-4 text-sm text-green-700 dark:text-green-400">{t("admin.smtp.saved")}</p>
+          <p className="mb-4 text-sm text-teal-700 dark:text-teal-400">{t("admin.smtp.saved")}</p>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">

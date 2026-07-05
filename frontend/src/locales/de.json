@@ -416,6 +416,7 @@
     "quick_links_add": "Kachel hinzufügen",
     "quick_links_add_modal_title": "Kachel hinzufügen",
     "quick_links_tile_title": "Titel",
+    "quick_links_tile_title_placeholder": "z. B. Nextcloud",
     "quick_links_tile_url": "URL",
     "quick_links_tile_icon": "Icon",
     "quick_links_tile_desc": "Beschreibung",

@@ -506,12 +506,12 @@ function FooterBar({
           onClick={() => onTogglePanel("status")}
           className={`flex items-center gap-1.5 rounded-xl px-3 py-1 font-medium ${
             allOk
-              ? "bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-400"
+              ? "bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-400"
               : "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-400"
           }`}
         >
           <span
-            className={`h-1.5 w-1.5 animate-pulse rounded-full ${allOk ? "bg-green-700 dark:bg-green-400" : "bg-red-700 dark:bg-red-400"}`}
+            className={`h-1.5 w-1.5 animate-pulse rounded-full ${allOk ? "bg-teal-700 dark:bg-teal-400" : "bg-red-700 dark:bg-red-400"}`}
           />
           {allOk ? t("shell.all_ok") : t("shell.attention")}
         </button>
@@ -967,7 +967,7 @@ function StatusRow({
     tone === "warn"
       ? "text-amber-600 dark:text-amber-400 font-medium"
       : tone === "ok"
-        ? "text-green-700 dark:text-green-400 font-medium"
+        ? "text-teal-700 dark:text-teal-400 font-medium"
         : "text-gray-500";
   return (
     <div className="flex items-center justify-between border-b border-gray-100 px-1 py-2.5 last:border-0 dark:border-gray-800">
@@ -978,9 +978,9 @@ function StatusRow({
         <span className={`text-xs ${valueClass}`}>{value}</span>
       ) : (
         <span
-          className={`flex items-center gap-1.5 text-xs font-medium ${ok ? "text-green-700 dark:text-green-400" : "text-red-600"}`}
+          className={`flex items-center gap-1.5 text-xs font-medium ${ok ? "text-teal-700 dark:text-teal-400" : "text-red-600"}`}
         >
-          <span className={`h-1.5 w-1.5 rounded-full ${ok ? "bg-green-600" : "bg-red-600"}`} />
+          <span className={`h-1.5 w-1.5 rounded-full ${ok ? "bg-teal-600" : "bg-red-600"}`} />
           {ok ? t("shell.status.reachable") : t("shell.status.unreachable")}
         </span>
       )}

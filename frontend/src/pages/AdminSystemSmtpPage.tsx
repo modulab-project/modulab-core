@@ -133,7 +133,7 @@ export default function AdminSystemSmtpPage() {
           <h1 className="text-xl font-semibold">{t("admin.smtp.title")}</h1>
           {status && (
             <span className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
-              <span className={`h-2 w-2 rounded-full ${status.configured ? "bg-green-500" : "bg-gray-300 dark:bg-gray-600"}`} />
+              <span className={`h-2 w-2 rounded-full ${status.configured ? "bg-teal-500" : "bg-gray-300 dark:bg-gray-600"}`} />
               {status.configured ? t("admin.smtp.status_configured") : t("admin.smtp.status_not_configured")}
             </span>
           )}
@@ -205,7 +205,7 @@ export default function AdminSystemSmtpPage() {
             </button>
           </form>
           {testResult && (
-            <p className={`mt-2 text-xs ${testResult.ok ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+            <p className={`mt-2 text-xs ${testResult.ok ? "text-teal-600 dark:text-teal-400" : "text-red-600 dark:text-red-400"}`}>
               {testResult.text}
             </p>
           )}
@@ -228,7 +228,7 @@ function BackLink() {
 
 function Msg({ msg }: { msg: { ok: boolean; text: string } }) {
   return (
-    <p className={`mb-4 text-sm ${msg.ok ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+    <p className={`mb-4 text-sm ${msg.ok ? "text-teal-700 dark:text-teal-400" : "text-red-600 dark:text-red-400"}`}>
       {msg.text}
     </p>
   );

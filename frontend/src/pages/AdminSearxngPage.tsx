@@ -105,7 +105,7 @@ export default function AdminSearxngPage() {
           <div className="mb-6 flex items-center gap-2">
             <span
               className={`h-2 w-2 rounded-full ${
-                status.configured ? "bg-green-500" : "bg-gray-300 dark:bg-gray-600"
+                status.configured ? "bg-teal-500" : "bg-gray-300 dark:bg-gray-600"
               }`}
             />
             <span className="text-sm text-gray-600 dark:text-gray-400">
@@ -180,7 +180,7 @@ export default function AdminSearxngPage() {
           )}
 
           {savedAt && (
-            <p className="text-sm text-green-700 dark:text-green-400">{t("admin.searxng.saved")}</p>
+            <p className="text-sm text-teal-700 dark:text-teal-400">{t("admin.searxng.saved")}</p>
           )}
 
           <div className="flex items-center gap-3">

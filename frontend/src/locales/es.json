@@ -103,6 +103,7 @@
         "body_label": "Tamaño máximo del cuerpo de solicitud (bytes)",
         "body_hint": "0 = sin límite. Por defecto: 1048576 (1 MB). Se aplica a todos los puntos de conexión.",
         "save_error": "Error al guardar la configuración.",
+        "load_error": "No se pudo cargar la configuración.",
         "saved": "Guardado"
       },
       "modal": {
@@ -391,12 +392,16 @@
     "modules": {
       "title": "Gestión de módulos",
       "subtitle": "Instale, actualice y gestione módulos en esta instancia de ModuLab.",
+      "syncing": "Sincronizando registro y buscando actualizaciones…",
       "store_title": "Tienda de módulos",
       "store_desc": "Explore e instale módulos desde el registro oficial y de la comunidad.",
       "store_count": "{{count}} módulos disponibles",
       "installed_title": "Módulos instalados",
       "installed_desc": "Gestione módulos activos, compruebe actualizaciones, ancle o elimine instalaciones.",
-      "installed_count": "{{count}} instalado(s)"
+      "installed_count": "{{count}} instalado(s)",
+      "updates_available": "{{count}} actualización(es) disponible(s)",
+      "all_up_to_date": "Todos los módulos están actualizados",
+      "sync_failed": "Error al sincronizar el registro — mostrando datos en caché, que pueden estar desactualizados."
     }
   },
   "home": {
@@ -411,6 +416,7 @@
     "quick_links_add": "Añadir mosaico",
     "quick_links_add_modal_title": "Añadir mosaico",
     "quick_links_tile_title": "Título",
+    "quick_links_tile_title_placeholder": "p. ej. Nextcloud",
     "quick_links_tile_url": "URL",
     "quick_links_tile_icon": "Ícono",
     "quick_links_tile_desc": "Descripción",
@@ -420,6 +426,8 @@
     "quick_links_remove": "Eliminar mosaico",
     "quick_links_empty": "Sin mosaicos — haga clic en \"+\" para añadir su primer enlace.",
     "quick_links_error": "Error al guardar",
+    "quick_links_reorder_failed": "No se pudo guardar el nuevo orden — inténtelo de nuevo.",
+    "quick_links_delete_failed": "No se pudo eliminar este mosaico — inténtelo de nuevo.",
     "quick_links_mode_url": "URL",
     "quick_links_mode_module": "Módulo",
     "quick_links_module_required": "Por favor selecciona un módulo.",
@@ -531,7 +539,10 @@
       "ntp": "Reloj del sistema (NTP)",
       "reachable": "Accesible",
       "unreachable": "Inaccesible",
-      "not_configured": "No configurado"
+      "not_configured": "No configurado",
+      "modules": "Módulos",
+      "modules_all_active": "{{count}} activos",
+      "modules_issues": "{{active}} activos · {{degraded}} degradados · {{failed}} fallidos"
     },
     "notifications_panel": {
       "checking": "Comprobando aprobaciones pendientes…",
@@ -541,7 +552,10 @@
       "recent_activity": "Actividad reciente",
       "nothing_yet": "Nada todavía — esto solo muestra lo que ocurrió mientras esta pestaña estaba abierta.",
       "review": "Revisar",
-      "waiting_toast": "{{name}} está esperando aprobación."
+      "waiting_toast": "{{name}} está esperando aprobación.",
+      "no_module_updates": "Todos los módulos están actualizados",
+      "module_updates_one": "{{count}} actualización de módulo disponible",
+      "module_updates_many": "{{count}} actualizaciones de módulos disponibles"
     },
     "chat": {
       "no_provider": "Sin proveedor",
@@ -635,6 +649,7 @@
       "title": "Proveedores de IA",
       "subtitle": "Añada su propia clave API para reemplazar la clave de ModuLab. Con su propia clave, también elige qué modelo usar.",
       "empty": "Aún no hay proveedores de IA configurados.",
+      "load_error": "No se pueden cargar los proveedores de IA.",
       "save_key_error": "Error al guardar la clave.",
       "remove_key_error": "Error al eliminar la clave.",
       "fetch_models_error": "No se pueden cargar los modelos.",

@@ -546,7 +546,7 @@ function StepSMTP({ onDone }: { onDone: () => void }) {
           </AuthSecondaryButton>
         </div>
         {testResult && (
-          <p className={`mt-2 text-xs ${testResult.ok ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+          <p className={`mt-2 text-xs ${testResult.ok ? "text-teal-600 dark:text-teal-400" : "text-red-600 dark:text-red-400"}`}>
             {testResult.message}
           </p>
         )}
@@ -617,7 +617,7 @@ function StepCompleteDone() {
   const navigate = useNavigate();
   return (
     <div className="space-y-4">
-      <p className="text-sm font-medium text-green-700 dark:text-green-400">
+      <p className="text-sm font-medium text-teal-700 dark:text-teal-400">
         {t("setup.step6.done_message")}
       </p>
       <AuthButton type="button" onClick={() => navigate("/")} className="w-full">

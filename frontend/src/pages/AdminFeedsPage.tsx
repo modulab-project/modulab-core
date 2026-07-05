@@ -864,7 +864,7 @@ function FeedModal({
             {checkResult && (
               <div className={`mt-2 rounded-md px-3 py-2 text-xs ${
                 checkResult.reachable
-                  ? "bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-400"
+                  ? "bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-400"
                   : "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-400"
               }`}>
                 {checkResult.reachable ? (

@@ -103,6 +103,7 @@
         "body_label": "Taille maximale du corps de la requête (octets)",
         "body_hint": "0 = illimité. Par défaut : 1048576 (1 Mo). S'applique à tous les points de terminaison.",
         "save_error": "Échec de l'enregistrement des paramètres.",
+        "load_error": "Impossible de charger les paramètres.",
         "saved": "Enregistré"
       },
       "modal": {
@@ -391,12 +392,16 @@
     "modules": {
       "title": "Gestion des modules",
       "subtitle": "Installer, mettre à jour et gérer les modules sur cette instance ModuLab.",
+      "syncing": "Synchronisation du registre et recherche de mises à jour…",
       "store_title": "Boutique de modules",
       "store_desc": "Parcourez et installez des modules depuis le registre officiel et la communauté.",
       "store_count": "{{count}} modules disponibles",
       "installed_title": "Modules installés",
       "installed_desc": "Gérez les modules actifs, vérifiez les mises à jour, épinglez ou supprimez des installations.",
-      "installed_count": "{{count}} installé(s)"
+      "installed_count": "{{count}} installé(s)",
+      "updates_available": "{{count}} mise(s) à jour disponible(s)",
+      "all_up_to_date": "Tous les modules sont à jour",
+      "sync_failed": "Échec de la synchronisation du registre — affichage des données en cache, qui peuvent être obsolètes."
     }
   },
   "home": {
@@ -411,6 +416,7 @@
     "quick_links_add": "Ajouter une tuile",
     "quick_links_add_modal_title": "Ajouter une tuile",
     "quick_links_tile_title": "Titre",
+    "quick_links_tile_title_placeholder": "ex. Nextcloud",
     "quick_links_tile_url": "URL",
     "quick_links_tile_icon": "Icône",
     "quick_links_tile_desc": "Description",
@@ -420,6 +426,8 @@
     "quick_links_remove": "Supprimer la tuile",
     "quick_links_empty": "Aucune tuile — cliquez sur \"+\" pour ajouter votre premier lien.",
     "quick_links_error": "Erreur lors de l'enregistrement",
+    "quick_links_reorder_failed": "Impossible d'enregistrer le nouvel ordre — veuillez réessayer.",
+    "quick_links_delete_failed": "Impossible de supprimer cette tuile — veuillez réessayer.",
     "quick_links_mode_url": "URL",
     "quick_links_mode_module": "Module",
     "quick_links_module_required": "Veuillez sélectionner un module.",
@@ -531,7 +539,10 @@
       "ntp": "Horloge système (NTP)",
       "reachable": "Accessible",
       "unreachable": "Inaccessible",
-      "not_configured": "Non configuré"
+      "not_configured": "Non configuré",
+      "modules": "Modules",
+      "modules_all_active": "{{count}} actifs",
+      "modules_issues": "{{active}} actifs · {{degraded}} dégradés · {{failed}} en échec"
     },
     "notifications_panel": {
       "checking": "Vérification des approbations en attente…",
@@ -541,7 +552,10 @@
       "recent_activity": "Activité récente",
       "nothing_yet": "Rien pour l'instant — ceci n'affiche que ce qui est arrivé pendant que cet onglet était ouvert.",
       "review": "Examiner",
-      "waiting_toast": "{{name}} attend une approbation."
+      "waiting_toast": "{{name}} attend une approbation.",
+      "no_module_updates": "Tous les modules sont à jour",
+      "module_updates_one": "{{count}} mise à jour de module disponible",
+      "module_updates_many": "{{count}} mises à jour de modules disponibles"
     },
     "chat": {
       "no_provider": "Aucun fournisseur",
@@ -635,6 +649,7 @@
       "title": "Fournisseurs IA",
       "subtitle": "Ajoutez votre propre clé API pour remplacer la clé ModuLab. Avec votre propre clé, vous choisissez également le modèle à utiliser.",
       "empty": "Aucun fournisseur IA configuré pour l'instant.",
+      "load_error": "Impossible de charger les fournisseurs IA.",
       "save_key_error": "Échec de l'enregistrement de la clé.",
       "remove_key_error": "Échec de la suppression de la clé.",
       "fetch_models_error": "Impossible de charger les modèles.",

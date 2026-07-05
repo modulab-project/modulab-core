@@ -416,6 +416,7 @@
     "quick_links_add": "Add tile",
     "quick_links_add_modal_title": "Add tile",
     "quick_links_tile_title": "Title",
+    "quick_links_tile_title_placeholder": "e.g. Nextcloud",
     "quick_links_tile_url": "URL",
     "quick_links_tile_icon": "Icon",
     "quick_links_tile_desc": "Description",

@@ -154,7 +154,7 @@ function AddTileModal({
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-base focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                  placeholder="z. B. Nextcloud"
+                  placeholder={t("home.quick_links_tile_title_placeholder")}
                 />
               </div>
               <div>

@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/modulab-project/modulab-core/backend/internal/netguard"
 	"github.com/modulab-project/modulab-core/backend/internal/valkey"
 )
 
@@ -33,7 +34,14 @@ const (
 	openMeteoBase = "https://api.open-meteo.com/v1/forecast"
 	userAgent     = "ModuLab-Core/1.0 (https://modulab.app)"
 	hourlyWindow  = 24 // slots shown in the day-view panel
+	fetchTimeout  = 10 * time.Second
 )
+
+// safeWeatherClient guards against SSRF the same way news/ai do, even
+// though openMeteoBase is a hardcoded constant today - keeping every
+// outbound call on the netguard client avoids a silent regression if
+// this ever becomes configurable.
+var safeWeatherClient = netguard.SafeHTTPClient(fetchTimeout)
 
 // Response is the JSON body of GET /v1/widgets/weather.
 type Response struct {
@@ -197,7 +205,7 @@ func fetchOpenMeteo(ctx context.Context, lat, lon float64) (*Response, error) {
 	}
 	req.Header.Set("User-Agent", userAgent)
 
-	httpResp, err := http.DefaultClient.Do(req)
+	httpResp, err := safeWeatherClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

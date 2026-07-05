@@ -139,7 +139,7 @@ function BackLink() {
 function StatusDot({ configured, t }: { configured: boolean; t: (k: string) => string }) {
   return (
     <span className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
-      <span className={`h-2 w-2 rounded-full ${configured ? "bg-green-500" : "bg-gray-300 dark:bg-gray-600"}`} />
+      <span className={`h-2 w-2 rounded-full ${configured ? "bg-teal-500" : "bg-gray-300 dark:bg-gray-600"}`} />
       {configured ? t("admin.smtp.status_configured") : t("admin.smtp.status_not_configured")}
     </span>
   );
@@ -147,7 +147,7 @@ function StatusDot({ configured, t }: { configured: boolean; t: (k: string) => s
 
 function Msg({ msg }: { msg: { ok: boolean; text: string } }) {
   return (
-    <p className={`mb-4 text-sm ${msg.ok ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+    <p className={`mb-4 text-sm ${msg.ok ? "text-teal-700 dark:text-teal-400" : "text-red-600 dark:text-red-400"}`}>
       {msg.text}
     </p>
   );
