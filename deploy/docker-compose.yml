@@ -100,8 +100,8 @@ services:
     mem_limit: 128m
     cpus: 0.5
     ports:
-      - "80:80"
-      - "443:443"
+      - "8080:80"
+      - "8443:443"
     environment:
       # Cloudflare API token — needs Zone:DNS:Edit permission for your domain.
       # Must be exactly 40 characters with no surrounding whitespace.
@@ -221,31 +221,23 @@ services:
     networks:
       - modulab-internal
 
-  # ── SearXNG config init ──────────────────────────────────────────────────────
-  # One-shot container that writes settings.yml (with the real secret_key
-  # substituted in from .env) into the searxng-data volume before the
-  # actual searxng service starts. Runs on every `up`, but is idempotent -
-  # it just overwrites the file with the same substitution each time, so
-  # re-running it is harmless. This keeps SEARXNG_SECRET_KEY as the single
-  # source of truth in .env, same as every other secret in this stack,
-  # instead of relying on the searxng image to generate/store its own.
-  searxng-config:
-    image: alpine:3.20
-    restart: "no"
-    environment:
-      SEARXNG_SECRET_KEY: ${SEARXNG_SECRET_KEY}
-    volumes:
-      - ./searxng/settings.yml:/template/settings.yml:ro
-      - searxng-data:/etc/searxng
-    command:
-      - sh
-      - -c
-      - "sed \"s|__SEARXNG_SECRET_KEY__|$$SEARXNG_SECRET_KEY|\" /template/settings.yml > /etc/searxng/settings.yml"
-
   # ── SearXNG ───────────────────────────────────────────────────────────────────
   # SearXNG reuses ModuLab's Valkey instance (database index 1) to avoid a
   # second in-memory store. SearXNG namespaces its own keys so there is no
   # collision risk.
+  #
+  # settings.yml is bind-mounted directly (read-only) instead of being
+  # templated in by a one-shot init container. That init-container approach
+  # (sed-substituting SEARXNG_SECRET_KEY from .env into the searxng-data
+  # volume before this service started) turned out unreliable on at least
+  # one real deployment (Ugreen NAS, 2026-07-06) - the searxng-config
+  # container failed to come up there. Editing deploy/searxng/settings.yml
+  # directly with a real secret_key tested as reliable instead, so that's
+  # the supported path now: before first start, replace the
+  # "__SEARXNG_SECRET_KEY__" placeholder below with a real value
+  # (`openssl rand -hex 32`) directly in that file. Since this file is
+  # version-controlled, do not commit your real key back - keep the edit
+  # local to your deployment.
   searxng:
     image: searxng/searxng:latest
     restart: unless-stopped
@@ -255,10 +247,8 @@ services:
     mem_limit: 256m
     cpus: 0.5
     volumes:
-      - searxng-data:/etc/searxng
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
     depends_on:
-      searxng-config:
-        condition: service_completed_successfully
       valkey:
         condition: service_healthy
     healthcheck:
@@ -298,5 +288,4 @@ volumes:
   postgres-data:
   valkey-data:
   traefik-acme:
-  searxng-data:
   modulab-modules-data:

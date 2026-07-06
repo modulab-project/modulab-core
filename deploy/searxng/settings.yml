@@ -1,10 +1,16 @@
 use_default_settings: true
 
 server:
-  # Placeholder substituted with the real SEARXNG_SECRET_KEY (from .env)
-  # by the one-shot searxng-config service in docker-compose.yml before
-  # this container starts. Never hardcode a real value here - this file
-  # is version-controlled and would then be the same on every install.
+  # Replace this placeholder with a real value (`openssl rand -hex 32`)
+  # directly in your local copy of this file before first start. This
+  # file is bind-mounted read-only into the searxng service (see
+  # docker-compose.yml) - there is no more automatic substitution step.
+  # An earlier approach templated this in from SEARXNG_SECRET_KEY in .env
+  # via a one-shot init container, but that container failed to start
+  # reliably on at least one real deployment (Ugreen NAS, 2026-07-06);
+  # editing this file directly tested as reliable instead. Since this
+  # file is version-controlled, do not commit your real key back - keep
+  # the edit local to your deployment.
   secret_key: "__SEARXNG_SECRET_KEY__"
   # Disable rate limiting — ModuLab Core calls SearXNG directly over the
   # Docker network without a reverse proxy, so there is no X-Forwarded-For
