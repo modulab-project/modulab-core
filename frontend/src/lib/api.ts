@@ -589,7 +589,8 @@ export function getWeather(lat: number, lon: number): Promise<WeatherResponse> {
 }
 
 export interface WeatherLocation {
-  label: string; // e.g. "Berlin, Deutschland" — see weather.go's fetchNominatimLabel
+  city: string; // e.g. "Frankfurt am Main" — for tight inline spots
+  label: string; // e.g. "Frankfurt am Main, Deutschland" — for the detail panel
 }
 
 // GET /v1/widgets/weather/location — reverse-geocodes the same lat/lon into

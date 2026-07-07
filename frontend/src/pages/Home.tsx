@@ -15,6 +15,7 @@ import {
   updateSearchPrefs,
   ApiError,
   type WeatherResponse,
+  type WeatherLocation,
   type NewsArticle,
   type NewsConfig,
   type Feed,
@@ -65,11 +66,13 @@ export default function Home() {
   const location = useLocation();
   const navigate = useNavigate();
   const [weather, setWeather] = useState<WeatherResponse | null>(null);
-  // Place name for the weather widget ("Berlin, Deutschland"), resolved via
-  // reverse geocoding from the same coordinates. Kept separate from
-  // `weather` itself: a failed/slow geocoding lookup must not hold up or
-  // hide the temperature, which is the more important half of the widget.
-  const [weatherLocation, setWeatherLocation] = useState<string | null>(null);
+  // Place name for the weather widget, resolved via reverse geocoding from
+  // the same coordinates. Kept separate from `weather` itself: a failed/slow
+  // geocoding lookup must not hold up or hide the temperature, which is the
+  // more important half of the widget. Carries both granularities the API
+  // returns (city alone vs. "city, country") - the homepage's one-line
+  // caption uses just the city, the detail panel has room for both.
+  const [weatherLocation, setWeatherLocation] = useState<WeatherLocation | null>(null);
   const [weatherPanelOpen, setWeatherPanelOpen] = useState(false);
   const [feedsPanelOpen, setFeedsPanelOpen] = useState(false);
   const [newsAllOpen, setNewsAllOpen] = useState(false);
@@ -141,7 +144,7 @@ export default function Home() {
         // slow/unreachable the temperature above still renders fine, just
         // without a place-name caption.
         getWeatherLocation(coords.latitude, coords.longitude)
-          .then((loc) => setWeatherLocation(loc.label || null))
+          .then((loc) => setWeatherLocation(loc.city ? loc : null))
           .catch(() => {});
       },
       () => {},
@@ -398,7 +401,7 @@ function Hero({
 }: {
   name: string;
   weather: WeatherResponse | null;
-  weatherLocation: string | null;
+  weatherLocation: WeatherLocation | null;
   onWeatherClick: () => void;
   onSearch: (q: string) => void;
   initialQuery: string;
@@ -461,7 +464,7 @@ function Hero({
           {weatherLocation && (
             <>
               <span>·</span>
-              <span className="max-w-[160px] truncate">{weatherLocation}</span>
+              <span className="max-w-[160px] truncate">{weatherLocation.city}</span>
             </>
           )}
           <i className="ti ti-chevron-right text-[11px] text-gray-400" aria-hidden="true" />
@@ -763,7 +766,7 @@ function WeatherPanel({
 }: {
   open: boolean;
   weather: WeatherResponse;
-  weatherLocation: string | null;
+  weatherLocation: WeatherLocation | null;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
@@ -798,7 +801,7 @@ function WeatherPanel({
           <div>
             <h2 className="text-base font-semibold">{t("home.weather.panel_title")}</h2>
             {weatherLocation && (
-              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{weatherLocation}</p>
+              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{weatherLocation.label}</p>
             )}
           </div>
           <button

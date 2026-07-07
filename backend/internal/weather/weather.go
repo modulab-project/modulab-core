@@ -323,11 +323,14 @@ func transform(raw *openMeteoResp) *Response {
 // --- Reverse geocoding (place name) ---------------------------------------
 
 // LocationResponse is the JSON body of GET /v1/widgets/weather/location.
-// Label is a short, human-readable place name ("Berlin, Deutschland") built
-// from whatever Nominatim's address breakdown provides - never the raw
-// full display_name, which is a long comma-separated address string not fit
-// for a one-line widget caption.
+// Two granularities so callers can pick what fits: City alone ("Frankfurt
+// am Main") for tight inline spots like the homepage's one-line weather
+// caption, and Label ("Frankfurt am Main, Deutschland") for anywhere with
+// room to spare, like the weather detail panel's header. Neither is ever
+// Nominatim's raw display_name, which is a long full-address string not fit
+// for either spot.
 type LocationResponse struct {
+	City  string `json:"city"`
 	Label string `json:"label"`
 }
 
@@ -401,13 +404,13 @@ func LocationHandler(vk *valkey.Client) http.HandlerFunc {
 			return
 		}
 
-		label, err := fetchNominatimLabel(ctx, lat, lon)
+		loc, err := fetchNominatimLocation(ctx, lat, lon)
 		if err != nil {
 			http.Error(w, "upstream geocoding fetch failed: "+err.Error(), http.StatusBadGateway)
 			return
 		}
 
-		data, err := json.Marshal(LocationResponse{Label: label})
+		data, err := json.Marshal(loc)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -423,10 +426,13 @@ func LocationHandler(vk *valkey.Client) http.HandlerFunc {
 	}
 }
 
-// fetchNominatimLabel calls OpenStreetMap's Nominatim reverse-geocoding API
-// and returns a short "<place>, <country>" label, or just the country if no
-// settlement-level name was returned (open ocean, remote areas).
-func fetchNominatimLabel(ctx context.Context, lat, lon float64) (string, error) {
+// fetchNominatimLocation calls OpenStreetMap's Nominatim reverse-geocoding
+// API and builds a LocationResponse from whatever address detail it
+// returns. City falls back to the country name if no settlement-level name
+// was found (open ocean, remote areas) - City is meant to always be
+// non-empty when the call succeeds at all, since Home.tsx's inline caption
+// has no fallback of its own for an empty string.
+func fetchNominatimLocation(ctx context.Context, lat, lon float64) (LocationResponse, error) {
 	params := url.Values{
 		"format":         {"jsonv2"},
 		"lat":            {strconv.FormatFloat(lat, 'f', 4, 64)},
@@ -437,7 +443,7 @@ func fetchNominatimLabel(ctx context.Context, lat, lon float64) (string, error) 
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, nominatimReverseURL+"?"+params.Encode(), nil)
 	if err != nil {
-		return "", err
+		return LocationResponse{}, err
 	}
 	// Nominatim's usage policy requires a valid User-Agent identifying the
 	// application (bare Go http.Client default is explicitly disallowed).
@@ -445,7 +451,7 @@ func fetchNominatimLabel(ctx context.Context, lat, lon float64) (string, error) 
 
 	httpResp, err := safeWeatherClient.Do(req)
 	if err != nil {
-		return "", err
+		return LocationResponse{}, err
 	}
 	defer func() {
 		if err := httpResp.Body.Close(); err != nil {
@@ -454,26 +460,27 @@ func fetchNominatimLabel(ctx context.Context, lat, lon float64) (string, error) 
 	}()
 
 	if httpResp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("nominatim returned HTTP %d", httpResp.StatusCode)
+		return LocationResponse{}, fmt.Errorf("nominatim returned HTTP %d", httpResp.StatusCode)
 	}
 
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		return "", err
+		return LocationResponse{}, err
 	}
 
 	var raw nominatimResp
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return "", fmt.Errorf("parse response: %w", err)
+		return LocationResponse{}, fmt.Errorf("parse response: %w", err)
 	}
 
 	settlement := raw.settlementName()
-	switch {
-	case settlement != "" && raw.Address.Country != "":
-		return settlement + ", " + raw.Address.Country, nil
-	case settlement != "":
-		return settlement, nil
-	default:
-		return raw.Address.Country, nil
+	city := settlement
+	if city == "" {
+		city = raw.Address.Country
 	}
+	label := city
+	if settlement != "" && raw.Address.Country != "" {
+		label = settlement + ", " + raw.Address.Country
+	}
+	return LocationResponse{City: city, Label: label}, nil
 }
