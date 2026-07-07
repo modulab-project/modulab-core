@@ -286,9 +286,11 @@
       "delete_title": "Supprimer"
     },
     "system": {
-      "title": "Configuration système",
+      "title": "Système et sécurité",
       "hub_subtitle": "Tous les paramètres système en un seul endroit — cliquez sur une section pour la configurer.",
-      "back": "Config. système",
+      "back": "Système et sécurité",
+      "group_config": "Configuration",
+      "group_diagnostics": "Diagnostic et sécurité",
       "oidc_card_desc": "Gérez votre fournisseur d'identité, Client ID et secret.",
       "searxng_card_desc": "Configurez l'instance de recherche web.",
       "ai_card_desc": "Clés API pour les fournisseurs IA intégrés et personnalisés.",

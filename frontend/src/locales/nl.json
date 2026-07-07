@@ -286,9 +286,11 @@
       "delete_title": "Verwijderen"
     },
     "system": {
-      "title": "Systeemconfiguratie",
+      "title": "Systeem en beveiliging",
       "hub_subtitle": "Alle systeeminstellingen op één plek — klik op een sectie om het te configureren.",
-      "back": "Systeemconfig.",
+      "back": "Systeem en beveiliging",
+      "group_config": "Configuratie",
+      "group_diagnostics": "Diagnostiek en beveiliging",
       "oidc_card_desc": "Beheer uw identiteitsprovider, Client ID en geheim.",
       "searxng_card_desc": "Configureer de webzoekinstantie.",
       "ai_card_desc": "API-sleutels voor ingebouwde en aangepaste AI-providers.",

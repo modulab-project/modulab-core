@@ -286,9 +286,11 @@
       "delete_title": "Löschen"
     },
     "system": {
-      "title": "Systemkonfiguration",
+      "title": "System & Sicherheit",
       "hub_subtitle": "Alle systemweiten Einstellungen an einem Ort – klicke auf einen Bereich, um ihn zu konfigurieren.",
-      "back": "Systemkonfiguration",
+      "back": "System & Sicherheit",
+      "group_config": "Konfiguration",
+      "group_diagnostics": "Diagnose & Sicherheit",
       "oidc_card_desc": "Anmeldeprovider, Client-ID und Secret verwalten.",
       "searxng_card_desc": "Websuche-Instanz konfigurieren.",
       "ai_card_desc": "API-Schlüssel für integrierte und benutzerdefinierte KI-Anbieter.",

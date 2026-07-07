@@ -18,7 +18,6 @@ export default function AdminSystemPage() {
   const { session, loading } = useAuthenticatedSession();
 
   const [oidcConfigured, setOidcConfigured] = useState(false);
-  const [groupPrefix, setGroupPrefix] = useState<string | null>(null);
   const [smtpConfigured, setSmtpConfigured] = useState(false);
   const [searxngConfigured, setSearxngConfigured] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -43,7 +42,6 @@ export default function AdminSystemPage() {
     ])
       .then(([sys, smtp, searxng]) => {
         setOidcConfigured(sys.oidc.configured);
-        setGroupPrefix(sys.group_prefix ?? null);
         setSmtpConfigured(smtp.configured);
         setSearxngConfigured(searxng.configured);
       })
@@ -64,26 +62,14 @@ export default function AdminSystemPage() {
           <p className="mb-6 text-sm text-red-600 dark:text-red-400">{loadError}</p>
         )}
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {/* Group prefix — read-only, no sub-page */}
-          <div className="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-center gap-2.5">
-                <i className="ti ti-tag text-[18px] text-gray-400" />
-                <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
-                  {t("admin.system.group_prefix_title")}
-                </span>
-              </div>
-            </div>
-            <p className="mt-2 text-xs text-gray-500 dark:text-gray-400 mb-2">
-              {t("admin.system.group_prefix_hint")}
-            </p>
-            <div className="rounded-lg border border-gray-100 bg-gray-50 px-2.5 py-1.5 text-xs font-mono text-gray-700 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300">
-              {groupPrefix || <span className="text-gray-400 dark:text-gray-600">{t("admin.system.not_configured")}</span>}
-            </div>
-          </div>
-
-          {/* OIDC */}
+        {/* Configuration group — OIDC (which now also shows the read-only
+            group prefix, moved off this hub - see AdminSystemOIDCPage.tsx),
+            SMTP, SearXNG, AI providers. Everything here has an actual
+            configured/not-configured state and a form to change it. */}
+        <p className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+          {t("admin.system.group_config")}
+        </p>
+        <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <ConfigCard
             icon="ti-id"
             title={t("admin.system.oidc_title")}
@@ -93,7 +79,6 @@ export default function AdminSystemPage() {
             t={t}
           />
 
-          {/* SMTP */}
           <ConfigCard
             icon="ti-mail"
             title={t("admin.smtp.title")}
@@ -103,7 +88,6 @@ export default function AdminSystemPage() {
             t={t}
           />
 
-          {/* SearXNG */}
           <ConfigCard
             icon="ti-search"
             title={t("admin.searxng.title")}
@@ -113,7 +97,6 @@ export default function AdminSystemPage() {
             t={t}
           />
 
-          {/* KI-Anbieter */}
           <Link
             to="/admin/system/ai"
             className="group flex flex-col rounded-xl border border-gray-200 p-4 transition-colors hover:border-teal-400 hover:bg-teal-50/40 dark:border-gray-800 dark:hover:border-teal-700 dark:hover:bg-teal-950/30"
@@ -131,10 +114,15 @@ export default function AdminSystemPage() {
               {t("admin.system.ai_card_desc")}
             </p>
           </Link>
+        </div>
 
-          {/* System Info — read-only diagnostics, no configured/not-
-              configured status dot like the cards above (nothing to
-              configure here). */}
+        {/* Diagnostics group — read-only, nothing to configure, so neither
+            card gets the configured/not-configured status dot the
+            configuration cards above have. */}
+        <p className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+          {t("admin.system.group_diagnostics")}
+        </p>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Link
             to="/admin/system/info"
             className="group flex flex-col rounded-xl border border-gray-200 p-4 transition-colors hover:border-teal-400 hover:bg-teal-50/40 dark:border-gray-800 dark:hover:border-teal-700 dark:hover:bg-teal-950/30"
@@ -153,11 +141,10 @@ export default function AdminSystemPage() {
             </p>
           </Link>
 
-          {/* Security Info — always last: split out from System Info
-              (2026-07-05) so "is Core healthy" and "who/what is currently
-              active or rate-limited" are two separate, focused pages
-              instead of one page trying to be both. Same read-only-
-              diagnostics treatment as the System Info card above. */}
+          {/* Split out from System Info (2026-07-05) so "is Core healthy"
+              and "who/what is currently active or rate-limited" are two
+              separate, focused pages instead of one page trying to be
+              both. Same read-only-diagnostics treatment as System Info. */}
           <Link
             to="/admin/security/info"
             className="group flex flex-col rounded-xl border border-gray-200 p-4 transition-colors hover:border-teal-400 hover:bg-teal-50/40 dark:border-gray-800 dark:hover:border-teal-700 dark:hover:bg-teal-950/30"

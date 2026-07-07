@@ -15,6 +15,11 @@ export default function AdminSystemOIDCPage() {
   const [issuer, setIssuer] = useState("");
   const [clientId, setClientId] = useState("");
   const [secret, setSecret] = useState("");
+  // Read-only - set once in the Setup Wizard, never editable from here (see
+  // its hint text below). Moved onto this page from the /admin/system hub
+  // (2026-07-08): it's OIDC-specific data with nowhere else it makes sense
+  // to show, not a standalone configurable area of its own.
+  const [groupPrefix, setGroupPrefix] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -34,6 +39,7 @@ export default function AdminSystemOIDCPage() {
           setIssuer(s.oidc.issuer_url ?? "");
           setClientId(s.oidc.client_id ?? "");
         }
+        setGroupPrefix(s.group_prefix ?? null);
       })
       .catch(() => setMsg({ ok: false, text: t("admin.system.load_error") }));
   }, [session, navigate, t]);
@@ -91,6 +97,25 @@ export default function AdminSystemOIDCPage() {
           <StatusDot configured={configured} t={t} />
         </div>
         <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">{t("admin.system.oidc_hint")}</p>
+
+        {/* Group prefix — read-only, set once by the Setup Wizard. Shown
+            here (not as its own hub card) since it has no configuration
+            surface of its own to justify one. */}
+        <div className="mb-6 rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+          <div className="flex items-center gap-2.5">
+            <i className="ti ti-tag text-[18px] text-gray-400" />
+            <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
+              {t("admin.system.group_prefix_title")}
+            </span>
+          </div>
+          <p className="mt-2 mb-2 text-xs text-gray-500 dark:text-gray-400">
+            {t("admin.system.group_prefix_hint")}
+          </p>
+          <div className="rounded-lg border border-gray-100 bg-gray-50 px-2.5 py-1.5 text-xs font-mono text-gray-700 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300">
+            {groupPrefix || <span className="text-gray-400 dark:text-gray-600">{t("admin.system.not_configured")}</span>}
+          </div>
+        </div>
+
         {msg && <Msg msg={msg} />}
         <form onSubmit={handleSubmit} className="space-y-4">
           <Field label={t("setup.step2.issuer_url")}>

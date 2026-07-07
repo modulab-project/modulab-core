@@ -286,9 +286,11 @@
       "delete_title": "Delete"
     },
     "system": {
-      "title": "System configuration",
+      "title": "System & Security",
       "hub_subtitle": "All system-wide settings in one place — click a section to configure it.",
-      "back": "System config",
+      "back": "System & Security",
+      "group_config": "Configuration",
+      "group_diagnostics": "Diagnostics & Security",
       "oidc_card_desc": "Manage your identity provider, Client ID, and secret.",
       "searxng_card_desc": "Configure the web search instance.",
       "ai_card_desc": "API keys for built-in and custom AI providers.",
