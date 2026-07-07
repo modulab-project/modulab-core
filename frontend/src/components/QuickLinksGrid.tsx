@@ -334,7 +334,15 @@ function TileCard({
             : "border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800",
       ].join(" ")}
     >
-      {/* Delete button — only on user tiles, visible on hover */}
+      {/* Delete button — only on user tiles. Always rendered (not
+          hover-gated): a pure `hidden group-hover:flex` pair depends on a
+          :hover state that touch devices (iPhone, tablet - reported
+          2026-07-08) never reliably enter, which made this button
+          effectively unreachable there - no mouse ever "hovers" a finger
+          tap. Kept visually subtle at rest (faint, no background) so it
+          doesn't clutter the tile on desktop either, then goes fully
+          opaque/red on hover for the same discoverability desktop had
+          before. */}
       {onDelete && (
         <button
           onClick={(e) => {
@@ -343,7 +351,8 @@ function TileCard({
             onDelete();
           }}
           title={t("home.quick_links_remove")}
-          className="absolute right-2 top-2 hidden rounded-full p-0.5 text-gray-400 hover:bg-red-100 hover:text-red-600 group-hover:flex dark:hover:bg-red-900/40 dark:hover:text-red-400"
+          aria-label={t("home.quick_links_remove")}
+          className="absolute right-2 top-2 flex rounded-full p-0.5 text-gray-400/70 hover:bg-red-100 hover:text-red-600 dark:text-gray-500/70 dark:hover:bg-red-900/40 dark:hover:text-red-400"
         >
           <i className="ti ti-x text-sm" />
         </button>
