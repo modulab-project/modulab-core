@@ -217,6 +217,7 @@ func (p *WorkerPool) startLocked(name, entrypoint string, opts WorkerOptions) er
 		skipTLSVerify:     opts.SkipTLSVerify,
 		jobEntrypoints:    jobs,
 		onCrash:           p.onCrash,
+		connPool:          make(chan net.Conn, connPoolSize),
 	}
 	if err := w.start(); err != nil {
 		return fmt.Errorf("worker %q: start: %w", name, err)
@@ -549,6 +550,27 @@ type ModuleNotification struct {
 
 // ── denoWorker (internal) ─────────────────────────────────────────────────────
 
+// connPoolSize bounds how many requests Core will have in flight to a single
+// module's Deno worker at once. Previously Core kept exactly one persistent
+// connection guarded by a mutex held for an entire request's round trip,
+// which meant one slow handler (e.g. a photo upload that resizes an image)
+// blocked every other request to that module — including unrelated, fast
+// ones like a simple GET — until it finished or the per-request deadline
+// fired. Under real load that was long enough for Traefik/Cloudflare to give
+// up waiting on the stalled connection and serve their own generic
+// gateway-error page instead of Core's actual response (observed 2026-07-07
+// with my-place's photo upload endpoint).
+//
+// The worker's own accept loop (see workerBootstrapScript's acceptLoop)
+// already calls handleConn per accepted connection without awaiting it, so
+// it was always able to service multiple connections concurrently as
+// separate async tasks — nothing on the Deno side needs to change. Core
+// just wasn't taking advantage of it. A small bounded pool of persistent
+// connections (still long-lived, avoiding the connection-churn "os error 22"
+// issue noted on waitForSocket) lets up to connPoolSize requests run at once
+// per module.
+const connPoolSize = 4
+
 // denoWorker manages a single Deno subprocess.
 type denoWorker struct {
 	name       string
@@ -575,10 +597,17 @@ type denoWorker struct {
 	// needing a back-reference to the pool itself.
 	onCrash func(name string)
 
-	// mu protects conn (the reusable Unix socket connection) and stopping.
+	// mu protects stopping and numConns. connPool is a channel and is safe
+	// for concurrent send/receive without mu.
 	mu       sync.Mutex
-	conn     net.Conn
 	stopping bool // set by stop() before cancel(); distinguishes an intentional stop from a crash
+
+	// connPool holds up to connPoolSize persistent, ready-to-use Unix socket
+	// connections to the worker (see connPoolSize's doc comment). numConns
+	// tracks how many have been dialed so far so getConn knows when to dial
+	// a new one vs. wait for one to be released back into the pool.
+	connPool chan net.Conn
+	numConns int
 }
 
 // workerBootstrapScript is the small Deno bootstrap that wraps the module's
@@ -899,15 +928,26 @@ func (w *denoWorker) start() error {
 	return nil
 }
 
-// stop kills the Deno subprocess and closes the connection.
+// stop kills the Deno subprocess and closes every pooled connection.
 func (w *denoWorker) stop() {
 	w.mu.Lock()
 	w.stopping = true
-	if w.conn != nil {
-		_ = w.conn.Close()
-		w.conn = nil
-	}
 	w.mu.Unlock()
+
+	// Drain and close whatever's currently sitting idle in the pool.
+	// Connections checked out by an in-flight dispatch() call aren't in the
+	// channel — they'll simply fail their next read/write once the process
+	// is gone, which dispatch already treats like any other broken
+	// connection.
+drain:
+	for {
+		select {
+		case conn := <-w.connPool:
+			_ = conn.Close()
+		default:
+			break drain
+		}
+	}
 
 	if w.cancel != nil {
 		w.cancel()
@@ -915,53 +955,79 @@ func (w *denoWorker) stop() {
 	_ = os.Remove(w.sockPath)
 }
 
-// dispatch sends a request and reads the response over the Unix socket.
-// It reconnects automatically if the connection was dropped.
-func (w *denoWorker) dispatch(ctx context.Context, req WorkerRequest) (WorkerResponse, error) {
-	reqBytes, err := json.Marshal(req)
-	if err != nil {
-		return WorkerResponse{}, fmt.Errorf("marshal request: %w", err)
+// getConn checks out a connection from the pool, dialing a fresh one if the
+// pool hasn't reached connPoolSize yet, or blocking until one is released
+// (or ctx ends) once it has. See connPoolSize's doc comment for why this
+// exists instead of one connection shared/serialized across all requests.
+func (w *denoWorker) getConn(ctx context.Context) (net.Conn, error) {
+	select {
+	case conn := <-w.connPool:
+		return conn, nil
+	default:
 	}
-	reqBytes = append(reqBytes, '\n')
 
 	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	// Reconnect if needed.
-	if w.conn == nil {
+	if w.numConns < connPoolSize {
+		w.numConns++
+		w.mu.Unlock()
 		conn, err := net.Dial("unix", w.sockPath)
 		if err != nil {
-			return WorkerResponse{}, fmt.Errorf("connect to worker socket: %w", err)
+			w.mu.Lock()
+			w.numConns--
+			w.mu.Unlock()
+			return nil, fmt.Errorf("connect to worker socket: %w", err)
 		}
-		w.conn = conn
+		return conn, nil
 	}
+	w.mu.Unlock()
 
-	// Apply context deadline.
+	select {
+	case conn := <-w.connPool:
+		return conn, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// releaseConn returns a healthy connection to the pool for reuse. Call with
+// nil after closing a broken connection instead — that frees its pool slot
+// (decrementing numConns) so the next getConn dials a replacement rather
+// than permanently shrinking the pool's effective capacity.
+func (w *denoWorker) releaseConn(conn net.Conn) {
+	if conn == nil {
+		w.mu.Lock()
+		w.numConns--
+		w.mu.Unlock()
+		return
+	}
+	select {
+	case w.connPool <- conn:
+	default:
+		// Pool already full — shouldn't happen given numConns accounting,
+		// but don't leak the connection if it does.
+		_ = conn.Close()
+		w.mu.Lock()
+		w.numConns--
+		w.mu.Unlock()
+	}
+}
+
+// roundTrip writes reqBytes to conn and reads a single newline-terminated
+// JSON response, applying ctx's deadline (or a 30s default) to the
+// connection first.
+func (w *denoWorker) roundTrip(ctx context.Context, conn net.Conn, reqBytes []byte) (WorkerResponse, error) {
 	if dl, ok := ctx.Deadline(); ok {
-		_ = w.conn.SetDeadline(dl)
+		_ = conn.SetDeadline(dl)
 	} else {
-		_ = w.conn.SetDeadline(time.Now().Add(30 * time.Second))
+		_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
 	}
 
-	if _, err := w.conn.Write(reqBytes); err != nil {
-		// Broken pipe — close and retry once.
-		_ = w.conn.Close()
-		w.conn = nil
-		conn, err2 := net.Dial("unix", w.sockPath)
-		if err2 != nil {
-			return WorkerResponse{}, fmt.Errorf("reconnect after write error: %w", err2)
-		}
-		w.conn = conn
-		_ = w.conn.SetDeadline(time.Now().Add(30 * time.Second))
-		if _, err = w.conn.Write(reqBytes); err != nil {
-			return WorkerResponse{}, fmt.Errorf("write request: %w", err)
-		}
+	if _, err := conn.Write(reqBytes); err != nil {
+		return WorkerResponse{}, fmt.Errorf("write request: %w", err)
 	}
 
-	line, err := bufio.NewReader(w.conn).ReadString('\n')
+	line, err := bufio.NewReader(conn).ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
-		_ = w.conn.Close()
-		w.conn = nil
 		return WorkerResponse{}, fmt.Errorf("read response: %w", err)
 	}
 
@@ -969,6 +1035,47 @@ func (w *denoWorker) dispatch(ctx context.Context, req WorkerRequest) (WorkerRes
 	if err := json.Unmarshal([]byte(line), &resp); err != nil {
 		return WorkerResponse{}, fmt.Errorf("unmarshal response: %w", err)
 	}
+	return resp, nil
+}
+
+// dispatch sends a request and reads the response over a pooled Unix socket
+// connection, retrying once against a fresh connection if the checked-out
+// one turns out to be broken (e.g. the worker restarted since it was
+// pooled).
+func (w *denoWorker) dispatch(ctx context.Context, req WorkerRequest) (WorkerResponse, error) {
+	reqBytes, err := json.Marshal(req)
+	if err != nil {
+		return WorkerResponse{}, fmt.Errorf("marshal request: %w", err)
+	}
+	reqBytes = append(reqBytes, '\n')
+
+	conn, err := w.getConn(ctx)
+	if err != nil {
+		return WorkerResponse{}, err
+	}
+
+	resp, err := w.roundTrip(ctx, conn, reqBytes)
+	if err != nil {
+		_ = conn.Close()
+		w.releaseConn(nil)
+
+		// Retry once against a brand new connection — mirrors the previous
+		// single-connection reconnect-and-retry behavior.
+		conn2, dialErr := w.getConn(ctx)
+		if dialErr != nil {
+			return WorkerResponse{}, fmt.Errorf("reconnect after error: %w", dialErr)
+		}
+		resp, err = w.roundTrip(ctx, conn2, reqBytes)
+		if err != nil {
+			_ = conn2.Close()
+			w.releaseConn(nil)
+			return WorkerResponse{}, err
+		}
+		w.releaseConn(conn2)
+		return resp, nil
+	}
+
+	w.releaseConn(conn)
 	return resp, nil
 }
 
