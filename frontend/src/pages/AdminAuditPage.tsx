@@ -54,6 +54,19 @@ const EVENT_TYPES = [
 
 const PAGE_SIZE = 50;
 
+// Translates a raw event_type ("user.approved", "config.ai_provider.key_cleared",
+// ...) into a human-readable label ("Benutzer freigegeben", ...) via
+// admin.audit.event_types.<type_with_underscores> - i18next keys can't
+// contain literal dots (they're the nesting separator), hence the
+// underscore rewrite. Falls back to the raw type itself via `defaultValue`
+// if a translation is ever missing - e.g. a backend event type shipped
+// before its locale entry was added, or a module-defined type in the
+// future - so an untranslated entry still shows something useful (the raw
+// string) rather than a blank/broken-looking cell.
+function eventTypeLabel(t: (key: string, opts?: { defaultValue: string }) => string, type: string): string {
+  return t(`admin.audit.event_types.${type.replace(/\./g, "_")}`, { defaultValue: type });
+}
+
 export default function AdminAuditPage() {
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -170,7 +183,7 @@ export default function AdminAuditPage() {
               <option value="">{t("admin.audit.filter_all")}</option>
               {EVENT_TYPES.map((et) => (
                 <option key={et} value={et}>
-                  {et}
+                  {eventTypeLabel(t, et)}
                 </option>
               ))}
             </select>
@@ -277,7 +290,15 @@ export default function AdminAuditPage() {
 }
 
 // Colour-coded badge for event types.
+// Shows the translated, human-readable label (eventTypeLabel) as the
+// primary text - the point of this whole component (2026-07-08: admins
+// couldn't tell at a glance what "config.ai_provider.key_cleared" meant).
+// The raw type string is kept as a `title` tooltip, not dropped: someone
+// cross-referencing against backend/internal/audit/audit.go or writing a
+// filter still needs the exact wire value, just not as the first thing
+// they read.
 function EventBadge({ type }: { type: string }) {
+  const { t } = useTranslation();
   let color = "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400";
   if (type.startsWith("user.")) {
     color = "bg-gray-200 text-gray-800 dark:bg-gray-700 dark:text-gray-200";
@@ -287,8 +308,11 @@ function EventBadge({ type }: { type: string }) {
     color = "bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300";
   }
   return (
-    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${color}`}>
-      {type}
+    <span
+      title={type}
+      className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${color}`}
+    >
+      {eventTypeLabel(t, type)}
     </span>
   );
 }
