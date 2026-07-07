@@ -14,11 +14,21 @@ export default function Footer() {
     <footer className="mx-auto max-w-xl px-4 py-6 text-center text-xs text-gray-400 dark:text-gray-500">
       <p>
         © {year} ModuLab ·{" "}
-        <a href={PROJECT_URL} className="hover:text-gray-600 dark:hover:text-gray-300">
+        <a
+          href={PROJECT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:text-gray-600 dark:hover:text-gray-300"
+        >
           modulab.app
         </a>{" "}
         ·{" "}
-        <a href={GITHUB_URL} className="hover:text-gray-600 dark:hover:text-gray-300">
+        <a
+          href={GITHUB_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:text-gray-600 dark:hover:text-gray-300"
+        >
           GitHub
         </a>
       </p>

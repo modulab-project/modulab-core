@@ -552,10 +552,20 @@ function FooterBar({
         {t("shell.versions", { core: health?.version ?? "…", frontend: FRONTEND_VERSION })}
       </span>
       <span className="flex items-center gap-3">
-        <a href={PROJECT_URL} className="hover:text-gray-700 dark:hover:text-gray-200">
+        <a
+          href={PROJECT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:text-gray-700 dark:hover:text-gray-200"
+        >
           modulab.app
         </a>
-        <a href={GITHUB_URL} className="hover:text-gray-700 dark:hover:text-gray-200">
+        <a
+          href={GITHUB_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:text-gray-700 dark:hover:text-gray-200"
+        >
           GitHub
         </a>
       </span>
