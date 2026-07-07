@@ -174,3 +174,52 @@ jobs:
           image-ref: ghcr.io/modulab-project/modulab-core:${{ github.event.release.tag_name }}
           severity: HIGH,CRITICAL
           exit-code: "1"
+
+  # deploy/Dockerfile.nginx copies its static frontend files out of the core
+  # image (COPY --from=core-source, ARG CORE_IMAGE) rather than building the
+  # frontend itself - see that file's doc comment. That only produces a
+  # correct result if it's built with CORE_IMAGE pointing at the *exact*
+  # core image publish-image just pushed, which is why this job `needs:
+  # publish-image` instead of running in parallel with it: without that
+  # ordering, this could build against whatever ghcr.io/.../modulab-core:latest
+  # happened to resolve to at the time (a stale previous release, on a
+  # runner that has no local Docker cache of its own to fall back on
+  # incorrectly either way - it would just as happily build a broken image
+  # against the wrong source).
+  #
+  # This is also what keeps a release "docker compose pull && docker compose
+  # up -d" on the deployment host - see docker-compose.yml's nginx service,
+  # now `image:` instead of `build:`. Before this job existed, nginx was
+  # built locally on the host from deploy/Dockerfile.nginx, which had the
+  # same stale-source risk this job's `needs:` ordering exists to avoid, but
+  # with no equivalent safeguard - a plain `docker compose pull` doesn't
+  # touch build-only services at all, and `docker compose up -d` without
+  # `--build` reuses whatever nginx image already happened to be sitting on
+  # the host, however old. That gap is exactly what made Core and Frontend
+  # disagree on their own version number after the 1.0.1 release (2026-07-08).
+  publish-nginx-image:
+    runs-on: ubuntu-latest
+    needs: [publish-image]
+    if: github.event_name == 'release'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: ./deploy
+          file: ./deploy/Dockerfile.nginx
+          build-args: |
+            CORE_IMAGE=ghcr.io/modulab-project/modulab-core:${{ github.event.release.tag_name }}
+          push: true
+          tags: |
+            ghcr.io/modulab-project/modulab-core-nginx:latest
+            ghcr.io/modulab-project/modulab-core-nginx:${{ github.event.release.tag_name }}

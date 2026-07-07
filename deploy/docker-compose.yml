@@ -6,6 +6,14 @@
 #   docker compose up -d
 #   docker compose logs -f core
 #
+# Upgrading to a new release: every image below (core, nginx) is published
+# by the CI release pipeline (.github/workflows/ci.yml's publish-image /
+# publish-nginx-image jobs) when a GitHub Release is published - there is no
+# local build step involved anymore for either of them, so upgrading is
+# always just:
+#   docker compose pull
+#   docker compose up -d
+#
 # Resource limits: every service below sets mem_limit/cpus. These are
 # non-swarm Compose fields (no `deploy:` key or swarm mode needed) and exist
 # so a single runaway container (e.g. a misbehaving module's Deno subprocess
@@ -200,10 +208,21 @@ services:
   # Serves the pre-built frontend from the core image and proxies /v1/ to Core.
   # Core does not serve static files itself; nginx bridges that gap so that
   # frontend and API share the same origin without an extra subdomain.
+  #
+  # image:, not build: - deploy/Dockerfile.nginx (still in this repo, used
+  # by the CI release pipeline's publish-nginx-image job) copies its static
+  # files out of a specific tagged core image at build time, so it can only
+  # ever be correct when built right after that exact core image is pushed.
+  # Building it locally on the deployment host had no equivalent guarantee:
+  # `docker compose pull` skips build-only services entirely, and `docker
+  # compose up -d` without `--build` silently reuses whatever nginx image
+  # already happened to be sitting on the host - which is exactly how Core
+  # and Frontend ended up disagreeing on their own version number after the
+  # 1.0.1 release (2026-07-08), and why this needed a manual rebuild to fix.
+  # Pulling a CI-built image instead means a plain `docker compose pull &&
+  # docker compose up -d` is enough for every future release, same as core.
   nginx:
-    build:
-      context: .
-      dockerfile: Dockerfile.nginx
+    image: ghcr.io/modulab-project/modulab-core-nginx:latest
     restart: unless-stopped
     mem_limit: 64m
     cpus: 0.25
