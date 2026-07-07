@@ -43,8 +43,18 @@ const (
 	// asks API consumers to cache aggressively and cap steady-state traffic
 	// at ~1 req/sec - a 15-minute TTL would re-hit it every time the 15-
 	// minute weather cache also expired, for a value that never differs.
-	locationCacheTTL    = 24 * time.Hour
-	locationCacheKeyPfx = "geoloc:"
+	locationCacheTTL = 24 * time.Hour
+	// "v2" because LocationResponse gained a City field alongside the
+	// original Label (see that struct's doc comment) - entries written
+	// under the old "geoloc:" prefix only ever contained {"label": "..."},
+	// so serving one of those straight from cache to today's frontend
+	// (which requires City to be truthy before it renders anything) would
+	// silently show nothing at all for up to the old entry's full 24h TTL.
+	// Bumping the prefix makes that whole class of "cached response is
+	// missing a field the current code expects" bug impossible instead of
+	// requiring a manual cache flush - repeat this bump on any future
+	// change to LocationResponse's shape.
+	locationCacheKeyPfx = "geoloc:v2:"
 	nominatimReverseURL = "https://nominatim.openstreetmap.org/reverse"
 )
 
