@@ -138,6 +138,17 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v7
+      # QEMU lets the amd64 runner emulate arm64 to build that platform's
+      # layers (the Dockerfile's go-builder/frontend-builder stages have no
+      # native cross-compile args, so arm64 layers are built under emulation -
+      # slower than a native arm64 runner, but fine for a solo project's
+      # release cadence). Buildx is the BuildKit driver that actually knows
+      # how to produce a multi-platform manifest list from a single build
+      # invocation; the default docker driver can't.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
       - name: Log in to ghcr.io
         uses: docker/login-action@v4
         with:
@@ -149,6 +160,7 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ghcr.io/modulab-project/modulab-core:latest
@@ -206,6 +218,14 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v7
+      # Same reasoning as publish-image above: this build's own base
+      # (nginx:alpine) and its COPY --from=core-source stage both need to
+      # resolve per-platform, which only buildx (with QEMU registered for the
+      # non-native arch) can do in one invocation.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
       - name: Log in to ghcr.io
         uses: docker/login-action@v4
         with:
@@ -217,6 +237,7 @@ jobs:
         with:
           context: ./deploy
           file: ./deploy/Dockerfile.nginx
+          platforms: linux/amd64,linux/arm64
           build-args: |
             CORE_IMAGE=ghcr.io/modulab-project/modulab-core:${{ github.event.release.tag_name }}
           push: true
