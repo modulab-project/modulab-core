@@ -45,6 +45,10 @@ export default function ModulePage() {
   const [ModuleComponent, setModuleComponent] = useState<React.ComponentType<ModuleComponentProps> | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [fetching, setFetching] = useState(true);
+  // True while the bundle fetch below is still retrying a 404 — kept separate
+  // from `fetching` (module metadata) so the "no frontend" fallback only
+  // renders once we're sure it's a genuine Tier 1 module, not mid-retry.
+  const [bundleLoading, setBundleLoading] = useState(true);
 
   // Fetch module metadata.
   // NOTE: `t` is intentionally NOT in the dependency array — same reason as
@@ -119,44 +123,85 @@ export default function ModulePage() {
   // cause a re-import every time the locale finishes loading (i18n fires a
   // re-render after addResourceBundle), which unmounts the module component
   // mid-interaction and loses all unsaved user input.
+  //
+  // Retries a 404 a few times before giving up: right after a module (re)starts
+  // (deno worker (re)start, npm dependency resolution in workerBootstrapScript,
+  // egress reload, etc. — see backend/internal/modules/deno.go) there is a real
+  // window where the worker/bundle isn't ready yet. A single fetch used to show
+  // the "no frontend" fallback permanently for that window, only recovering on
+  // a manual page reload — this makes the same window resolve on its own.
   useEffect(() => {
-    if (!mod || mod.status !== "active") return;
+    if (!mod || mod.status !== "active") {
+      setBundleLoading(false);
+      return;
+    }
 
     const token = getSessionToken();
-    if (!token) return;
+    if (!token) {
+      setBundleLoading(false);
+      return;
+    }
 
+    let cancelled = false;
     let blobUrl: string | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-    fetch(`/v1/modules/${encodeURIComponent(mod.name)}/ui/bundle.js`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((r) => {
-        if (!r.ok) {
-          // 404 = no bundle (Tier 1 or not yet built) — show fallback silently.
-          if (r.status === 404) return null;
-          throw new Error(`HTTP ${r.status}`);
-        }
-        return r.blob();
+    const MAX_ATTEMPTS = 6;
+    const RETRY_DELAY_MS = 1500;
+
+    setBundleLoading(true);
+
+    function attempt(attemptNum: number) {
+      fetch(`/v1/modules/${encodeURIComponent(mod!.name)}/ui/bundle.js`, {
+        headers: { Authorization: `Bearer ${token}` },
       })
-      .then((blob) => {
-        if (!blob) return null;
-        blobUrl = URL.createObjectURL(blob);
-        return import(/* @vite-ignore */ blobUrl);
-      })
-      .then((m) => {
-        if (!m) return; // 404 path
-        if (m.default) {
-          setModuleComponent(() => m.default as React.ComponentType<ModuleComponentProps>);
-        } else {
-          setLoadError("module_page.no_default_export");
-        }
-      })
-      .catch((e) => {
-        setLoadError(`module_page.fetch_error:${e instanceof Error ? e.message : String(e)}`);
-      })
-      .finally(() => {
-        if (blobUrl) URL.revokeObjectURL(blobUrl);
-      });
+        .then((r) => {
+          if (cancelled) return null;
+          if (!r.ok) {
+            if (r.status === 404) {
+              // Bundle/worker not ready yet — retry a few times before
+              // treating this as "genuinely no bundle" (Tier 1 module).
+              if (attemptNum < MAX_ATTEMPTS) {
+                retryTimer = setTimeout(() => attempt(attemptNum + 1), RETRY_DELAY_MS);
+                return null;
+              }
+              setBundleLoading(false); // exhausted retries — show fallback now
+              return null;
+            }
+            throw new Error(`HTTP ${r.status}`);
+          }
+          return r.blob();
+        })
+        .then((blob) => {
+          if (cancelled || !blob) return null;
+          blobUrl = URL.createObjectURL(blob);
+          return import(/* @vite-ignore */ blobUrl);
+        })
+        .then((m) => {
+          if (cancelled || !m) return; // still-retrying or genuinely-no-bundle path
+          if (m.default) {
+            setModuleComponent(() => m.default as React.ComponentType<ModuleComponentProps>);
+          } else {
+            setLoadError("module_page.no_default_export");
+          }
+          setBundleLoading(false);
+        })
+        .catch((e) => {
+          if (cancelled) return;
+          setLoadError(`module_page.fetch_error:${e instanceof Error ? e.message : String(e)}`);
+          setBundleLoading(false);
+        })
+        .finally(() => {
+          if (blobUrl) URL.revokeObjectURL(blobUrl);
+        });
+    }
+
+    attempt(1);
+
+    return () => {
+      cancelled = true;
+      if (retryTimer !== null) clearTimeout(retryTimer);
+    };
   }, [mod]);
 
   if (loading || !session) return null;
@@ -171,7 +216,7 @@ export default function ModulePage() {
   return (
     <AppShell session={session}>
       <div className="mx-auto max-w-5xl py-6 px-2">
-        {fetching && (
+        {(fetching || (!loadError && bundleLoading)) && (
           <p className="text-sm text-gray-400 dark:text-gray-500">{t("common.loading")}</p>
         )}
 
@@ -195,11 +240,11 @@ export default function ModulePage() {
           </div>
         )}
 
-        {!fetching && !loadError && ModuleComponent && (
+        {!fetching && !bundleLoading && !loadError && ModuleComponent && (
           <ModuleComponent moduleName={moduleName} apiBase={apiBase} token={token} initialQuery={searchParams} />
         )}
 
-        {!fetching && !loadError && !ModuleComponent && mod && (
+        {!fetching && !bundleLoading && !loadError && !ModuleComponent && mod && (
           <ModuleFallback mod={mod} apiBase={apiBase} token={token} />
         )}
       </div>
