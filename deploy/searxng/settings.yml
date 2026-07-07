@@ -26,3 +26,42 @@ search:
   formats:
     - html
     - json
+
+# Engine overrides on top of use_default_settings' defaults.
+#
+# Disabled below: pure HTML-scraping engines that were observed CAPTCHA-
+# walling or 429-rate-limiting this instance in production (2026-07-06 logs)
+# duckduckgo, brave, startpage - plus qwant, which the upstream SearXNG
+# project tracks as commonly CAPTCHA-blocked for self-hosted instances
+# (searxng/searxng#3929) even though it hadn't shown up in our own logs yet.
+#
+# Kept enabled: engines that are either real public APIs rather than HTML
+# scraping (wikipedia, wikidata, github, stackoverflow) or empirically more
+# tolerant of self-hosted scraping (mojeek, bing). Revisit this list if new
+# CAPTCHA/429 errors show up for any of the kept engines - blocking is IP-
+# reputation-based and can change over time.
+#
+# NOT listed here: ahmia, torch. Tried disabling them too, but their
+# "can't register engine (loading engine failed)" error happens while
+# SearXNG loads the engine module (they need a Tor SOCKS proxy we don't
+# run) - before our disabled flag is even consulted, and there's no valid
+# override name that avoids it. This is a known upstream bug (searxng/
+# searxng, reported since 2025.12.26 across several Docker image versions):
+# the engines end up inactive either way, so the log line is harmless
+# noise, not a functional problem. Only a real fix would be configuring
+# outgoing.networks.tor with an actual Tor proxy, which we don't need.
+#
+# NOTE: only "duckduckgo" is a valid engine name in this SearXNG version -
+# an earlier attempt at also listing "duckduckgo html" here failed at
+# startup ("The 'engine' field is missing for the engine named 'duckduckgo
+# html'") because that name doesn't match any default engine, so SearXNG
+# tried to register it as a brand-new engine instead of overriding one.
+engines:
+  - name: duckduckgo
+    disabled: true
+  - name: brave
+    disabled: true
+  - name: startpage
+    disabled: true
+  - name: qwant
+    disabled: true

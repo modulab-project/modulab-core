@@ -103,10 +103,26 @@ export default function Home() {
   const [newsLoading, setNewsLoading] = useState(true);
   const [prefs, setPrefs] = useState<NewsConfig>({ home_count: 5, show_images: true });
 
-  // Geolocation: ask once on mount, fetch weather on success.
-  // Errors (denied, unavailable) are silently ignored - the widget
+  // Geolocation: ask once a real session is confirmed, fetch weather on
+  // success. Errors (denied, unavailable) are silently ignored - the widget
   // simply does not render, which is the correct degraded state.
+  //
+  // Gated on `session` (not just mount) and guarded by geoRequestedRef so it
+  // fires exactly once: Home mounts the moment the router matches "/",
+  // before useAuthenticatedSession has any idea whether a valid token even
+  // exists. A plain mount-only effect (`[]` deps) used to fire the browser's
+  // permission prompt immediately on every visit to "/", including the
+  // fraction of a second before an unauthenticated visitor gets redirected
+  // to /login - so the prompt could appear ahead of, or on top of, the login
+  // screen itself. Waiting for `session` to be non-null means this can only
+  // ever run once a session has actually been validated against the backend
+  // (useSession.ts's getMe() call), i.e. strictly after a successful login.
+  const geoRequestedRef = useRef(false);
   useEffect(() => {
+    if (!session || geoRequestedRef.current) {
+      return;
+    }
+    geoRequestedRef.current = true;
     if (!navigator.geolocation) {
       return;
     }
@@ -119,7 +135,7 @@ export default function Home() {
       () => {},
       { timeout: 8000 },
     );
-  }, []);
+  }, [session]);
 
   const loadNews = useCallback(() => {
     const token = getSessionToken();
