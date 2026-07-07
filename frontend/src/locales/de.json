@@ -525,8 +525,11 @@
     "searxng_link": "SearXNG",
     "system_link": "System",
     "audit_link": "Audit-Log",
-    "dark_mode": "Dunkelmodus",
+    "dark_mode": "Design",
     "toggle_dark": "Dunkelmodus umschalten",
+    "theme_light": "Hell",
+    "theme_dark": "Dunkel",
+    "theme_system": "System",
     "language": "Sprache",
     "sign_out": "Abmelden",
     "status": {

@@ -55,6 +55,23 @@ const THEME_KEY = "modulab_theme";
 const PROJECT_URL = "https://modulab.app";
 const GITHUB_URL = "https://github.com/modulab-project/modulab-core";
 
+// Light/Dark are explicit user choices; System defers to the OS/browser's
+// prefers-color-scheme and stays live-updated if that changes while the
+// tab is open (e.g. the OS switches to dark mode at sunset). Anything other
+// than a recognized "dark"/"system" value in storage (including an absent
+// key, e.g. a first-ever visit) falls back to "light" - unchanged default
+// from before this had three options.
+type Theme = "light" | "dark" | "system";
+
+function readStoredTheme(): Theme {
+  const stored = localStorage.getItem(THEME_KEY);
+  return stored === "dark" || stored === "system" ? stored : "light";
+}
+
+function systemPrefersDark(): boolean {
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+}
+
 // Shared chrome - header, profile/status slide panels, footer - for every
 // page reachable once a user has a fully-approved session: Home ("/") and
 // ProfilePage ("/profile") so far. Originally lived only in Home.tsx; moved
@@ -75,7 +92,12 @@ export function AppShell({
   const navigate = useNavigate();
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [openPanel, setOpenPanel] = useState<OpenPanel>(null);
-  const [dark, setDark] = useState(() => localStorage.getItem(THEME_KEY) === "dark");
+  const [theme, setTheme] = useState<Theme>(readStoredTheme);
+  // The actual light/dark class always comes from this, never from `theme`
+  // directly - `theme === "system"` still needs to resolve to a concrete
+  // boolean before it can be applied to <html>.
+  const [systemDark, setSystemDark] = useState(systemPrefersDark);
+  const dark = theme === "system" ? systemDark : theme === "dark";
   const [activeModules, setActiveModules] = useState<InstalledModule[]>([]);
   // How many installed modules have an update waiting (available_version set).
   // Shown in the notification bell badge alongside pending-user count.
@@ -84,8 +106,20 @@ export function AppShell({
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
-    localStorage.setItem(THEME_KEY, dark ? "dark" : "light");
-  }, [dark]);
+    localStorage.setItem(THEME_KEY, theme);
+  }, [dark, theme]);
+
+  // Only relevant while `theme === "system"`, but kept subscribed
+  // unconditionally rather than mounting/unmounting the listener on every
+  // theme switch - matchMedia listeners are cheap, and this avoids a
+  // subtle bug where switching *away* from "system" and back without a
+  // remount would miss an OS change that happened in between.
+  useEffect(() => {
+    const mql = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => setSystemDark(mql.matches);
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, []);
 
   // Unconditional on mount, not gated behind a session effect of its own -
   // by the time AppShell renders, the caller has already resolved a
@@ -331,8 +365,8 @@ export function AppShell({
         <ProfilePanelContent
           session={session}
           isAdmin={isAdmin}
-          dark={dark}
-          setDark={setDark}
+          theme={theme}
+          setTheme={setTheme}
           onLogout={handleLogout}
           onClose={() => setOpenPanel(null)}
           activeModules={activeModules}
@@ -570,16 +604,16 @@ function SlidePanel({
 function ProfilePanelContent({
   session,
   isAdmin,
-  dark,
-  setDark,
+  theme,
+  setTheme,
   onLogout,
   onClose,
   activeModules,
 }: {
   session: Session;
   isAdmin: boolean;
-  dark: boolean;
-  setDark: (d: boolean) => void;
+  theme: Theme;
+  setTheme: (t: Theme) => void;
   onLogout: () => void;
   onClose: () => void;
   activeModules: InstalledModule[];
@@ -707,20 +741,33 @@ function ProfilePanelContent({
         <span className="flex items-center gap-2.5">
           <i className="ti ti-moon text-[15px] text-gray-500" /> {t("shell.dark_mode")}
         </span>
-        <button
-          type="button"
-          aria-label={t("shell.toggle_dark")}
-          onClick={() => setDark(!dark)}
-          className={`relative h-[22px] w-10 rounded-full border transition-colors ${
-            dark ? "border-teal-600 bg-teal-600" : "border-gray-300 bg-gray-100"
-          }`}
-        >
-          <span
-            className={`absolute top-[2px] h-4 w-4 rounded-full bg-white transition-all ${
-              dark ? "left-[21px]" : "left-[2px]"
-            }`}
-          />
-        </button>
+        {/* Three-way segmented control rather than the old single on/off
+            switch - "system" has no natural "on" position of its own, so a
+            boolean toggle had no honest way to represent it. */}
+        <div className="flex rounded-full border border-gray-200 bg-gray-100 p-0.5 dark:border-gray-700 dark:bg-gray-900">
+          {(
+            [
+              { value: "light", icon: "ti-sun", label: t("shell.theme_light") },
+              { value: "dark", icon: "ti-moon", label: t("shell.theme_dark") },
+              { value: "system", icon: "ti-device-desktop", label: t("shell.theme_system") },
+            ] as const
+          ).map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              aria-label={opt.label}
+              aria-pressed={theme === opt.value}
+              onClick={() => setTheme(opt.value)}
+              className={`flex h-6 w-8 items-center justify-center rounded-full transition-colors ${
+                theme === opt.value
+                  ? "bg-white text-teal-600 shadow-sm dark:bg-gray-700 dark:text-teal-400"
+                  : "text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+              }`}
+            >
+              <i className={`ti ${opt.icon} text-[14px]`} aria-hidden="true" />
+            </button>
+          ))}
+        </div>
       </div>
       <div className="flex items-center justify-between px-2.5 py-2.5 text-sm">
         <span className="flex items-center gap-2.5">

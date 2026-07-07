@@ -525,8 +525,11 @@
     "searxng_link": "SearXNG",
     "system_link": "Systeem",
     "audit_link": "Auditlogboek",
-    "dark_mode": "Donkere modus",
+    "dark_mode": "Thema",
     "toggle_dark": "Donkere modus wisselen",
+    "theme_light": "Licht",
+    "theme_dark": "Donker",
+    "theme_system": "Systeem",
     "language": "Taal",
     "sign_out": "Uitloggen",
     "status": {

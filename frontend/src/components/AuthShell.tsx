@@ -10,8 +10,9 @@ import { useTranslation } from "react-i18next";
 // App.tsx's WithFooter already wraps every page that uses this shell in
 // the shared Footer (copyright/version/links), and the "dark" class is
 // applied globally before first paint by the inline script in index.html
-// (reading the same modulab_theme key Home.tsx writes to) - this shell
-// just needs to respond to that class via dark: variants, not own it.
+// (reading the same modulab_theme key AppShell.tsx writes to, including its
+// "system" value - see that script's own comment) - this shell just needs
+// to respond to that class via dark: variants, not own it.
 export function AuthShell({
   title,
   subtitle,

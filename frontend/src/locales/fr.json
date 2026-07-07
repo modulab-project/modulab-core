@@ -525,8 +525,11 @@
     "searxng_link": "SearXNG",
     "system_link": "Système",
     "audit_link": "Journal d'audit",
-    "dark_mode": "Mode sombre",
+    "dark_mode": "Thème",
     "toggle_dark": "Basculer le mode sombre",
+    "theme_light": "Clair",
+    "theme_dark": "Sombre",
+    "theme_system": "Système",
     "language": "Langue",
     "sign_out": "Se déconnecter",
     "status": {
