@@ -1119,6 +1119,34 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  // Whether new content should auto-scroll the panel to the bottom. Starts
+  // true (a fresh panel has nothing to scroll away from) and is kept in a
+  // ref rather than state - it needs to be read from inside the
+  // streaming-delta callback above without re-subscribing that callback on
+  // every scroll tick, and writing it must not itself trigger a render.
+  //
+  // Bug (reported 2026-07-08): the old effect below scrolled to the bottom
+  // unconditionally on every `messages` change, including every single
+  // streamed token - so once a reply grew past one screenful, there was no
+  // way to scroll up and read earlier text: the very next delta yanked the
+  // view straight back down. Now a scroll handler on the message list
+  // tracks whether the user is still near the bottom (stuckToBottomRef) and
+  // the auto-scroll effect only fires while that holds - scroll up during
+  // streaming and it stays put; scroll back down (or send a new message,
+  // see handleSend) and it resumes following along.
+  const stuckToBottomRef = useRef(true);
+  // px of slack from the true bottom still counted as "at the bottom" - a
+  // smooth-scroll animation or a fraction-of-a-pixel layout rounding
+  // shouldn't be enough to count as "the user scrolled away".
+  const BOTTOM_SLACK_PX = 48;
+
+  function handleMessagesScroll() {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stuckToBottomRef.current = distanceFromBottom <= BOTTOM_SLACK_PX;
+  }
 
   // Load available providers on mount and restore the user's last selection.
   useEffect(() => {
@@ -1137,9 +1165,12 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
       .catch(() => {});
   }, []);
 
-  // Scroll to bottom whenever messages change.
+  // Scroll to bottom whenever messages change - but only while the user is
+  // still stuck to the bottom (see stuckToBottomRef's doc comment above).
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (stuckToBottomRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [messages]);
 
   // Stop streaming when panel closes.
@@ -1153,6 +1184,11 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
     if (!input.trim() || streaming || !selectedProvider) return;
     const token = getSessionToken();
     if (!token) return;
+
+    // Sending a message is a deliberate action - resume following the
+    // conversation even if the user had scrolled up to reread something
+    // earlier, same as most chat UIs.
+    stuckToBottomRef.current = true;
 
     const userMsg: ChatMessage = { role: "user", content: input.trim() };
     const newMessages = [...messages, userMsg];
@@ -1212,7 +1248,12 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
   // they have their own key, otherwise the admin-set default.
 
   return (
-    <div className="fixed bottom-[52px] right-4 z-40 flex w-[340px] flex-col rounded-2xl border border-gray-200 bg-white shadow-xl dark:border-gray-800 dark:bg-gray-950"
+    // Below sm: inset-x-4 spans the panel edge-to-edge (minus a 16px margin
+    // on each side) instead of the fixed 340px/right-4 floating box, which
+    // on a narrow phone (iPhone SE and similar, ~320-375px wide) left next
+    // to no margin on one side and could clip on the other. From sm up,
+    // reverts to the original floating box anchored bottom-right.
+    <div className="fixed inset-x-4 bottom-[52px] z-40 flex flex-col rounded-2xl border border-gray-200 bg-white shadow-xl dark:border-gray-800 dark:bg-gray-950 sm:inset-x-auto sm:right-4 sm:w-[340px]"
       style={{ maxHeight: "calc(100vh - 120px)" }}
     >
       {/* Header */}
@@ -1282,7 +1323,12 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-3 py-3" style={{ minHeight: "200px" }}>
+      <div
+        ref={messagesContainerRef}
+        onScroll={handleMessagesScroll}
+        className="flex-1 overflow-y-auto px-3 py-3"
+        style={{ minHeight: "200px" }}
+      >
         {messages.length === 0 ? (
           <p className="mt-8 text-center text-xs text-gray-400 dark:text-gray-600">
             {providers.length === 0
