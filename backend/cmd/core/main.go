@@ -438,6 +438,11 @@ func main() {
 	// page simultaneously. lat and lon come from the browser's own
 	// Geolocation API - Core never stores or logs them.
 	mux.HandleFunc("GET /v1/widgets/weather", weather.Handler(valkeyClient))
+	// Reverse-geocodes the same lat/lon into a short place name via
+	// Nominatim (OpenStreetMap) - same trust model as the weather endpoint
+	// above (no auth, coordinates never stored/logged), just a much longer
+	// cache TTL since a place name doesn't go stale the way weather does.
+	mux.HandleFunc("GET /v1/widgets/weather/location", weather.LocationHandler(valkeyClient))
 
 	// SearXNG web-search proxy (spec section 6.4, search widget).
 	// Admin configuration: super-admin only (same tier as SMTP).
@@ -774,9 +779,9 @@ func main() {
 // Returns "{}" when nothing changed (e.g. saving without modifications).
 func smtpDiff(old setup.SMTPRuntimeConfig, newHost string, newPort int, newFrom, newEnc string) string {
 	type kv struct {
-		key      string
-		oldVal   string
-		newVal   string
+		key    string
+		oldVal string
+		newVal string
 	}
 	changes := []kv{
 		{"host", old.Host, newHost},
@@ -1284,8 +1289,8 @@ type systemInfoResponse struct {
 	// check failed (offline homelab, GitHub rate limit, etc.) rather than
 	// blocking the page - same "nil = unknown" convention as SearxngReachable
 	// and NTPDriftOK above.
-	LatestCoreVersion  string `json:"latest_core_version,omitempty"`
-	CoreUpdateAvailable bool  `json:"core_update_available"`
+	LatestCoreVersion   string `json:"latest_core_version,omitempty"`
+	CoreUpdateAvailable bool   `json:"core_update_available"`
 
 	// CosignAvailable (added 2026-07-05) reports whether the cosign binary
 	// is actually reachable on this instance - if it isn't, every module's
@@ -1330,9 +1335,9 @@ type systemInfoResponse struct {
 // button can name exactly what to delete without the frontend needing to
 // reconstruct it from the other fields.
 type systemInfoRateLimit struct {
-	Key            string `json:"key"`
-	Label          string `json:"label"`
-	Identifier     string `json:"identifier"`
+	Key        string `json:"key"`
+	Label      string `json:"label"`
+	Identifier string `json:"identifier"`
 	// DisplayName (added 2026-07-05, alongside identifyBySessionOrIP)
 	// resolves a "user:<sub>" identifier to the account's name/email via
 	// db.Pool.GetUser, so an admin sees "sookie" instead of a bare OIDC

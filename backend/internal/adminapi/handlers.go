@@ -1,9 +1,9 @@
 // Package adminapi provides the super-admin-only endpoints that expose and
 // mutate system configuration post-Setup-Wizard completion:
 //
-//   GET  /v1/admin/system          — OIDC, group prefix (read-only)
-//   PATCH /v1/admin/oidc           — update OIDC configuration
-//   GET  /v1/audit-log             — paginated, filtered audit log
+//	GET  /v1/admin/system          — OIDC, group prefix (read-only)
+//	PATCH /v1/admin/oidc           — update OIDC configuration
+//	GET  /v1/audit-log             — paginated, filtered audit log
 //
 // All three require a super-admin session (enforced by the
 // auth.RequireSuperAdminMiddleware wrapper that main.go applies to each
@@ -216,9 +216,10 @@ func OIDCDeleteHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 // ---- GET /v1/audit-log --------------------------------------------------------
 
 // AuditLogHandler serves GET /v1/audit-log with optional query parameters:
-//   event_type  — filter to entries of exactly this event type
-//   before      — cursor: return entries with id < before (newest-first paging)
-//   limit       — max entries per page (1-200, default 50)
+//
+//	event_type  — filter to entries of exactly this event type
+//	before      — cursor: return entries with id < before (newest-first paging)
+//	limit       — max entries per page (1-200, default 50)
 func AuditLogHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()

@@ -1961,22 +1961,22 @@ const (
 
 // InstalledModuleRow is a full row from installed_modules.
 type InstalledModuleRow struct {
-	Name             string     `json:"name"`
-	Version          string     `json:"version"`
-	Tier             int        `json:"tier"`
-	Scope            string     `json:"scope"`
-	Source           string     `json:"source"`
-	ReleaseURL       string     `json:"release_url"`
-	SHA256           string     `json:"sha256"`
+	Name             string          `json:"name"`
+	Version          string          `json:"version"`
+	Tier             int             `json:"tier"`
+	Scope            string          `json:"scope"`
+	Source           string          `json:"source"`
+	ReleaseURL       string          `json:"release_url"`
+	SHA256           string          `json:"sha256"`
 	Manifest         json.RawMessage `json:"manifest,omitempty"` // raw JSONB — RawMessage serialises as-is, not base64
-	Status           string     `json:"status"`
-	Pinned           bool       `json:"pinned"`
-	CosignVerified   bool       `json:"cosign_verified"`
-	CachedZipPath    *string    `json:"cached_zip_path,omitempty"`
-	AvailableVersion *string    `json:"available_version,omitempty"`
-	LastUpdateCheck  *time.Time `json:"last_update_check,omitempty"`
-	InstalledAt      time.Time  `json:"installed_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
+	Status           string          `json:"status"`
+	Pinned           bool            `json:"pinned"`
+	CosignVerified   bool            `json:"cosign_verified"`
+	CachedZipPath    *string         `json:"cached_zip_path,omitempty"`
+	AvailableVersion *string         `json:"available_version,omitempty"`
+	LastUpdateCheck  *time.Time      `json:"last_update_check,omitempty"`
+	InstalledAt      time.Time       `json:"installed_at"`
+	UpdatedAt        time.Time       `json:"updated_at"`
 }
 
 // InsertInstalledModule writes a new module row with status "installing".

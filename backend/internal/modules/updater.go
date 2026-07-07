@@ -28,6 +28,7 @@ import (
 //  7. Parse and validate new manifest
 //  8. Copy new files over old files (atomic dir swap via temp)
 //  9. Run new module migrations (post-v1 stub)
+//
 // 10. Update DB row (version, sha256, manifest, status=active)
 // 11. Delete cached rollback ZIP on success
 func Update(ctx context.Context, d Deps, entry store.Entry) error {

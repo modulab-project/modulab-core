@@ -28,17 +28,17 @@ type Deps struct {
 
 // Entry is one row of the module_registry table, ready for the API response.
 type Entry struct {
-	Name           string          `json:"name"`
-	Source         string          `json:"source"` // "official" | "community"
-	SourceRepo     string          `json:"source_repo"`
-	ReleaseAsset   string          `json:"release_asset"`
+	Name         string `json:"name"`
+	Source       string `json:"source"` // "official" | "community"
+	SourceRepo   string `json:"source_repo"`
+	ReleaseAsset string `json:"release_asset"`
 	// CosignSigURL is the URL of the Cosign signature file. Empty string means
 	// no signature is available and Cosign verification should be skipped.
-	CosignSigURL   string          `json:"cosign_sig_url,omitempty"`
-	Category       string          `json:"category"`
-	LatestVersion  string          `json:"latest_version,omitempty"`
-	ManifestCache  json.RawMessage `json:"manifest,omitempty"`
-	SyncedAt       time.Time       `json:"synced_at"`
+	CosignSigURL  string          `json:"cosign_sig_url,omitempty"`
+	Category      string          `json:"category"`
+	LatestVersion string          `json:"latest_version,omitempty"`
+	ManifestCache json.RawMessage `json:"manifest,omitempty"`
+	SyncedAt      time.Time       `json:"synced_at"`
 }
 
 // UpsertEntry inserts or fully replaces a registry entry. Called by the sync

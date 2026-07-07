@@ -35,21 +35,21 @@ import (
 // a typo shows up as a compile error, not a silent mis-labelled log entry.
 const (
 	// User lifecycle events (admin-driven)
-	EventUserApproved  = "user.approved"
-	EventUserLocked    = "user.locked"
-	EventUserUnlocked  = "user.unlocked"
-	EventUserDeleted   = "user.deleted"
+	EventUserApproved = "user.approved"
+	EventUserLocked   = "user.locked"
+	EventUserUnlocked = "user.unlocked"
+	EventUserDeleted  = "user.deleted"
 	// User self-service
 	EventUserSelfDeleted = "user.self_deleted"
 	// Auth events
 	EventAuthLogin = "auth.login"
 	// System config events
-	EventConfigSMTP         = "config.smtp"
-	EventConfigSMTPDel      = "config.smtp.deleted"
-	EventConfigOIDC         = "config.oidc"
-	EventConfigOIDCDel      = "config.oidc.deleted"
-	EventConfigSearXNG      = "config.searxng"
-	EventConfigSearXNGDel   = "config.searxng.deleted"
+	EventConfigSMTP          = "config.smtp"
+	EventConfigSMTPDel       = "config.smtp.deleted"
+	EventConfigOIDC          = "config.oidc"
+	EventConfigOIDCDel       = "config.oidc.deleted"
+	EventConfigSearXNG       = "config.searxng"
+	EventConfigSearXNGDel    = "config.searxng.deleted"
 	EventConfigAIProvider    = "config.ai_provider"
 	EventConfigAIProviderDel = "config.ai_provider.deleted"
 	EventConfigAIKeyCleared  = "config.ai_provider.key_cleared"
@@ -98,11 +98,11 @@ const (
 // Entry is one row from the audit_log table, returned by List. All PII
 // fields are already decrypted so callers can display them directly.
 type Entry struct {
-	ID          int64     `json:"id"`
-	CreatedAt   time.Time `json:"created_at"`
-	EventType   string    `json:"event_type"`
-	ActorID     string    `json:"actor_id"`
-	ActorEmail  string    `json:"actor_email"`
+	ID         int64     `json:"id"`
+	CreatedAt  time.Time `json:"created_at"`
+	EventType  string    `json:"event_type"`
+	ActorID    string    `json:"actor_id"`
+	ActorEmail string    `json:"actor_email"`
 	// ActorName/TargetName (added 2026-07-05) resolve actor_id/target_id
 	// (the OIDC subject) against the current users.name via a LEFT JOIN in
 	// List - "" if the subject never matched a row (e.g. a purely IP-keyed
@@ -110,13 +110,13 @@ type Entry struct {
 	// A name is friendlier to read than a bare email, so callers should
 	// prefer ActorName/TargetName over the *Email fields when non-empty,
 	// falling back to email, then to the raw ID.
-	ActorName   string    `json:"actor_name,omitempty"`
-	TargetID    string    `json:"target_id"`
-	TargetEmail string    `json:"target_email"`
-	TargetName  string    `json:"target_name,omitempty"`
-	Details     string    `json:"details"` // plaintext JSON or ""
-	PrevHash    string    `json:"prev_hash"`
-	Hash        string    `json:"hash"`
+	ActorName   string `json:"actor_name,omitempty"`
+	TargetID    string `json:"target_id"`
+	TargetEmail string `json:"target_email"`
+	TargetName  string `json:"target_name,omitempty"`
+	Details     string `json:"details"` // plaintext JSON or ""
+	PrevHash    string `json:"prev_hash"`
+	Hash        string `json:"hash"`
 }
 
 // LogParams carries the fields the caller provides; everything else
@@ -367,9 +367,9 @@ func Verify(ctx context.Context, pool *db.Pool, masterKey string) (VerifyResult,
 	)
 	for rows.Next() {
 		var (
-			id                            int64
-			eventType, actorID, targetID  string
-			prevHash, hash                string
+			id                           int64
+			eventType, actorID, targetID string
+			prevHash, hash               string
 		)
 		if err := rows.Scan(&id, &eventType, &actorID, &targetID, &prevHash, &hash); err != nil {
 			return VerifyResult{}, fmt.Errorf("audit: verify scan: %w", err)

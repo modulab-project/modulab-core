@@ -588,6 +588,22 @@ export function getWeather(lat: number, lon: number): Promise<WeatherResponse> {
   );
 }
 
+export interface WeatherLocation {
+  label: string; // e.g. "Berlin, Deutschland" — see weather.go's fetchNominatimLabel
+}
+
+// GET /v1/widgets/weather/location — reverse-geocodes the same lat/lon into
+// a short place name via Nominatim. Same trust model as getWeather above
+// (no auth). Called alongside getWeather, not merged into its response,
+// since the two have very different cache lifetimes on the backend (15min
+// vs 24h) and a failure here should not take the temperature/forecast down
+// with it.
+export function getWeatherLocation(lat: number, lon: number): Promise<WeatherLocation> {
+  return request<WeatherLocation>(
+    `/v1/widgets/weather/location?lat=${lat.toFixed(4)}&lon=${lon.toFixed(4)}`,
+  );
+}
+
 // --- SearXNG web search --------------------------------------------------
 // Mirrors backend/internal/searxng's JSON shapes exactly.
 

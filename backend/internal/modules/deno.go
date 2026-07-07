@@ -203,7 +203,7 @@ func (p *WorkerPool) startLocked(name, entrypoint string, opts WorkerOptions) er
 		// about which exact sub-paths Deno.listen()'s Unix-socket bind and
 		// Deno.removeSync() touch — still confined to this one module's own
 		// directory, not the rest of the host.
-		moduleRoot: filepath.Dir(sockPath),
+		moduleRoot:  filepath.Dir(sockPath),
 		egressHosts: egressHosts,
 		// moduleEgressHosts is opts.EgressHosts as passed in, WITHOUT dbHost/
 		// dnsResolver mixed in — i.e. exactly the hosts a module itself
@@ -558,8 +558,8 @@ type denoWorker struct {
 	// moduleRoot is {dataDir}/{name} — the --allow-read/--allow-write scope.
 	// Covers both the handler code under moduleRoot/handlers/... and the
 	// worker's own Unix socket at moduleRoot/worker.sock.
-	moduleRoot string
-	egressHosts    []string // hostnames granted via --allow-net (includes dbHost/dnsResolver); empty = no network
+	moduleRoot  string
+	egressHosts []string // hostnames granted via --allow-net (includes dbHost/dnsResolver); empty = no network
 	// moduleEgressHosts is egressHosts minus the infra hosts (dbHost,
 	// dnsResolver) — see the field doc comment where this is set in
 	// startLocked.

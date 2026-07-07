@@ -94,7 +94,6 @@ func WizardComplete(ctx context.Context, pool *db.Pool) (bool, error) {
 // (Core refuses to even start without it), so by the time this function can
 // run at all, the master key is guaranteed present - there is nothing left
 // to persist or verify for it.
-//
 func missingSteps(ctx context.Context, pool *db.Pool) ([]string, error) {
 	var missing []string
 

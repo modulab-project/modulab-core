@@ -40,21 +40,21 @@ type Deps struct {
 // Manifest is the parsed content of manifest.yaml inside a module ZIP.
 // Every module must ship this file at the archive root.
 type Manifest struct {
-	Name        string            `yaml:"name"         json:"name"`
-	Version     string            `yaml:"version"      json:"version"`
-	Tier        int               `yaml:"tier"         json:"tier"`
-	Scope       string            `yaml:"scope"        json:"scope"`
-	Description string            `yaml:"description"  json:"description"`
-	Author      string            `yaml:"author"       json:"author,omitempty"`
-	License     string            `yaml:"license"      json:"license,omitempty"`
-	MinCore     string            `yaml:"min_core"     json:"min_core,omitempty"`
+	Name        string `yaml:"name"         json:"name"`
+	Version     string `yaml:"version"      json:"version"`
+	Tier        int    `yaml:"tier"         json:"tier"`
+	Scope       string `yaml:"scope"        json:"scope"`
+	Description string `yaml:"description"  json:"description"`
+	Author      string `yaml:"author"       json:"author,omitempty"`
+	License     string `yaml:"license"      json:"license,omitempty"`
+	MinCore     string `yaml:"min_core"     json:"min_core,omitempty"`
 	// DisplayName is an optional map of language code → human-readable name,
 	// e.g. {"en": "Recipes", "de": "Rezepte"}. Used by the AppShell to show
 	// a localized module name instead of the raw module identifier.
 	DisplayName map[string]string `yaml:"display_name" json:"display_name,omitempty"`
 	// Handler is the Deno entrypoint (relative path inside the ZIP), required
 	// for Tier 2 and 3 modules.
-	Handler         string   `yaml:"handler"          json:"handler,omitempty"`
+	Handler string `yaml:"handler"          json:"handler,omitempty"`
 	// EgressAllowlist lists the hostnames the Deno worker may connect to
 	// (mapped to --allow-net). Empty = no outbound network.
 	EgressAllowlist []string `yaml:"egress_allowlist" json:"egress_allowlist,omitempty"`
@@ -115,7 +115,7 @@ type Manifest struct {
 
 // ManifestJob describes one scheduled job entry under a module's jobs: list.
 type ManifestJob struct {
-	Name    string `yaml:"name"     json:"name"`
+	Name string `yaml:"name"     json:"name"`
 	// Schedule is a 5-field cron expression. JobRunner only supports minute
 	// granularity (spec says "Cron-Format erlaubt kein Sub-Minuten-Intervall"
 	// in the reference modules) — it is evaluated once per minute, so any
@@ -146,6 +146,7 @@ const (
 //  7. Parse and validate manifest.yaml
 //  8. Record module in DB with status "installing"
 //  9. Copy module files to permanent DataDir/{name}
+//
 // 10. Run module-supplied SQL migrations (v1: skipped — no migration runner yet)
 // 11. Deno worker registration (post-v1 stub)
 // 12. Mark module status "active"

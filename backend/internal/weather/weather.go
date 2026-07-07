@@ -35,6 +35,17 @@ const (
 	userAgent     = "ModuLab-Core/1.0 (https://modulab.app)"
 	hourlyWindow  = 24 // slots shown in the day-view panel
 	fetchTimeout  = 10 * time.Second
+
+	// Reverse geocoding (place name for the weather widget). A separate,
+	// much longer TTL than the weather cache above: unlike temperature, the
+	// place name at a given lat/lon essentially never changes, and
+	// Nominatim's usage policy (https://operations.osmfoundation.org/policies/nominatim/)
+	// asks API consumers to cache aggressively and cap steady-state traffic
+	// at ~1 req/sec - a 15-minute TTL would re-hit it every time the 15-
+	// minute weather cache also expired, for a value that never differs.
+	locationCacheTTL    = 24 * time.Hour
+	locationCacheKeyPfx = "geoloc:"
+	nominatimReverseURL = "https://nominatim.openstreetmap.org/reverse"
 )
 
 // safeWeatherClient guards against SSRF the same way news/ai do, even
@@ -190,13 +201,13 @@ func Handler(vk *valkey.Client) http.HandlerFunc {
 // single HTTP round-trip.
 func fetchOpenMeteo(ctx context.Context, lat, lon float64) (*Response, error) {
 	params := url.Values{
-		"latitude":     {strconv.FormatFloat(lat, 'f', 4, 64)},
-		"longitude":    {strconv.FormatFloat(lon, 'f', 4, 64)},
-		"current":      {"temperature_2m,apparent_temperature,relative_humidity_2m,windspeed_10m,weathercode"},
-		"hourly":       {"temperature_2m,weathercode,precipitation_probability"},
-		"daily":        {"weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset"},
+		"latitude":      {strconv.FormatFloat(lat, 'f', 4, 64)},
+		"longitude":     {strconv.FormatFloat(lon, 'f', 4, 64)},
+		"current":       {"temperature_2m,apparent_temperature,relative_humidity_2m,windspeed_10m,weathercode"},
+		"hourly":        {"temperature_2m,weathercode,precipitation_probability"},
+		"daily":         {"weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset"},
 		"forecast_days": {"16"},
-		"timezone":     {"auto"},
+		"timezone":      {"auto"},
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, openMeteoBase+"?"+params.Encode(), nil)
@@ -306,5 +317,163 @@ func transform(raw *openMeteoResp) *Response {
 		Hourly:   hourly,
 		Daily:    daily,
 		Timezone: raw.Timezone,
+	}
+}
+
+// --- Reverse geocoding (place name) ---------------------------------------
+
+// LocationResponse is the JSON body of GET /v1/widgets/weather/location.
+// Label is a short, human-readable place name ("Berlin, Deutschland") built
+// from whatever Nominatim's address breakdown provides - never the raw
+// full display_name, which is a long comma-separated address string not fit
+// for a one-line widget caption.
+type LocationResponse struct {
+	Label string `json:"label"`
+}
+
+// nominatimResp mirrors the subset of Nominatim's reverse-geocoding JSON
+// response (format=jsonv2) this package actually uses.
+type nominatimResp struct {
+	Address struct {
+		City         string `json:"city"`
+		Town         string `json:"town"`
+		Village      string `json:"village"`
+		Municipality string `json:"municipality"`
+		County       string `json:"county"`
+		State        string `json:"state"`
+		Country      string `json:"country"`
+	} `json:"address"`
+}
+
+// settlementName picks the most specific place name Nominatim's address
+// breakdown offers, in descending order of granularity. Falls through to
+// county/state for rural coordinates where no city/town/village exists.
+func (a *nominatimResp) settlementName() string {
+	for _, v := range []string{a.Address.City, a.Address.Town, a.Address.Village, a.Address.Municipality, a.Address.County, a.Address.State} {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// LocationHandler returns the HTTP handler for GET /v1/widgets/weather/location.
+// Same trust model as Handler above: no auth, lat/lon come straight from the
+// browser's own Geolocation API, Core never stores or logs them - this just
+// resolves them to a short place name for the weather widget's caption.
+func LocationHandler(vk *valkey.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		latStr := r.URL.Query().Get("lat")
+		lonStr := r.URL.Query().Get("lon")
+		if latStr == "" || lonStr == "" {
+			http.Error(w, "lat and lon are required", http.StatusBadRequest)
+			return
+		}
+		lat, err := strconv.ParseFloat(latStr, 64)
+		if err != nil {
+			http.Error(w, "invalid lat", http.StatusBadRequest)
+			return
+		}
+		lon, err := strconv.ParseFloat(lonStr, 64)
+		if err != nil {
+			http.Error(w, "invalid lon", http.StatusBadRequest)
+			return
+		}
+
+		ctx := r.Context()
+		// Coarser rounding than the weather cache key (1 decimal ~ 11km, vs
+		// 2 decimals ~1km there): a place name is meaningful at city
+		// granularity, so nearby GPS jitter should still hit the same
+		// cache entry rather than each mint a fresh Nominatim call.
+		key := fmt.Sprintf("%s%.1f:%.1f", locationCacheKeyPfx, math.Round(lat*10)/10, math.Round(lon*10)/10)
+
+		if cached, ok, err := vk.Get(ctx, key); err == nil && ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-Weather-Cache", "HIT")
+			if _, err := fmt.Fprint(w, cached); err != nil {
+				log.Printf("weather: write cached location response: %v", err)
+			}
+			return
+		}
+
+		label, err := fetchNominatimLabel(ctx, lat, lon)
+		if err != nil {
+			http.Error(w, "upstream geocoding fetch failed: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+
+		data, err := json.Marshal(LocationResponse{Label: label})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		_ = vk.SetWithTTL(ctx, key, string(data), locationCacheTTL)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Weather-Cache", "MISS")
+		if _, err := w.Write(data); err != nil {
+			log.Printf("weather: write location response: %v", err)
+		}
+	}
+}
+
+// fetchNominatimLabel calls OpenStreetMap's Nominatim reverse-geocoding API
+// and returns a short "<place>, <country>" label, or just the country if no
+// settlement-level name was returned (open ocean, remote areas).
+func fetchNominatimLabel(ctx context.Context, lat, lon float64) (string, error) {
+	params := url.Values{
+		"format":         {"jsonv2"},
+		"lat":            {strconv.FormatFloat(lat, 'f', 4, 64)},
+		"lon":            {strconv.FormatFloat(lon, 'f', 4, 64)},
+		"zoom":           {"10"}, // city-level detail, per Nominatim's zoom-to-address-level table
+		"addressdetails": {"1"},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, nominatimReverseURL+"?"+params.Encode(), nil)
+	if err != nil {
+		return "", err
+	}
+	// Nominatim's usage policy requires a valid User-Agent identifying the
+	// application (bare Go http.Client default is explicitly disallowed).
+	req.Header.Set("User-Agent", userAgent)
+
+	httpResp, err := safeWeatherClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		if err := httpResp.Body.Close(); err != nil {
+			log.Printf("weather: close geocoding response body: %v", err)
+		}
+	}()
+
+	if httpResp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("nominatim returned HTTP %d", httpResp.StatusCode)
+	}
+
+	body, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	var raw nominatimResp
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return "", fmt.Errorf("parse response: %w", err)
+	}
+
+	settlement := raw.settlementName()
+	switch {
+	case settlement != "" && raw.Address.Country != "":
+		return settlement + ", " + raw.Address.Country, nil
+	case settlement != "":
+		return settlement, nil
+	default:
+		return raw.Address.Country, nil
 	}
 }

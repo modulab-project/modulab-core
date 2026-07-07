@@ -5,6 +5,7 @@ import { useAuthenticatedSession } from "../lib/useSession";
 import { safeHref } from "../lib/url";
 import {
   getWeather,
+  getWeatherLocation,
   getNews,
   getNewsConfig,
   listFeeds,
@@ -64,6 +65,11 @@ export default function Home() {
   const location = useLocation();
   const navigate = useNavigate();
   const [weather, setWeather] = useState<WeatherResponse | null>(null);
+  // Place name for the weather widget ("Berlin, Deutschland"), resolved via
+  // reverse geocoding from the same coordinates. Kept separate from
+  // `weather` itself: a failed/slow geocoding lookup must not hold up or
+  // hide the temperature, which is the more important half of the widget.
+  const [weatherLocation, setWeatherLocation] = useState<string | null>(null);
   const [weatherPanelOpen, setWeatherPanelOpen] = useState(false);
   const [feedsPanelOpen, setFeedsPanelOpen] = useState(false);
   const [newsAllOpen, setNewsAllOpen] = useState(false);
@@ -130,6 +136,12 @@ export default function Home() {
       ({ coords }) => {
         getWeather(coords.latitude, coords.longitude)
           .then(setWeather)
+          .catch(() => {});
+        // Independent request, independent failure mode: if Nominatim is
+        // slow/unreachable the temperature above still renders fine, just
+        // without a place-name caption.
+        getWeatherLocation(coords.latitude, coords.longitude)
+          .then((loc) => setWeatherLocation(loc.label || null))
           .catch(() => {});
       },
       () => {},
@@ -285,6 +297,7 @@ export default function Home() {
         <Hero
           name={firstName(session)}
           weather={weather}
+          weatherLocation={weatherLocation}
           onWeatherClick={() => setWeatherPanelOpen(true)}
           onSearch={handleSearch}
           initialQuery={searchQuery}
@@ -334,6 +347,7 @@ export default function Home() {
         <WeatherPanel
           open={weatherPanelOpen}
           weather={weather}
+          weatherLocation={weatherLocation}
           onClose={() => setWeatherPanelOpen(false)}
         />
       )}
@@ -377,12 +391,14 @@ function useClock() {
 function Hero({
   name,
   weather,
+  weatherLocation,
   onWeatherClick,
   onSearch,
   initialQuery,
 }: {
   name: string;
   weather: WeatherResponse | null;
+  weatherLocation: string | null;
   onWeatherClick: () => void;
   onSearch: (q: string) => void;
   initialQuery: string;
@@ -442,6 +458,12 @@ function Hero({
           </span>
           <span>·</span>
           <span>{t(wmoKey(weather.current.weather_code))}</span>
+          {weatherLocation && (
+            <>
+              <span>·</span>
+              <span className="max-w-[160px] truncate">{weatherLocation}</span>
+            </>
+          )}
           <i className="ti ti-chevron-right text-[11px] text-gray-400" aria-hidden="true" />
         </button>
       )}
@@ -736,10 +758,12 @@ function ImageResultCard({ result }: { result: WebResult }) {
 function WeatherPanel({
   open,
   weather,
+  weatherLocation,
   onClose,
 }: {
   open: boolean;
   weather: WeatherResponse;
+  weatherLocation: string | null;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
@@ -771,7 +795,12 @@ function WeatherPanel({
         }`}
       >
         <div className="flex flex-none items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-800">
-          <h2 className="text-base font-semibold">{t("home.weather.panel_title")}</h2>
+          <div>
+            <h2 className="text-base font-semibold">{t("home.weather.panel_title")}</h2>
+            {weatherLocation && (
+              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{weatherLocation}</p>
+            )}
+          </div>
           <button
             type="button"
             aria-label={t("shell.close")}

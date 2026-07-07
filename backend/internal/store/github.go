@@ -245,4 +245,3 @@ func officialSourceRepo(releaseURL string) string {
 	}
 	return releaseURL
 }
-

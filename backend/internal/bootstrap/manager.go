@@ -27,8 +27,8 @@ import (
 const HeaderName = "X-ModuLab-Bootstrap-Token"
 
 const (
-	failuresBeforeIPBlock    = 5
-	ipBlockDuration          = time.Hour
+	failuresBeforeIPBlock     = 5
+	ipBlockDuration           = time.Hour
 	failuresBeforeGlobalPause = 10
 )
 

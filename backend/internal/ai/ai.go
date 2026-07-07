@@ -140,7 +140,7 @@ type chatRequest struct {
 }
 
 type chatMessage struct {
-	Role    string `json:"role"`    // "user" or "assistant"
+	Role    string `json:"role"` // "user" or "assistant"
 	Content string `json:"content"`
 }
 
@@ -670,7 +670,7 @@ func fetchDeepSeekBalance(ctx context.Context, apiKey string) (float64, string, 
 	}
 
 	var result struct {
-		IsAvailable bool `json:"is_available"`
+		IsAvailable  bool `json:"is_available"`
 		BalanceInfos []struct {
 			Currency        string `json:"currency"`
 			TotalBalance    string `json:"total_balance"`
