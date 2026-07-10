@@ -57,6 +57,11 @@ const (
 	// the provider CRUD above, this one had no audit call at all despite
 	// max_body_bytes being a DoS-relevant limit.
 	EventConfigAISettings = "config.ai_settings"
+	// Cross-cutting operational limits (adminapi.AdminLimitsHandler):
+	// upload size caps, rate limits, worker pool size. See that handler's
+	// doc comment for the full list - all DoS/availability-relevant, hence
+	// audited the same way max_body_bytes is above.
+	EventConfigSystemLimits = "config.system_limits"
 	// Setup
 	EventSetupComplete = "setup.completed"
 	// Module lifecycle events (org-admin/super-admin driven, spec section

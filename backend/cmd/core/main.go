@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -430,6 +431,11 @@ func main() {
 	mux.Handle("DELETE /v1/admin/oidc", superAdminOnly(adminapi.OIDCDeleteHandler(pool, cfg.MasterKey)))
 	mux.Handle("GET /v1/audit-log", superAdminOnly(adminapi.AuditLogHandler(pool, cfg.MasterKey)))
 	mux.Handle("GET /v1/audit-log/verify", superAdminOnly(adminapi.AuditVerifyHandler(pool, cfg.MasterKey)))
+	// Cross-cutting operational limits (upload/body size caps, rate limits,
+	// Deno worker pool size) - see adminapi.AdminLimitsHandler's package doc
+	// comment for why these were consolidated into one endpoint.
+	mux.Handle("GET /v1/admin/system/limits", superAdminOnly(adminapi.AdminLimitsHandler(pool, cfg.MasterKey)))
+	mux.Handle("PATCH /v1/admin/system/limits", superAdminOnly(adminapi.AdminLimitsHandler(pool, cfg.MasterKey)))
 
 	// Widget endpoints (spec section 8 / Home page). Not wrapped in any
 	// auth middleware: weather data is not sensitive, and the 15-minute
@@ -543,7 +549,10 @@ func main() {
 	// per-module in WorkerPool.Start so each worker sees only its own schema.
 	dbURL := fmt.Sprintf("postgres://%s:%s@%s:%s/%s",
 		cfg.DBUser, cfg.DBPassword, cfg.DBHost, cfg.DBPort, cfg.DBName)
-	workerPool := modules.NewWorkerPool(cfg.ModuleDataDir, dbURL)
+	// deno_conn_pool_size is only read here, at startup - see
+	// modules.ConnPoolSize's doc comment for why a running worker's pool
+	// can't be resized without restarting it.
+	workerPool := modules.NewWorkerPool(cfg.ModuleDataDir, dbURL, modules.ConnPoolSize(ctx, pool))
 	defer workerPool.StopAll()
 
 	// A worker that crashes on its own (as opposed to Stop/StopAll or a
@@ -820,14 +829,51 @@ func (r *responseRecorder) WriteHeader(code int) {
 	r.ResponseWriter.WriteHeader(code)
 }
 
-// maxBodyMiddleware caps every request body using the max_body_bytes setting
-// stored in core_settings (default 1 MB; 0 = unlimited). The limit is read
-// from the database on every request so changes via PATCH /v1/admin/ai/settings
-// take effect immediately without a restart.
+// maxBodyMiddleware caps every non-upload request body using the
+// max_body_bytes setting stored in core_settings (default 1 MB; 0 =
+// unlimited). The limit is read from the database on every request so
+// changes via PATCH /v1/admin/system/limits take effect immediately without
+// a restart.
+//
+// multipart/form-data requests are exempt: every file-upload handler in
+// Core (modules.ModuleProxyHandler's photo/image uploads, news.go's OPML
+// importer, modules.AdminInstallHandler's module ZIP upload) already parses
+// its own body with its own, separately-configured limit via
+// http.MaxBytesReader/ParseMultipartForm. Nesting this generic cap
+// underneath those silently wins whenever it happens to be the smaller of
+// the two — which is exactly what made every module photo upload over
+// ~1 MB fail with a connection-reset 502 before this exemption existed
+// (found 2026-07-07 chasing intermittent photo-upload failures in the
+// my-place module that turned out to reproduce consistently above
+// ~1024 KB, tracing back to this middleware wrapping r.Body before
+// ModuleProxyHandler's own, much larger limit ever got a chance to apply).
+// See adminapi.AdminLimitsHandler's doc comment for the full set of
+// upload-specific limits this now defers to.
+//
+// The Content-Length pre-check (rather than only relying on
+// http.MaxBytesReader tripping mid-stream) matters for the same reason:
+// MaxBytesReader doesn't send a clean response when the limit is hit — it
+// fails the next Read() and the Go server then closes the connection to
+// avoid reading a request body it doesn't intend to trust, which is
+// indistinguishable from a crash to any reverse proxy in front of Core and
+// surfaces to the client as a bare 502 instead of a real status code.
+// Checking Content-Length upfront (when the client sent one, which every
+// browser fetch()/XHR upload does) rejects oversized requests with a clean
+// 413 before a single body byte is read, so there's no mid-stream
+// connection to abort in the first place.
 func maxBodyMiddleware(pool *db.Pool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		if mediaType == "multipart/form-data" {
+			next.ServeHTTP(w, r)
+			return
+		}
 		limit := ai.MaxBodyBytes(r.Context(), pool)
 		if limit > 0 {
+			if r.ContentLength > limit {
+				http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+				return
+			}
 			r.Body = http.MaxBytesReader(w, r.Body, limit)
 		}
 		next.ServeHTTP(w, r)
@@ -893,46 +939,102 @@ func recoverMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// authRateLimitWindow/authRateLimitMax bound how often a single client IP
-// may hit a rate-limited auth endpoint. Sized for a homelab (a handful of
-// real users, occasional retries) while still cutting off unbounded
-// scripted hammering of the login/callback endpoints.
-const (
-	authRateLimitWindow = time.Minute
-	authRateLimitMax    = 20
-)
+// authRateLimitWindow bounds how often a single client IP may hit a
+// rate-limited auth endpoint. The window is fixed (unlike the max — see
+// authRateLimitMax below) since a tuning need for the window itself hasn't
+// come up in practice; only the request-count ceiling has.
+const authRateLimitWindow = time.Minute
 
-// aiChatRateLimitWindow/aiChatRateLimitMax bound how often a single client IP
-// may call the AI chat proxy. Unlike login/callback, every call here forwards
-// to a paid external provider (OpenAI/Anthropic/etc. - internal/ai), so an
-// unbounded loop from a single approved-but-compromised account (or a buggy
-// frontend retry) can run up real cost, not just load Core itself. 30/min is
-// generous for interactive chat use (a few messages a minute, per browser
-// tab) while still bounding worst-case spend to a known ceiling.
-const (
-	aiChatRateLimitWindow = time.Minute
-	aiChatRateLimitMax    = 30
-)
+// defaultAuthRateLimitMax is the fallback used when the
+// auth_rate_limit_max setting (see authRateLimitMax) has never been set.
+// Sized for a homelab (a handful of real users, occasional retries) while
+// still cutting off unbounded scripted hammering of the login/callback
+// endpoints.
+const defaultAuthRateLimitMax = 20
 
-// globalRateLimitWindow/globalRateLimitMax is a coarse backstop applied to
-// every route except /healthz (see main's handler chain). It exists because,
-// before this, only /v1/auth/login and /v1/auth/callback had any rate limit
-// at all - anything else (module API proxy, search, news aggregation, etc.)
-// was reachable at unbounded volume by any approved session or, for routes
-// that don't check auth themselves, any caller who can reach Core. The limit
-// is deliberately generous (a self-hosted homelab has a handful of real
-// users, not a fleet of API consumers) - it is meant to catch runaway loops
-// and scripted abuse, not to shape normal interactive traffic.
-const (
-	globalRateLimitWindow = time.Minute
-	globalRateLimitMax    = 600
-)
+// authRateLimitMax reads the configured auth-endpoint rate limit ceiling
+// from core_settings ("auth_rate_limit_max"). See
+// adminapi.AdminLimitsHandler for where this is admin-editable.
+func authRateLimitMax(ctx context.Context, pool *db.Pool) int64 {
+	return readRateLimitSetting(ctx, pool, "auth_rate_limit_max", defaultAuthRateLimitMax)
+}
+
+// aiChatRateLimitWindow bounds how often a single client IP may call the AI
+// chat proxy — see aiChatRateLimitMax below for the request-count ceiling
+// and why it exists on top of ai.go's own separate per-user chat limiter.
+const aiChatRateLimitWindow = time.Minute
+
+// defaultAIChatRateLimitMax is the fallback used when the
+// ai_chat_ip_rate_limit_max setting (see aiChatRateLimitMax) has never been
+// set. Unlike login/callback, every call here forwards to a paid external
+// provider (OpenAI/Anthropic/etc. - internal/ai), so an unbounded loop from
+// a single approved-but-compromised account (or a buggy frontend retry) can
+// run up real cost, not just load Core itself. 30/min is generous for
+// interactive chat use (a few messages a minute, per browser tab) while
+// still bounding worst-case spend to a known ceiling.
+const defaultAIChatRateLimitMax = 30
+
+// aiChatRateLimitMax reads the configured AI-chat per-IP rate limit
+// ceiling from core_settings ("ai_chat_ip_rate_limit_max"). This is a
+// coarse IP-based backstop layered on top of ai.go's own separate
+// per-user "chat_rpm_limit" (ai.go's chatRPMLimit) — not a replacement for
+// it. See adminapi.AdminLimitsHandler for where this is admin-editable.
+func aiChatRateLimitMax(ctx context.Context, pool *db.Pool) int64 {
+	return readRateLimitSetting(ctx, pool, "ai_chat_ip_rate_limit_max", defaultAIChatRateLimitMax)
+}
+
+// globalRateLimitWindow bounds the coarse backstop applied to every route
+// except /healthz — see globalRateLimitMax below for the request-count
+// ceiling and globalRateLimitMiddleware's doc comment for the full
+// rationale.
+const globalRateLimitWindow = time.Minute
+
+// defaultGlobalRateLimitMax is the fallback used when the
+// global_rate_limit_max setting (see globalRateLimitMax) has never been
+// set. Before this backstop existed, only /v1/auth/login and
+// /v1/auth/callback had any rate limit at all - anything else (module API
+// proxy, search, news aggregation, etc.) was reachable at unbounded volume
+// by any approved session or, for routes that don't check auth themselves,
+// any caller who can reach Core. The limit is deliberately generous (a
+// self-hosted homelab has a handful of real users, not a fleet of API
+// consumers) - it is meant to catch runaway loops and scripted abuse, not
+// to shape normal interactive traffic.
+const defaultGlobalRateLimitMax = 600
+
+// globalRateLimitMax reads the configured global rate limit ceiling from
+// core_settings ("global_rate_limit_max"). See adminapi.AdminLimitsHandler
+// for where this is admin-editable.
+func globalRateLimitMax(ctx context.Context, pool *db.Pool) int64 {
+	return readRateLimitSetting(ctx, pool, "global_rate_limit_max", defaultGlobalRateLimitMax)
+}
+
+// readRateLimitSetting is the shared GetSetting/parse/fallback logic behind
+// authRateLimitMax/aiChatRateLimitMax/globalRateLimitMax. 0 means unlimited
+// (IncrExpire's count can never exceed a max of 0... except it always will,
+// since count starts at 1 - so 0 here intentionally means "trips on the
+// very first request", which is never a sensible admin intent; unlike the
+// body-size settings, 0 is treated as invalid input, not "unlimited", and
+// falls back to def instead).
+func readRateLimitSetting(ctx context.Context, pool *db.Pool, key string, def int64) int64 {
+	val, ok, err := pool.GetSetting(ctx, key)
+	if err != nil || !ok || val == "" {
+		return def
+	}
+	n, err := strconv.ParseInt(val, 10, 64)
+	if err != nil || n <= 0 {
+		return def
+	}
+	return n
+}
 
 // rateLimitMiddleware applies a fixed-window rate limit (via
 // valkey.Client.IncrExpire) to a single handler. label distinguishes the
 // Valkey key namespace per endpoint/scope (e.g. "login" vs "callback" vs
-// "ai-chat" vs "global") so budgets don't bleed into each other. max is the
-// number of requests allowed per window. identify computes the bucket key
+// "ai-chat" vs "global") so budgets don't bleed into each other. maxFn
+// resolves the number of requests allowed per window — a function rather
+// than a fixed value so changes via PATCH /v1/admin/system/limits take
+// effect immediately on the next request, without a restart (same pattern
+// as ai.MaxBodyBytes/maxBodyMiddleware). identify computes the bucket key
 // per request (see identifyByIP/identifyBySessionOrIP below) — pulled out
 // as a parameter (2026-07-05) rather than hardcoded to clientIP so the
 // global backstop can bucket authenticated requests by user instead of IP
@@ -941,14 +1043,14 @@ const (
 // "no rate limiting" rather than locking everyone out.
 //
 // pool/masterKeyEnv (added 2026-07-05, alongside System Info's "rate
-// limits" section) are used only on the rare trip branch, to write an
-// audit.EventRateLimitExceeded entry — a live Valkey counter tells you a
-// limit is active right now, but says nothing about one that already
-// expired by the time an admin goes looking, which is exactly what
-// happened investigating an earlier "too many requests" report. ActorID is
-// whatever identify returned (an IP, or "user:<id>" for an authenticated
-// request at the global layer).
-func rateLimitMiddleware(vk *valkey.Client, pool *db.Pool, masterKeyEnv string, label string, window time.Duration, max int64, identify func(*http.Request) string, next http.HandlerFunc) http.HandlerFunc {
+// limits" section) are used both to resolve maxFn's current value and, on
+// the rare trip branch, to write an audit.EventRateLimitExceeded entry — a
+// live Valkey counter tells you a limit is active right now, but says
+// nothing about one that already expired by the time an admin goes
+// looking, which is exactly what happened investigating an earlier "too
+// many requests" report. ActorID is whatever identify returned (an IP, or
+// "user:<id>" for an authenticated request at the global layer).
+func rateLimitMiddleware(vk *valkey.Client, pool *db.Pool, masterKeyEnv string, label string, window time.Duration, maxFn func(context.Context, *db.Pool) int64, identify func(*http.Request) string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		identifier := identify(r)
 		key := "ratelimit:" + label + ":" + identifier
@@ -958,6 +1060,7 @@ func rateLimitMiddleware(vk *valkey.Client, pool *db.Pool, masterKeyEnv string, 
 			next.ServeHTTP(w, r)
 			return
 		}
+		max := maxFn(r.Context(), pool)
 		if count > max {
 			// Logged (2026-07-05): previously silent, so a real trip of this
 			// limit left zero trace in the logs — reported by a user as
@@ -1102,14 +1205,14 @@ func isTrustedProxyPeer(host string) bool {
 // for a diagnostics page; the UI shows count-only for that one label.
 var knownRateLimitLabels = []string{"auth:login", "auth:callback", "ai-chat", "global", "chat"}
 
-func rateLimitMax(label string) int64 {
+func rateLimitMax(ctx context.Context, pool *db.Pool, label string) int64 {
 	switch label {
 	case "auth:login", "auth:callback":
-		return authRateLimitMax
+		return authRateLimitMax(ctx, pool)
 	case "ai-chat":
-		return aiChatRateLimitMax
+		return aiChatRateLimitMax(ctx, pool)
 	case "global":
-		return globalRateLimitMax
+		return globalRateLimitMax(ctx, pool)
 	default:
 		return 0
 	}
@@ -1187,7 +1290,7 @@ func activeRateLimits(ctx context.Context, vk *valkey.Client, pool *db.Pool) []s
 			Identifier:     identifier,
 			DisplayName:    displayName,
 			Count:          count,
-			Max:            rateLimitMax(label),
+			Max:            rateLimitMax(ctx, pool, label),
 			ResetInSeconds: int64(ttl / time.Second),
 		})
 	}

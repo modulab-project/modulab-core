@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -127,10 +128,34 @@ type ManifestJob struct {
 
 const (
 	installDownloadTimeout = 5 * time.Minute
-	maxModuleZIPBytes      = 100 << 20 // 100 MB hard cap
-	maxSHA256FileBytes     = 1024      // a hex digest is at most 64 chars
-	maxSigFileBytes        = 4096
+	// defaultMaxModuleZIPBytes is the fallback used when the
+	// max_module_zip_bytes setting (see MaxModuleZIPBytes) has never been
+	// set.
+	defaultMaxModuleZIPBytes = 100 << 20 // 100 MB
+	// maxSHA256FileBytes/maxSigFileBytes are not admin-configurable on
+	// purpose: they bound a hex digest (always 64 chars) and a cosign
+	// signature bundle respectively — fixed by the file formats involved,
+	// not an operational choice anyone would plausibly need to tune.
+	maxSHA256FileBytes = 1024
+	maxSigFileBytes    = 4096
 )
+
+// MaxModuleZIPBytes reads the module-install ZIP size cap from
+// core_settings ("max_module_zip_bytes"). Defaults to
+// defaultMaxModuleZIPBytes (100 MB) if unset; 0 means unlimited, the same
+// convention max_body_bytes/MaxUploadBodyBytes use. See
+// adminapi.AdminLimitsHandler for where this is admin-editable.
+func MaxModuleZIPBytes(ctx context.Context, pool *db.Pool) int64 {
+	val, ok, err := pool.GetSetting(ctx, "max_module_zip_bytes")
+	if err != nil || !ok || val == "" {
+		return defaultMaxModuleZIPBytes
+	}
+	n, err := strconv.ParseInt(val, 10, 64)
+	if err != nil || n < 0 {
+		return defaultMaxModuleZIPBytes
+	}
+	return n
+}
 
 // Install performs the full module installation pipeline for entry.
 // It is idempotent in the sense that it refuses to start if the module
@@ -154,6 +179,7 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 	if entry.LatestVersion == "" {
 		return fmt.Errorf("modules: install %q: no version known — registry may not have synced yet", entry.Name)
 	}
+	maxZIPBytes := MaxModuleZIPBytes(ctx, d.DB)
 
 	// ── 1. Guard: not already installed ───────────────────────────────────
 	_, exists, err := d.DB.GetInstalledModule(ctx, entry.Name)
@@ -204,7 +230,7 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 	dlCtx, dlCancel := context.WithTimeout(ctx, installDownloadTimeout)
 	defer dlCancel()
 
-	go func() { zipCh <- dlResult{downloadFile(dlCtx, zipURL, zipPath, maxModuleZIPBytes)} }()
+	go func() { zipCh <- dlResult{downloadFile(dlCtx, zipURL, zipPath, maxZIPBytes)} }()
 	go func() { hashCh <- dlResult{downloadFile(dlCtx, sha256URL, sha256Path, maxSHA256FileBytes)} }()
 
 	if r := <-zipCh; r.err != nil {
@@ -272,7 +298,7 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 
 	// ── 6. Extract ZIP ────────────────────────────────────────────────────
 	extractDir := filepath.Join(tmpDir, "extracted")
-	if err := extractZIP(zipPath, extractDir, maxModuleZIPBytes); err != nil {
+	if err := extractZIP(zipPath, extractDir, maxZIPBytes); err != nil {
 		return fmt.Errorf("modules: install %q: extract zip: %w", entry.Name, err)
 	}
 

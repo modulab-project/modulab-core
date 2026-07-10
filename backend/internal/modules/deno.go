@@ -14,9 +14,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/modulab-project/modulab-core/backend/internal/db"
 )
 
 // WorkerPool manages one Deno subprocess per installed Tier 2/3 module.
@@ -63,6 +66,13 @@ type WorkerPool struct {
 	mu      sync.RWMutex
 	workers map[string]*denoWorker
 
+	// connPoolSize is resolved once at construction time (see NewWorkerPool)
+	// from the deno_conn_pool_size setting and copied onto every worker this
+	// pool starts (denoWorker.poolSize). See ConnPoolSize's doc comment for
+	// why this is restart-required rather than live like the other settings
+	// in this package.
+	connPoolSize int
+
 	// onCrash, if set, is called (in its own goroutine, never holding p.mu)
 	// whenever a worker's Deno process exits on its own rather than via an
 	// intentional Stop/StopAll/restart. Wired up once in main.go to mark the
@@ -97,17 +107,26 @@ func (p *WorkerPool) SetCrashHandler(fn func(name string)) {
 // NewWorkerPool creates an empty WorkerPool. Call Start for each installed
 // Tier 2/3 module at startup. dbURL is the PostgreSQL connection string that
 // will be passed to each Deno worker so modules can query the database.
-func NewWorkerPool(dataDir, dbURL string) *WorkerPool {
+// connPoolSize is the resolved deno_conn_pool_size setting (see
+// ConnPoolSize) to use for every worker this pool starts — resolved once by
+// the caller (main.go, which has the DB pool at hand during startup) rather
+// than looked up here, since WorkerPool itself has no *db.Pool reference.
+// Values below 1 fall back to defaultConnPoolSize.
+func NewWorkerPool(dataDir, dbURL string, connPoolSize int) *WorkerPool {
 	dbHost := ""
 	if u, err := url.Parse(dbURL); err == nil {
 		dbHost = u.Host // includes port, e.g. "postgres:5432" — exactly what --allow-net expects
 	} else {
 		log.Printf("modules: NewWorkerPool: could not parse dbURL to extract host for worker --allow-net grants: %v", err)
 	}
+	if connPoolSize < 1 {
+		connPoolSize = defaultConnPoolSize
+	}
 	return &WorkerPool{
-		dataDir:     dataDir,
-		dbURL:       dbURL,
-		dbHost:      dbHost,
+		dataDir:      dataDir,
+		dbURL:        dbURL,
+		dbHost:       dbHost,
+		connPoolSize: connPoolSize,
 		dnsResolver: "127.0.0.11:53", // Docker's embedded DNS resolver — see field doc comment
 		workers:     make(map[string]*denoWorker),
 	}
@@ -217,7 +236,8 @@ func (p *WorkerPool) startLocked(name, entrypoint string, opts WorkerOptions) er
 		skipTLSVerify:     opts.SkipTLSVerify,
 		jobEntrypoints:    jobs,
 		onCrash:           p.onCrash,
-		connPool:          make(chan net.Conn, connPoolSize),
+		poolSize:          p.connPoolSize,
+		connPool:          make(chan net.Conn, p.connPoolSize),
 	}
 	if err := w.start(); err != nil {
 		return fmt.Errorf("worker %q: start: %w", name, err)
@@ -550,16 +570,18 @@ type ModuleNotification struct {
 
 // ── denoWorker (internal) ─────────────────────────────────────────────────────
 
-// connPoolSize bounds how many requests Core will have in flight to a single
-// module's Deno worker at once. Previously Core kept exactly one persistent
-// connection guarded by a mutex held for an entire request's round trip,
-// which meant one slow handler (e.g. a photo upload that resizes an image)
-// blocked every other request to that module — including unrelated, fast
-// ones like a simple GET — until it finished or the per-request deadline
-// fired. Under real load that was long enough for Traefik/Cloudflare to give
-// up waiting on the stalled connection and serve their own generic
-// gateway-error page instead of Core's actual response (observed 2026-07-07
-// with my-place's photo upload endpoint).
+// defaultConnPoolSize is the fallback used when the deno_conn_pool_size
+// setting (see ConnPoolSize) has never been set. It bounds how many
+// requests Core will have in flight to a single module's Deno worker at
+// once. Previously Core kept exactly one persistent connection guarded by a
+// mutex held for an entire request's round trip, which meant one slow
+// handler (e.g. a photo upload that resizes an image) blocked every other
+// request to that module — including unrelated, fast ones like a simple
+// GET — until it finished or the per-request deadline fired. Under real
+// load that was long enough for Traefik/Cloudflare to give up waiting on
+// the stalled connection and serve their own generic gateway-error page
+// instead of Core's actual response (observed 2026-07-07 with my-place's
+// photo upload endpoint).
 //
 // The worker's own accept loop (see workerBootstrapScript's acceptLoop)
 // already calls handleConn per accepted connection without awaiting it, so
@@ -567,9 +589,30 @@ type ModuleNotification struct {
 // separate async tasks — nothing on the Deno side needs to change. Core
 // just wasn't taking advantage of it. A small bounded pool of persistent
 // connections (still long-lived, avoiding the connection-churn "os error 22"
-// issue noted on waitForSocket) lets up to connPoolSize requests run at once
+// issue noted on waitForSocket) lets up to this many requests run at once
 // per module.
-const connPoolSize = 4
+const defaultConnPoolSize = 4
+
+// ConnPoolSize reads the per-module Deno worker connection pool size from
+// core_settings ("deno_conn_pool_size"). Unlike the other settings in this
+// package, this is only read once, when a worker starts (WorkerPool is
+// constructed with the value already resolved) — a running worker's pool is
+// sized at creation, so changing this setting takes effect on that module's
+// next restart/reinstall/update, not immediately. Defaults to
+// defaultConnPoolSize (4) if unset, and is clamped to at least 1 (a pool of
+// 0 would make every module request block forever). See
+// adminapi.AdminLimitsHandler for where this is admin-editable.
+func ConnPoolSize(ctx context.Context, pool *db.Pool) int {
+	val, ok, err := pool.GetSetting(ctx, "deno_conn_pool_size")
+	if err != nil || !ok || val == "" {
+		return defaultConnPoolSize
+	}
+	n, err := strconv.Atoi(val)
+	if err != nil || n < 1 {
+		return defaultConnPoolSize
+	}
+	return n
+}
 
 // denoWorker manages a single Deno subprocess.
 type denoWorker struct {
@@ -602,12 +645,16 @@ type denoWorker struct {
 	mu       sync.Mutex
 	stopping bool // set by stop() before cancel(); distinguishes an intentional stop from a crash
 
-	// connPool holds up to connPoolSize persistent, ready-to-use Unix socket
-	// connections to the worker (see connPoolSize's doc comment). numConns
+	// connPool holds up to poolSize persistent, ready-to-use Unix socket
+	// connections to the worker (see ConnPoolSize's doc comment). numConns
 	// tracks how many have been dialed so far so getConn knows when to dial
-	// a new one vs. wait for one to be released back into the pool.
+	// a new one vs. wait for one to be released back into the pool. poolSize
+	// is resolved once, when the worker starts (see startLocked) — the
+	// channel's capacity can't change after creation, so a setting change
+	// only takes effect on this module's next restart.
 	connPool chan net.Conn
 	numConns int
+	poolSize int
 }
 
 // workerBootstrapScript is the small Deno bootstrap that wraps the module's
@@ -956,9 +1003,9 @@ drain:
 }
 
 // getConn checks out a connection from the pool, dialing a fresh one if the
-// pool hasn't reached connPoolSize yet, or blocking until one is released
-// (or ctx ends) once it has. See connPoolSize's doc comment for why this
-// exists instead of one connection shared/serialized across all requests.
+// pool hasn't reached w.poolSize yet, or blocking until one is released (or
+// ctx ends) once it has. See ConnPoolSize's doc comment for why this exists
+// instead of one connection shared/serialized across all requests.
 func (w *denoWorker) getConn(ctx context.Context) (net.Conn, error) {
 	select {
 	case conn := <-w.connPool:
@@ -967,7 +1014,7 @@ func (w *denoWorker) getConn(ctx context.Context) (net.Conn, error) {
 	}
 
 	w.mu.Lock()
-	if w.numConns < connPoolSize {
+	if w.numConns < w.poolSize {
 		w.numConns++
 		w.mu.Unlock()
 		conn, err := net.Dial("unix", w.sockPath)

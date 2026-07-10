@@ -413,6 +413,32 @@ type OPMLEntry struct {
 	ReachError string `json:"reach_error,omitempty"`
 }
 
+// defaultMaxOPMLUploadBytes is the fallback OPML import size cap used when
+// the max_opml_upload_bytes setting (see MaxOPMLUploadBytes) has never been
+// set.
+const defaultMaxOPMLUploadBytes = 2 << 20 // 2 MB
+
+// MaxOPMLUploadBytes reads the OPML-import upload size cap from
+// core_settings ("max_opml_upload_bytes"). Used to be a hardcoded constant
+// with no admin control — the same class of problem max_body_bytes'
+// interaction with module uploads turned out to have (see
+// modules.MaxUploadBodyBytes's doc comment): a hardcoded per-handler limit
+// silently capped at whatever value happened to be smaller. Defaults to
+// defaultMaxOPMLUploadBytes (2 MB) if unset; 0 means unlimited, same
+// convention as the other size settings. See adminapi.AdminLimitsHandler
+// for where this is admin-editable.
+func MaxOPMLUploadBytes(ctx context.Context, pool *db.Pool) int64 {
+	val, ok, err := pool.GetSetting(ctx, "max_opml_upload_bytes")
+	if err != nil || !ok || val == "" {
+		return defaultMaxOPMLUploadBytes
+	}
+	n, err := strconv.ParseInt(val, 10, 64)
+	if err != nil || n < 0 {
+		return defaultMaxOPMLUploadBytes
+	}
+	return n
+}
+
 // AdminParseOPMLHandler is POST /v1/admin/feeds/opml-parse.
 // Accepts a multipart/form-data upload with a field named "file" containing
 // an OPML document. Returns the list of feeds found in the file — including
@@ -422,12 +448,25 @@ type OPMLEntry struct {
 // the network. The caller (admin UI) shows a selection step and then calls
 // POST /v1/admin/feeds/import with the chosen feeds.
 func AdminParseOPMLHandler(d auth.Deps) http.HandlerFunc {
-	const maxUploadSize = 2 << 20 // 2 MB
 	return func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := auth.RequireAdminSession(d, w, r); !ok {
 			return
 		}
-		if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+		maxUploadSize := MaxOPMLUploadBytes(r.Context(), d.Pool)
+		// Reject oversized uploads before reading any body bytes rather than
+		// letting ParseMultipartForm's internal limit trip mid-stream - see
+		// maxBodyMiddleware's doc comment (cmd/core/main.go) for why that
+		// matters (an abrupt connection close looks like a 502 to any proxy
+		// in front of Core, not a clean error).
+		if maxUploadSize > 0 && r.ContentLength > maxUploadSize {
+			http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		parseMemory := maxUploadSize
+		if parseMemory <= 0 {
+			parseMemory = defaultMaxOPMLUploadBytes * 16 // generous bound for the "unlimited" case
+		}
+		if err := r.ParseMultipartForm(parseMemory); err != nil {
 			http.Error(w, "file too large or invalid form", http.StatusBadRequest)
 			return
 		}
@@ -442,7 +481,11 @@ func AdminParseOPMLHandler(d auth.Deps) http.HandlerFunc {
 			}
 		}()
 
-		body, err := io.ReadAll(io.LimitReader(file, maxUploadSize))
+		readLimit := maxUploadSize
+		if readLimit <= 0 {
+			readLimit = parseMemory
+		}
+		body, err := io.ReadAll(io.LimitReader(file, readLimit))
 		if err != nil {
 			http.Error(w, "read error", http.StatusInternalServerError)
 			return

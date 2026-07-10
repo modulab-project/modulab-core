@@ -14,6 +14,7 @@ import AdminSystemOIDCPage from "./pages/AdminSystemOIDCPage";
 import AdminSystemSmtpPage from "./pages/AdminSystemSmtpPage";
 import AdminSystemSearxngPage from "./pages/AdminSystemSearxngPage";
 import AdminAIPage from "./pages/AdminAIPage";
+import AdminSystemLimitsPage from "./pages/AdminSystemLimitsPage";
 import AdminQuickLinksPage from "./pages/AdminQuickLinksPage";
 import AdminSystemPage from "./pages/AdminSystemPage";
 import AdminSystemInfoPage from "./pages/AdminSystemInfoPage";
@@ -64,6 +65,7 @@ export default function App() {
       <Route path="/admin/feeds" element={<AdminFeedsPage />} />
       <Route path="/admin/ai" element={<Navigate to="/admin/system/ai" replace />} />
       <Route path="/admin/system/ai" element={<AdminAIPage />} />
+      <Route path="/admin/system/limits" element={<AdminSystemLimitsPage />} />
       <Route path="/admin/quick-links" element={<AdminQuickLinksPage />} />
       <Route path="/admin/system" element={<AdminSystemPage />} />
       <Route path="/admin/system/info" element={<AdminSystemInfoPage />} />

@@ -825,7 +825,6 @@ export async function adminFetchAIProviderBalance(token: string, id: string): Pr
 
 export interface AISettings {
   chat_rpm_limit: number;
-  max_body_bytes: number;
 }
 
 // GET /v1/admin/ai/settings — super-admin only.
@@ -838,6 +837,45 @@ export function adminGetAISettings(token: string): Promise<AISettings> {
 // PATCH /v1/admin/ai/settings — super-admin only.
 export function adminPatchAISettings(token: string, settings: Partial<AISettings>): Promise<AISettings> {
   return request<AISettings>("/v1/admin/ai/settings", {
+    method: "PATCH",
+    headers: bearerHeaders(token),
+    body: JSON.stringify(settings),
+  });
+}
+
+// LimitsSettings mirrors backend/internal/adminapi/limits.go's
+// LimitsSettings — the cross-cutting operational limits (upload/body size
+// caps, rate limits, Deno worker pool size) that used to be hardcoded Go
+// constants scattered across several packages. See that file's doc comment
+// for the incident (module photo uploads silently capped at ~1 MB) that
+// led to consolidating them behind one endpoint.
+//
+// deno_conn_pool_size is the only field here that needs a module
+// restart/update to take effect — every other field applies immediately.
+export interface LimitsSettings {
+  max_body_bytes: number;
+  max_upload_body_bytes: number;
+  max_module_zip_bytes: number;
+  max_opml_upload_bytes: number;
+  auth_rate_limit_max: number;
+  ai_chat_ip_rate_limit_max: number;
+  global_rate_limit_max: number;
+  deno_conn_pool_size: number;
+}
+
+// GET /v1/admin/system/limits — super-admin only.
+export function adminGetLimitsSettings(token: string): Promise<LimitsSettings> {
+  return request<LimitsSettings>("/v1/admin/system/limits", {
+    headers: bearerHeaders(token),
+  });
+}
+
+// PATCH /v1/admin/system/limits — super-admin only. Always sends the full
+// object (unlike adminPatchAISettings' Partial<>) since the backend
+// validates and rewrites every field on each PATCH — see
+// AdminLimitsHandler's doc comment.
+export function adminPatchLimitsSettings(token: string, settings: LimitsSettings): Promise<LimitsSettings> {
+  return request<LimitsSettings>("/v1/admin/system/limits", {
     method: "PATCH",
     headers: bearerHeaders(token),
     body: JSON.stringify(settings),

@@ -11,11 +11,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
+	"github.com/modulab-project/modulab-core/backend/internal/db"
 	"github.com/modulab-project/modulab-core/backend/internal/notify"
 )
 
@@ -71,10 +73,45 @@ func truncateUTF8(s string, maxBytes int) string {
 	return string(b)
 }
 
-// maxUploadBytes is the per-request upload cap for module image uploads.
-// Separate from Core's global max_body_bytes because module storage is
-// intentionally larger (images vs. JSON API payloads).
-const maxUploadBytes = 20 << 20 // 20 MB
+// defaultMaxUploadBytes is the fallback module image-upload cap used when
+// the max_upload_body_bytes setting (see MaxUploadBodyBytes) has never been
+// set.
+const defaultMaxUploadBytes = 20 << 20 // 20 MB
+
+// unlimitedUploadParseMemory bounds how much of a module upload
+// ParseMultipartForm buffers in memory when the configured limit is 0
+// ("unlimited"). ParseMultipartForm's maxMemory parameter cannot itself be
+// "unlimited" in any meaningful sense - it always needs a real number - so
+// this is a fixed, generous ceiling (matching Go's own historical default
+// for multipart parsing elsewhere in net/http) rather than a per-request
+// unbounded buffer, regardless of what admins set max_upload_body_bytes to.
+const unlimitedUploadParseMemory = 32 << 20 // 32 MB
+
+// MaxUploadBodyBytes reads the module-upload body size cap from
+// core_settings ("max_upload_body_bytes"), separate from Core's general
+// max_body_bytes cap that every other route uses (see maxBodyMiddleware in
+// cmd/core/main.go) — module storage (spot photos, recipe images, module
+// install ZIPs, etc.) intentionally allows much larger payloads than a
+// typical JSON API request. Defaults to defaultMaxUploadBytes (20 MB) if
+// unset; 0 means unlimited, the same convention max_body_bytes uses.
+//
+// Exists because this used to be a hardcoded Go constant with no admin
+// control at all — fine until a real photo upload needed to be bigger than
+// whatever the constant happened to be, at which point fixing it required a
+// code change and a redeploy instead of an admin settings update. See
+// adminapi.AdminLimitsHandler, which exposes this alongside every other
+// upload/rate/pool limit that had the same problem.
+func MaxUploadBodyBytes(ctx context.Context, pool *db.Pool) int64 {
+	val, ok, err := pool.GetSetting(ctx, "max_upload_body_bytes")
+	if err != nil || !ok || val == "" {
+		return defaultMaxUploadBytes
+	}
+	n, err := strconv.ParseInt(val, 10, 64)
+	if err != nil || n < 0 {
+		return defaultMaxUploadBytes
+	}
+	return n
+}
 
 // ModuleProxyHandler returns an http.Handler that forwards every request under
 // /v1/modules/{name}/* to the Deno worker for that module.
@@ -140,7 +177,18 @@ func ModuleProxyHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 		mediaType, _, _ := mime.ParseMediaType(ct)
 
 		if mediaType == "multipart/form-data" {
-			savedPath, err := saveUploadedFile(r, d.DataDir, moduleName)
+			uploadLimit := MaxUploadBodyBytes(r.Context(), d.DB)
+			// Reject oversized uploads before reading any body bytes, same
+			// reasoning as maxBodyMiddleware's Content-Length pre-check
+			// (cmd/core/main.go): letting http.MaxBytesReader trip mid-stream
+			// instead aborts the connection, which any reverse proxy in
+			// front of Core reports as a bare 502 rather than a real status
+			// code.
+			if uploadLimit > 0 && r.ContentLength > uploadLimit {
+				http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
+				return
+			}
+			savedPath, err := saveUploadedFile(r, d.DataDir, moduleName, uploadLimit)
 			if err != nil {
 				http.Error(w, "file upload failed: "+err.Error(), http.StatusBadRequest)
 				return
@@ -237,9 +285,19 @@ var allowedImageTypes = map[string]bool{
 // Returns a stable relative path ("uploads/{filename}") — never an absolute
 // path — so that the value stored in the DB is portable across environments
 // (local dev, Docker, different data dir mounts).
-func saveUploadedFile(r *http.Request, dataDir, moduleName string) (string, error) {
-	r.Body = http.MaxBytesReader(nil, r.Body, maxUploadBytes)
-	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
+//
+// limit is the caller-resolved max_upload_body_bytes value (see
+// MaxUploadBodyBytes) — resolved once by the caller rather than looked up
+// again here so the Content-Length pre-check and the actual read enforce
+// the exact same number. 0 means unlimited.
+func saveUploadedFile(r *http.Request, dataDir, moduleName string, limit int64) (string, error) {
+	parseMemory := limit
+	if limit <= 0 {
+		parseMemory = unlimitedUploadParseMemory
+	} else {
+		r.Body = http.MaxBytesReader(nil, r.Body, limit)
+	}
+	if err := r.ParseMultipartForm(parseMemory); err != nil {
 		return "", fmt.Errorf("parse multipart: %w", err)
 	}
 

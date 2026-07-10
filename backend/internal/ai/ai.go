@@ -697,13 +697,18 @@ func fetchDeepSeekBalance(ctx context.Context, apiKey string) (float64, string, 
 //
 // Configurable settings:
 //   - chat_rpm_limit: POST /v1/ai/chat requests per user per minute (0 = unlimited, default 60).
-//   - max_body_bytes: request body size cap in bytes applied to every route (0 = unlimited, default 1 MB).
+//
+// max_body_bytes used to live here too, but it was never actually
+// AI-specific (see its own doc comment: "applied to every route") — it now
+// lives on GET/PATCH /v1/admin/system/limits (adminapi.AdminLimitsHandler),
+// alongside every other cross-cutting operational limit that had the same
+// "hardcoded, undiscoverable, wrong place" problem. See that handler's
+// package doc comment for the incident this consolidation came from.
 //
 // Changes take effect immediately — no restart needed.
 func AdminSettingsHandler(deps auth.Deps) http.HandlerFunc {
 	type aiSettings struct {
-		ChatRPMLimit int   `json:"chat_rpm_limit"`
-		MaxBodyBytes int64 `json:"max_body_bytes"`
+		ChatRPMLimit int `json:"chat_rpm_limit"`
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -712,7 +717,6 @@ func AdminSettingsHandler(deps auth.Deps) http.HandlerFunc {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(aiSettings{
 				ChatRPMLimit: chatRPMLimit(r.Context(), deps.Pool),
-				MaxBodyBytes: MaxBodyBytes(r.Context(), deps.Pool),
 			})
 
 		case http.MethodPatch:
@@ -725,30 +729,19 @@ func AdminSettingsHandler(deps auth.Deps) http.HandlerFunc {
 				http.Error(w, "chat_rpm_limit must be >= 0 (0 = unlimited)", http.StatusBadRequest)
 				return
 			}
-			if body.MaxBodyBytes < 0 {
-				http.Error(w, "max_body_bytes must be >= 0 (0 = unlimited)", http.StatusBadRequest)
-				return
-			}
 			if err := deps.Pool.SetSetting(r.Context(), "ai_chat_rpm_limit", strconv.Itoa(body.ChatRPMLimit)); err != nil {
-				http.Error(w, "database error", http.StatusInternalServerError)
-				return
-			}
-			if err := deps.Pool.SetSetting(r.Context(), "max_body_bytes", strconv.FormatInt(body.MaxBodyBytes, 10)); err != nil {
 				http.Error(w, "database error", http.StatusInternalServerError)
 				return
 			}
 
 			// Best-effort audit; a failed write must not block the response.
-			// max_body_bytes in particular is a DoS-relevant limit (0 =
-			// unlimited request body size) - this had no audit trail at all
-			// before, unlike every other admin AI setting in this file.
 			sess, _ := auth.SessionFromContext(r.Context())
 			if masterKey, err := setup.ResolveMasterKey(r.Context(), deps.Pool, deps.MasterKeyEnv); err == nil {
 				if err := audit.Log(r.Context(), deps.Pool, masterKey, audit.LogParams{
 					EventType:  audit.EventConfigAISettings,
 					ActorID:    sess.UserID,
 					ActorEmail: sess.Email,
-					Details:    fmt.Sprintf(`{"chat_rpm_limit":%d,"max_body_bytes":%d}`, body.ChatRPMLimit, body.MaxBodyBytes),
+					Details:    fmt.Sprintf(`{"chat_rpm_limit":%d}`, body.ChatRPMLimit),
 				}); err != nil {
 					log.Printf("ai: audit settings update: %v", err)
 				}
@@ -757,7 +750,6 @@ func AdminSettingsHandler(deps auth.Deps) http.HandlerFunc {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(aiSettings{
 				ChatRPMLimit: body.ChatRPMLimit,
-				MaxBodyBytes: body.MaxBodyBytes,
 			})
 
 		default:

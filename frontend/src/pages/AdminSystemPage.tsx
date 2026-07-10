@@ -114,6 +114,31 @@ export default function AdminSystemPage() {
               {t("admin.system.ai_card_desc")}
             </p>
           </Link>
+
+          {/* Cross-cutting operational limits (upload/body size caps, rate
+              limits, Deno worker pool size) — consolidated here from several
+              hardcoded Go constants and one misplaced AI-settings field, see
+              adminapi.AdminLimitsHandler's doc comment for why. No single
+              configured/not-configured state (there's nothing to "configure"
+              in that sense, just tunable defaults), same treatment as the AI
+              card above. */}
+          <Link
+            to="/admin/system/limits"
+            className="group flex flex-col rounded-xl border border-gray-200 p-4 transition-colors hover:border-teal-400 hover:bg-teal-50/40 dark:border-gray-800 dark:hover:border-teal-700 dark:hover:bg-teal-950/30"
+          >
+            <div className="flex items-start justify-between gap-3 mb-2">
+              <div className="flex items-center gap-2.5">
+                <i className="ti ti-gauge text-[18px] text-gray-400 group-hover:text-teal-600 dark:group-hover:text-teal-400" />
+                <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
+                  {t("admin.system_limits.title")}
+                </span>
+              </div>
+              <i className="ti ti-chevron-right flex-none text-gray-300 group-hover:text-teal-500 dark:text-gray-600 dark:group-hover:text-teal-400" />
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2">
+              {t("admin.system.limits_card_desc")}
+            </p>
+          </Link>
         </div>
 
         {/* Diagnostics group — read-only, nothing to configure, so neither
