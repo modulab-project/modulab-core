@@ -89,6 +89,11 @@ export default function SetupWizard() {
       return;
     }
     if (result.error) {
+      // Runs exactly once on mount ([] deps) to read a one-shot stashed
+      // result from an external store (consumeAuthResult consumes/clears
+      // the entry, so this can never re-fire or cascade) - same shape as
+      // Login.tsx's mount effect, see its comment for the full rationale.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLoginError(authErrorKey(result.error));
       return;
     }

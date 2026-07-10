@@ -23,6 +23,14 @@ export default function Login() {
   useEffect(() => {
     const result = consumeAuthResult();
     if (result?.error) {
+      // Runs exactly once on mount ([] deps) to read a one-shot stashed
+      // result from an external store (see consumeAuthResult - it consumes/
+      // clears the entry, so this can never re-fire or cascade). Not a
+      // candidate for the render-time "adjusting state" pattern used
+      // elsewhere: there is no prop/state to compare against, just a
+      // mount-time read of an external system, which is exactly what
+      // effects are for.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setError(authErrorKey(result.error));
     }
   }, []);
