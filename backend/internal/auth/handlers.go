@@ -757,17 +757,47 @@ func ExportSelfHandler(d Deps) http.HandlerFunc {
 }
 
 // LogoutHandler invalidates the request's Bearer token immediately.
+//
+// Looks the session up (ValidateSession) before deleting it purely to have
+// an actor to audit - login has always produced an audit.EventAuthLogin
+// entry, but logout previously produced no trail at all, an asymmetry
+// found during the pre-V1 re-audit. If the token is already invalid/expired
+// by the time this runs (e.g. a double-click, or it was already revoked
+// elsewhere), ValidateSession's ok=false just skips the audit write - the
+// actual deletion below still runs unconditionally, since a client asking
+// to log out with a token that turns out to be already-dead should still
+// get a clean 204, not an error.
 func LogoutHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
 		token := bearerToken(r)
 		if token == "" {
 			http.Error(w, "missing bearer token", http.StatusUnauthorized)
 			return
 		}
-		if err := DeleteSession(r.Context(), d.Valkey, token); err != nil {
+
+		sess, ok, err := ValidateSession(ctx, d, token)
+
+		if err := DeleteSession(ctx, d.Valkey, token); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+
+		// Best-effort, same tradeoff as every other audit.Log call in this
+		// package: the logout itself already succeeded above - a failed or
+		// skipped audit write must not turn it into an error for the caller.
+		if err == nil && ok {
+			if masterKey, mkErr := setup.ResolveMasterKey(ctx, d.Pool, d.MasterKeyEnv); mkErr == nil {
+				if auditErr := audit.Log(ctx, d.Pool, masterKey, audit.LogParams{
+					EventType:  audit.EventAuthLogout,
+					ActorID:    sess.UserID,
+					ActorEmail: sess.Email,
+				}); auditErr != nil {
+					log.Printf("auth: audit logout for %s: %v", sess.UserID, auditErr)
+				}
+			}
+		}
+
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

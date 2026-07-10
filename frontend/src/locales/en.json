@@ -420,6 +420,9 @@
       "verify_error": "Could not verify the audit log.",
       "event_types": {
         "auth_login": "Login",
+        "auth_logout": "Logout",
+        "auth_session_revoked_by_admin": "Session ended by admin",
+        "auth_session_revoked_by_idp": "Session revoked by identity provider",
         "user_approved": "User approved",
         "user_locked": "User locked",
         "user_unlocked": "User unlocked",

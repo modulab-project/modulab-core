@@ -11,6 +11,9 @@ import { AppShell } from "../components/AppShell";
 const EVENT_TYPES = [
   // Auth
   "auth.login",
+  "auth.logout",
+  "auth.session_revoked_by_admin",
+  "auth.session_revoked_by_idp",
   // User lifecycle (admin-driven)
   "user.approved",
   "user.locked",

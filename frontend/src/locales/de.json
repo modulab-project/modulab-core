@@ -420,6 +420,9 @@
       "verify_error": "Audit-Log konnte nicht geprüft werden.",
       "event_types": {
         "auth_login": "Anmeldung",
+        "auth_logout": "Abmeldung",
+        "auth_session_revoked_by_admin": "Sitzung von Admin beendet",
+        "auth_session_revoked_by_idp": "Sitzung vom Identity Provider widerrufen",
         "user_approved": "Benutzer freigegeben",
         "user_locked": "Benutzer gesperrt",
         "user_unlocked": "Benutzer entsperrt",

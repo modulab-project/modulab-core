@@ -1609,6 +1609,19 @@ func systemInfoHandler(pool *db.Pool, valkeyClient *valkey.Client, cfg config.Co
 // Deliberately does not stop an admin from ending their own current
 // session this way - closing your own only tab is equivalent to logging
 // out, just from an unusual place to do it.
+//
+// Audited (audit.EventSessionRevokedByAdmin) - previously the only
+// per-user-affecting admin action in this codebase with no audit trail at
+// all, unlike LockUserHandler/DeleteUserHandler (which also revoke
+// sessions, but log the users-table change itself, not the session-kill).
+// This does not know which user the session belonged to without an extra
+// lookup - RevokeSessionByID only reports found/not-found, not whose
+// session it was (see its doc comment: it has to scan and match by hashed
+// ID, same as ListActiveSessions) - so TargetID is intentionally left at
+// the session's own opaque id, not an OIDC subject, unlike every other
+// admin audit entry in this file. Good enough to prove "an admin ended
+// session X at time Y"; cross-referencing which user that was means
+// checking the audit log from around when that session was created.
 func revokeSessionHandler(authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
@@ -1624,6 +1637,21 @@ func revokeSessionHandler(authDeps auth.Deps) http.HandlerFunc {
 		if !found {
 			http.Error(w, "session not found", http.StatusNotFound)
 			return
+		}
+		// Best-effort, same tradeoff as every other audit.Log call in this
+		// codebase: the revoke itself already succeeded above - a failed or
+		// skipped audit write must not turn it into an error for the caller.
+		if sess, ok := auth.SessionFromContext(r.Context()); ok {
+			if masterKey, mkErr := setup.ResolveMasterKey(r.Context(), authDeps.Pool, authDeps.MasterKeyEnv); mkErr == nil {
+				if auditErr := audit.Log(r.Context(), authDeps.Pool, masterKey, audit.LogParams{
+					EventType:  audit.EventSessionRevokedByAdmin,
+					ActorID:    sess.UserID,
+					ActorEmail: sess.Email,
+					TargetID:   id,
+				}); auditErr != nil {
+					log.Printf("main: audit session revoke by %s: %v", sess.UserID, auditErr)
+				}
+			}
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}

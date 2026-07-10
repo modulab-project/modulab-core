@@ -43,6 +43,22 @@ const (
 	EventUserSelfDeleted = "user.self_deleted"
 	// Auth events
 	EventAuthLogin = "auth.login"
+	// Fired by LogoutHandler on an explicit logout - previously only login
+	// produced an audit trail, so a full "when was this account active"
+	// timeline had start events but no end events. Not fired for a session
+	// that simply expires unused (SessionTTL) or is revoked by an admin
+	// action (those already have their own trail: EventUserLocked/
+	// EventUserDeleted, or EventSessionRevokedByAdmin below) - only for the
+	// user's own deliberate "log me out" action.
+	EventAuthLogout = "auth.logout"
+	// Fired by RevokeSessionByID's caller (admin.go's EndSessionHandler)
+	// when an admin ends one specific active session (System Info page's
+	// per-row action) - distinct from EventUserLocked/EventUserDeleted
+	// (which also revoke sessions, but as a side effect of a users-table
+	// change) and from EventSessionRevokedByIdP (revalidate.go, no human
+	// actor at all): this is an admin choosing to end one session while
+	// leaving the account itself untouched.
+	EventSessionRevokedByAdmin = "auth.session_revoked_by_admin"
 	// Fired by auth.RevalidateSession (revalidate.go) when the periodic IdP
 	// re-check finds a session's refresh token rejected - account
 	// disabled/deleted/revoked at the IdP - and kills it early instead of

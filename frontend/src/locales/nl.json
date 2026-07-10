@@ -420,6 +420,9 @@
       "verify_error": "Audit-log kon niet worden gecontroleerd.",
       "event_types": {
         "auth_login": "Aanmelding",
+        "auth_logout": "Afmelding",
+        "auth_session_revoked_by_admin": "Sessie beëindigd door beheerder",
+        "auth_session_revoked_by_idp": "Sessie ingetrokken door identiteitsprovider",
         "user_approved": "Gebruiker goedgekeurd",
         "user_locked": "Gebruiker vergrendeld",
         "user_unlocked": "Gebruiker ontgrendeld",
