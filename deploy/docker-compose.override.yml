@@ -1,0 +1,40 @@
+# Local full-stack test override — auto-loaded by Compose alongside
+# docker-compose.yml (same directory, no -f flag needed).
+#
+# Builds `core` and `nginx` from local source instead of pulling
+# ghcr.io/modulab-project/modulab-core[-nginx]:latest, using the exact same
+# Dockerfiles the CI release pipeline uses (repo-root Dockerfile,
+# deploy/Dockerfile.nginx) - so this is the same build the release images
+# come from, just run against your working tree. Traefik, Postgres, Valkey
+# and SearXNG are untouched and still use their published images.
+#
+# Usage:
+#   docker compose build        # after any backend or frontend change
+#   docker compose up -d
+#
+# nginx's build depends on core's build even for a frontend-only change:
+# Dockerfile.nginx copies its static files out of the core image (built in
+# core's own multi-stage Dockerfile, stage "frontend-builder"), it does not
+# read frontend/dist directly. `docker compose build` rebuilds both in the
+# right order because of the depends_on below; a plain `docker compose up
+# --build` does the same.
+#
+# This file has no secrets and is safe to commit - remove it (or comment
+# out the services below) to go back to the published GHCR images.
+
+services:
+  core:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: modulab-core:local
+
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile.nginx
+      args:
+        CORE_IMAGE: modulab-core:local
+    depends_on:
+      core:
+        condition: service_healthy
