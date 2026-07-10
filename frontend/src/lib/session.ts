@@ -11,6 +11,8 @@
 // long as the user has at least one tab open and making requests, their
 // session auto-extends and never expires mid-use. Closing all tabs signs
 // them out; a new tab after that requires a fresh OIDC login.
+import { queryClient } from "./queryClient";
+
 const SESSION_TOKEN_KEY = "modulab_session_token";
 
 export function storeSessionToken(token: string): void {
@@ -23,4 +25,12 @@ export function getSessionToken(): string | null {
 
 export function clearSessionToken(): void {
   sessionStorage.removeItem(SESSION_TOKEN_KEY);
+  // ModuLab is designed to run as a shared, always-on browser homepage
+  // (see Home.tsx's top-of-file comment) - the TanStack Query cache is a
+  // single instance for the tab's whole lifetime and survives the SPA
+  // navigate("/login") every logout/session-invalidation path uses (no
+  // full page reload), so without this it would otherwise keep serving
+  // the previous person's cached feed/module/store data for a few seconds
+  // after the next person logs in on the same tab.
+  queryClient.clear();
 }
