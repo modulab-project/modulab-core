@@ -9,6 +9,16 @@
 //   - The module component is responsible for its own data fetching.
 //
 // For v1 (no external bundle yet), a fallback is shown when no bundle is found.
+//
+// Deliberately NOT migrated to TanStack Query (unlike the other admin/store
+// pages) even though its bundle-load effect below trips
+// react-hooks/set-state-in-effect: the bundle fetch is a dynamic import()
+// of executable code via a Blob URL, with manual 404-retry and cancellation
+// - not cacheable server state, and re-running it on every query
+// stale/refetch would risk exactly the "unmounts the module component
+// mid-interaction, loses unsaved input" bug the `t`-dependency comments
+// further down already warn about. Suppressed with a targeted
+// eslint-disable instead.
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
@@ -132,6 +142,10 @@ export default function ModulePage() {
   // a manual page reload — this makes the same window resolve on its own.
   useEffect(() => {
     if (!mod || mod.status !== "active") {
+      // Not a shared-server-state fetch TanStack Query would fit well (see
+      // the file-level migration note below) - this early-return guard just
+      // sets a boolean once per `mod` change, no cascading/looping risk.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setBundleLoading(false);
       return;
     }

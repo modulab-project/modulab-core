@@ -3,9 +3,10 @@
 // in the background so the user arrives at /admin/modules/installed with
 // fresh data and update badges already set — no manual clicks needed.
 // Gate: org-admin and super-admin.
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { Link, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 import {
   checkModuleUpdates,
   listInstalledModules,
@@ -17,65 +18,86 @@ import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
 import { isAdminRole } from "../lib/roles";
 
+const MODULES_HUB_QUERY_KEY = ["admin-modules-hub"] as const;
+
+interface ModulesHubData {
+  storeCount: number | null;
+  installedCount: number | null;
+  updateCount: number | null;
+  syncError: boolean;
+}
+
 export default function AdminModulesPage() {
   const { t } = useTranslation();
   const { session, loading } = useAuthenticatedSession();
   const navigate = useNavigate();
+  const isAdmin = !!session && isAdminRole(session.role);
 
-  // null = not yet known, number = resolved
-  const [storeCount, setStoreCount] = useState<number | null>(null);
-  const [installedCount, setInstalledCount] = useState<number | null>(null);
-  const [updateCount, setUpdateCount] = useState<number | null>(null);
-  const [syncing, setSyncing] = useState(false);
-  const [syncError, setSyncError] = useState(false);
-
+  // Redirect stays an effect (imperative router call, not a setState the
+  // render-time-adjustment pattern applies to) - kept separate from the
+  // data fetch below.
   useEffect(() => {
     if (!session) return;
     if (!isAdminRole(session.role)) {
       navigate("/", { replace: true });
-      return;
     }
-
-    const token = getSessionToken();
-    if (!token) return;
-
-    setSyncing(true);
-    setSyncError(false);
-
-    // Step 1: sync registry first so the DB has the latest versions.
-    // Step 2: only after sync completes, run update-check + read counts
-    // in parallel — otherwise checkModuleUpdates reads stale data.
-    //
-    // A failed sync is still non-fatal (the counts below fall back to
-    // whatever was already cached), but it used to be swallowed entirely
-    // with no feedback at all — an admin had no way to tell "these numbers
-    // might be stale" from "everything's fine". setSyncError surfaces that
-    // via the banner rendered below, without blocking the rest of the page.
-    syncStore(token)
-      .catch(() => setSyncError(true))
-      .then(() =>
-        Promise.allSettled([
-          listStore(token)
-            .then((r) => setStoreCount(r.total_count))
-            .catch(() => {}),
-          checkModuleUpdates(token)
-            .then((r) => setUpdateCount(r.count))
-            // Was silently defaulting to 0 here, which renders as "all up to
-            // date" (admin.modules.all_up_to_date) - actively misleading,
-            // since a failed check is not the same as a check that found
-            // nothing. Surface it via the same banner as a sync failure
-            // instead of a false all-clear.
-            .catch(() => setSyncError(true)),
-          listInstalledModules(token)
-            .then((list) => setInstalledCount(list?.length ?? 0))
-            .catch(() => setInstalledCount(null)),
-        ]),
-      )
-      .finally(() => setSyncing(false));
   }, [session, navigate]);
 
-  if (loading || !session || !isAdminRole(session.role)) return null;
+  // Step 1: sync registry first so the DB has the latest versions.
+  // Step 2: only after sync completes, run update-check + read counts
+  // in parallel — otherwise checkModuleUpdates reads stale data.
+  //
+  // A failed sync is still non-fatal (the counts below fall back to
+  // whatever was already cached), but it used to be swallowed entirely
+  // with no feedback at all — an admin had no way to tell "these numbers
+  // might be stale" from "everything's fine". syncError surfaces that via
+  // the banner rendered below, without blocking the rest of the page.
+  const { data, isFetching: syncing } = useQuery({
+    queryKey: MODULES_HUB_QUERY_KEY,
+    queryFn: async (): Promise<ModulesHubData> => {
+      const token = getSessionToken();
+      if (!token) throw new Error("no session token");
 
+      let syncError = false;
+      try {
+        await syncStore(token);
+      } catch {
+        syncError = true;
+      }
+
+      const [storeRes, updateRes, installedRes] = await Promise.allSettled([
+        listStore(token),
+        checkModuleUpdates(token),
+        listInstalledModules(token),
+      ]);
+
+      const storeCount = storeRes.status === "fulfilled" ? storeRes.value.total_count : null;
+
+      let updateCount: number | null = null;
+      if (updateRes.status === "fulfilled") {
+        updateCount = updateRes.value.count;
+      } else {
+        // Was silently defaulting to 0 here, which renders as "all up to
+        // date" (admin.modules.all_up_to_date) - actively misleading,
+        // since a failed check is not the same as a check that found
+        // nothing. Surface it via the same banner as a sync failure
+        // instead of a false all-clear.
+        syncError = true;
+      }
+
+      const installedCount = installedRes.status === "fulfilled" ? (installedRes.value?.length ?? 0) : null;
+
+      return { storeCount, updateCount, installedCount, syncError };
+    },
+    enabled: !loading && isAdmin,
+  });
+
+  if (loading || !session || !isAdmin) return null;
+
+  const storeCount = data?.storeCount ?? null;
+  const installedCount = data?.installedCount ?? null;
+  const updateCount = data?.updateCount ?? null;
+  const syncError = data?.syncError ?? false;
   const hasUpdates = updateCount !== null && updateCount > 0;
 
   return (

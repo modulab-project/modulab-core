@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { listFeeds, setFeedSubscription, type Feed } from "../lib/api";
 import { getSessionToken } from "../lib/session";
+import { USER_FEEDS_QUERY_KEY } from "../lib/queryKeys";
 
 // /user/feeds — lets every approved user manage their feed subscriptions.
 // Mirrors the FeedsPanel slide panel on the homepage but as a standalone
@@ -11,22 +13,23 @@ import { getSessionToken } from "../lib/session";
 export default function UserFeedsPage() {
   const { t } = useTranslation();
   const { session, loading } = useAuthenticatedSession();
-  const [feeds, setFeeds] = useState<Feed[]>([]);
-  const [fetching, setFetching] = useState(true);
+  const queryClient = useQueryClient();
   const [toggling, setToggling] = useState<number | null>(null);
-  const [loadError, setLoadError] = useState(false);
   const [toggleError, setToggleError] = useState(false);
 
-  useEffect(() => {
-    const token = getSessionToken();
-    if (!token) return;
-    setFetching(true);
-    setLoadError(false);
-    listFeeds(token)
-      .then((f) => setFeeds(f ?? []))
-      .catch(() => setLoadError(true))
-      .finally(() => setFetching(false));
-  }, []);
+  const {
+    data: feeds = [],
+    isLoading: fetching,
+    isError: loadError,
+  } = useQuery({
+    queryKey: USER_FEEDS_QUERY_KEY,
+    queryFn: async () => {
+      const token = getSessionToken();
+      if (!token) throw new Error("no session token");
+      return (await listFeeds(token)) ?? [];
+    },
+    enabled: !loading && !!session,
+  });
 
   async function handleToggle(feed: Feed) {
     const token = getSessionToken();
@@ -34,13 +37,17 @@ export default function UserFeedsPage() {
     const next = !feed.enabled;
     setToggling(feed.id);
     setToggleError(false);
-    setFeeds((prev) => prev.map((f) => (f.id === feed.id ? { ...f, enabled: next } : f)));
+    queryClient.setQueryData<Feed[]>(USER_FEEDS_QUERY_KEY, (prev) =>
+      (prev ?? []).map((f) => (f.id === feed.id ? { ...f, enabled: next } : f)),
+    );
     try {
       await setFeedSubscription(token, feed.id, next);
     } catch {
       // Revert the optimistic toggle, and say so - a toggle that visibly
       // flips back is confusing without an explanation.
-      setFeeds((prev) => prev.map((f) => (f.id === feed.id ? { ...f, enabled: feed.enabled } : f)));
+      queryClient.setQueryData<Feed[]>(USER_FEEDS_QUERY_KEY, (prev) =>
+        (prev ?? []).map((f) => (f.id === feed.id ? { ...f, enabled: feed.enabled } : f)),
+      );
       setToggleError(true);
     } finally {
       setToggling(null);

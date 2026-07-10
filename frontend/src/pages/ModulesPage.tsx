@@ -1,8 +1,9 @@
 // Installed modules management page (/admin/modules/installed).
 // Admin-only. Lists all installed modules with status, version, and admin actions.
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   listInstalledModules,
   checkModuleUpdates,
@@ -18,39 +19,49 @@ import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
 import { isAdminRole } from "../lib/roles";
 
+const MODULES_QUERY_KEY = ["installed-modules"] as const;
+
 export default function ModulesPage() {
   const { t } = useTranslation();
   const { session, loading } = useAuthenticatedSession();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
-  const [modules, setModules] = useState<InstalledModule[]>([]);
-  const [fetching, setFetching] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [busyName, setBusyName] = useState<string | null>(null);
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [updatesMsg, setUpdatesMsg] = useState<string | null>(null);
 
-  const load = useCallback(() => {
-    const token = getSessionToken();
-    if (!token) return;
-    setFetching(true);
-    listInstalledModules(token)
-      .then((list) => {
-        setModules(list ?? []);
-        setError(null);
-      })
-      .catch(() => setError(t("modules.load_error")))
-      .finally(() => setFetching(false));
-  }, [t]);
+  const isAdmin = !!session && isAdminRole(session.role);
 
+  // Redirect (not a data concern, so not folded into the useQuery below) -
+  // stays an effect since navigate() is an imperative call to an external
+  // system (the router), not a setState call the render-time-adjustment
+  // pattern applies to.
   useEffect(() => {
     if (!session) return;
     if (!isAdminRole(session.role)) {
       navigate("/", { replace: true });
-      return;
     }
-    load();
-  }, [session, navigate, load]);
+  }, [session, navigate]);
+
+  const {
+    data: modules = [],
+    isLoading: fetching,
+    isError: hasLoadError,
+  } = useQuery({
+    queryKey: MODULES_QUERY_KEY,
+    queryFn: async () => {
+      const token = getSessionToken();
+      if (!token) throw new Error("no session token");
+      return (await listInstalledModules(token)) ?? [];
+    },
+    enabled: !loading && isAdmin,
+  });
+  const error = hasLoadError ? t("modules.load_error") : null;
+
+  function setModules(updater: (prev: InstalledModule[]) => InstalledModule[]) {
+    queryClient.setQueryData<InstalledModule[]>(MODULES_QUERY_KEY, (prev) => updater(prev ?? []));
+  }
 
   async function handleCheckUpdates() {
     const token = getSessionToken();
@@ -64,7 +75,8 @@ export default function ModulesPage() {
       } else {
         setUpdatesMsg(t("modules.updates_found", { count: res.count }));
       }
-      load(); // refresh to show available_version badges
+      // refresh to show available_version badges
+      queryClient.invalidateQueries({ queryKey: MODULES_QUERY_KEY });
     } catch {
       setUpdatesMsg(t("modules.check_updates_error"));
     } finally {
@@ -137,9 +149,7 @@ export default function ModulesPage() {
     }
   }
 
-  if (loading || !session) return null;
-
-  const isAdmin = isAdminRole(session.role);
+  if (loading || !session || !isAdmin) return null;
 
   return (
     <AppShell session={session}>

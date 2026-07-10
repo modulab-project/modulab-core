@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { getSessionToken } from "../lib/session";
 import { AppShell } from "../components/AppShell";
@@ -13,6 +14,7 @@ import {
   updateAdminQuickLink,
 } from "../lib/quicklinks";
 import { listInstalledModules, type InstalledModule } from "../lib/api";
+import { ACTIVE_MODULES_QUERY_KEY } from "../lib/queryKeys";
 
 function moduleDisplayName(mod: InstalledModule, lang: string): string {
   const mf = mod.manifest as { display_name?: Record<string, string>; name?: string } | null;
@@ -58,21 +60,19 @@ function QuickLinkForm({
   const [description, setDescription] = useState(initial?.description ?? "");
   const [sortOrder, setSortOrder] = useState(initial?.sort_order ?? 0);
 
-  const [modules, setModules] = useState<InstalledModule[]>([]);
-  const [modulesLoading, setModulesLoading] = useState(false);
   const [selectedModule, setSelectedModule] = useState<InstalledModule | null>(null);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    if (mode !== "module" || modules.length > 0) return;
-    setModulesLoading(true);
-    listInstalledModules(token)
-      .then((mods) => setModules(mods.filter((m) => m.status === "active")))
-      .catch(() => {})
-      .finally(() => setModulesLoading(false));
-  }, [mode, token, modules.length]);
+  const { data: modules = [], isLoading: modulesLoading } = useQuery({
+    queryKey: [...ACTIVE_MODULES_QUERY_KEY, token],
+    queryFn: async () => {
+      const mods = await listInstalledModules(token);
+      return mods.filter((m) => m.status === "active");
+    },
+    enabled: mode === "module",
+  });
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

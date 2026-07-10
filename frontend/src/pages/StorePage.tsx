@@ -1,9 +1,10 @@
 // Module Store browse page (/admin/modules/store).
 // Admin-only. Shows all known modules from the registry cache (official + community).
 // Only org-admin/super-admin can access, install, or sync.
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   listStore,
   listInstalledModules,
@@ -20,49 +21,64 @@ import { safeHref } from "../lib/url";
 
 type SourceFilter = "all" | "official" | "community";
 
+const STORE_QUERY_KEY = ["module-store"] as const;
+
+interface StoreData {
+  entries: StoreEntry[];
+  lastSynced: string | null;
+  installed: Map<string, InstalledModule>;
+}
+
 export default function StorePage() {
   const { t } = useTranslation();
   const { session, loading } = useAuthenticatedSession();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
-  const [entries, setEntries] = useState<StoreEntry[]>([]);
-  const [installed, setInstalled] = useState<Map<string, InstalledModule>>(new Map());
-  const [fetching, setFetching] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [busyName, setBusyName] = useState<string | null>(null);
-  const [lastSynced, setLastSynced] = useState<string | null>(null);
 
-  const load = useCallback(() => {
-    const token = getSessionToken();
-    if (!token) return;
-    setFetching(true);
-    Promise.all([
-      listStore(token),
-      listInstalledModules(token),
-    ])
-      .then(([storeResp, installedList]) => {
-        setEntries(storeResp.entries ?? []);
-        setLastSynced(storeResp.last_synced_at ?? null);
-        const map = new Map<string, InstalledModule>();
-        for (const m of installedList ?? []) map.set(m.name, m);
-        setInstalled(map);
-        setError(null);
-      })
-      .catch(() => setError(t("store.load_error")))
-      .finally(() => setFetching(false));
-  }, [t]);
+  const isAdmin = !!session && isAdminRole(session.role);
 
+  // Redirect stays an effect (imperative router call, not a setState the
+  // render-time-adjustment pattern applies to) - kept separate from the
+  // data fetch below.
   useEffect(() => {
     if (!session) return;
     if (!isAdminRole(session.role)) {
       navigate("/", { replace: true });
-      return;
     }
-    load();
-  }, [session, navigate, load]);
+  }, [session, navigate]);
+
+  const {
+    data,
+    isLoading: fetching,
+    isError: hasLoadError,
+  } = useQuery({
+    queryKey: STORE_QUERY_KEY,
+    queryFn: async (): Promise<StoreData> => {
+      const token = getSessionToken();
+      if (!token) throw new Error("no session token");
+      const [storeResp, installedList] = await Promise.all([
+        listStore(token),
+        listInstalledModules(token),
+      ]);
+      const installed = new Map<string, InstalledModule>();
+      for (const m of installedList ?? []) installed.set(m.name, m);
+      return {
+        entries: storeResp.entries ?? [],
+        lastSynced: storeResp.last_synced_at ?? null,
+        installed,
+      };
+    },
+    enabled: !loading && isAdmin,
+  });
+  const entries = data?.entries ?? [];
+  const installed = data?.installed ?? new Map<string, InstalledModule>();
+  const lastSynced = data?.lastSynced ?? null;
+  const error = hasLoadError ? t("store.load_error") : null;
 
   async function handleSync() {
     const token = getSessionToken();
@@ -72,7 +88,7 @@ export default function StorePage() {
     try {
       const res = await syncStore(token);
       setSyncMsg(res.ok ? t("store.sync_ok") : t("store.sync_partial"));
-      load();
+      queryClient.invalidateQueries({ queryKey: STORE_QUERY_KEY });
     } catch {
       setSyncMsg(t("store.sync_error"));
     } finally {
@@ -86,7 +102,9 @@ export default function StorePage() {
     setBusyName(name);
     try {
       const mod = await installModule(token, name);
-      setInstalled((prev) => new Map(prev).set(name, mod));
+      queryClient.setQueryData<StoreData>(STORE_QUERY_KEY, (prev) =>
+        prev ? { ...prev, installed: new Map(prev.installed).set(name, mod) } : prev,
+      );
     } catch (e) {
       alert(`${t("store.install_error")}: ${(e as Error).message}`);
     } finally {
@@ -94,9 +112,8 @@ export default function StorePage() {
     }
   }
 
-  if (loading || !session || !isAdminRole(session.role)) return null;
+  if (loading || !session || !isAdmin) return null;
 
-  const isAdmin = isAdminRole(session.role);
   const visible = sourceFilter === "all"
     ? entries
     : entries.filter((e) => e.source === sourceFilter);

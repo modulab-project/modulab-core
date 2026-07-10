@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { safeHref } from "../lib/url";
+import { USER_FEEDS_QUERY_KEY } from "../lib/queryKeys";
 import {
   getWeather,
   getWeatherLocation,
@@ -189,6 +191,13 @@ export default function Home() {
     }
     geoRequestedRef.current = true;
     if (!navigator.geolocation) {
+      // Not migrated to TanStack Query: this effect's entire point is to
+      // ask the browser's geolocation permission prompt at most once ever
+      // per session (see geoRequestedRef above) - a query's normal
+      // stale/refetch-on-refocus semantics would risk re-triggering that
+      // prompt, which is exactly the UX bug this effect's design already
+      // guards against.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setWeatherLoading(false);
       return;
     }
@@ -1373,21 +1382,22 @@ function relativeNewsTime(date: Date): string {
 
 function FeedsPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { t } = useTranslation();
-  const [feeds, setFeeds] = useState<Feed[]>([]);
-  const [fetching, setFetching] = useState(false);
+  const queryClient = useQueryClient();
   const [toggling, setToggling] = useState<number | null>(null);
 
-  // Load feed list whenever the panel opens.
-  useEffect(() => {
-    if (!open) return;
-    const token = getSessionToken();
-    if (!token) return;
-    setFetching(true);
-    listFeeds(token)
-      .then((f) => setFeeds(f ?? []))
-      .catch(() => {})
-      .finally(() => setFetching(false));
-  }, [open]);
+  // Load feed list whenever the panel opens. Shares USER_FEEDS_QUERY_KEY
+  // with UserFeedsPage.tsx's standalone /user/feeds page, so whichever of
+  // the two was visited more recently serves the other an instant
+  // cache-hit instead of a fresh loading flash.
+  const { data: feeds = [], isLoading: fetching } = useQuery({
+    queryKey: USER_FEEDS_QUERY_KEY,
+    queryFn: async () => {
+      const token = getSessionToken();
+      if (!token) throw new Error("no session token");
+      return (await listFeeds(token)) ?? [];
+    },
+    enabled: open,
+  });
 
   // Close on Escape key, same as WeatherPanel/NewsAllPanel.
   useEffect(() => {
@@ -1405,12 +1415,16 @@ function FeedsPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
     const next = !feed.enabled;
     setToggling(feed.id);
     // Optimistic update
-    setFeeds((prev) => prev.map((f) => (f.id === feed.id ? { ...f, enabled: next } : f)));
+    queryClient.setQueryData<Feed[]>(USER_FEEDS_QUERY_KEY, (prev) =>
+      (prev ?? []).map((f) => (f.id === feed.id ? { ...f, enabled: next } : f)),
+    );
     try {
       await setFeedSubscription(token, feed.id, next);
     } catch {
       // Roll back on error
-      setFeeds((prev) => prev.map((f) => (f.id === feed.id ? { ...f, enabled: feed.enabled } : f)));
+      queryClient.setQueryData<Feed[]>(USER_FEEDS_QUERY_KEY, (prev) =>
+        (prev ?? []).map((f) => (f.id === feed.id ? { ...f, enabled: feed.enabled } : f)),
+      );
     } finally {
       setToggling(null);
     }
