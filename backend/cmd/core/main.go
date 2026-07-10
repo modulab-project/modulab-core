@@ -282,7 +282,7 @@ func main() {
 	})))
 
 	mux.Handle("/v1/setup/group-prefix/status", bootstrapMgr.Middleware(setup.GroupPrefixStatusHandler(pool)))
-	mux.Handle("/v1/setup/group-prefix/configure", bootstrapMgr.Middleware(setup.GroupPrefixConfigureHandler(pool, masterKey)))
+	mux.Handle("/v1/setup/group-prefix/configure", bootstrapMgr.Middleware(setup.GroupPrefixConfigureHandler(pool, cfg.MasterKey)))
 
 	// Wizard step 7 (spec section 6.5): only flips bootstrapMgr's gate once
 	// every prior step's persisted state actually checks out - see
