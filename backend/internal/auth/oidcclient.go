@@ -14,6 +14,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -253,7 +254,11 @@ func (p *Provider) Revoke(ctx context.Context, refreshToken string) error {
 	if err != nil {
 		return fmt.Errorf("auth: revoke request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Printf("auth: revoke: close response body: %v", closeErr)
+		}
+	}()
 	// RFC 7009 §2.2: the endpoint MUST return 200 for both a successfully
 	// revoked token and one it does not recognize (already expired,
 	// invalid, or unknown) - a client cannot and should not try to
