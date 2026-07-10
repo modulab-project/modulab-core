@@ -145,15 +145,20 @@ export default function Home() {
 
   // Clear search results whenever the URL loses its ?q= parameter — e.g.
   // when the user clicks the ModuLab logo (navigate("/")) or uses the
-  // browser back button to return to the bare home page.
-  useEffect(() => {
+  // browser back button to return to the bare home page. Adjusted during
+  // render (React's "adjusting state when a prop changes" pattern) instead
+  // of in an effect, tracking the previous location.search to detect the
+  // change.
+  const [prevLocationSearch, setPrevLocationSearch] = useState(location.search);
+  if (location.search !== prevLocationSearch) {
+    setPrevLocationSearch(location.search);
     const q = new URLSearchParams(location.search).get("q") ?? "";
     if (!q) {
       setSearchQuery("");
       setWebResults(null);
       setWebLoading(false);
     }
-  }, [location.search]);
+  }
 
   // Quick links state
   const [tiles, setTiles] = useState<Tile[]>([]);
@@ -502,11 +507,14 @@ function Hero({
   const [value, setValue] = useState(initialQuery);
 
   // Sync local value when the parent clears initialQuery (e.g. logo click
-  // navigates to "/" which triggers the location.search effect in Home and
-  // resets searchQuery to "").
-  useEffect(() => {
+  // navigates to "/" which triggers the location.search adjustment in Home
+  // and resets searchQuery to ""). Adjusted during render rather than in an
+  // effect, per React's "adjusting state when a prop changes" pattern.
+  const [prevInitialQuery, setPrevInitialQuery] = useState(initialQuery);
+  if (initialQuery !== prevInitialQuery) {
+    setPrevInitialQuery(initialQuery);
     setValue(initialQuery);
-  }, [initialQuery]);
+  }
 
   function handleSearchKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key !== "Enter") {

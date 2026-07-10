@@ -400,10 +400,15 @@ export function QuickLinksGrid({
   const [reorderError, setReorderError] = useState(false);
   const [deleteError, setDeleteError] = useState(false);
 
-  // Sync when the parent delivers fetched tiles after first render.
-  useEffect(() => {
+  // Sync when the parent delivers fetched tiles after first render. Adjusted
+  // during render (React's documented "adjusting state when a prop changes"
+  // pattern) instead of in an effect, so the update lands in the same
+  // commit as the prop change rather than triggering a second render pass.
+  const [prevInitialTiles, setPrevInitialTiles] = useState(initialTiles);
+  if (initialTiles !== prevInitialTiles) {
+    setPrevInitialTiles(initialTiles);
     setTiles(initialTiles);
-  }, [initialTiles]);
+  }
   const dragSrcIdx = useRef<number | null>(null);
   const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
