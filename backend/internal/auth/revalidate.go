@@ -127,6 +127,16 @@ func RevalidateSession(ctx context.Context, d Deps, token string, provider *Prov
 	}
 
 	claims, newRefreshToken, err := provider.Revalidate(ctx, refreshToken)
+	if err == nil && claims.Subject != "" && claims.Subject != stored.UserID {
+		// The IdP's userinfo response came back for a different subject than
+		// the one this session was issued to. This should be unreachable in
+		// normal operation - the refresh token is scoped to stored.UserID's
+		// own OIDC session at the IdP - so treat it the same as an outright
+		// IdP rejection (revoke) rather than trusting/writing claims for the
+		// wrong user into this session. err is set here purely so the
+		// shared revoke-and-audit branch below fires with a clear reason.
+		err = fmt.Errorf("subject mismatch: session issued to %q, IdP returned %q", stored.UserID, claims.Subject)
+	}
 	if err != nil {
 		// The IdP rejected the refresh token - treat this exactly like an
 		// admin-initiated revoke of this one session (RevokeSessionByID).
@@ -207,4 +217,62 @@ func RevalidateSession(ctx context.Context, d Deps, token string, provider *Prov
 		return false, fmt.Errorf("auth: revalidate: store session: %w", err)
 	}
 	return false, nil
+}
+
+// revokeRefreshTokenAtIdP decrypts stored's refresh token (if it has one)
+// and calls provider.Revoke on it. A no-op, not an error, if stored has no
+// refresh token at all (predates this feature, or the IdP never granted
+// one) - there is nothing to revoke.
+func revokeRefreshTokenAtIdP(ctx context.Context, provider *Provider, masterKey string, stored storedSession) error {
+	if stored.RefreshTokenEnc == "" {
+		return nil
+	}
+	refreshToken, err := crypto.DecryptIfNotEmpty(masterKey, stored.RefreshTokenEnc)
+	if err != nil {
+		return fmt.Errorf("decrypt refresh token: %w", err)
+	}
+	return provider.Revoke(ctx, refreshToken)
+}
+
+// bestEffortRevokeAtIdP resolves the current OIDC provider and master key
+// once, then calls revokeRefreshTokenAtIdP for every session in sessions -
+// used wherever one or more sessions are killed locally (logout, admin
+// "end session", RevokeUserSessions on lock/delete) so the corresponding
+// refresh token is also invalidated at the IdP itself, not just deleted
+// from Core's own Valkey copy (see Provider.Revoke's doc comment for why
+// that distinction matters).
+//
+// Entirely best-effort: this only ever logs failures, never returns an
+// error, because every caller's own local session deletion is the actual
+// source of truth and must proceed regardless of whether this succeeds -
+// OIDC not being configured yet, a transient network error, or an IdP that
+// simply does not support RFC 7009 revocation are all just missed
+// opportunities for defense in depth, not failures of the kill itself.
+func bestEffortRevokeAtIdP(ctx context.Context, d Deps, sessions []storedSession) {
+	hasAny := false
+	for _, s := range sessions {
+		if s.RefreshTokenEnc != "" {
+			hasAny = true
+			break
+		}
+	}
+	if !hasAny {
+		return
+	}
+
+	provider, err := d.resolveProvider(ctx)
+	if err != nil {
+		log.Printf("auth: revoke at idp: resolve provider: %v", err)
+		return
+	}
+	masterKey, err := setup.ResolveMasterKey(ctx, d.Pool, d.MasterKeyEnv)
+	if err != nil {
+		log.Printf("auth: revoke at idp: resolve master key: %v", err)
+		return
+	}
+	for _, s := range sessions {
+		if err := revokeRefreshTokenAtIdP(ctx, provider, masterKey, s); err != nil {
+			log.Printf("auth: revoke at idp for %s: %v", s.UserID, err)
+		}
+	}
 }

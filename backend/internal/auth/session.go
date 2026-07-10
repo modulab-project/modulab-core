@@ -296,17 +296,35 @@ func CreateSession(ctx context.Context, d Deps, sess Session, refreshToken strin
 // not "they keep their current tab open until tomorrow." Looking up zero
 // tokens (a user who never logged in, or whose sessions already expired) is
 // not an error.
-func RevokeUserSessions(ctx context.Context, vk *valkey.Client, subject string) error {
-	tokens, err := vk.SetMembers(ctx, userSessionsKeyPrefix+subject)
+func RevokeUserSessions(ctx context.Context, d Deps, subject string) error {
+	tokens, err := d.Valkey.SetMembers(ctx, userSessionsKeyPrefix+subject)
 	if err != nil {
 		return fmt.Errorf("auth: list sessions for revocation: %w", err)
 	}
+
+	// Best-effort: also invalidate each session's refresh token at the IdP
+	// itself (see Provider.Revoke's doc comment), not just delete Core's own
+	// copy below. Decoded up front, before any Del, so a decode failure on
+	// one session can't skip revocation for the others.
+	var stored []storedSession
 	for _, token := range tokens {
-		if err := vk.Del(ctx, sessionKeyPrefix+token); err != nil {
+		raw, exists, err := d.Valkey.Get(ctx, sessionKeyPrefix+token)
+		if err != nil || !exists {
+			continue
+		}
+		var s storedSession
+		if err := json.Unmarshal([]byte(raw), &s); err == nil {
+			stored = append(stored, s)
+		}
+	}
+	bestEffortRevokeAtIdP(ctx, d, stored)
+
+	for _, token := range tokens {
+		if err := d.Valkey.Del(ctx, sessionKeyPrefix+token); err != nil {
 			return fmt.Errorf("auth: revoke session: %w", err)
 		}
 	}
-	return vk.Del(ctx, userSessionsKeyPrefix+subject)
+	return d.Valkey.Del(ctx, userSessionsKeyPrefix+subject)
 }
 
 // RevokeSessionByID ends exactly one active session, identified by the
@@ -346,6 +364,11 @@ func RevokeSessionByID(ctx context.Context, d Deps, id string) (bool, error) {
 		if err := json.Unmarshal([]byte(raw), &stored); err != nil {
 			return false, fmt.Errorf("auth: revoke session by id: decode: %w", err)
 		}
+		// Best-effort: also invalidate the refresh token at the IdP itself,
+		// same reasoning as RevokeUserSessions - before deleting Core's own
+		// copy below, though either order is fine here since this is not
+		// atomic with the Del anyway.
+		bestEffortRevokeAtIdP(ctx, d, []storedSession{stored})
 		if err := d.Valkey.Del(ctx, key); err != nil {
 			return false, fmt.Errorf("auth: revoke session by id: delete: %w", err)
 		}

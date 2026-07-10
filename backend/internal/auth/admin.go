@@ -402,7 +402,7 @@ func LockUserHandler(d Deps) http.HandlerFunc {
 		// has to retry. Worst case, an already-open session survives until
 		// it naturally expires, which is exactly the pre-existing behavior
 		// this change improves on, not a regression.
-		if err := RevokeUserSessions(r.Context(), d.Valkey, subject); err != nil {
+		if err := RevokeUserSessions(r.Context(), d, subject); err != nil {
 			logRevokeError("lock", subject, err)
 		}
 		enqueueMail(r.Context(), d, "lock", subject, func(email, name string) mail.Message {
@@ -514,7 +514,7 @@ func DeleteUserHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "no such user", http.StatusNotFound)
 			return
 		}
-		if err := RevokeUserSessions(r.Context(), d.Valkey, subject); err != nil {
+		if err := RevokeUserSessions(r.Context(), d, subject); err != nil {
 			logRevokeError("delete", subject, err)
 		}
 		// Best-effort, same reasoning as everywhere else in this file: the

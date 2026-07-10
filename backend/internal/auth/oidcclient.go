@@ -14,6 +14,9 @@ package auth
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
@@ -196,4 +199,68 @@ func (p *Provider) Revalidate(ctx context.Context, refreshToken string) (claims 
 		newRefreshToken = refreshToken
 	}
 	return claims, newRefreshToken, nil
+}
+
+// revocationEndpoint returns the RFC 7009 token revocation endpoint from the
+// discovery document, if the IdP publishes one. "revocation_endpoint" is not
+// part of the core OpenID Connect Discovery spec, but is a near-universal
+// extension (RFC 8414 §2, and OAuth 2.0 Authorization Server Metadata) that
+// go-oidc does not surface as a typed field - only via the raw discovery
+// document, which oidc.Provider.Claims can decode into an arbitrary struct.
+func (p *Provider) revocationEndpoint() (string, bool) {
+	var doc struct {
+		RevocationEndpoint string `json:"revocation_endpoint"`
+	}
+	if err := p.oidcProvider.Claims(&doc); err != nil || doc.RevocationEndpoint == "" {
+		return "", false
+	}
+	return doc.RevocationEndpoint, true
+}
+
+// Revoke tells the IdP to invalidate refreshToken immediately (RFC 7009
+// token revocation) instead of letting it sit valid until its own natural
+// expiry (often 30 days). Called whenever a session holding this refresh
+// token is killed locally (logout, admin "end session", lock/delete user) -
+// without this, deleting Core's own encrypted copy of the token was
+// cosmetic: anyone who separately obtained that same token before the
+// session was killed (e.g. via a Valkey + master-key compromise) could
+// still use it directly against the IdP for the rest of its own lifetime,
+// regardless of what Core's session store said.
+//
+// Best-effort by design, matching how every caller treats this: an IdP that
+// does not publish a revocation_endpoint is a silent no-op, not an error -
+// RFC 7009 support is common but not universal. A revocation call that
+// fails (network error, IdP rejects it) is returned as an error for the
+// caller to log, not to retry or to block the local session deletion on -
+// this is defense in depth, not the primary safeguard.
+func (p *Provider) Revoke(ctx context.Context, refreshToken string) error {
+	endpoint, ok := p.revocationEndpoint()
+	if !ok {
+		return nil
+	}
+	form := url.Values{
+		"token":           {refreshToken},
+		"token_type_hint": {"refresh_token"},
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return fmt.Errorf("auth: build revoke request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetBasicAuth(p.oauth2Config.ClientID, p.oauth2Config.ClientSecret)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("auth: revoke request: %w", err)
+	}
+	defer resp.Body.Close()
+	// RFC 7009 §2.2: the endpoint MUST return 200 for both a successfully
+	// revoked token and one it does not recognize (already expired,
+	// invalid, or unknown) - a client cannot and should not try to
+	// distinguish those cases. Only a non-2xx here indicates an actual
+	// problem (e.g. bad client credentials).
+	if resp.StatusCode/100 != 2 {
+		return fmt.Errorf("auth: revoke request: IdP returned %s", resp.Status)
+	}
+	return nil
 }

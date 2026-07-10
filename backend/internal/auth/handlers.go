@@ -489,7 +489,7 @@ func DeleteSelfHandler(d Deps) http.HandlerFunc {
 		// successful self-delete into a 500 the user has to retry. This
 		// also invalidates the very token used to make this request,
 		// which is fine: the caller is about to discard it anyway.
-		if err := RevokeUserSessions(ctx, d.Valkey, sess.UserID); err != nil {
+		if err := RevokeUserSessions(ctx, d, sess.UserID); err != nil {
 			logRevokeError("delete-self", sess.UserID, err)
 		}
 		// Best-effort: audit the self-deletion. The row is already gone and
@@ -777,6 +777,19 @@ func LogoutHandler(d Deps) http.HandlerFunc {
 		}
 
 		sess, ok, err := ValidateSession(ctx, d, token)
+
+		// Best-effort: also invalidate this session's refresh token at the
+		// IdP itself (see Provider.Revoke's doc comment), not just delete
+		// Core's own copy below. Fetched separately from ValidateSession's
+		// Session, which deliberately does not carry RefreshTokenEnc (see
+		// storedSession's doc comment) - a decode failure here just skips
+		// IdP revocation, it never blocks the actual logout.
+		if raw, exists, getErr := d.Valkey.Get(ctx, sessionKeyPrefix+token); getErr == nil && exists {
+			var stored storedSession
+			if jsonErr := json.Unmarshal([]byte(raw), &stored); jsonErr == nil {
+				bestEffortRevokeAtIdP(ctx, d, []storedSession{stored})
+			}
+		}
 
 		if err := DeleteSession(ctx, d.Valkey, token); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
