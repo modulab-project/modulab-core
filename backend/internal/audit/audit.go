@@ -43,6 +43,16 @@ const (
 	EventUserSelfDeleted = "user.self_deleted"
 	// Auth events
 	EventAuthLogin = "auth.login"
+	// Fired by auth.RevalidateSession (revalidate.go) when the periodic IdP
+	// re-check finds a session's refresh token rejected - account
+	// disabled/deleted/revoked at the IdP - and kills it early instead of
+	// letting it run out the rest of SessionTTL. Distinct from
+	// EventUserLocked/EventUserDeleted: those are Core-admin-driven actions
+	// on the users table; this is Core noticing, on its own, that the IdP
+	// no longer considers the login valid - worth its own trail so an admin
+	// can tell "I locked them" apart from "the IdP revoked them and Core
+	// caught it automatically".
+	EventSessionRevokedByIdP = "auth.session_revoked_by_idp"
 	// System config events
 	EventConfigSMTP          = "config.smtp"
 	EventConfigSMTPDel       = "config.smtp.deleted"

@@ -350,12 +350,20 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 
 		// Best-effort: audit the successful login. A failed write must not
 		// block an otherwise-successful login — log the error and continue.
+		//
+		// refresh_token_issued records only the fact, never the token value
+		// itself (that stays GCM-encrypted in the session, see
+		// storedSession.RefreshTokenEnc) - this is the supported way to
+		// confirm the IdP actually granted one (e.g. after changing the
+		// requested scopes), via the Admin Audit Log UI, instead of adding
+		// it to Core's stdout log, which never logs token contents/secrets
+		// by policy.
 		if masterKey, mkErr := setup.ResolveMasterKey(ctx, d.Pool, d.MasterKeyEnv); mkErr == nil {
 			if err := audit.Log(ctx, d.Pool, masterKey, audit.LogParams{
 				EventType:  audit.EventAuthLogin,
 				ActorID:    claims.Subject,
 				ActorEmail: claims.Email,
-				Details:    fmt.Sprintf(`{"role":%q}`, sessionRole),
+				Details:    fmt.Sprintf(`{"role":%q,"refresh_token_issued":%t}`, sessionRole, refreshToken != ""),
 			}); err != nil {
 				log.Printf("auth: audit login for %s: %v", claims.Subject, err)
 			}

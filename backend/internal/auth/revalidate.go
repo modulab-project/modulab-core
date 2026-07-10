@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/crypto"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
 )
@@ -139,6 +140,20 @@ func RevalidateSession(ctx context.Context, d Deps, token string, provider *Prov
 			// already tolerate a token in that set with no matching session
 			// key), not worth failing this call over.
 			log.Printf("auth: revalidate: unindex revoked session for %s: %v", stored.UserID, remErr)
+		}
+		// Best-effort, same tradeoff every other audit.Log call in this
+		// codebase makes: a failed audit write must not turn an otherwise-
+		// successful revoke into a retryable error - the session is already
+		// gone either way. ActorID is the affected user themselves, not an
+		// admin - there is no human actor for this event, Core noticed it
+		// on its own (see EventSessionRevokedByIdP's doc comment). Details
+		// carries the underlying IdP error, not the refresh token itself.
+		if auditErr := audit.Log(ctx, d.Pool, masterKey, audit.LogParams{
+			EventType: audit.EventSessionRevokedByIdP,
+			ActorID:   stored.UserID,
+			Details:   fmt.Sprintf(`{"reason":%q}`, err.Error()),
+		}); auditErr != nil {
+			log.Printf("auth: revalidate: audit revoke for %s: %v", stored.UserID, auditErr)
 		}
 		return true, nil
 	}
