@@ -53,7 +53,7 @@ export default function AdminUsersPage() {
         setError(null);
       })
       .catch(() => setError(t("admin.users.load_error")));
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (!session) {

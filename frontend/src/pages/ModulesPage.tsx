@@ -1,6 +1,6 @@
 // Installed modules management page (/admin/modules/installed).
 // Admin-only. Lists all installed modules with status, version, and admin actions.
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import {
@@ -30,16 +30,7 @@ export default function ModulesPage() {
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [updatesMsg, setUpdatesMsg] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!session) return;
-    if (!isAdminRole(session.role)) {
-      navigate("/", { replace: true });
-      return;
-    }
-    load();
-  }, [session, navigate]);
-
-  function load() {
+  const load = useCallback(() => {
     const token = getSessionToken();
     if (!token) return;
     setFetching(true);
@@ -50,7 +41,16 @@ export default function ModulesPage() {
       })
       .catch(() => setError(t("modules.load_error")))
       .finally(() => setFetching(false));
-  }
+  }, [t]);
+
+  useEffect(() => {
+    if (!session) return;
+    if (!isAdminRole(session.role)) {
+      navigate("/", { replace: true });
+      return;
+    }
+    load();
+  }, [session, navigate, load]);
 
   async function handleCheckUpdates() {
     const token = getSessionToken();

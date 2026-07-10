@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AppShell } from "../components/AppShell";
 import { useAuthenticatedSession } from "../lib/useSession";
@@ -24,18 +24,18 @@ export default function UserAIKeysPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = () => {
+  const refresh = useCallback(() => {
     const token = getSessionToken();
     if (!token) return;
     listAIProviders(token)
       .then(({ providers }) => { setProviders(providers); setError(null); })
       .catch(() => setError(t("user.ai.load_error")));
-  };
+  }, [t]);
 
   useEffect(() => {
     if (!session) return;
     refresh();
-  }, [session]);
+  }, [session, refresh]);
 
   if (loading || !session) return null;
 

@@ -61,7 +61,7 @@ export default function AdminAIPage() {
     adminListAIProviders(token)
       .then((p) => { setProviders(p); setError(null); })
       .catch(() => setError(t("admin.ai.load_error")));
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (!session) return;
@@ -79,7 +79,7 @@ export default function AdminAIPage() {
         })
         .catch(() => setError(t("admin.ai.settings.load_error")));
     }
-  }, [session, navigate, refresh]);
+  }, [session, navigate, refresh, t]);
 
   if (loading || !session || !isAdminRole(session.role)) return null;
 

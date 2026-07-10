@@ -73,7 +73,7 @@ export default function AdminFeedsPage() {
     }
     load();
     loadSettings();
-  }, [session]);
+  }, [session, navigate]);
 
   function load() {
     const token = getSessionToken();

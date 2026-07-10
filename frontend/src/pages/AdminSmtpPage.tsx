@@ -85,7 +85,7 @@ export default function AdminSmtpPage() {
         }
       })
       .catch(() => setError(t("admin.smtp.load_error")));
-  }, [session, navigate]);
+  }, [session, navigate, t]);
 
   if (loading || !session || session.role !== "super-admin") {
     return null;

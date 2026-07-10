@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { getAuditLog, verifyAuditLog, type AuditEntry, type AuditVerifyResult } from "../lib/api";
@@ -114,7 +114,7 @@ export default function AdminAuditPage() {
   const hasFetched = useRef(false);
 
   // Load the first page whenever filter changes or on initial mount.
-  function loadFirstPage(eventType: string) {
+  const loadFirstPage = useCallback((eventType: string) => {
     const token = getSessionToken();
     if (!token) return;
     cursorRef.current = undefined;
@@ -131,7 +131,7 @@ export default function AdminAuditPage() {
       })
       .catch(() => setError(t("admin.audit.load_error")))
       .finally(() => setFetching(false));
-  }
+  }, [t]);
 
   useEffect(() => {
     if (!session) return;
@@ -142,7 +142,7 @@ export default function AdminAuditPage() {
     if (hasFetched.current) return;
     hasFetched.current = true;
     loadFirstPage("");
-  }, [session, navigate]);
+  }, [session, navigate, loadFirstPage]);
 
   if (loading || !session || session.role !== "super-admin") return null;
 

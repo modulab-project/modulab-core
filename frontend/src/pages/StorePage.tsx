@@ -1,7 +1,7 @@
 // Module Store browse page (/admin/modules/store).
 // Admin-only. Shows all known modules from the registry cache (official + community).
 // Only org-admin/super-admin can access, install, or sync.
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import {
@@ -35,16 +35,7 @@ export default function StorePage() {
   const [busyName, setBusyName] = useState<string | null>(null);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!session) return;
-    if (!isAdminRole(session.role)) {
-      navigate("/", { replace: true });
-      return;
-    }
-    load();
-  }, [session, navigate]);
-
-  function load() {
+  const load = useCallback(() => {
     const token = getSessionToken();
     if (!token) return;
     setFetching(true);
@@ -62,7 +53,16 @@ export default function StorePage() {
       })
       .catch(() => setError(t("store.load_error")))
       .finally(() => setFetching(false));
-  }
+  }, [t]);
+
+  useEffect(() => {
+    if (!session) return;
+    if (!isAdminRole(session.role)) {
+      navigate("/", { replace: true });
+      return;
+    }
+    load();
+  }, [session, navigate, load]);
 
   async function handleSync() {
     const token = getSessionToken();
