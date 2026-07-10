@@ -9,9 +9,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 
+	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/crypto"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
 )
@@ -225,6 +227,20 @@ func OIDCConfigureHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 		if err := pool.SetSetting(ctx, oidcClientSecretSettingKey, encryptedSecret); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+
+		// Best-effort: this write already succeeded and is the source of
+		// truth, so a failed audit write must not turn it into a 500 the
+		// operator has to retry. No ActorID/ActorEmail - this step is gated
+		// by the one-time bootstrap token (X-ModuLab-Bootstrap-Token), not
+		// an admin session, since no user account can exist yet this early
+		// in the wizard. Details carries only issuer_url/client_id, never
+		// the secret itself.
+		if err := audit.Log(ctx, pool, masterKey, audit.LogParams{
+			EventType: audit.EventSetupOIDCConfigured,
+			Details:   fmt.Sprintf(`{"issuer_url":%q,"client_id":%q}`, req.IssuerURL, req.ClientID),
+		}); err != nil {
+			log.Printf("setup: audit oidc configure: %v", err)
 		}
 
 		writeJSON(w, http.StatusOK, OIDCStatusResponse{

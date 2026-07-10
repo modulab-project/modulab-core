@@ -1079,7 +1079,8 @@ func AdminNewsSettingsHandler(d auth.Deps) http.HandlerFunc {
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := auth.RequireAdminSession(d, w, r); !ok {
+		sess, ok := auth.RequireAdminSession(d, w, r)
+		if !ok {
 			return
 		}
 
@@ -1095,6 +1096,11 @@ func AdminNewsSettingsHandler(d auth.Deps) http.HandlerFunc {
 			return
 		}
 
+		// Only the fields actually present in this PATCH, same convention
+		// smtpDiff (cmd/core/main.go) uses for its audit entry - so the log
+		// shows what changed, not the full settings blob on every save.
+		changed := map[string]any{}
+
 		if body.MaxArticles != nil {
 			v := *body.MaxArticles
 			if v < 1 {
@@ -1107,6 +1113,7 @@ func AdminNewsSettingsHandler(d auth.Deps) http.HandlerFunc {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
+			changed["max_articles"] = v
 		}
 		if body.HomeCount != nil {
 			v := *body.HomeCount
@@ -1120,6 +1127,7 @@ func AdminNewsSettingsHandler(d auth.Deps) http.HandlerFunc {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
+			changed["home_count"] = v
 		}
 		if body.ShowImages != nil {
 			val := "true"
@@ -1129,6 +1137,22 @@ func AdminNewsSettingsHandler(d auth.Deps) http.HandlerFunc {
 			if err := d.Pool.SetSetting(r.Context(), "news_show_images", val); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
+			}
+			changed["show_images"] = *body.ShowImages
+		}
+
+		// Best-effort, same tradeoff as every other audit.Log call in this
+		// package: the settings write(s) above already succeeded - a failed
+		// audit write must not turn it into an error. Skipped entirely for
+		// an empty PATCH (no recognized fields present).
+		if len(changed) > 0 {
+			if details, err := json.Marshal(changed); err == nil {
+				logFeedAudit(r.Context(), d, audit.LogParams{
+					EventType:  audit.EventNewsSettings,
+					ActorID:    sess.UserID,
+					ActorEmail: sess.Email,
+					Details:    string(details),
+				})
 			}
 		}
 

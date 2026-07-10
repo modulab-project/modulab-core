@@ -32,8 +32,14 @@ const EVENT_TYPES = [
   "config.ai_provider.deleted",
   "config.ai_provider.key_cleared",
   "config.ai_settings",
+  "config.news_settings",
+  // AI (user-owned key)
+  "ai.user_key_set",
+  "ai.user_key_deleted",
   // Setup
   "setup.completed",
+  "setup.oidc_configured",
+  "setup.group_prefix_configured",
   // Module lifecycle
   "module.installed",
   "module.uninstalled",

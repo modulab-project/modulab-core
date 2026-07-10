@@ -9,10 +9,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
 
+	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
 )
 
@@ -99,7 +101,11 @@ func GroupPrefixStatusHandler(pool *db.Pool) http.HandlerFunc {
 // system (spec section 3.1), which has not landed yet, so it is not
 // enforced here. The bootstrap-token gate (see bootstrap.Manager) is the
 // only access control in front of this endpoint for now.
-func GroupPrefixConfigureHandler(pool *db.Pool) http.HandlerFunc {
+//
+// masterKey is only needed for the audit.Log call below (HMAC-chaining the
+// entry, and encrypting the always-empty ActorEmail field) - the prefix
+// itself is plaintext, not PII (see groupPrefixSettingKey's doc comment).
+func GroupPrefixConfigureHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -125,6 +131,18 @@ func GroupPrefixConfigureHandler(pool *db.Pool) http.HandlerFunc {
 		if err := pool.SetSetting(r.Context(), groupPrefixSettingKey, prefix); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+
+		// Best-effort, same tradeoff as OIDCConfigureHandler's audit call:
+		// the write already succeeded above - a failed audit write must not
+		// turn it into a 500 the operator has to retry. No ActorID/
+		// ActorEmail, same reasoning as OIDCConfigureHandler - bootstrap-
+		// token gated, no admin session exists this early in the wizard.
+		if err := audit.Log(r.Context(), pool, masterKey, audit.LogParams{
+			EventType: audit.EventSetupGroupPrefixConfigured,
+			Details:   fmt.Sprintf(`{"prefix":%q}`, prefix),
+		}); err != nil {
+			log.Printf("setup: audit group-prefix configure: %v", err)
 		}
 
 		writeJSON(w, http.StatusOK, GroupPrefixStatusResponse{

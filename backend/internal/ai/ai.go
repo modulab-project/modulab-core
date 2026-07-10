@@ -871,6 +871,20 @@ func UserSetKeyHandler(deps auth.Deps) http.HandlerFunc {
 			http.Error(w, "database error", http.StatusInternalServerError)
 			return
 		}
+		// Best-effort audit, same treatment as AdminClearKeyHandler's below -
+		// a failed write must not turn a successful key save into an error.
+		// Unlike the admin key handlers, the key value itself never appears
+		// here, encrypted or otherwise - only that provider_id had a key set.
+		if masterKey, err := setup.ResolveMasterKey(r.Context(), deps.Pool, deps.MasterKeyEnv); err == nil {
+			if err := audit.Log(r.Context(), deps.Pool, masterKey, audit.LogParams{
+				EventType:  audit.EventAIUserKeySet,
+				ActorID:    sess.UserID,
+				ActorEmail: sess.Email,
+				Details:    fmt.Sprintf(`{"provider_id":%q}`, providerID),
+			}); err != nil {
+				log.Printf("ai: audit set user key for provider %q: %v", providerID, err)
+			}
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -890,6 +904,18 @@ func UserDeleteKeyHandler(deps auth.Deps) http.HandlerFunc {
 		if err := deps.Pool.DeleteAIUserKey(r.Context(), sess.UserID, providerID); err != nil {
 			http.Error(w, "database error", http.StatusInternalServerError)
 			return
+		}
+		// Best-effort audit - see UserSetKeyHandler above for why this pair
+		// needs the same treatment as their admin-key siblings.
+		if masterKey, err := setup.ResolveMasterKey(r.Context(), deps.Pool, deps.MasterKeyEnv); err == nil {
+			if err := audit.Log(r.Context(), deps.Pool, masterKey, audit.LogParams{
+				EventType:  audit.EventAIUserKeyDeleted,
+				ActorID:    sess.UserID,
+				ActorEmail: sess.Email,
+				Details:    fmt.Sprintf(`{"provider_id":%q}`, providerID),
+			}); err != nil {
+				log.Printf("ai: audit delete user key for provider %q: %v", providerID, err)
+			}
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}

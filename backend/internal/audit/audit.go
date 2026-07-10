@@ -83,6 +83,16 @@ const (
 	// the provider CRUD above, this one had no audit call at all despite
 	// max_body_bytes being a DoS-relevant limit.
 	EventConfigAISettings = "config.ai_settings"
+	// User-owned AI provider key events (internal/ai) - distinct from the
+	// config.ai_provider* family above, which is exclusively admin-driven
+	// (provider CRUD, the shared admin key). These cover a user's own
+	// override key for a provider (PUT /v1/ai/keys/{id}, DELETE
+	// /v1/ai/keys/{id}) - previously unaudited despite being a credential
+	// write, unlike its admin-key sibling (EventConfigAIKeyCleared) right
+	// above. The key value itself is never included in Details, only which
+	// provider_id was touched.
+	EventAIUserKeySet     = "ai.user_key_set"
+	EventAIUserKeyDeleted = "ai.user_key_deleted"
 	// Cross-cutting operational limits (adminapi.AdminLimitsHandler):
 	// upload size caps, rate limits, worker pool size. See that handler's
 	// doc comment for the full list - all DoS/availability-relevant, hence
@@ -90,6 +100,16 @@ const (
 	EventConfigSystemLimits = "config.system_limits"
 	// Setup
 	EventSetupComplete = "setup.completed"
+	// Wizard steps that write config before the wizard itself is marked
+	// complete (POST /v1/setup/oidc/configure, POST
+	// /v1/setup/group-prefix/configure) - gated by the one-time bootstrap
+	// token rather than an admin session (no session/role exists yet this
+	// early), so ActorID/ActorEmail are left empty on these two entries.
+	// Lower-severity than the post-wizard config.oidc update path (single
+	// operator, pre-launch), but previously had no trail at all, unlike
+	// every config write after setup completes.
+	EventSetupOIDCConfigured        = "setup.oidc_configured"
+	EventSetupGroupPrefixConfigured = "setup.group_prefix_configured"
 	// Module lifecycle events (org-admin/super-admin driven, spec section
 	// 4.6-4.9). Installing a module runs arbitrary code (Tier 2/3 modules
 	// spawn a Deno subprocess with DB + scoped network access) - previously
@@ -105,6 +125,12 @@ const (
 	EventFeedCreated = "feed.created"
 	EventFeedUpdated = "feed.updated"
 	EventFeedDeleted = "feed.deleted"
+	// Global news display settings (PATCH /v1/admin/news/settings:
+	// news_max_articles, news_home_count, news_show_images) - same category
+	// of cross-cutting config mutation as EventConfigSystemLimits/
+	// EventConfigAISettings above, both of which are audited; this one was
+	// simply missed when feed CRUD got its audit calls.
+	EventNewsSettings = "config.news_settings"
 	// Quick-link management (org-admin/super-admin), internal/quicklinks.
 	EventQuickLinkCreated = "quicklink.created"
 	EventQuickLinkUpdated = "quicklink.updated"
