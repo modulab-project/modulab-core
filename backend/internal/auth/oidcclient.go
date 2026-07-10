@@ -21,9 +21,15 @@ import (
 
 // Provider bundles what one OIDC login round-trip (redirect + callback)
 // needs against a single, already-resolved provider configuration.
+//
+// oidcProvider (the underlying *oidc.Provider, distinct from this wrapper
+// type) is kept around, not just its Endpoint()/Verifier(), so Revalidate
+// below can call its UserInfo endpoint - go-oidc only exposes that as a
+// method on the provider itself.
 type Provider struct {
 	oauth2Config oauth2.Config
 	verifier     *oidc.IDTokenVerifier
+	oidcProvider *oidc.Provider
 }
 
 // NewProvider performs OIDC discovery against issuerURL (one HTTP request
@@ -51,9 +57,22 @@ func NewProvider(ctx context.Context, issuerURL, clientID, clientSecret, redirec
 			// (-> RolePending), not an error. "profile" is also requested
 			// so Name/Picture below are populated whenever the IdP has
 			// them; "email" additionally brings EmailVerified.
-			Scopes: []string{oidc.ScopeOpenID, "profile", "email", "groups"},
+			// "offline_access" is what makes the token response in
+			// Exchange actually include a refresh_token at all - per the
+			// OIDC/OAuth2 convention most IdPs (Pocket ID, Keycloak,
+			// Authentik, Google, ...) follow, a refresh token is only
+			// issued when this scope is explicitly requested, even for a
+			// confidential client. Needed for RunSessionRevalidateWorker
+			// (revalidate.go) to be able to periodically re-check a
+			// session against the IdP without asking the user to log in
+			// again. An IdP that does not support it simply omits the
+			// refresh_token from the response - handled as "nothing to
+			// revalidate against" (see storedSession.RefreshTokenEnc),
+			// not an error.
+			Scopes: []string{oidc.ScopeOpenID, "profile", "email", "groups", "offline_access"},
 		},
-		verifier: p.Verifier(&oidc.Config{ClientID: clientID}),
+		verifier:     p.Verifier(&oidc.Config{ClientID: clientID}),
+		oidcProvider: p,
 	}, nil
 }
 
@@ -106,28 +125,75 @@ type Claims struct {
 // signature, issuer, audience, and expiry against the IdP's published JWKS
 // (spec section 3.3: "Core validates JWTs statelessly via the IdP's public
 // key") before trusting any claim inside it.
-func (p *Provider) Exchange(ctx context.Context, code, codeVerifier string) (Claims, error) {
+//
+// The second return value is the response's refresh_token, if the IdP
+// issued one (see the "offline_access" scope comment on NewProvider) -
+// empty string if not. CallbackHandler stores it (encrypted) on the new
+// session so RunSessionRevalidateWorker can later re-check this login
+// against the IdP without a fresh interactive login.
+func (p *Provider) Exchange(ctx context.Context, code, codeVerifier string) (Claims, string, error) {
 	token, err := p.oauth2Config.Exchange(ctx, code, oauth2.VerifierOption(codeVerifier))
 	if err != nil {
-		return Claims{}, fmt.Errorf("auth: exchange code: %w", err)
+		return Claims{}, "", fmt.Errorf("auth: exchange code: %w", err)
 	}
 
 	rawIDToken, ok := token.Extra("id_token").(string)
 	if !ok {
-		return Claims{}, fmt.Errorf("auth: token response had no id_token")
+		return Claims{}, "", fmt.Errorf("auth: token response had no id_token")
 	}
 
 	idToken, err := p.verifier.Verify(ctx, rawIDToken)
 	if err != nil {
-		return Claims{}, fmt.Errorf("auth: verify id_token: %w", err)
+		return Claims{}, "", fmt.Errorf("auth: verify id_token: %w", err)
 	}
 
 	var claims Claims
 	if err := idToken.Claims(&claims); err != nil {
-		return Claims{}, fmt.Errorf("auth: decode id_token claims: %w", err)
+		return Claims{}, "", fmt.Errorf("auth: decode id_token claims: %w", err)
 	}
 	if claims.Subject == "" {
-		return Claims{}, fmt.Errorf("auth: id_token has no sub claim")
+		return Claims{}, "", fmt.Errorf("auth: id_token has no sub claim")
 	}
-	return claims, nil
+	return claims, token.RefreshToken, nil
+}
+
+// Revalidate re-checks a previously issued refresh token against the IdP:
+// it exchanges refreshToken for a fresh access token (the refresh grant
+// itself is the actual "is this login still valid" check - a revoked or
+// expired refresh token makes this call fail) and then calls the IdP's
+// UserInfo endpoint to get the account's current claims. Used by
+// RunSessionRevalidateWorker (revalidate.go), not by the interactive login
+// flow.
+//
+// An error here means the refresh token was rejected by the IdP - the
+// caller's job is to treat that as "this session is no longer valid there
+// either" and revoke it locally, not to retry.
+//
+// The returned refreshToken is what should be persisted going forward:
+// some IdPs rotate the refresh token on every use (OAuth2 refresh token
+// rotation, RFC 6819 §5.2.2.3) - if so it differs from the one passed in,
+// and re-using the old one on the next revalidation would then fail even
+// though nothing is actually wrong. If the IdP does not rotate it, this is
+// simply the same value passed in.
+func (p *Provider) Revalidate(ctx context.Context, refreshToken string) (claims Claims, newRefreshToken string, err error) {
+	tokenSource := p.oauth2Config.TokenSource(ctx, &oauth2.Token{RefreshToken: refreshToken})
+	tok, err := tokenSource.Token()
+	if err != nil {
+		return Claims{}, "", fmt.Errorf("auth: refresh access token: %w", err)
+	}
+
+	userInfo, err := p.oidcProvider.UserInfo(ctx, oauth2.StaticTokenSource(tok))
+	if err != nil {
+		return Claims{}, "", fmt.Errorf("auth: fetch userinfo: %w", err)
+	}
+	if err := userInfo.Claims(&claims); err != nil {
+		return Claims{}, "", fmt.Errorf("auth: decode userinfo claims: %w", err)
+	}
+
+	newRefreshToken = tok.RefreshToken
+	if newRefreshToken == "" {
+		// Not rotated by this IdP - keep using the same one next time.
+		newRefreshToken = refreshToken
+	}
+	return claims, newRefreshToken, nil
 }

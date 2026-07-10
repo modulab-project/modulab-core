@@ -60,19 +60,70 @@ import { listQuickLinks, type Tile } from "../lib/quicklinks";
 //   session object on every 15s poll, which would trigger loadNews on every
 //   poll if we used useEffect([session]) directly. We guard with a ref so
 //   news only loads once on initial mount and on explicit user actions.
+// sessionStorage key for the stale-while-revalidate weather cache below -
+// deliberately sessionStorage (not localStorage), matching session.ts's own
+// per-tab lifetime: a cached weather reading should not survive past the
+// tab/session it was fetched in, same as the auth token itself.
+const WEATHER_CACHE_KEY = "modulab_weather_cache";
+
+interface WeatherCache {
+  weather: WeatherResponse;
+  weatherLocation: WeatherLocation | null;
+}
+
+// Reads the last successful weather fetch from sessionStorage, if any, so
+// the widget can render instantly on next paint instead of staying empty
+// for the several seconds a fresh GPS fix + API round-trip takes (see the
+// geolocation effect below). Purely a perceived-latency improvement - a
+// fresh fetch always still runs and overwrites both state and this cache;
+// nothing here is treated as authoritative or shown without also being
+// refreshed. Malformed/absent cache is not an error, just "nothing to show
+// yet".
+function readWeatherCache(): WeatherCache | null {
+  try {
+    const raw = sessionStorage.getItem(WEATHER_CACHE_KEY);
+    return raw ? (JSON.parse(raw) as WeatherCache) : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function Home() {
   const { t } = useTranslation();
   const { session, loading } = useAuthenticatedSession();
   const location = useLocation();
   const navigate = useNavigate();
-  const [weather, setWeather] = useState<WeatherResponse | null>(null);
+  const [weather, setWeather] = useState<WeatherResponse | null>(() => readWeatherCache()?.weather ?? null);
   // Place name for the weather widget, resolved via reverse geocoding from
   // the same coordinates. Kept separate from `weather` itself: a failed/slow
   // geocoding lookup must not hold up or hide the temperature, which is the
   // more important half of the widget. Carries both granularities the API
   // returns (city alone vs. "city, country") - the homepage's one-line
   // caption uses just the city, the detail panel has room for both.
-  const [weatherLocation, setWeatherLocation] = useState<WeatherLocation | null>(null);
+  const [weatherLocation, setWeatherLocation] = useState<WeatherLocation | null>(
+    () => readWeatherCache()?.weatherLocation ?? null,
+  );
+  // Only true while there is neither a fresh nor a cached reading yet to
+  // show - drives the skeleton placeholder in Hero. Once any weather (even
+  // stale, from the cache above) is available, this stays false for the
+  // rest of the page's lifetime; the background refresh below swaps the
+  // content in place without re-showing a skeleton.
+  const [weatherLoading, setWeatherLoading] = useState(() => readWeatherCache() === null);
+  // Mirrors of the two states above, kept in sync via the effect right
+  // below - not for rendering, only so the geolocation effect's writeCache
+  // helper (further down) can read the *latest* value of whichever of
+  // weather/weatherLocation it did not itself just set, instead of the
+  // value from whatever render the effect closure was created in (that
+  // effect only depends on [session], so its own closure over `weather`/
+  // `weatherLocation` would otherwise always see this component's very
+  // first render's values, not the ones set by the other, independently-
+  // resolving fetch).
+  const weatherRef = useRef(weather);
+  const weatherLocationRef = useRef(weatherLocation);
+  useEffect(() => {
+    weatherRef.current = weather;
+    weatherLocationRef.current = weatherLocation;
+  }, [weather, weatherLocation]);
   const [weatherPanelOpen, setWeatherPanelOpen] = useState(false);
   const [feedsPanelOpen, setFeedsPanelOpen] = useState(false);
   const [newsAllOpen, setNewsAllOpen] = useState(false);
@@ -133,22 +184,50 @@ export default function Home() {
     }
     geoRequestedRef.current = true;
     if (!navigator.geolocation) {
+      setWeatherLoading(false);
       return;
     }
     navigator.geolocation.getCurrentPosition(
       ({ coords }) => {
+        // Cache is written from a small helper below rather than inline in
+        // both .then()s, since either the weather or the location call can
+        // resolve first (they're independent/parallel) and either one
+        // succeeding should update the cache with whatever the latest
+        // combined state is.
+        const writeCache = (w: WeatherResponse | null, loc: WeatherLocation | null) => {
+          if (!w) return;
+          try {
+            sessionStorage.setItem(WEATHER_CACHE_KEY, JSON.stringify({ weather: w, weatherLocation: loc }));
+          } catch {
+            // sessionStorage full/unavailable (e.g. private browsing) - not
+            // fatal, just means no instant-paint next time.
+          }
+        };
         getWeather(coords.latitude, coords.longitude)
-          .then(setWeather)
-          .catch(() => {});
+          .then((w) => {
+            setWeather(w);
+            setWeatherLoading(false);
+            writeCache(w, weatherLocationRef.current);
+          })
+          .catch(() => setWeatherLoading(false));
         // Independent request, independent failure mode: if Nominatim is
         // slow/unreachable the temperature above still renders fine, just
         // without a place-name caption.
         getWeatherLocation(coords.latitude, coords.longitude)
-          .then((loc) => setWeatherLocation(loc.city ? loc : null))
+          .then((loc) => {
+            const resolved = loc.city ? loc : null;
+            setWeatherLocation(resolved);
+            writeCache(weatherRef.current, resolved);
+          })
           .catch(() => {});
       },
-      () => {},
-      { timeout: 8000 },
+      () => setWeatherLoading(false),
+      // enableHighAccuracy: false uses Wi-Fi/cell-based positioning instead
+      // of the GPS chip - much faster indoors (where this app is used) and
+      // plenty precise for weather. Timeout dropped from 8s to 5s to match:
+      // a network-based fix that hasn't resolved in 5s is unlikely to
+      // resolve much sooner, so failing fast beats a long hang.
+      { enableHighAccuracy: false, timeout: 5000 },
     );
   }, [session]);
 
@@ -301,6 +380,7 @@ export default function Home() {
           name={firstName(session)}
           weather={weather}
           weatherLocation={weatherLocation}
+          weatherLoading={weatherLoading}
           onWeatherClick={() => setWeatherPanelOpen(true)}
           onSearch={handleSearch}
           initialQuery={searchQuery}
@@ -395,6 +475,7 @@ function Hero({
   name,
   weather,
   weatherLocation,
+  weatherLoading,
   onWeatherClick,
   onSearch,
   initialQuery,
@@ -402,6 +483,7 @@ function Hero({
   name: string;
   weather: WeatherResponse | null;
   weatherLocation: WeatherLocation | null;
+  weatherLoading: boolean;
   onWeatherClick: () => void;
   onSearch: (q: string) => void;
   initialQuery: string;
@@ -471,8 +553,26 @@ function Hero({
         </button>
       )}
 
-      {/* Spacer when weather widget is absent to maintain consistent search position */}
-      {!weather && <div className="mb-6" />}
+      {/* Skeleton placeholder while the GPS fix + weather fetch are still in
+          flight and no cached reading exists yet (see readWeatherCache in
+          Home.tsx). Same footprint as the real pill above so nothing shifts
+          when it's replaced - purely a perceived-latency smoother, the
+          fetch itself isn't any faster because of this. */}
+      {!weather && weatherLoading && (
+        <div
+          className="mt-2 mb-4 flex items-center gap-1.5 rounded-full px-3 py-1 text-[13px]"
+          aria-hidden="true"
+        >
+          <div className="h-[15px] w-[15px] animate-pulse rounded-full bg-gray-200 dark:bg-gray-800" />
+          <div className="h-[13px] w-14 animate-pulse rounded bg-gray-200 dark:bg-gray-800" />
+          <div className="h-[13px] w-20 animate-pulse rounded bg-gray-200 dark:bg-gray-800" />
+        </div>
+      )}
+
+      {/* Spacer when weather widget is absent (and no skeleton is showing
+          either, e.g. geolocation denied/unavailable) to maintain consistent
+          search position. */}
+      {!weather && !weatherLoading && <div className="mb-6" />}
 
       <div className="flex h-11 w-full max-w-[440px] items-center gap-2.5 rounded-full border border-teal-600/35 px-[18px]">
         <i className="ti ti-search text-[16px] text-teal-600 dark:text-teal-400" aria-hidden="true" />

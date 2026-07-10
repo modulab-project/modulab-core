@@ -714,6 +714,15 @@ func main() {
 	// end of main).
 	go mail.RunWorker(ctx, valkeyClient, pool, cfg.MasterKey)
 
+	// Periodically re-checks every active session's stored refresh token
+	// against the configured OIDC provider, revoking sessions the IdP no
+	// longer honors (account disabled/deleted/revoked there) instead of
+	// letting them keep working here for up to SessionTTL (24h) - see
+	// auth/revalidate.go's doc comment. Same unconditional-start pattern as
+	// mail.RunWorker above: a tick before OIDC is configured is a logged
+	// no-op, not fatal.
+	go auth.RunSessionRevalidateWorker(ctx, authDeps)
+
 	// The group prefix has no environment fallback anymore (removed
 	// 2026-06-21 alongside OIDC's) - it may legitimately be unconfigured
 	// here if the operator hasn't run the Setup Wizard's group-prefix step

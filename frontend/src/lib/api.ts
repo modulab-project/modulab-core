@@ -1193,16 +1193,21 @@ export function verifyAuditLog(token: string): Promise<AuditVerifyResult> {
 
 export interface UserPrefs {
   ui_language: string; // "en" | "de" | "" (browser default)
+  theme: string; // "light" | "dark" | "system" | "" (client default, see AppShell.tsx)
 }
 
-// GET /v1/user/preferences — returns the calling user's stored UI language.
+// GET /v1/user/preferences — returns the calling user's stored UI language
+// and theme preferences.
 export function getUserPrefs(token: string): Promise<UserPrefs> {
   return request<UserPrefs>("/v1/user/preferences", {
     headers: bearerHeaders(token),
   });
 }
 
-// PATCH /v1/user/preferences — saves the UI language preference.
+// PATCH /v1/user/preferences — saves a partial set of preferences (e.g. just
+// { theme: "dark" }). Only the keys present in `prefs` are sent, so the
+// backend only touches the fields it received — see UserPrefsHandler's PATCH
+// branch for why that matters (pointer fields, partial-update safe).
 export function updateUserPrefs(token: string, prefs: Partial<UserPrefs>): Promise<void> {
   return request<void>("/v1/user/preferences", {
     method: "PATCH",

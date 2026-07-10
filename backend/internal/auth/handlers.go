@@ -212,7 +212,7 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 			return
 		}
 
-		claims, err := provider.Exchange(ctx, code, codeVerifier)
+		claims, refreshToken, err := provider.Exchange(ctx, code, codeVerifier)
 		if err != nil {
 			redirectToFrontend(w, r, target, url.Values{"error": {"exchange_failed"}})
 			return
@@ -342,7 +342,7 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 			CreatedAt:         time.Now(),
 			IP:                clientIP(r),
 			UserAgent:         r.Header.Get("User-Agent"),
-		})
+		}, refreshToken)
 		if err != nil {
 			redirectToFrontend(w, r, target, url.Values{"error": {"server_error"}})
 			return
@@ -515,16 +515,20 @@ func DeleteSelfHandler(d Deps) http.HandlerFunc {
 // UserPrefsResponse is the body of GET /v1/user/preferences.
 type UserPrefsResponse struct {
 	UILanguage string `json:"ui_language"` // "en", "de", or "" (browser default)
+	Theme      string `json:"theme"`       // "light", "dark", "system", or "" (client default)
 }
 
 // UserPrefsHandler handles GET and PATCH /v1/user/preferences.
 //
-// GET returns the caller's stored UI language preference.
-// PATCH accepts {"ui_language": "en"|"de"|""} and persists it; responds 204.
+// GET returns the caller's stored UI language and theme preferences.
+// PATCH accepts a partial body - any subset of {"ui_language": "en"|"de"|"",
+// "theme": "light"|"dark"|"system"|""} - and persists only the fields
+// present in the request; responds 204.
 //
 // Both methods require a valid non-pending session (validated via Valkey, same
-// pattern as MeHandler). Language is stored as plaintext in users.ui_language -
-// it is not PII and does not need GCM encryption.
+// pattern as MeHandler). Both fields are stored as plaintext (ui_language on
+// users.ui_language, theme on users.theme) - neither is PII and neither
+// needs GCM encryption.
 func UserPrefsHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := bearerToken(r)
@@ -550,20 +554,42 @@ func UserPrefsHandler(d Deps) http.HandlerFunc {
 				http.Error(w, "internal error", http.StatusInternalServerError)
 				return
 			}
-			writeJSON(w, http.StatusOK, UserPrefsResponse{UILanguage: lang})
+			theme, err := d.Pool.GetUserTheme(ctx, sess.UserID)
+			if err != nil {
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			writeJSON(w, http.StatusOK, UserPrefsResponse{UILanguage: lang, Theme: theme})
 
 		case http.MethodPatch:
+			// Pointer fields, not plain strings: the frontend now sends a
+			// partial body (e.g. {"theme": "dark"} alone, from the theme
+			// toggle, without ui_language). A plain string field would
+			// decode a missing "ui_language" key as "" and SetUserLanguage
+			// below would then silently wipe out the stored language on
+			// every theme-only PATCH. nil means "field not present in this
+			// request, leave the stored value alone".
 			var body struct {
-				UILanguage string `json:"ui_language"`
+				UILanguage *string `json:"ui_language"`
+				Theme      *string `json:"theme"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				http.Error(w, "invalid request body", http.StatusBadRequest)
 				return
 			}
-			// Validation is delegated to SetUserLanguage (resets unknown values to "").
-			if err := d.Pool.SetUserLanguage(ctx, sess.UserID, body.UILanguage); err != nil {
-				http.Error(w, "internal error", http.StatusInternalServerError)
-				return
+			// Validation for both is delegated to the Set* methods (they
+			// reset unrecognized values to "").
+			if body.UILanguage != nil {
+				if err := d.Pool.SetUserLanguage(ctx, sess.UserID, *body.UILanguage); err != nil {
+					http.Error(w, "internal error", http.StatusInternalServerError)
+					return
+				}
+			}
+			if body.Theme != nil {
+				if err := d.Pool.SetUserTheme(ctx, sess.UserID, *body.Theme); err != nil {
+					http.Error(w, "internal error", http.StatusInternalServerError)
+					return
+				}
 			}
 			w.WriteHeader(http.StatusNoContent)
 
@@ -670,6 +696,7 @@ func ExportSelfHandler(d Deps) http.HandlerFunc {
 			Role        string `json:"role"`
 			Approved    bool   `json:"approved"`
 			UILanguage  string `json:"ui_language"`
+			Theme       string `json:"theme"`
 			CreatedAt   string `json:"created_at"`
 			LastLoginAt string `json:"last_login_at"`
 		}
@@ -695,6 +722,7 @@ func ExportSelfHandler(d Deps) http.HandlerFunc {
 				Role:        user.Role,
 				Approved:    user.Approved,
 				UILanguage:  user.UILanguage,
+				Theme:       user.Theme,
 				CreatedAt:   user.CreatedAt.UTC().Format(time.RFC3339),
 				LastLoginAt: user.LastLoginAt.UTC().Format(time.RFC3339),
 			},

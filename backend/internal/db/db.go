@@ -147,6 +147,18 @@ func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
 	`); err != nil {
 		return fmt.Errorf("db: ensure users.ui_language: %w", err)
 	}
+	// theme stores the user's light/dark/system preference (AppShell.tsx's
+	// three-way toggle). Previously localStorage-only ("modulab_theme"),
+	// which meant the choice did not follow the user across browsers/
+	// devices, unlike ui_language right above it - moved here to match.
+	// Plaintext for the same reason as ui_language: not PII. Empty string
+	// means "no preference saved yet, use whatever the client already has
+	// (localStorage, falling back to light)".
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE users ADD COLUMN IF NOT EXISTS theme TEXT NOT NULL DEFAULT ''
+	`); err != nil {
+		return fmt.Errorf("db: ensure users.theme: %w", err)
+	}
 
 	if err := p.EnsureNewsSchema(ctx); err != nil {
 		return err
@@ -625,6 +637,35 @@ func (p *Pool) SetUserLanguage(ctx context.Context, userID, lang string) error {
 	return nil
 }
 
+// GetUserTheme returns the stored theme preference for userID ("light",
+// "dark", "system"), or "" when no preference has been saved yet - callers
+// treat "" as "keep whatever the client already has locally".
+func (p *Pool) GetUserTheme(ctx context.Context, userID string) (string, error) {
+	var theme string
+	err := p.QueryRow(ctx, `SELECT theme FROM users WHERE id = $1`, userID).Scan(&theme)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", nil
+		}
+		return "", fmt.Errorf("db: get theme for %q: %w", userID, err)
+	}
+	return theme, nil
+}
+
+// SetUserTheme persists the theme preference for userID. Only "light",
+// "dark", and "system" are accepted (matching AppShell.tsx's Theme type);
+// any other value is stored as "" (reset to default).
+func (p *Pool) SetUserTheme(ctx context.Context, userID, theme string) error {
+	if theme != "light" && theme != "dark" && theme != "system" {
+		theme = ""
+	}
+	_, err := p.Exec(ctx, `UPDATE users SET theme = $1 WHERE id = $2`, theme, userID)
+	if err != nil {
+		return fmt.Errorf("db: set theme for %q: %w", userID, err)
+	}
+	return nil
+}
+
 // UserExportRow collects all personal data stored for one user — used by the
 // DSGVO data-export endpoint (GET /v1/auth/me/export). All encrypted fields
 // are returned as plaintext (already decrypted by this method).
@@ -636,6 +677,7 @@ type UserExportRow struct {
 	Approved    bool
 	Locked      bool
 	UILanguage  string
+	Theme       string
 	CreatedAt   time.Time
 	LastLoginAt time.Time
 }
@@ -644,10 +686,10 @@ type UserExportRow struct {
 func (p *Pool) GetUserExportRow(ctx context.Context, userID string) (UserExportRow, bool, error) {
 	var u UserExportRow
 	err := p.QueryRow(ctx, `
-		SELECT id, email, name, role, approved, locked, ui_language, created_at, last_login_at
+		SELECT id, email, name, role, approved, locked, ui_language, theme, created_at, last_login_at
 		FROM users WHERE id = $1
 	`, userID).Scan(&u.Subject, &u.Email, &u.Name, &u.Role, &u.Approved, &u.Locked,
-		&u.UILanguage, &u.CreatedAt, &u.LastLoginAt)
+		&u.UILanguage, &u.Theme, &u.CreatedAt, &u.LastLoginAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return UserExportRow{}, false, nil

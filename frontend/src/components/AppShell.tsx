@@ -151,9 +151,14 @@ export function AppShell({
     refreshModuleUpdateCount();
   }, [refreshModuleUpdateCount]);
 
-  // Load the stored UI language on first render for this user and apply it
-  // so the preference survives across browsers and devices. Best-effort: a
-  // failed fetch leaves the existing browser/localStorage language in place.
+  // Load the stored UI language and theme on first render for this user and
+  // apply them so both preferences survive across browsers and devices.
+  // Best-effort: a failed fetch leaves the existing browser/localStorage
+  // values in place. Theme was localStorage-only before this - an empty
+  // `prefs.theme` (nothing saved to the DB yet for this user) intentionally
+  // keeps whatever readStoredTheme() already initialized state to, rather
+  // than resetting to "light", so an existing local choice isn't clobbered
+  // the first time this user hits an updated Core instance.
   useEffect(() => {
     const token = getSessionToken();
     if (!token) return;
@@ -161,6 +166,9 @@ export function AppShell({
       .then((prefs) => {
         if (prefs.ui_language && !i18n.language.startsWith(prefs.ui_language)) {
           i18n.changeLanguage(prefs.ui_language);
+        }
+        if (prefs.theme === "light" || prefs.theme === "dark" || prefs.theme === "system") {
+          setTheme(prefs.theme);
         }
       })
       .catch(() => {});
@@ -767,7 +775,17 @@ function ProfilePanelContent({
               type="button"
               aria-label={opt.label}
               aria-pressed={theme === opt.value}
-              onClick={() => setTheme(opt.value)}
+              onClick={() => {
+                setTheme(opt.value);
+                // Persist to DB so the preference survives across devices,
+                // same pattern as the language <select> below. Best-effort:
+                // a failed save leaves the in-browser change (and its
+                // localStorage mirror, written by the effect above) intact.
+                const token = getSessionToken();
+                if (token) {
+                  updateUserPrefs(token, { theme: opt.value }).catch(() => {});
+                }
+              }}
               className={`flex h-6 w-8 items-center justify-center rounded-full transition-colors ${
                 theme === opt.value
                   ? "bg-white text-teal-600 shadow-sm dark:bg-gray-700 dark:text-teal-400"

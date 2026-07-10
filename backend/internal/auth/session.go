@@ -122,6 +122,15 @@ type Session struct {
 // feedback_encrypt_at_implementation_time policy applies. CreatedAt stays
 // plaintext: it's a timestamp, explicitly exempt by that same policy (like
 // EmailVerified/Role/Locked below).
+// RefreshTokenEnc holds the OIDC refresh token issued alongside this
+// session (empty if the IdP did not grant one - see NewProvider's
+// "offline_access" scope comment), GCM-encrypted like every other secret/
+// PII field here. Deliberately NOT mirrored onto the public Session struct
+// above: MeResponse (handlers.go) embeds Session directly into GET
+// /v1/auth/me's JSON response, so anything added to Session is sent to the
+// browser - a refresh token must never leave Valkey. It is only ever read
+// back by RevalidateSession (revalidate.go), which works against
+// storedSession directly for exactly this reason.
 type storedSession struct {
 	UserID               string    `json:"user_id"`
 	EmailEnc             string    `json:"email_enc"`
@@ -134,6 +143,7 @@ type storedSession struct {
 	CreatedAt            time.Time `json:"created_at"`
 	IPEnc                string    `json:"ip_enc,omitempty"`
 	UserAgentEnc         string    `json:"user_agent_enc,omitempty"`
+	RefreshTokenEnc      string    `json:"refresh_token_enc,omitempty"`
 }
 
 // encryptSession converts a plaintext Session into its encrypted-at-rest
@@ -228,7 +238,12 @@ func decryptSession(masterKey string, s storedSession) (Session, error) {
 // currently the only caller, but making this the one place that can't
 // forget it means a future second login path (e.g. a password-based flow)
 // gets a correct "logged in since" for free too.
-func CreateSession(ctx context.Context, d Deps, sess Session) (string, error) {
+//
+// refreshToken is the OIDC refresh token from the same token response as
+// sess's claims (Provider.Exchange's second return value), or "" if the
+// IdP did not issue one. Stored encrypted, never decrypted back into the
+// public Session struct - see storedSession.RefreshTokenEnc's doc comment.
+func CreateSession(ctx context.Context, d Deps, sess Session, refreshToken string) (string, error) {
 	if sess.CreatedAt.IsZero() {
 		sess.CreatedAt = time.Now()
 	}
@@ -244,6 +259,13 @@ func CreateSession(ctx context.Context, d Deps, sess Session) (string, error) {
 	stored, err := encryptSession(masterKey, sess)
 	if err != nil {
 		return "", fmt.Errorf("auth: encrypt session: %w", err)
+	}
+	if refreshToken != "" {
+		refreshTokenEnc, err := crypto.EncryptIfNotEmpty(masterKey, refreshToken)
+		if err != nil {
+			return "", fmt.Errorf("auth: encrypt refresh token: %w", err)
+		}
+		stored.RefreshTokenEnc = refreshTokenEnc
 	}
 
 	data, err := json.Marshal(stored)
