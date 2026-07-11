@@ -608,7 +608,7 @@ function SlidePanel({
             type="button"
             aria-label={t("shell.close")}
             onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-900"
+            className="flex h-8 w-8 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-900"
           >
             <i className="ti ti-x" />
           </button>
@@ -1333,9 +1333,9 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
             type="button"
             aria-label={t("shell.close_chat")}
             onClick={onClose}
-            className="flex h-7 w-7 items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-800"
+            className="flex h-7 w-7 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
           >
-            <i className="ti ti-x text-[14px] text-gray-500" />
+            <i className="ti ti-x text-[14px]" />
           </button>
         </div>
       </div>

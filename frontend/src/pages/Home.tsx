@@ -534,7 +534,7 @@ function Hero({
 
   return (
     <div className="flex flex-col items-center py-9 sm:py-14">
-      <p className="m-0 text-[clamp(38px,12vw,64px)] font-semibold leading-none tracking-tight">
+      <p className="m-0 text-[32px] font-semibold leading-none tracking-tight sm:text-[clamp(38px,12vw,64px)]">
         {hours}
         <span className="text-teal-600 dark:text-teal-400">:</span>
         {minutes}
@@ -925,7 +925,7 @@ function WeatherPanel({
             type="button"
             aria-label={t("shell.close")}
             onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-900"
+            className="flex h-8 w-8 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-900"
           >
             <i className="ti ti-x" aria-hidden="true" />
           </button>
@@ -1243,7 +1243,7 @@ function NewsAllPanel({
             type="button"
             aria-label={t("shell.close")}
             onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-900"
+            className="flex h-8 w-8 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-900"
           >
             <i className="ti ti-x" aria-hidden="true" />
           </button>
@@ -1451,7 +1451,7 @@ function FeedsPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
             type="button"
             aria-label={t("shell.close")}
             onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-900"
+            className="flex h-8 w-8 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-900"
           >
             <i className="ti ti-x" />
           </button>
