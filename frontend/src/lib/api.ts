@@ -1226,7 +1226,10 @@ export interface StoreEntry {
   release_asset: string;
   category: string;
   latest_version: string;
-  description?: string;
+  // Map of language code → short blurb, e.g. {"en": "...", "de": "..."} -
+  // same shape as an installed module's manifest.display_name. Resolve with
+  // an en-fallback lookup for the user's UI language (see StorePage.tsx).
+  description?: Record<string, string>;
   manifest?: Record<string, unknown>;
   synced_at: string;
 }

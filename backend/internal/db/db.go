@@ -1955,7 +1955,7 @@ func (p *Pool) EnsureModuleStoreSchema(ctx context.Context) error {
 		    cosign_sig_url  TEXT,
 		    category        TEXT        NOT NULL,
 		    latest_version  TEXT,
-		    description     TEXT,
+		    description     JSONB,
 		    manifest_cache  JSONB,
 		    synced_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)
@@ -1979,10 +1979,32 @@ func (p *Pool) EnsureModuleStoreSchema(ctx context.Context) error {
 	// pattern as cosign_sig_url above. Sourced from each module's own
 	// manifest.yaml (official via registry.json, community via a direct
 	// manifest.yaml fetch - see github.go), shown on the Module Store cards.
+	// JSONB (not TEXT) because store.Entry.Description is a map of language
+	// code → blurb, same shape as manifest.yaml's display_name, so the
+	// frontend can resolve the user's UI language with an en-fallback lookup.
 	if _, err := p.Exec(ctx, `
-		ALTER TABLE module_registry ADD COLUMN IF NOT EXISTS description TEXT
+		ALTER TABLE module_registry ADD COLUMN IF NOT EXISTS description JSONB
 	`); err != nil {
 		return fmt.Errorf("db: ensure module_registry.description: %w", err)
+	}
+
+	// The column briefly shipped as plain TEXT (single English string) before
+	// switching to the JSONB language-map shape above. Convert any
+	// already-created TEXT column in place so upgrades from that short-lived
+	// version don't fail with a type-mismatch on every subsequent sync.
+	// No-op (WHERE finds nothing) once already JSONB, so safe to run every boot.
+	if _, err := p.Exec(ctx, `
+		DO $$
+		BEGIN
+		    IF EXISTS (
+		        SELECT 1 FROM information_schema.columns
+		        WHERE table_name = 'module_registry' AND column_name = 'description' AND data_type = 'text'
+		    ) THEN
+		        ALTER TABLE module_registry ALTER COLUMN description TYPE JSONB USING NULL;
+		    END IF;
+		END $$;
+	`); err != nil {
+		return fmt.Errorf("db: convert module_registry.description to jsonb: %w", err)
 	}
 
 	// store.ListEntries (internal/store/registry.go) filters

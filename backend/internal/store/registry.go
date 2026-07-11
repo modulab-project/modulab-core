@@ -37,14 +37,18 @@ type Entry struct {
 	CosignSigURL  string          `json:"cosign_sig_url,omitempty"`
 	Category      string          `json:"category"`
 	LatestVersion string          `json:"latest_version,omitempty"`
-	// Description is the module's short blurb, taken from its own
-	// manifest.yaml. Official modules carry it in registry.json (copied
-	// there at release time by build-module.sh); community modules have it
-	// read directly since Core already fetches their manifest.yaml during
-	// sync (see FetchCommunityRegistry in github.go).
-	Description   string          `json:"description,omitempty"`
-	ManifestCache json.RawMessage `json:"manifest,omitempty"`
-	SyncedAt      time.Time       `json:"synced_at"`
+	// Description is a map of language code → short blurb, taken from the
+	// module's own manifest.yaml (same shape as manifest.yaml's display_name -
+	// see Manifest.Description in installer.go). Official modules carry it in
+	// registry.json (copied there at release time by build-module.sh);
+	// community modules have it read directly since Core already fetches
+	// their manifest.yaml during sync (see FetchCommunityRegistry in
+	// github.go). The frontend resolves the right language with an
+	// en-fallback lookup, mirroring how display_name is already resolved for
+	// installed modules (AppShell.tsx).
+	Description   map[string]string `json:"description,omitempty"`
+	ManifestCache json.RawMessage   `json:"manifest,omitempty"`
+	SyncedAt      time.Time         `json:"synced_at"`
 }
 
 // UpsertEntry inserts or fully replaces a registry entry. Called by the sync
@@ -53,6 +57,14 @@ func UpsertEntry(ctx context.Context, pool *db.Pool, e Entry) error {
 	manifest := []byte("{}")
 	if len(e.ManifestCache) > 0 {
 		manifest = e.ManifestCache
+	}
+	description := []byte("{}")
+	if len(e.Description) > 0 {
+		b, err := json.Marshal(e.Description)
+		if err != nil {
+			return fmt.Errorf("store: marshal description for %q: %w", e.Name, err)
+		}
+		description = b
 	}
 	_, err := pool.Exec(ctx, `
 		INSERT INTO module_registry
@@ -69,7 +81,7 @@ func UpsertEntry(ctx context.Context, pool *db.Pool, e Entry) error {
 		    manifest_cache = EXCLUDED.manifest_cache,
 		    synced_at      = now()
 	`, e.Name, e.Source, e.SourceRepo, e.ReleaseAsset, nullableString(e.CosignSigURL), e.Category,
-		nullableString(e.LatestVersion), nullableString(e.Description), manifest)
+		nullableString(e.LatestVersion), description, manifest)
 	if err != nil {
 		return fmt.Errorf("store: upsert entry %q: %w", e.Name, err)
 	}
@@ -82,7 +94,7 @@ func UpsertEntry(ctx context.Context, pool *db.Pool, e Entry) error {
 func ListEntries(ctx context.Context, pool *db.Pool, source, category string) ([]Entry, error) {
 	query := `
 		SELECT name, source, source_repo, release_asset, COALESCE(cosign_sig_url, ''), category,
-		       COALESCE(latest_version, ''), COALESCE(description, ''), manifest_cache, synced_at
+		       COALESCE(latest_version, ''), description, manifest_cache, synced_at
 		FROM module_registry
 		WHERE ($1 = '' OR source = $1)
 		  AND ($2 = '' OR category = $2)
@@ -97,12 +109,17 @@ func ListEntries(ctx context.Context, pool *db.Pool, source, category string) ([
 	var out []Entry
 	for rows.Next() {
 		var e Entry
-		var manifest []byte
+		var manifest, description []byte
 		if err := rows.Scan(&e.Name, &e.Source, &e.SourceRepo, &e.ReleaseAsset, &e.CosignSigURL,
-			&e.Category, &e.LatestVersion, &e.Description, &manifest, &e.SyncedAt); err != nil {
+			&e.Category, &e.LatestVersion, &description, &manifest, &e.SyncedAt); err != nil {
 			return nil, fmt.Errorf("store: scan entry: %w", err)
 		}
 		e.ManifestCache = json.RawMessage(manifest)
+		if len(description) > 0 {
+			if err := json.Unmarshal(description, &e.Description); err != nil {
+				return nil, fmt.Errorf("store: unmarshal description for %q: %w", e.Name, err)
+			}
+		}
 		out = append(out, e)
 	}
 	return out, rows.Err()
@@ -112,14 +129,14 @@ func ListEntries(ctx context.Context, pool *db.Pool, source, category string) ([
 // Returns (Entry{}, false, nil) when the name is not found.
 func GetEntry(ctx context.Context, pool *db.Pool, name string) (Entry, bool, error) {
 	var e Entry
-	var manifest []byte
+	var manifest, description []byte
 	err := pool.QueryRow(ctx, `
 		SELECT name, source, source_repo, release_asset, COALESCE(cosign_sig_url, ''), category,
-		       COALESCE(latest_version, ''), COALESCE(description, ''), manifest_cache, synced_at
+		       COALESCE(latest_version, ''), description, manifest_cache, synced_at
 		FROM module_registry
 		WHERE name = $1
 	`, name).Scan(&e.Name, &e.Source, &e.SourceRepo, &e.ReleaseAsset, &e.CosignSigURL,
-		&e.Category, &e.LatestVersion, &e.Description, &manifest, &e.SyncedAt)
+		&e.Category, &e.LatestVersion, &description, &manifest, &e.SyncedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Entry{}, false, nil
@@ -127,6 +144,11 @@ func GetEntry(ctx context.Context, pool *db.Pool, name string) (Entry, bool, err
 		return Entry{}, false, fmt.Errorf("store: get entry %q: %w", name, err)
 	}
 	e.ManifestCache = json.RawMessage(manifest)
+	if len(description) > 0 {
+		if err := json.Unmarshal(description, &e.Description); err != nil {
+			return Entry{}, false, fmt.Errorf("store: unmarshal description for %q: %w", name, err)
+		}
+	}
 	return e, true, nil
 }
 

@@ -30,7 +30,7 @@ interface StoreData {
 }
 
 export default function StorePage() {
-  const { t } = useTranslation();
+  const { t, i18n: i18nInstance } = useTranslation();
   const { session, loading } = useAuthenticatedSession();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -196,7 +196,8 @@ export default function StorePage() {
             const inst = installed.get(entry.name);
             const isInstalled = !!inst;
             const isBusy = busyName === entry.name;
-            const description = entry.description ?? "";
+            const lng = i18nInstance.language?.slice(0, 2) ?? "en";
+            const description = entry.description?.[lng] ?? entry.description?.["en"] ?? "";
 
             return (
               <div

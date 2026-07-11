@@ -43,12 +43,16 @@ type Deps struct {
 type Manifest struct {
 	Name        string `yaml:"name"         json:"name"`
 	Version     string `yaml:"version"      json:"version"`
-	Tier        int    `yaml:"tier"         json:"tier"`
-	Scope       string `yaml:"scope"        json:"scope"`
-	Description string `yaml:"description"  json:"description"`
-	Author      string `yaml:"author"       json:"author,omitempty"`
-	License     string `yaml:"license"      json:"license,omitempty"`
-	MinCore     string `yaml:"min_core"     json:"min_core,omitempty"`
+	Tier    int    `yaml:"tier"         json:"tier"`
+	Scope   string `yaml:"scope"        json:"scope"`
+	// Description is a map of language code → short blurb, e.g.
+	// {"en": "...", "de": "..."} - same shape as DisplayName below, so the
+	// frontend resolves it with the identical lng-with-"en"-fallback lookup
+	// (see AppShell.tsx's activeModules render and StorePage.tsx).
+	Description map[string]string `yaml:"description"  json:"description,omitempty"`
+	Author      string            `yaml:"author"       json:"author,omitempty"`
+	License     string            `yaml:"license"      json:"license,omitempty"`
+	MinCore     string            `yaml:"min_core"     json:"min_core,omitempty"`
 	// DisplayName is an optional map of language code → human-readable name,
 	// e.g. {"en": "Recipes", "de": "Rezepte"}. Used by the AppShell to show
 	// a localized module name instead of the raw module identifier.

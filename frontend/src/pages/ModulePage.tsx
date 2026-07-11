@@ -280,17 +280,19 @@ function ModuleFallback({
 }) {
   const { t } = useTranslation();
   const manifest = mod.manifest as {
-    description?: string;
+    description?: Record<string, string>;
     version?: string;
     author?: string;
   } | null;
+  const lng = i18n.language?.slice(0, 2) ?? "en";
+  const description = manifest?.description?.[lng] ?? manifest?.description?.["en"];
 
   return (
     <div>
       <div className="mb-6">
         <h1 className="text-xl font-semibold capitalize">{mod.name}</h1>
-        {manifest?.description && (
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{manifest.description}</p>
+        {description && (
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{description}</p>
         )}
         <div className="mt-2 flex flex-wrap gap-2">
           {manifest?.version && (

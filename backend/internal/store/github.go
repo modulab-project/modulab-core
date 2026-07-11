@@ -49,10 +49,12 @@ type officialEntry struct {
 	SHA256       string `json:"sha256"`
 	CosignSigURL string `json:"cosign_sig_url"`
 	Category     string `json:"category"`
-	// Description is optional - older registry.json entries (released before
-	// build-module.sh started writing this field) simply omit it, so this
-	// must stay the zero value ("") rather than fail to parse.
-	Description string `json:"description"`
+	// Description is a map of language code → short blurb (same shape as
+	// manifest.yaml's display_name, see installer.go's Manifest.Description).
+	// Optional - older registry.json entries (released before build-module.sh
+	// started writing this field) simply omit it, so this must stay nil
+	// rather than fail to parse.
+	Description map[string]string `json:"description"`
 }
 
 // communityRepoItem is one entry returned by the GitHub Contents API for the
@@ -70,11 +72,11 @@ type communityRepoItem struct {
 // (where manifest.yaml lives within the module's own repo - not used for
 // sync itself, only by human reviewers), and release_url.
 type communityManifest struct {
-	Version     string `yaml:"version"`
-	Category    string `yaml:"category"`
-	SourceRepo  string `yaml:"source_repo"`
-	ReleaseURL  string `yaml:"release_url"`
-	Description string `yaml:"description"`
+	Version     string            `yaml:"version"`
+	Category    string            `yaml:"category"`
+	SourceRepo  string            `yaml:"source_repo"`
+	ReleaseURL  string            `yaml:"release_url"`
+	Description map[string]string `yaml:"description"`
 }
 
 // githubRelease is the subset of fields the GitHub Releases API returns that
