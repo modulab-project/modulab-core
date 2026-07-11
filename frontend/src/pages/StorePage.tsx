@@ -196,8 +196,7 @@ export default function StorePage() {
             const inst = installed.get(entry.name);
             const isInstalled = !!inst;
             const isBusy = busyName === entry.name;
-            const description =
-              (entry.manifest as { description?: string } | undefined)?.description ?? "";
+            const description = entry.description ?? "";
 
             return (
               <div

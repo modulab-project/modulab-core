@@ -1226,6 +1226,7 @@ export interface StoreEntry {
   release_asset: string;
   category: string;
   latest_version: string;
+  description?: string;
   manifest?: Record<string, unknown>;
   synced_at: string;
 }

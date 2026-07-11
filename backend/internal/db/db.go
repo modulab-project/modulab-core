@@ -1955,6 +1955,7 @@ func (p *Pool) EnsureModuleStoreSchema(ctx context.Context) error {
 		    cosign_sig_url  TEXT,
 		    category        TEXT        NOT NULL,
 		    latest_version  TEXT,
+		    description     TEXT,
 		    manifest_cache  JSONB,
 		    synced_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)
@@ -1972,6 +1973,16 @@ func (p *Pool) EnsureModuleStoreSchema(ctx context.Context) error {
 		ALTER TABLE module_registry ADD COLUMN IF NOT EXISTS cosign_sig_url TEXT
 	`); err != nil {
 		return fmt.Errorf("db: ensure module_registry.cosign_sig_url: %w", err)
+	}
+
+	// description: added after the table's initial release, same backfill
+	// pattern as cosign_sig_url above. Sourced from each module's own
+	// manifest.yaml (official via registry.json, community via a direct
+	// manifest.yaml fetch - see github.go), shown on the Module Store cards.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE module_registry ADD COLUMN IF NOT EXISTS description TEXT
+	`); err != nil {
+		return fmt.Errorf("db: ensure module_registry.description: %w", err)
 	}
 
 	// store.ListEntries (internal/store/registry.go) filters

@@ -37,6 +37,12 @@ type Entry struct {
 	CosignSigURL  string          `json:"cosign_sig_url,omitempty"`
 	Category      string          `json:"category"`
 	LatestVersion string          `json:"latest_version,omitempty"`
+	// Description is the module's short blurb, taken from its own
+	// manifest.yaml. Official modules carry it in registry.json (copied
+	// there at release time by build-module.sh); community modules have it
+	// read directly since Core already fetches their manifest.yaml during
+	// sync (see FetchCommunityRegistry in github.go).
+	Description   string          `json:"description,omitempty"`
 	ManifestCache json.RawMessage `json:"manifest,omitempty"`
 	SyncedAt      time.Time       `json:"synced_at"`
 }
@@ -50,8 +56,8 @@ func UpsertEntry(ctx context.Context, pool *db.Pool, e Entry) error {
 	}
 	_, err := pool.Exec(ctx, `
 		INSERT INTO module_registry
-		    (name, source, source_repo, release_asset, cosign_sig_url, category, latest_version, manifest_cache, synced_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+		    (name, source, source_repo, release_asset, cosign_sig_url, category, latest_version, description, manifest_cache, synced_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
 		ON CONFLICT (name) DO UPDATE SET
 		    source         = EXCLUDED.source,
 		    source_repo    = EXCLUDED.source_repo,
@@ -59,10 +65,11 @@ func UpsertEntry(ctx context.Context, pool *db.Pool, e Entry) error {
 		    cosign_sig_url = EXCLUDED.cosign_sig_url,
 		    category       = EXCLUDED.category,
 		    latest_version = EXCLUDED.latest_version,
+		    description    = EXCLUDED.description,
 		    manifest_cache = EXCLUDED.manifest_cache,
 		    synced_at      = now()
 	`, e.Name, e.Source, e.SourceRepo, e.ReleaseAsset, nullableString(e.CosignSigURL), e.Category,
-		nullableString(e.LatestVersion), manifest)
+		nullableString(e.LatestVersion), nullableString(e.Description), manifest)
 	if err != nil {
 		return fmt.Errorf("store: upsert entry %q: %w", e.Name, err)
 	}
@@ -75,7 +82,7 @@ func UpsertEntry(ctx context.Context, pool *db.Pool, e Entry) error {
 func ListEntries(ctx context.Context, pool *db.Pool, source, category string) ([]Entry, error) {
 	query := `
 		SELECT name, source, source_repo, release_asset, COALESCE(cosign_sig_url, ''), category,
-		       COALESCE(latest_version, ''), manifest_cache, synced_at
+		       COALESCE(latest_version, ''), COALESCE(description, ''), manifest_cache, synced_at
 		FROM module_registry
 		WHERE ($1 = '' OR source = $1)
 		  AND ($2 = '' OR category = $2)
@@ -92,7 +99,7 @@ func ListEntries(ctx context.Context, pool *db.Pool, source, category string) ([
 		var e Entry
 		var manifest []byte
 		if err := rows.Scan(&e.Name, &e.Source, &e.SourceRepo, &e.ReleaseAsset, &e.CosignSigURL,
-			&e.Category, &e.LatestVersion, &manifest, &e.SyncedAt); err != nil {
+			&e.Category, &e.LatestVersion, &e.Description, &manifest, &e.SyncedAt); err != nil {
 			return nil, fmt.Errorf("store: scan entry: %w", err)
 		}
 		e.ManifestCache = json.RawMessage(manifest)
@@ -108,11 +115,11 @@ func GetEntry(ctx context.Context, pool *db.Pool, name string) (Entry, bool, err
 	var manifest []byte
 	err := pool.QueryRow(ctx, `
 		SELECT name, source, source_repo, release_asset, COALESCE(cosign_sig_url, ''), category,
-		       COALESCE(latest_version, ''), manifest_cache, synced_at
+		       COALESCE(latest_version, ''), COALESCE(description, ''), manifest_cache, synced_at
 		FROM module_registry
 		WHERE name = $1
 	`, name).Scan(&e.Name, &e.Source, &e.SourceRepo, &e.ReleaseAsset, &e.CosignSigURL,
-		&e.Category, &e.LatestVersion, &manifest, &e.SyncedAt)
+		&e.Category, &e.LatestVersion, &e.Description, &manifest, &e.SyncedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Entry{}, false, nil
