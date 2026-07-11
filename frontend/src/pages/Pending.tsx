@@ -58,6 +58,12 @@ export default function Pending() {
           navigate("/", { replace: true });
         }
       } catch {
+        // TEMP DIAGNOSTIC (remove once swipe-logout root cause confirmed,
+        // same three cases as useSession.ts's useAuthenticatedSession):
+        // this is case C, token present but rejected.
+        console.warn("[auth-diag] Pending: token present but rejected", {
+          time: new Date().toISOString(),
+        });
         // Expired or otherwise invalid token - fail closed, back to login.
         clearSessionToken();
         navigate("/login", { replace: true });
@@ -69,6 +75,8 @@ export default function Pending() {
   useEffect(() => {
     const token = getSessionToken();
     if (!token) {
+      // TEMP DIAGNOSTIC: case B - token gone from sessionStorage on mount.
+      console.warn("[auth-diag] Pending: no token on mount", { time: new Date().toISOString() });
       navigate("/login", { replace: true });
       return;
     }
@@ -90,6 +98,10 @@ export default function Pending() {
     // up to POLL_INTERVAL_MS for the next tick.
     const onPageShow = (event: PageTransitionEvent) => {
       if (event.persisted) {
+        // TEMP DIAGNOSTIC: case A - bfcache restore caught here.
+        console.warn("[auth-diag] Pending: pageshow persisted=true, re-checking", {
+          time: new Date().toISOString(),
+        });
         poll(token);
       }
     };

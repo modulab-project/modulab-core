@@ -42,6 +42,14 @@ export function useAuthenticatedSession(): { session: Session | null; loading: b
   useEffect(() => {
     const token = getSessionToken();
     if (!token) {
+      // TEMP DIAGNOSTIC (remove once the swipe-logout root cause is
+      // confirmed): distinguishes "sessionStorage was empty on this mount"
+      // (case B - token actually gone, e.g. iOS killed the tab process)
+      // from the pageshow/401 cases logged further down.
+      console.warn("[auth-diag] no token on mount - redirecting to login/setup", {
+        wasPersisted: (window.performance?.getEntriesByType?.("navigation")[0] as PerformanceNavigationTiming | undefined)?.type,
+        time: new Date().toISOString(),
+      });
       // Before sending the user to /login, check whether setup has ever been
       // completed. If not, /login is useless (OIDC isn't configured yet) -
       // send them to /setup instead so the wizard can run.
@@ -104,6 +112,14 @@ export function useAuthenticatedSession(): { session: Session | null; loading: b
           //   - Still on initial load: schedule one quick retry after 2 s so
           //     a brief backend restart on page load doesn't leave a blank screen.
           if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+            // TEMP DIAGNOSTIC: case C - token was present in sessionStorage
+            // but the backend actively rejected it (really expired/revoked
+            // server-side, not a storage/bfcache artifact).
+            console.warn("[auth-diag] token present but rejected", {
+              status: err.status,
+              isRetry,
+              time: new Date().toISOString(),
+            });
             clearSessionToken();
             navigate("/login", { replace: true });
             return;
@@ -136,6 +152,12 @@ export function useAuthenticatedSession(): { session: Session | null; loading: b
     // parameter rather than closing over the outer `token` directly.
     function handlePageShow(currentToken: string, event: PageTransitionEvent) {
       if (event.persisted && !cancelled) {
+        // TEMP DIAGNOSTIC: case A - bfcache restore actually fired and got
+        // caught by this listener; the resulting check() above will log
+        // its own case B/C outcome if the revalidation itself fails.
+        console.warn("[auth-diag] pageshow persisted=true, re-checking session", {
+          time: new Date().toISOString(),
+        });
         check(currentToken);
       }
     }

@@ -413,6 +413,16 @@ func MeHandler(d Deps) http.HandlerFunc {
 			return
 		}
 		if !ok {
+			// TEMP DIAGNOSTIC (remove once the iOS Safari swipe-logout root
+			// cause is confirmed - see frontend/src/lib/useSession.ts's
+			// matching "[auth-diag]" logs): only the token's first 8 chars
+			// are logged, never the full bearer token, so this can't be
+			// replayed from the log itself.
+			tokenPrefix := token
+			if len(tokenPrefix) > 8 {
+				tokenPrefix = tokenPrefix[:8]
+			}
+			log.Printf("auth-diag: /v1/auth/me rejected token=%s... remote=%s ua=%q", tokenPrefix, r.RemoteAddr, r.UserAgent())
 			http.Error(w, "invalid or expired session", http.StatusUnauthorized)
 			return
 		}
