@@ -785,6 +785,9 @@
       "official": "Officieel",
       "community": "Community"
     },
+    "search_placeholder": "Modules zoeken…",
+    "category_all": "Alle categorieën",
+    "no_results": "Geen modules gevonden.",
     "install_error": "Installatie mislukt"
   },
   "modules": {

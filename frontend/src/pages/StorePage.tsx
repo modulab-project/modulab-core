@@ -16,6 +16,7 @@ import {
 import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
+import { Logo } from "../components/AuthShell";
 import { isAdminRole } from "../lib/roles";
 import { safeHref } from "../lib/url";
 
@@ -36,6 +37,8 @@ export default function StorePage() {
   const queryClient = useQueryClient();
 
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [search, setSearch] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [busyName, setBusyName] = useState<string | null>(null);
@@ -114,9 +117,23 @@ export default function StorePage() {
 
   if (loading || !session || !isAdmin) return null;
 
-  const visible = sourceFilter === "all"
-    ? entries
-    : entries.filter((e) => e.source === sourceFilter);
+  const lng = i18nInstance.language?.slice(0, 2) ?? "en";
+
+  // Categories present in the current data, alphabetical - so the filter
+  // never offers a category with zero matching entries.
+  const categories = Array.from(new Set(entries.map((e) => e.category).filter(Boolean))).sort();
+
+  const searchNeedle = search.trim().toLowerCase();
+  const visible = entries.filter((e) => {
+    if (sourceFilter !== "all" && e.source !== sourceFilter) return false;
+    if (categoryFilter !== "all" && e.category !== categoryFilter) return false;
+    if (searchNeedle) {
+      const description = e.description?.[lng] ?? e.description?.["en"] ?? "";
+      const haystack = `${e.name} ${description}`.toLowerCase();
+      if (!haystack.includes(searchNeedle)) return false;
+    }
+    return true;
+  });
 
   return (
     <AppShell session={session}>
@@ -162,8 +179,21 @@ export default function StorePage() {
           </div>
         )}
 
+        {/* Search */}
+        <div className="relative mb-3">
+          <i className="ti ti-search absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-gray-400" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t("store.search_placeholder")}
+            className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-900"
+            style={{ fontSize: 16 }}
+          />
+        </div>
+
         {/* Source filter tabs */}
-        <div className="mb-5 flex gap-1 rounded-xl bg-gray-100 p-1 dark:bg-gray-900">
+        <div className="mb-3 flex gap-1 rounded-xl bg-gray-100 p-1 dark:bg-gray-900">
           {(["all", "official", "community"] as SourceFilter[]).map((f) => (
             <button
               key={f}
@@ -180,6 +210,38 @@ export default function StorePage() {
           ))}
         </div>
 
+        {/* Category filter chips - only shown once there's more than one
+            category in the data, otherwise it'd just be a single "All" chip */}
+        {categories.length > 1 && (
+          <div className="mb-5 flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => setCategoryFilter("all")}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                categoryFilter === "all"
+                  ? "bg-teal-600 text-white"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+              }`}
+            >
+              {t("store.category_all")}
+            </button>
+            {categories.map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => setCategoryFilter(c)}
+                className={`rounded-full px-3 py-1 text-xs font-medium capitalize transition-colors ${
+                  categoryFilter === c
+                    ? "bg-teal-600 text-white"
+                    : "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                }`}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Content */}
         {error && (
           <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
@@ -187,88 +249,90 @@ export default function StorePage() {
         {fetching && !error && (
           <p className="text-sm text-gray-400 dark:text-gray-500">{t("common.loading")}</p>
         )}
-        {!fetching && !error && visible.length === 0 && (
+        {!fetching && !error && entries.length > 0 && visible.length === 0 && (
+          <p className="text-sm text-gray-400 dark:text-gray-500">{t("store.no_results")}</p>
+        )}
+        {!fetching && !error && entries.length === 0 && (
           <p className="text-sm text-gray-400 dark:text-gray-500">{t("store.empty")}</p>
         )}
 
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="flex flex-col gap-3">
           {visible.map((entry) => {
             const inst = installed.get(entry.name);
             const isInstalled = !!inst;
             const isBusy = busyName === entry.name;
-            const lng = i18nInstance.language?.slice(0, 2) ?? "en";
             const description = entry.description?.[lng] ?? entry.description?.["en"] ?? "";
 
             return (
               <div
                 key={entry.name}
-                className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900"
+                className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900 sm:flex-row sm:items-start"
               >
-                {/* Top row */}
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
+                <ModuleLogo url={entry.logo_url} name={entry.name} />
+
+                <div className="min-w-0 flex-1">
+                  {/* Top row */}
+                  <div className="flex flex-wrap items-center gap-2">
                     <h2 className="text-sm font-semibold leading-snug">{entry.name}</h2>
                     {entry.latest_version && (
                       <span className="text-xs text-gray-400 dark:text-gray-500">
                         v{entry.latest_version}
                       </span>
                     )}
-                  </div>
-                  <div className="flex flex-none items-center gap-1.5">
                     <SourceBadge source={entry.source} />
                     {entry.category && <CategoryBadge category={entry.category} />}
                   </div>
-                </div>
 
-                {/* Description */}
-                {description && (
-                  <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2">
-                    {description}
-                  </p>
-                )}
+                  {/* Description - full text, no truncation */}
+                  {description && (
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      {description}
+                    </p>
+                  )}
 
-                {/* Bottom row */}
-                <div className="mt-auto flex items-center justify-between gap-2">
-                  <a
-                    href={safeHref(entry.source_repo)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-                  >
-                    <i className="ti ti-brand-github text-[13px]" />
-                    {t("store.source")}
-                  </a>
-
-                  {isInstalled ? (
-                    <span className="flex items-center gap-1 rounded-full bg-teal-50 px-2.5 py-1 text-xs font-medium text-teal-700 dark:bg-teal-950 dark:text-teal-300">
-                      <i className="ti ti-check text-[12px]" />
-                      {t("store.installed")}
-                      {inst?.available_version && (
-                        <span className="ml-1 rounded-full bg-amber-100 px-1.5 text-amber-700 dark:bg-amber-900 dark:text-amber-300">
-                          {t("store.update_available")}
-                        </span>
-                      )}
-                    </span>
-                  ) : isAdmin ? (
-                    <button
-                      type="button"
-                      onClick={() => handleInstall(entry.name)}
-                      disabled={isBusy}
-                      className="flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-700 disabled:opacity-50"
+                  {/* Bottom row */}
+                  <div className="mt-3 flex items-center justify-between gap-2">
+                    <a
+                      href={safeHref(entry.source_repo)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
                     >
-                      {isBusy ? (
-                        <>
-                          <i className="ti ti-loader-2 animate-spin text-[13px]" />
-                          {t("store.installing")}
-                        </>
-                      ) : (
-                        <>
-                          <i className="ti ti-download text-[13px]" />
-                          {t("store.install")}
-                        </>
-                      )}
-                    </button>
-                  ) : null}
+                      <i className="ti ti-brand-github text-[13px]" />
+                      {t("store.source")}
+                    </a>
+
+                    {isInstalled ? (
+                      <span className="flex items-center gap-1 rounded-full bg-teal-50 px-2.5 py-1 text-xs font-medium text-teal-700 dark:bg-teal-950 dark:text-teal-300">
+                        <i className="ti ti-check text-[12px]" />
+                        {t("store.installed")}
+                        {inst?.available_version && (
+                          <span className="ml-1 rounded-full bg-amber-100 px-1.5 text-amber-700 dark:bg-amber-900 dark:text-amber-300">
+                            {t("store.update_available")}
+                          </span>
+                        )}
+                      </span>
+                    ) : isAdmin ? (
+                      <button
+                        type="button"
+                        onClick={() => handleInstall(entry.name)}
+                        disabled={isBusy}
+                        className="flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-700 disabled:opacity-50"
+                      >
+                        {isBusy ? (
+                          <>
+                            <i className="ti ti-loader-2 animate-spin text-[13px]" />
+                            {t("store.installing")}
+                          </>
+                        ) : (
+                          <>
+                            <i className="ti ti-download text-[13px]" />
+                            {t("store.install")}
+                          </>
+                        )}
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
               </div>
             );
@@ -276,6 +340,29 @@ export default function StorePage() {
         </div>
       </div>
     </AppShell>
+  );
+}
+
+// Shows the module's own logo image when it has one; falls back to the
+// ModuLab mark on missing logo_url OR a failed image load (404, unreachable
+// host, etc.) via onError - so a broken/removed logo never breaks the layout
+// or leaves a blank box.
+function ModuleLogo({ url, name }: { url?: string; name: string }) {
+  const [failed, setFailed] = useState(false);
+  if (!url || failed) {
+    return (
+      <div className="flex h-10 w-10 flex-none items-center justify-center rounded-xl bg-gray-100 dark:bg-gray-800">
+        <Logo className="h-6 w-6" />
+      </div>
+    );
+  }
+  return (
+    <img
+      src={url}
+      alt={name}
+      onError={() => setFailed(true)}
+      className="h-10 w-10 flex-none rounded-xl border border-gray-200 object-cover dark:border-gray-800"
+    />
   );
 }
 

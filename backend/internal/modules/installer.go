@@ -57,6 +57,12 @@ type Manifest struct {
 	// e.g. {"en": "Recipes", "de": "Rezepte"}. Used by the AppShell to show
 	// a localized module name instead of the raw module identifier.
 	DisplayName map[string]string `yaml:"display_name" json:"display_name,omitempty"`
+	// Logo is the filename of an optional logo image shipped at the module's
+	// own repo root (e.g. "logo.png"). The Module Store resolves it to an
+	// absolute raw.githubusercontent.com URL (see store.Entry.LogoURL /
+	// github.go) rather than Core hosting the image itself - same
+	// no-own-asset-hosting principle as release_url/cosign_sig_url.
+	Logo string `yaml:"logo" json:"logo,omitempty"`
 	// Handler is the Deno entrypoint (relative path inside the ZIP), required
 	// for Tier 2 and 3 modules.
 	Handler string `yaml:"handler"          json:"handler,omitempty"`

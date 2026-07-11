@@ -785,6 +785,9 @@
       "official": "Offiziell",
       "community": "Community"
     },
+    "search_placeholder": "Module durchsuchen…",
+    "category_all": "Alle Kategorien",
+    "no_results": "Keine Module gefunden.",
     "install_error": "Installation fehlgeschlagen"
   },
   "modules": {

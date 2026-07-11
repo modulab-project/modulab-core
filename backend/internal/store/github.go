@@ -30,6 +30,11 @@ const (
 	// manifest.yaml directly from the main branch, given the directory name.
 	communityManifestRawURLFmt = "https://raw.githubusercontent.com/modulab-project/modulab-community/main/%s/manifest.yaml"
 
+	// communityFileRawURLFmt builds a raw URL for an arbitrary file inside a
+	// module directory, given the directory name and the file's relative
+	// path (e.g. manifest.yaml's own "logo" field). %[1]s = directory, %[2]s = path.
+	communityFileRawURLFmt = "https://raw.githubusercontent.com/modulab-project/modulab-community/main/%[1]s/%[2]s"
+
 	githubAPITimeout = 15 * time.Second
 )
 
@@ -55,6 +60,12 @@ type officialEntry struct {
 	// started writing this field) simply omit it, so this must stay nil
 	// rather than fail to parse.
 	Description map[string]string `json:"description"`
+	// LogoURL is a full, already-absolute URL - build-module.sh computes it
+	// at release time from manifest.yaml's "logo" field (a filename), since
+	// Core never fetches an official module's manifest.yaml directly. Empty
+	// when the module ships no logo; the frontend falls back to the ModuLab
+	// mark in that case.
+	LogoURL string `json:"logo_url"`
 }
 
 // communityRepoItem is one entry returned by the GitHub Contents API for the
@@ -77,6 +88,10 @@ type communityManifest struct {
 	SourceRepo  string            `yaml:"source_repo"`
 	ReleaseURL  string            `yaml:"release_url"`
 	Description map[string]string `yaml:"description"`
+	// Logo is a filename relative to the module's directory in
+	// modulab-community (e.g. "logo.png"), resolved to an absolute raw URL
+	// below via communityFileRawURLFmt.
+	Logo string `yaml:"logo"`
 }
 
 // githubRelease is the subset of fields the GitHub Releases API returns that
@@ -122,6 +137,7 @@ func FetchOfficialRegistry(ctx context.Context) ([]Entry, error) {
 			Category:      r.Category,
 			LatestVersion: r.Version,
 			Description:   r.Description,
+			LogoURL:       r.LogoURL,
 		})
 	}
 	return out, nil
@@ -168,6 +184,10 @@ func FetchCommunityRegistry(ctx context.Context) ([]Entry, error) {
 			log.Printf("store: community: %q missing source_repo or release_url, skipping", item.Name)
 			continue // malformed entry
 		}
+		logoURL := ""
+		if m.Logo != "" {
+			logoURL = fmt.Sprintf(communityFileRawURLFmt, item.Name, m.Logo)
+		}
 		out = append(out, Entry{
 			// The directory name is already the short module name (README:
 			// "named after the module's name field with the modulab-mod-
@@ -180,6 +200,7 @@ func FetchCommunityRegistry(ctx context.Context) ([]Entry, error) {
 			Category:      m.Category,
 			LatestVersion: m.Version,
 			Description:   m.Description,
+			LogoURL:       logoURL,
 		})
 	}
 	return out, nil

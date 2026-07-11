@@ -46,9 +46,15 @@ type Entry struct {
 	// github.go). The frontend resolves the right language with an
 	// en-fallback lookup, mirroring how display_name is already resolved for
 	// installed modules (AppShell.tsx).
-	Description   map[string]string `json:"description,omitempty"`
-	ManifestCache json.RawMessage   `json:"manifest,omitempty"`
-	SyncedAt      time.Time         `json:"synced_at"`
+	Description map[string]string `json:"description,omitempty"`
+	// LogoURL is an absolute URL to the module's logo image, or empty when
+	// the module ships none - the frontend falls back to the ModuLab mark
+	// in that case. Built by build-module.sh for official modules (written
+	// straight into registry.json) and by FetchCommunityRegistry for
+	// community modules (github.go).
+	LogoURL       string          `json:"logo_url,omitempty"`
+	ManifestCache json.RawMessage `json:"manifest,omitempty"`
+	SyncedAt      time.Time       `json:"synced_at"`
 }
 
 // UpsertEntry inserts or fully replaces a registry entry. Called by the sync
@@ -68,8 +74,8 @@ func UpsertEntry(ctx context.Context, pool *db.Pool, e Entry) error {
 	}
 	_, err := pool.Exec(ctx, `
 		INSERT INTO module_registry
-		    (name, source, source_repo, release_asset, cosign_sig_url, category, latest_version, description, manifest_cache, synced_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+		    (name, source, source_repo, release_asset, cosign_sig_url, category, latest_version, description, logo_url, manifest_cache, synced_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
 		ON CONFLICT (name) DO UPDATE SET
 		    source         = EXCLUDED.source,
 		    source_repo    = EXCLUDED.source_repo,
@@ -78,10 +84,11 @@ func UpsertEntry(ctx context.Context, pool *db.Pool, e Entry) error {
 		    category       = EXCLUDED.category,
 		    latest_version = EXCLUDED.latest_version,
 		    description    = EXCLUDED.description,
+		    logo_url       = EXCLUDED.logo_url,
 		    manifest_cache = EXCLUDED.manifest_cache,
 		    synced_at      = now()
 	`, e.Name, e.Source, e.SourceRepo, e.ReleaseAsset, nullableString(e.CosignSigURL), e.Category,
-		nullableString(e.LatestVersion), description, manifest)
+		nullableString(e.LatestVersion), description, nullableString(e.LogoURL), manifest)
 	if err != nil {
 		return fmt.Errorf("store: upsert entry %q: %w", e.Name, err)
 	}
@@ -94,7 +101,7 @@ func UpsertEntry(ctx context.Context, pool *db.Pool, e Entry) error {
 func ListEntries(ctx context.Context, pool *db.Pool, source, category string) ([]Entry, error) {
 	query := `
 		SELECT name, source, source_repo, release_asset, COALESCE(cosign_sig_url, ''), category,
-		       COALESCE(latest_version, ''), description, manifest_cache, synced_at
+		       COALESCE(latest_version, ''), description, COALESCE(logo_url, ''), manifest_cache, synced_at
 		FROM module_registry
 		WHERE ($1 = '' OR source = $1)
 		  AND ($2 = '' OR category = $2)
@@ -111,7 +118,7 @@ func ListEntries(ctx context.Context, pool *db.Pool, source, category string) ([
 		var e Entry
 		var manifest, description []byte
 		if err := rows.Scan(&e.Name, &e.Source, &e.SourceRepo, &e.ReleaseAsset, &e.CosignSigURL,
-			&e.Category, &e.LatestVersion, &description, &manifest, &e.SyncedAt); err != nil {
+			&e.Category, &e.LatestVersion, &description, &e.LogoURL, &manifest, &e.SyncedAt); err != nil {
 			return nil, fmt.Errorf("store: scan entry: %w", err)
 		}
 		e.ManifestCache = json.RawMessage(manifest)
@@ -132,11 +139,11 @@ func GetEntry(ctx context.Context, pool *db.Pool, name string) (Entry, bool, err
 	var manifest, description []byte
 	err := pool.QueryRow(ctx, `
 		SELECT name, source, source_repo, release_asset, COALESCE(cosign_sig_url, ''), category,
-		       COALESCE(latest_version, ''), description, manifest_cache, synced_at
+		       COALESCE(latest_version, ''), description, COALESCE(logo_url, ''), manifest_cache, synced_at
 		FROM module_registry
 		WHERE name = $1
 	`, name).Scan(&e.Name, &e.Source, &e.SourceRepo, &e.ReleaseAsset, &e.CosignSigURL,
-		&e.Category, &e.LatestVersion, &description, &manifest, &e.SyncedAt)
+		&e.Category, &e.LatestVersion, &description, &e.LogoURL, &manifest, &e.SyncedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Entry{}, false, nil

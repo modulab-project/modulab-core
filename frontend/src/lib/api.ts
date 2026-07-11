@@ -1230,6 +1230,10 @@ export interface StoreEntry {
   // same shape as an installed module's manifest.display_name. Resolve with
   // an en-fallback lookup for the user's UI language (see StorePage.tsx).
   description?: Record<string, string>;
+  // Absolute URL to the module's logo image, or empty/absent when the
+  // module ships none - render the ModuLab mark as fallback in that case
+  // (see StorePage.tsx's ModuleLogo).
+  logo_url?: string;
   manifest?: Record<string, unknown>;
   synced_at: string;
 }

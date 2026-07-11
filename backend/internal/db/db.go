@@ -2007,6 +2007,18 @@ func (p *Pool) EnsureModuleStoreSchema(ctx context.Context) error {
 		return fmt.Errorf("db: convert module_registry.description to jsonb: %w", err)
 	}
 
+	// logo_url: added after the table's initial release, same backfill
+	// pattern as cosign_sig_url/description above. Absolute URL to the
+	// module's logo image (build-module.sh computes it for official modules,
+	// FetchCommunityRegistry for community ones - see github.go); empty
+	// means the module ships no logo and the frontend falls back to the
+	// ModuLab mark.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE module_registry ADD COLUMN IF NOT EXISTS logo_url TEXT
+	`); err != nil {
+		return fmt.Errorf("db: ensure module_registry.logo_url: %w", err)
+	}
+
 	// store.ListEntries (internal/store/registry.go) filters
 	// "WHERE ($1 = '' OR source = $1) AND ($2 = '' OR category = $2)" for
 	// the Module Store's source/category filter UI. In practice this table
