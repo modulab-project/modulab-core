@@ -1267,6 +1267,7 @@ export interface InstalledModule {
   cached_zip_path?: string;
   available_version?: string;
   last_update_check?: string;
+  logo_url?: string;
   installed_at: string;
   updated_at: string;
 }

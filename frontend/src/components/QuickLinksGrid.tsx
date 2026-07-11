@@ -6,6 +6,7 @@ import { createUserQuickLink, deleteUserQuickLink, saveOrder } from "../lib/quic
 import { listInstalledModules, type InstalledModule } from "../lib/api";
 import { safeHref } from "../lib/url";
 import { ACTIVE_MODULES_QUERY_KEY } from "../lib/queryKeys";
+import { Logo } from "./AuthShell";
 
 // ---- Drag-and-drop ----------------------------------------------------------
 //
@@ -17,6 +18,18 @@ import { ACTIVE_MODULES_QUERY_KEY } from "../lib/queryKeys";
 
 function tileKey(t: Tile) {
   return `${t.type}:${t.id}`;
+}
+
+// Module tiles are created with url = `/modules/{name}` (see AddTileModal's
+// handleSubmit below) - this is the only link back from a generic Tile to
+// the module it represents, since Tile itself has no module-identity field.
+// Used to look up that module's logo_url so TileIcon can render it instead
+// of the generic favicon/Tabler-icon fallback used for regular URL tiles.
+const MODULE_TILE_URL_RE = /^\/modules\/([^/]+)$/;
+
+function moduleNameFromTileUrl(url: string): string | null {
+  const m = MODULE_TILE_URL_RE.exec(url);
+  return m ? decodeURIComponent(m[1]) : null;
 }
 
 // ---- Helpers ----------------------------------------------------------------
@@ -262,8 +275,40 @@ function AddTileModal({
 
 // ---- Single tile card -------------------------------------------------------
 
-function TileIcon({ tile }: { tile: Tile }) {
+// Module tiles: use the module's own logo (same fallback pattern as the
+// Module Store's ModuleLogo in StorePage.tsx) if one is set, else the
+// ModuLab mark - never the generic favicon/Tabler-icon treatment below,
+// which stays exactly as-is for plain URL tiles.
+function ModuleTileIcon({ logoUrl }: { logoUrl?: string }) {
   const [failed, setFailed] = useState(false);
+
+  if (!logoUrl || failed) {
+    return (
+      <span className="flex h-12 w-12 items-center justify-center rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900">
+        <Logo className="h-7 w-7" />
+      </span>
+    );
+  }
+
+  return (
+    <span className="flex h-12 w-12 items-center justify-center rounded-xl border border-gray-200 bg-white p-1.5 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+      <img
+        src={logoUrl}
+        alt=""
+        onError={() => setFailed(true)}
+        className="h-full w-full object-contain"
+      />
+    </span>
+  );
+}
+
+function TileIcon({ tile, moduleLogoUrl }: { tile: Tile; moduleLogoUrl?: string }) {
+  const [failed, setFailed] = useState(false);
+  const isModuleTile = moduleNameFromTileUrl(tile.url) !== null;
+
+  if (isModuleTile) {
+    return <ModuleTileIcon logoUrl={moduleLogoUrl} />;
+  }
 
   let faviconUrl: string | null = null;
   try {
@@ -301,6 +346,7 @@ function TileCard({
   onDragEnd,
   onDrop,
   onDelete,
+  moduleLogoUrl,
 }: {
   tile: Tile;
   dragging: boolean;
@@ -310,6 +356,7 @@ function TileCard({
   onDragEnd: () => void;
   onDrop: () => void;
   onDelete?: () => void;
+  moduleLogoUrl?: string;
 }) {
   const { t } = useTranslation();
   return (
@@ -367,7 +414,7 @@ function TileCard({
         onClick={(e) => e.stopPropagation()}
         className="flex flex-col items-center gap-2 text-inherit no-underline"
       >
-        <TileIcon tile={tile} />
+        <TileIcon tile={tile} moduleLogoUrl={moduleLogoUrl} />
 
         {/* Title */}
         <span className="line-clamp-2 text-sm font-medium text-gray-800 dark:text-gray-100">
@@ -399,6 +446,21 @@ export function QuickLinksGrid({
   const [showAdd, setShowAdd] = useState(false);
   const [reorderError, setReorderError] = useState(false);
   const [deleteError, setDeleteError] = useState(false);
+
+  // Installed modules, fetched here (not just inside AddTileModal, which
+  // only loads them on demand while adding a tile) so every module tile
+  // already on the grid can look up its logo_url on first render. Same
+  // queryKey + "active" filter as AddTileModal's own query below, so both
+  // share one cache entry instead of racing two differently-shaped fetches
+  // under the same key.
+  const { data: installedModules = [] } = useQuery({
+    queryKey: [...ACTIVE_MODULES_QUERY_KEY, token],
+    queryFn: async () => {
+      const mods = await listInstalledModules(token);
+      return mods.filter((m) => m.status === "active");
+    },
+  });
+  const moduleLogoByName = new Map(installedModules.map((m) => [m.name, m.logo_url]));
 
   // Sync when the parent delivers fetched tiles after first render. Adjusted
   // during render (React's documented "adjusting state when a prop changes"
@@ -486,19 +548,23 @@ export function QuickLinksGrid({
       )}
       {/* Grid */}
       <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6">
-        {tiles.map((tile, idx) => (
-          <TileCard
-            key={tileKey(tile)}
-            tile={tile}
-            dragging={draggingIdx === idx}
-            dragOver={dragOverIdx === idx && draggingIdx !== idx}
-            onDragStart={() => handleDragStart(idx)}
-            onDragEnter={() => handleDragEnter(idx)}
-            onDragEnd={handleDragEnd}
-            onDrop={() => handleDrop(idx)}
-            onDelete={tile.type === "user" ? () => handleDelete(tile) : undefined}
-          />
-        ))}
+        {tiles.map((tile, idx) => {
+          const moduleName = moduleNameFromTileUrl(tile.url);
+          return (
+            <TileCard
+              key={tileKey(tile)}
+              tile={tile}
+              dragging={draggingIdx === idx}
+              dragOver={dragOverIdx === idx && draggingIdx !== idx}
+              onDragStart={() => handleDragStart(idx)}
+              onDragEnter={() => handleDragEnter(idx)}
+              onDragEnd={handleDragEnd}
+              onDrop={() => handleDrop(idx)}
+              onDelete={tile.type === "user" ? () => handleDelete(tile) : undefined}
+              moduleLogoUrl={moduleName ? moduleLogoByName.get(moduleName) : undefined}
+            />
+          );
+        })}
 
         {/* Add-tile button */}
         <button

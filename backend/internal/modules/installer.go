@@ -336,7 +336,7 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 	// From this point on, any error must attempt to clean up the DB row.
 	if err := d.DB.InsertInstalledModule(ctx,
 		mf.Name, mf.Version, mf.Tier, mf.Scope,
-		entry.Source, zipURL, gotHex, manifestJSON, cosignVerified,
+		entry.Source, zipURL, gotHex, manifestJSON, cosignVerified, entry.LogoURL,
 	); err != nil {
 		return fmt.Errorf("modules: install %q: db insert: %w", entry.Name, err)
 	}

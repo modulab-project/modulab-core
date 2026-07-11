@@ -245,7 +245,7 @@ func Update(ctx context.Context, d Deps, entry store.Entry) error {
 	}
 
 	// ── 10. Update DB row ─────────────────────────────────────────────────
-	if err := d.updateInstalledModuleRecord(ctx, entry.Name, mf.Version, gotHex, zipURL, manifestJSON, cosignVerified); err != nil {
+	if err := d.updateInstalledModuleRecord(ctx, entry.Name, mf.Version, gotHex, zipURL, manifestJSON, cosignVerified, entry.LogoURL); err != nil {
 		return fmt.Errorf("modules: update %q: db update: %w", entry.Name, err)
 	}
 	if _, err := d.DB.UpdateModuleStatus(ctx, entry.Name, db.ModuleStatusActive); err != nil {
@@ -331,13 +331,19 @@ func cacheCurrentZIP(ctx context.Context, releaseURL, path string, maxBytes int6
 }
 
 // updateInstalledModuleRecord patches the version, sha256, release_url,
-// manifest, and cosign_verified columns on the installed_modules row. There
-// is no single DB helper for this combination, so we exec the UPDATE
-// directly. cosignVerified is this update's own Cosign result (added
+// manifest, cosign_verified, and logo_url columns on the installed_modules
+// row. There is no single DB helper for this combination, so we exec the
+// UPDATE directly. cosignVerified is this update's own Cosign result (added
 // 2026-07-05) - overwrites whatever was recorded for the previous version,
 // since a signature check is only ever meaningful for the version it was
-// actually run against.
-func (d Deps) updateInstalledModuleRecord(ctx context.Context, name, version, sha256, releaseURL string, manifest []byte, cosignVerified bool) error {
+// actually run against. logoURL is re-synced from the registry on every
+// update (not just at first install) so a module that gains, changes, or
+// loses a logo after install picks that up on its next update.
+func (d Deps) updateInstalledModuleRecord(ctx context.Context, name, version, sha256, releaseURL string, manifest []byte, cosignVerified bool, logoURL string) error {
+	var logoURLArg any
+	if logoURL != "" {
+		logoURLArg = logoURL
+	}
 	_, err := d.DB.Exec(ctx, `
 		UPDATE installed_modules
 		SET version         = $2,
@@ -345,9 +351,10 @@ func (d Deps) updateInstalledModuleRecord(ctx context.Context, name, version, sh
 		    release_url     = $4,
 		    manifest        = $5,
 		    cosign_verified = $6,
-		    updated_at      = $7
+		    logo_url        = $7,
+		    updated_at      = $8
 		WHERE name = $1
-	`, name, version, sha256, releaseURL, manifest, cosignVerified, time.Now())
+	`, name, version, sha256, releaseURL, manifest, cosignVerified, logoURLArg, time.Now())
 	if err != nil {
 		return fmt.Errorf("db: update installed_module record %q: %w", name, err)
 	}

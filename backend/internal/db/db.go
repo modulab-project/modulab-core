@@ -1942,6 +1942,19 @@ func (p *Pool) EnsureModuleStoreSchema(ctx context.Context) error {
 		return fmt.Errorf("db: ensure installed_modules.cosign_verified: %w", err)
 	}
 
+	// logo_url: the module's logo, carried over from module_registry.logo_url
+	// (store.Entry.LogoURL, resolved by build-module.sh for official modules
+	// or from the community manifest's logo field - see github.go) at the
+	// moment of install/update. Previously the Store's resolved logo URL was
+	// discarded once a module was actually installed, so the Home page's
+	// module tiles had no way to show it and always fell back to the ModuLab
+	// mark. NULL means no logo was set for that module.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE installed_modules ADD COLUMN IF NOT EXISTS logo_url TEXT
+	`); err != nil {
+		return fmt.Errorf("db: ensure installed_modules.logo_url: %w", err)
+	}
+
 	// ── module_registry ───────────────────────────────────────────────────────
 
 	// Local cache of official registry.json + modulab-community index.
@@ -2083,6 +2096,7 @@ type InstalledModuleRow struct {
 	CachedZipPath    *string         `json:"cached_zip_path,omitempty"`
 	AvailableVersion *string         `json:"available_version,omitempty"`
 	LastUpdateCheck  *time.Time      `json:"last_update_check,omitempty"`
+	LogoURL          *string         `json:"logo_url,omitempty"`
 	InstalledAt      time.Time       `json:"installed_at"`
 	UpdatedAt        time.Time       `json:"updated_at"`
 }
@@ -2093,12 +2107,19 @@ type InstalledModuleRow struct {
 // cosignVerified is the result of installer.go's Cosign check for this
 // specific install (added 2026-07-05 - previously computed and logged but
 // discarded, never persisted anywhere an admin could see it).
-func (p *Pool) InsertInstalledModule(ctx context.Context, name, version string, tier int, scope, source, releaseURL, sha256 string, manifest []byte, cosignVerified bool) error {
+// logoURL is carried over from the store.Entry the module was installed
+// from (empty string if the module has no logo) - see the logo_url column
+// comment in EnsureCoreSchema for why this is persisted at all.
+func (p *Pool) InsertInstalledModule(ctx context.Context, name, version string, tier int, scope, source, releaseURL, sha256 string, manifest []byte, cosignVerified bool, logoURL string) error {
+	var logoURLArg any
+	if logoURL != "" {
+		logoURLArg = logoURL
+	}
 	_, err := p.Exec(ctx, `
 		INSERT INTO installed_modules
-		    (name, version, tier, scope, source, release_url, sha256, manifest, status, cosign_verified, installed_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'installing', $9, now(), now())
-	`, name, version, tier, scope, source, releaseURL, sha256, manifest, cosignVerified)
+		    (name, version, tier, scope, source, release_url, sha256, manifest, status, cosign_verified, logo_url, installed_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'installing', $9, $10, now(), now())
+	`, name, version, tier, scope, source, releaseURL, sha256, manifest, cosignVerified, logoURLArg)
 	if err != nil {
 		return fmt.Errorf("db: insert installed_module %q: %w", name, err)
 	}
@@ -2123,12 +2144,12 @@ func (p *Pool) GetInstalledModule(ctx context.Context, name string) (InstalledMo
 	err := p.QueryRow(ctx, `
 		SELECT name, version, tier, scope, source, release_url, sha256, manifest,
 		       status, pinned, cosign_verified, cached_zip_path, available_version, last_update_check,
-		       installed_at, updated_at
+		       logo_url, installed_at, updated_at
 		FROM installed_modules WHERE name = $1
 	`, name).Scan(
 		&r.Name, &r.Version, &r.Tier, &r.Scope, &r.Source, &r.ReleaseURL, &r.SHA256, &r.Manifest,
 		&r.Status, &r.Pinned, &r.CosignVerified, &r.CachedZipPath, &r.AvailableVersion, &r.LastUpdateCheck,
-		&r.InstalledAt, &r.UpdatedAt,
+		&r.LogoURL, &r.InstalledAt, &r.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -2144,7 +2165,7 @@ func (p *Pool) ListInstalledModules(ctx context.Context) ([]InstalledModuleRow, 
 	rows, err := p.Query(ctx, `
 		SELECT name, version, tier, scope, source, release_url, sha256, manifest,
 		       status, pinned, cosign_verified, cached_zip_path, available_version, last_update_check,
-		       installed_at, updated_at
+		       logo_url, installed_at, updated_at
 		FROM installed_modules ORDER BY name ASC
 	`)
 	if err != nil {
@@ -2158,6 +2179,7 @@ func (p *Pool) ListInstalledModules(ctx context.Context) ([]InstalledModuleRow, 
 		if err := rows.Scan(
 			&r.Name, &r.Version, &r.Tier, &r.Scope, &r.Source, &r.ReleaseURL, &r.SHA256, &r.Manifest,
 			&r.Status, &r.Pinned, &r.CosignVerified, &r.CachedZipPath, &r.AvailableVersion, &r.LastUpdateCheck,
+			&r.LogoURL,
 			&r.InstalledAt, &r.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("db: scan installed_module: %w", err)
