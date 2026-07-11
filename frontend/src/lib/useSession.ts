@@ -121,10 +121,32 @@ export function useAuthenticatedSession(): { session: Session | null; loading: b
 
     check(token);
     const id = window.setInterval(() => check(token), POLL_INTERVAL_MS);
+
+    // iOS Safari's edge-swipe back/forward gesture restores the previous
+    // page from the bfcache (back-forward cache) instead of re-mounting the
+    // React tree - this effect does NOT re-run on that kind of restore, so
+    // without this listener a frozen tab could sit on stale session state
+    // for up to POLL_INTERVAL_MS after the swipe before the next interval
+    // tick notices a meanwhile-revoked/expired session (or, on the flip
+    // side, a meanwhile-approved one). `pageshow`'s `persisted` flag is true
+    // exactly for this bfcache-restore case (never on a fresh load, where
+    // the `check(token)` call above already covers it), so re-checking here
+    // closes that gap immediately instead of waiting on the poll.
+    // Same narrowing limitation as `check` above: takes the token as a
+    // parameter rather than closing over the outer `token` directly.
+    function handlePageShow(currentToken: string, event: PageTransitionEvent) {
+      if (event.persisted && !cancelled) {
+        check(currentToken);
+      }
+    }
+    const onPageShow = (event: PageTransitionEvent) => handlePageShow(token, event);
+    window.addEventListener("pageshow", onPageShow);
+
     return () => {
       cancelled = true;
       window.clearInterval(id);
       if (retryTimer !== null) clearTimeout(retryTimer);
+      window.removeEventListener("pageshow", onPageShow);
     };
   }, [navigate, initialLoadDone]);
 

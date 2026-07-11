@@ -82,9 +82,23 @@ export default function Pending() {
 
     poll(token);
     const id = window.setInterval(() => poll(token), POLL_INTERVAL_MS);
+
+    // Same bfcache-restore gap useSession.ts's useAuthenticatedSession
+    // closes (see its comment) - iOS Safari's swipe back/forward gesture
+    // can restore this page from bfcache without re-running this effect,
+    // so re-check immediately on that kind of restore instead of waiting
+    // up to POLL_INTERVAL_MS for the next tick.
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        poll(token);
+      }
+    };
+    window.addEventListener("pageshow", onPageShow);
+
     return () => {
       cancelled = true;
       window.clearInterval(id);
+      window.removeEventListener("pageshow", onPageShow);
     };
   }, [navigate, check]);
 
