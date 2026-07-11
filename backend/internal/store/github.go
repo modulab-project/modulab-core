@@ -60,12 +60,23 @@ type officialEntry struct {
 	// started writing this field) simply omit it, so this must stay nil
 	// rather than fail to parse.
 	Description map[string]string `json:"description"`
+	// DisplayName is a map of language code → human-readable module name
+	// (same shape/source as manifest.yaml's own display_name field - see
+	// installer.go's Manifest.DisplayName). Falls back to Name in the
+	// frontend when absent.
+	DisplayName map[string]string `json:"display_name"`
 	// LogoURL is a full, already-absolute URL - build-module.sh computes it
 	// at release time from manifest.yaml's "logo" field (a filename), since
 	// Core never fetches an official module's manifest.yaml directly. Empty
 	// when the module ships no logo; the frontend falls back to the ModuLab
 	// mark in that case.
 	LogoURL string `json:"logo_url"`
+	// BrowseURL points at the module's own subdirectory in the modulab-modules
+	// monorepo (e.g. ".../tree/main/my-place"), computed by build-module.sh
+	// from the actual release directory name. Needed because Name and the
+	// on-disk directory can differ (e.g. entry name "my-places" vs directory
+	// "my-place") - SourceRepo alone would only link to the repo root.
+	BrowseURL string `json:"browse_url"`
 }
 
 // communityRepoItem is one entry returned by the GitHub Contents API for the
@@ -88,6 +99,7 @@ type communityManifest struct {
 	SourceRepo  string            `yaml:"source_repo"`
 	ReleaseURL  string            `yaml:"release_url"`
 	Description map[string]string `yaml:"description"`
+	DisplayName map[string]string `yaml:"display_name"`
 	// Logo is a filename relative to the module's directory in
 	// modulab-community (e.g. "logo.png"), resolved to an absolute raw URL
 	// below via communityFileRawURLFmt.
@@ -137,7 +149,9 @@ func FetchOfficialRegistry(ctx context.Context) ([]Entry, error) {
 			Category:      r.Category,
 			LatestVersion: r.Version,
 			Description:   r.Description,
+			DisplayName:   r.DisplayName,
 			LogoURL:       r.LogoURL,
+			BrowseURL:     r.BrowseURL,
 		})
 	}
 	return out, nil
@@ -200,7 +214,11 @@ func FetchCommunityRegistry(ctx context.Context) ([]Entry, error) {
 			Category:      m.Category,
 			LatestVersion: m.Version,
 			Description:   m.Description,
+			DisplayName:   m.DisplayName,
 			LogoURL:       logoURL,
+			// No BrowseURL: community modules live at the root of their own
+			// dedicated repo (SourceRepo), not a monorepo subdirectory, so
+			// SourceRepo itself is already the correct "view on GitHub" link.
 		})
 	}
 	return out, nil

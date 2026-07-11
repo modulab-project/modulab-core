@@ -47,12 +47,22 @@ type Entry struct {
 	// en-fallback lookup, mirroring how display_name is already resolved for
 	// installed modules (AppShell.tsx).
 	Description map[string]string `json:"description,omitempty"`
+	// DisplayName is a map of language code → human-readable module name,
+	// same shape/purpose as Description - falls back to Name in the
+	// frontend when absent (see StorePage.tsx).
+	DisplayName map[string]string `json:"display_name,omitempty"`
 	// LogoURL is an absolute URL to the module's logo image, or empty when
 	// the module ships none - the frontend falls back to the ModuLab mark
 	// in that case. Built by build-module.sh for official modules (written
 	// straight into registry.json) and by FetchCommunityRegistry for
 	// community modules (github.go).
-	LogoURL       string          `json:"logo_url,omitempty"`
+	LogoURL string `json:"logo_url,omitempty"`
+	// BrowseURL is the "view on GitHub" link. For official modules this
+	// points at the module's own subdirectory in the monorepo (SourceRepo
+	// alone would only link to the repo root); for community modules it's
+	// empty and the frontend falls back to SourceRepo, which already points
+	// at the module's own dedicated repo.
+	BrowseURL     string          `json:"browse_url,omitempty"`
 	ManifestCache json.RawMessage `json:"manifest,omitempty"`
 	SyncedAt      time.Time       `json:"synced_at"`
 }
@@ -72,10 +82,18 @@ func UpsertEntry(ctx context.Context, pool *db.Pool, e Entry) error {
 		}
 		description = b
 	}
+	displayName := []byte("{}")
+	if len(e.DisplayName) > 0 {
+		b, err := json.Marshal(e.DisplayName)
+		if err != nil {
+			return fmt.Errorf("store: marshal display_name for %q: %w", e.Name, err)
+		}
+		displayName = b
+	}
 	_, err := pool.Exec(ctx, `
 		INSERT INTO module_registry
-		    (name, source, source_repo, release_asset, cosign_sig_url, category, latest_version, description, logo_url, manifest_cache, synced_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
+		    (name, source, source_repo, release_asset, cosign_sig_url, category, latest_version, description, display_name, logo_url, browse_url, manifest_cache, synced_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now())
 		ON CONFLICT (name) DO UPDATE SET
 		    source         = EXCLUDED.source,
 		    source_repo    = EXCLUDED.source_repo,
@@ -84,11 +102,14 @@ func UpsertEntry(ctx context.Context, pool *db.Pool, e Entry) error {
 		    category       = EXCLUDED.category,
 		    latest_version = EXCLUDED.latest_version,
 		    description    = EXCLUDED.description,
+		    display_name   = EXCLUDED.display_name,
 		    logo_url       = EXCLUDED.logo_url,
+		    browse_url     = EXCLUDED.browse_url,
 		    manifest_cache = EXCLUDED.manifest_cache,
 		    synced_at      = now()
 	`, e.Name, e.Source, e.SourceRepo, e.ReleaseAsset, nullableString(e.CosignSigURL), e.Category,
-		nullableString(e.LatestVersion), description, nullableString(e.LogoURL), manifest)
+		nullableString(e.LatestVersion), description, displayName, nullableString(e.LogoURL),
+		nullableString(e.BrowseURL), manifest)
 	if err != nil {
 		return fmt.Errorf("store: upsert entry %q: %w", e.Name, err)
 	}
@@ -101,7 +122,8 @@ func UpsertEntry(ctx context.Context, pool *db.Pool, e Entry) error {
 func ListEntries(ctx context.Context, pool *db.Pool, source, category string) ([]Entry, error) {
 	query := `
 		SELECT name, source, source_repo, release_asset, COALESCE(cosign_sig_url, ''), category,
-		       COALESCE(latest_version, ''), description, COALESCE(logo_url, ''), manifest_cache, synced_at
+		       COALESCE(latest_version, ''), description, display_name, COALESCE(logo_url, ''),
+		       COALESCE(browse_url, ''), manifest_cache, synced_at
 		FROM module_registry
 		WHERE ($1 = '' OR source = $1)
 		  AND ($2 = '' OR category = $2)
@@ -116,15 +138,21 @@ func ListEntries(ctx context.Context, pool *db.Pool, source, category string) ([
 	var out []Entry
 	for rows.Next() {
 		var e Entry
-		var manifest, description []byte
+		var manifest, description, displayName []byte
 		if err := rows.Scan(&e.Name, &e.Source, &e.SourceRepo, &e.ReleaseAsset, &e.CosignSigURL,
-			&e.Category, &e.LatestVersion, &description, &e.LogoURL, &manifest, &e.SyncedAt); err != nil {
+			&e.Category, &e.LatestVersion, &description, &displayName, &e.LogoURL, &e.BrowseURL,
+			&manifest, &e.SyncedAt); err != nil {
 			return nil, fmt.Errorf("store: scan entry: %w", err)
 		}
 		e.ManifestCache = json.RawMessage(manifest)
 		if len(description) > 0 {
 			if err := json.Unmarshal(description, &e.Description); err != nil {
 				return nil, fmt.Errorf("store: unmarshal description for %q: %w", e.Name, err)
+			}
+		}
+		if len(displayName) > 0 {
+			if err := json.Unmarshal(displayName, &e.DisplayName); err != nil {
+				return nil, fmt.Errorf("store: unmarshal display_name for %q: %w", e.Name, err)
 			}
 		}
 		out = append(out, e)
@@ -136,14 +164,16 @@ func ListEntries(ctx context.Context, pool *db.Pool, source, category string) ([
 // Returns (Entry{}, false, nil) when the name is not found.
 func GetEntry(ctx context.Context, pool *db.Pool, name string) (Entry, bool, error) {
 	var e Entry
-	var manifest, description []byte
+	var manifest, description, displayName []byte
 	err := pool.QueryRow(ctx, `
 		SELECT name, source, source_repo, release_asset, COALESCE(cosign_sig_url, ''), category,
-		       COALESCE(latest_version, ''), description, COALESCE(logo_url, ''), manifest_cache, synced_at
+		       COALESCE(latest_version, ''), description, display_name, COALESCE(logo_url, ''),
+		       COALESCE(browse_url, ''), manifest_cache, synced_at
 		FROM module_registry
 		WHERE name = $1
 	`, name).Scan(&e.Name, &e.Source, &e.SourceRepo, &e.ReleaseAsset, &e.CosignSigURL,
-		&e.Category, &e.LatestVersion, &description, &e.LogoURL, &manifest, &e.SyncedAt)
+		&e.Category, &e.LatestVersion, &description, &displayName, &e.LogoURL, &e.BrowseURL,
+		&manifest, &e.SyncedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Entry{}, false, nil
@@ -154,6 +184,11 @@ func GetEntry(ctx context.Context, pool *db.Pool, name string) (Entry, bool, err
 	if len(description) > 0 {
 		if err := json.Unmarshal(description, &e.Description); err != nil {
 			return Entry{}, false, fmt.Errorf("store: unmarshal description for %q: %w", name, err)
+		}
+	}
+	if len(displayName) > 0 {
+		if err := json.Unmarshal(displayName, &e.DisplayName); err != nil {
+			return Entry{}, false, fmt.Errorf("store: unmarshal display_name for %q: %w", name, err)
 		}
 	}
 	return e, true, nil

@@ -2019,6 +2019,27 @@ func (p *Pool) EnsureModuleStoreSchema(ctx context.Context) error {
 		return fmt.Errorf("db: ensure module_registry.logo_url: %w", err)
 	}
 
+	// display_name: added after the table's initial release, same backfill
+	// pattern as the columns above. Map of language code → human-readable
+	// module name, same shape/source as description (manifest.yaml's own
+	// display_name field) - the Module Store shows this instead of the raw
+	// module identifier once present.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE module_registry ADD COLUMN IF NOT EXISTS display_name JSONB
+	`); err != nil {
+		return fmt.Errorf("db: ensure module_registry.display_name: %w", err)
+	}
+
+	// browse_url: added after the table's initial release, same backfill
+	// pattern as the columns above. "View on GitHub" link target - for
+	// official modules this is the module's own subdirectory in the
+	// monorepo (build-module.sh computes it), not just the repo root.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE module_registry ADD COLUMN IF NOT EXISTS browse_url TEXT
+	`); err != nil {
+		return fmt.Errorf("db: ensure module_registry.browse_url: %w", err)
+	}
+
 	// store.ListEntries (internal/store/registry.go) filters
 	// "WHERE ($1 = '' OR source = $1) AND ($2 = '' OR category = $2)" for
 	// the Module Store's source/category filter UI. In practice this table

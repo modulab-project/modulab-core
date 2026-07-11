@@ -787,6 +787,11 @@
     },
     "search_placeholder": "Module durchsuchen…",
     "category_all": "Alle Kategorien",
+    "category": {
+      "lifestyle": "Lifestyle",
+      "productivity": "Produktivität",
+      "network": "Netzwerk"
+    },
     "no_results": "Keine Module gefunden.",
     "install_error": "Installation fehlgeschlagen"
   },

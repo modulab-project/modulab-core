@@ -128,8 +128,9 @@ export default function StorePage() {
     if (sourceFilter !== "all" && e.source !== sourceFilter) return false;
     if (categoryFilter !== "all" && e.category !== categoryFilter) return false;
     if (searchNeedle) {
+      const title = e.display_name?.[lng] ?? e.display_name?.["en"] ?? e.name;
       const description = e.description?.[lng] ?? e.description?.["en"] ?? "";
-      const haystack = `${e.name} ${description}`.toLowerCase();
+      const haystack = `${e.name} ${title} ${description}`.toLowerCase();
       if (!haystack.includes(searchNeedle)) return false;
     }
     return true;
@@ -236,7 +237,7 @@ export default function StorePage() {
                     : "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
                 }`}
               >
-                {c}
+                {t(`store.category.${c}`, { defaultValue: c })}
               </button>
             ))}
           </div>
@@ -261,19 +262,21 @@ export default function StorePage() {
             const inst = installed.get(entry.name);
             const isInstalled = !!inst;
             const isBusy = busyName === entry.name;
+            const title = entry.display_name?.[lng] ?? entry.display_name?.["en"] ?? entry.name;
             const description = entry.description?.[lng] ?? entry.description?.["en"] ?? "";
+            const githubURL = entry.browse_url || entry.source_repo;
 
             return (
               <div
                 key={entry.name}
                 className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900 sm:flex-row sm:items-start"
               >
-                <ModuleLogo url={entry.logo_url} name={entry.name} />
+                <ModuleLogo url={entry.logo_url} name={title} />
 
                 <div className="min-w-0 flex-1">
                   {/* Top row */}
                   <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="text-sm font-semibold leading-snug">{entry.name}</h2>
+                    <h2 className="text-sm font-semibold leading-snug">{title}</h2>
                     {entry.latest_version && (
                       <span className="text-xs text-gray-400 dark:text-gray-500">
                         v{entry.latest_version}
@@ -293,7 +296,7 @@ export default function StorePage() {
                   {/* Bottom row */}
                   <div className="mt-3 flex items-center justify-between gap-2">
                     <a
-                      href={safeHref(entry.source_repo)}
+                      href={safeHref(githubURL)}
                       target="_blank"
                       rel="noreferrer"
                       className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
@@ -382,9 +385,10 @@ function SourceBadge({ source }: { source: string }) {
 }
 
 function CategoryBadge({ category }: { category: string }) {
+  const { t } = useTranslation();
   return (
     <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] text-gray-500 dark:bg-gray-800 dark:text-gray-400">
-      {category}
+      {t(`store.category.${category}`, { defaultValue: category })}
     </span>
   );
 }

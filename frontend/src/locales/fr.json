@@ -787,6 +787,11 @@
     },
     "search_placeholder": "Rechercher des modules…",
     "category_all": "Toutes les catégories",
+    "category": {
+      "lifestyle": "Style de vie",
+      "productivity": "Productivité",
+      "network": "Réseau"
+    },
     "no_results": "Aucun module ne correspond à votre recherche.",
     "install_error": "Échec de l'installation"
   },

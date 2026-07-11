@@ -787,6 +787,11 @@
     },
     "search_placeholder": "Modules zoeken…",
     "category_all": "Alle categorieën",
+    "category": {
+      "lifestyle": "Lifestyle",
+      "productivity": "Productiviteit",
+      "network": "Netwerk"
+    },
     "no_results": "Geen modules gevonden.",
     "install_error": "Installatie mislukt"
   },

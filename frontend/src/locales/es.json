@@ -787,6 +787,11 @@
     },
     "search_placeholder": "Buscar módulos…",
     "category_all": "Todas las categorías",
+    "category": {
+      "lifestyle": "Estilo de vida",
+      "productivity": "Productividad",
+      "network": "Red"
+    },
     "no_results": "Ningún módulo coincide con la búsqueda.",
     "install_error": "Error al instalar"
   },
