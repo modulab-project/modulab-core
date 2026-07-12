@@ -229,7 +229,12 @@ export default function ModulePage() {
 
   return (
     <AppShell session={session}>
-      <div className="mx-auto max-w-5xl py-6 px-2">
+      {/* flex h-full lets a module opt into filling the remaining viewport height
+          (e.g. my-places' map view); overflow-y-auto keeps today's behavior for
+          modules whose content is naturally taller than the available space —
+          this div scrolls internally instead of the whole page, so the AppShell
+          header/footer stay pinned either way. */}
+      <div className="mx-auto flex h-full max-w-5xl flex-col overflow-y-auto py-6 px-2">
         {(fetching || (!loadError && bundleLoading)) && (
           <p className="text-sm text-gray-400 dark:text-gray-500">{t("common.loading")}</p>
         )}

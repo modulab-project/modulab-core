@@ -423,7 +423,7 @@ export function AppShell({
         onToggleChat={() => setChatOpen((v) => !v)}
       />
 
-      <main className="flex-1 overflow-y-auto px-3 sm:px-6">{children}</main>
+      <main className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-6">{children}</main>
 
       <FooterBar isAdmin={isAdmin} health={health} onTogglePanel={togglePanel} />
       <ToastStack toasts={toasts} />
