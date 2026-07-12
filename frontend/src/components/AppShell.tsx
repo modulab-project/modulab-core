@@ -703,16 +703,28 @@ function SlidePanel({
 function IOSInstallInstructions({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center"
-      onClick={onClose}
-    >
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+      {/* A real <button> rather than a div+onClick backdrop - natively
+          keyboard-operable (satisfies jsx-a11y/click-events-have-key-events)
+          without needing a manual onKeyDown handler, and its aria-label
+          doubles as the "close" affordance for anyone tabbing to it. Sits
+          behind the dialog box below via absolute positioning, so a click
+          on the dialog itself lands on the dialog's own elements first
+          instead of needing stopPropagation. */}
+      <button
+        type="button"
+        aria-label={t("shell.close")}
+        onClick={onClose}
+        className="absolute inset-0 bg-black/40"
+      />
       <div
-        className="w-full max-w-sm rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl dark:bg-gray-900"
-        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="ios-install-title"
+        className="relative w-full max-w-sm rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl dark:bg-gray-900"
       >
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-base font-semibold">{t("shell.ios_install.title")}</h3>
+          <h3 id="ios-install-title" className="text-base font-semibold">{t("shell.ios_install.title")}</h3>
           <button
             type="button"
             aria-label={t("shell.close")}
