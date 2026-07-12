@@ -1033,7 +1033,7 @@ function WeatherPanelContent({ weather }: { weather: WeatherResponse }) {
               }`}
             >
               <span
-                className={`w-7 shrink-0 text-[12px] ${
+                className={`w-14 shrink-0 text-[12px] ${
                   isToday
                     ? "font-medium text-teal-700 dark:text-teal-400"
                     : "text-gray-500 dark:text-gray-400"
@@ -1122,10 +1122,14 @@ function formatHourLabel(isoTime: string): string {
   return `${parseInt(hour, 10)}h`;
 }
 
-// Formats an ISO date string ("2026-06-23") to a locale-aware short weekday.
+// Formats an ISO date string ("2026-06-23") to a locale-aware short weekday
+// plus numeric date (e.g. "Mo 1.7." in de-DE, "Mon 7/1" in en-US) — order
+// and separators follow the locale via Intl, not a hardcoded format.
 function formatDayLabel(isoDate: string, locale: string): string {
   const d = new Date(isoDate + "T12:00:00"); // noon avoids DST edge cases
-  return new Intl.DateTimeFormat(locale, { weekday: "short" }).format(d);
+  const weekday = new Intl.DateTimeFormat(locale, { weekday: "short" }).format(d);
+  const date = new Intl.DateTimeFormat(locale, { day: "numeric", month: "numeric" }).format(d);
+  return `${weekday} ${date}`;
 }
 
 // --- News preview (compact, home page) -----------------------------------
