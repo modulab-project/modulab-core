@@ -910,7 +910,7 @@ function WeatherPanel({
 
       {/* Slide panel — same dimensions as AppShell's own panels */}
       <div
-        className={`fixed top-[60px] bottom-[44px] right-0 z-30 flex w-full flex-col border-l border-gray-200 bg-white shadow-xl transition-transform duration-200 sm:w-[360px] dark:border-gray-800 dark:bg-gray-950 ${
+        className={`fixed top-[60px] bottom-[44px] right-0 z-30 flex w-full flex-col border-l border-gray-200 bg-white text-gray-900 shadow-xl transition-transform duration-200 sm:w-[360px] dark:border-gray-800 dark:bg-gray-950 dark:text-gray-100 ${
           open ? "translate-x-0" : "translate-x-full"
         }`}
       >
@@ -1232,7 +1232,7 @@ function NewsAllPanel({
         aria-hidden="true"
       />
       <div
-        className={`fixed top-[60px] bottom-[44px] right-0 z-30 flex w-full flex-col border-l border-gray-200 bg-white shadow-xl transition-transform duration-200 sm:w-[420px] dark:border-gray-800 dark:bg-gray-950 ${
+        className={`fixed top-[60px] bottom-[44px] right-0 z-30 flex w-full flex-col border-l border-gray-200 bg-white text-gray-900 shadow-xl transition-transform duration-200 sm:w-[420px] dark:border-gray-800 dark:bg-gray-950 dark:text-gray-100 ${
           open ? "translate-x-0" : "translate-x-full"
         }`}
       >
@@ -1441,7 +1441,7 @@ function FeedsPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
         />
       )}
       <div
-        className={`fixed top-[60px] bottom-[44px] right-0 z-30 flex w-full flex-col border-l border-gray-200 bg-white shadow-xl transition-transform duration-200 sm:w-[380px] dark:border-gray-800 dark:bg-gray-950 ${
+        className={`fixed top-[60px] bottom-[44px] right-0 z-30 flex w-full flex-col border-l border-gray-200 bg-white text-gray-900 shadow-xl transition-transform duration-200 sm:w-[380px] dark:border-gray-800 dark:bg-gray-950 dark:text-gray-100 ${
           open ? "translate-x-0" : "translate-x-full"
         }`}
       >
