@@ -19,6 +19,33 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
 )
 
+// reauthWindow bounds how "fresh" a session's original login has to be
+// before it may perform an irreversible-ish account action (lock, delete,
+// self-delete) - see requireRecentLogin. Sessions slide their TTL on every
+// request (ValidateSession) and can stay alive for up to SessionTTL (24h)
+// of intermittent use without a fresh login, which is fine for ordinary
+// browsing but too stale a credential to trust for "forget this user
+// forever" - a stolen/left-open tab hours after the real owner logged in
+// would otherwise be just as capable of that as a fresh login. 15 minutes
+// mirrors the module-token TTL (ModuleTokenTTL) in spirit - short enough to
+// meaningfully require a deliberate, recent authentication, long enough
+// not to make routine admin work annoying.
+const reauthWindow = 15 * time.Minute
+
+// requireRecentLogin returns true if sess's original login (Session.
+// CreatedAt - stamped once at CreateSession, never touched by the sliding-
+// window TTL refresh) is within reauthWindow. On failure it writes 403 with
+// a machine-readable "reauth_required" body itself and returns false; the
+// frontend (AdminUsersPage.tsx / ProfilePage.tsx) recognises exactly that
+// body and offers a re-login link rather than showing a generic error.
+func requireRecentLogin(w http.ResponseWriter, sess Session) bool {
+	if time.Since(sess.CreatedAt) > reauthWindow {
+		http.Error(w, "reauth_required", http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
 // logRevokeError logs a failed RevokeUserSessions call. Pulled out to one
 // line since LockUserHandler and DeleteUserHandler both need it, and both
 // treat it the same way - log and continue, see the call sites for why.
@@ -372,6 +399,9 @@ func LockUserHandler(d Deps) http.HandlerFunc {
 		if !ok {
 			return
 		}
+		if !requireRecentLogin(w, sess) {
+			return
+		}
 		subject := r.PathValue("id")
 		if subject == "" {
 			http.Error(w, "missing user id", http.StatusBadRequest)
@@ -476,6 +506,9 @@ func DeleteUserHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := requireAdmin(d, w, r)
 		if !ok {
+			return
+		}
+		if !requireRecentLogin(w, sess) {
 			return
 		}
 		subject := r.PathValue("id")

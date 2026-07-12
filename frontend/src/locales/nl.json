@@ -44,7 +44,9 @@
     "delete_confirm": "Uw account verwijderen? Deze actie kan niet ongedaan worden gemaakt.",
     "delete_button": "Mijn account verwijderen",
     "deleting": "Verwijderen…",
-    "delete_error_fallback": "Kan uw account niet verwijderen."
+    "delete_error_fallback": "Kan uw account niet verwijderen.",
+    "reauth_required": "Voor uw veiligheid vereist deze actie een recente aanmelding.",
+    "reauth_login_link": "Opnieuw aanmelden"
   },
   "admin": {
     "users": {
@@ -53,6 +55,8 @@
       "empty": "Nog geen gebruikers",
       "load_error": "Kan gebruikers niet laden.",
       "action_error": "Deze actie is mislukt.",
+      "reauth_required": "Voor uw veiligheid vereist deze actie een recente aanmelding.",
+      "reauth_login_link": "Opnieuw aanmelden",
       "you": "(u)",
       "delete_confirm": "{{name}} verwijderen? Deze actie kan niet ongedaan worden gemaakt.",
       "joined": "aangemeld",

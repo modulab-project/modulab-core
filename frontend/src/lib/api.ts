@@ -1385,6 +1385,26 @@ export function moduleApiUrl(moduleName: string): string {
   return `${API_BASE_URL}/v1/modules/${encodeURIComponent(moduleName)}/api`;
 }
 
+// Response body of GET /v1/modules/{name}/token (mirrors
+// backend/internal/modules.ModuleTokenHandler's anonymous struct).
+export interface ModuleTokenResponse {
+  token: string;
+  expires_in: number;
+}
+
+// fetchModuleToken exchanges the caller's full session token for a
+// short-lived, module-scoped token (backend/internal/auth/moduletoken.go) -
+// call this once a module is confirmed active, then hand the returned
+// token (never the full session token) to the module's own UI bundle via
+// ModuleComponentProps.token. Requires the caller's real session token,
+// unlike every other moduleApi* function above which take whatever token
+// ModulePage.tsx is currently using (module-scoped once available).
+export function fetchModuleToken(token: string, moduleName: string): Promise<ModuleTokenResponse> {
+  return request<ModuleTokenResponse>(`/v1/modules/${encodeURIComponent(moduleName)}/token`, {
+    headers: bearerHeaders(token),
+  });
+}
+
 // moduleApiFetch sends an authenticated request to a module's Deno API.
 export async function moduleApiFetch<T = unknown>(
   token: string,

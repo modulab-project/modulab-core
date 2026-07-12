@@ -5,6 +5,7 @@ import {
   approveUser,
   deleteUser,
   listUsers,
+  loginRedirectUrl,
   lockUser,
   unlockUser,
   type AdminUser,
@@ -13,6 +14,7 @@ import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
 import { isAdminRole } from "../lib/roles";
+import { isReauthRequiredError } from "../lib/authErrors";
 
 // "/admin/users" - replaces the manual "UPDATE users SET approved = true"
 // (and, before this page, no way at all to lock or delete someone) with a
@@ -40,6 +42,13 @@ export default function AdminUsersPage() {
   const { session, loading } = useAuthenticatedSession();
   const [users, setUsers] = useState<AdminUser[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // True when the last failed action was refused specifically because the
+  // caller's own login is too old (backend/internal/auth.requireRecentLogin,
+  // reauthWindow = 15 min) - lock/delete/self-delete require a recent login,
+  // not just a still-valid session, since a session can slide its TTL for up
+  // to 24h of intermittent use. Shown as a distinct banner with a re-login
+  // link rather than folded into the generic `error` text.
+  const [reauthRequired, setReauthRequired] = useState(false);
   const [busySubject, setBusySubject] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
@@ -81,16 +90,22 @@ export default function AdminUsersPage() {
     }
     setBusySubject(subject);
     setError(null);
+    setReauthRequired(false);
     try {
       await action(token, subject);
       refresh();
     } catch (err) {
-      // lockUser/deleteUser's self- and last-super-admin guards surface
-      // here as a 400 with a human-readable message (see admin.go's
-      // guardAgainstSelfOrLastSuperAdmin) - shown as-is rather than a
-      // generic "something went wrong".
-      const message = err instanceof Error ? err.message : t("admin.users.action_error");
-      setError(message);
+      if (isReauthRequiredError(err)) {
+        setReauthRequired(true);
+        setError(t("admin.users.reauth_required"));
+      } else {
+        // lockUser/deleteUser's self- and last-super-admin guards surface
+        // here as a 400 with a human-readable message (see admin.go's
+        // guardAgainstSelfOrLastSuperAdmin) - shown as-is rather than a
+        // generic "something went wrong".
+        const message = err instanceof Error ? err.message : t("admin.users.action_error");
+        setError(message);
+      }
     } finally {
       setBusySubject(null);
     }
@@ -112,7 +127,19 @@ export default function AdminUsersPage() {
           {t("admin.users.subtitle")}
         </p>
 
-        {error && <p className="mb-4 text-sm text-red-600 dark:text-red-400">{error}</p>}
+        {error && (
+          <p className="mb-4 text-sm text-red-600 dark:text-red-400">
+            {error}
+            {reauthRequired && (
+              <>
+                {" "}
+                <a href={loginRedirectUrl()} className="font-medium underline">
+                  {t("admin.users.reauth_login_link")}
+                </a>
+              </>
+            )}
+          </p>
+        )}
 
         {users === null ? null : users.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-gray-300 px-6 py-10 text-center dark:border-gray-700">

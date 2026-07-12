@@ -44,7 +44,9 @@
     "delete_confirm": "Delete your account? This cannot be undone.",
     "delete_button": "Delete my account",
     "deleting": "Deleting…",
-    "delete_error_fallback": "Could not delete your account."
+    "delete_error_fallback": "Could not delete your account.",
+    "reauth_required": "For your security, this action needs a recent login.",
+    "reauth_login_link": "Log in again"
   },
   "admin": {
     "users": {
@@ -53,6 +55,8 @@
       "empty": "No users yet",
       "load_error": "Could not load users.",
       "action_error": "That action failed.",
+      "reauth_required": "For your security, this action needs a recent login.",
+      "reauth_login_link": "Log in again",
       "you": "(you)",
       "delete_confirm": "Delete {{name}}? This cannot be undone.",
       "joined": "joined",

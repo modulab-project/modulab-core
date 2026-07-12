@@ -472,6 +472,9 @@ func DeleteSelfHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "invalid or expired session", http.StatusUnauthorized)
 			return
 		}
+		if !requireRecentLogin(w, sess) {
+			return
+		}
 
 		blocked, reason, err := guardAgainstLastSuperAdmin(ctx, d, sess.UserID)
 		if err != nil {

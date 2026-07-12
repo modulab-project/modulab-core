@@ -4,8 +4,16 @@
 // the rest of ModuLab.
 //
 // Communication between the host and the module component:
-//   - The session token is passed as a prop (ModuleComponentProps) so the
-//     module can call its own /v1/modules/{name}/api/* endpoints.
+//   - A short-lived, module-scoped token (auth/moduletoken.go) — NOT the
+//     caller's full session token — is passed as a prop
+//     (ModuleComponentProps.token) so the module can call its own
+//     /v1/modules/{name}/api/* endpoints. Minted via GET
+//     /v1/modules/{name}/token once the module is confirmed active, and
+//     refreshed in the background before it expires (see
+//     MODULE_TOKEN_REFRESH_MARGIN_MS below) - a buggy or compromised module
+//     bundle (loaded via Blob-URL dynamic import() into this same top-level
+//     JS realm, no iframe sandbox) therefore never holds a credential good
+//     for anything beyond its own routes.
 //   - The module component is responsible for its own data fetching.
 //
 // For v1 (no external bundle yet), a fallback is shown when no bundle is found.
@@ -19,14 +27,20 @@
 // mid-interaction, loses unsaved input" bug the `t`-dependency comments
 // further down already warn about. Suppressed with a targeted
 // eslint-disable instead.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import i18n from "../lib/i18n";
 import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
-import { moduleApiUrl, type InstalledModule } from "../lib/api";
+import { fetchModuleToken, moduleApiUrl, type InstalledModule } from "../lib/api";
 import { AppShell } from "../components/AppShell";
+
+// Refresh the module-scoped token (auth/moduletoken.go, ModuleTokenTTL =
+// 20 min) this long before it actually expires, so a module page left open
+// never hits a mid-session 401 on its own API calls. 2 minutes of margin is
+// generous relative to any single request's round trip.
+const MODULE_TOKEN_REFRESH_MARGIN_MS = 2 * 60 * 1000;
 
 // Props the host passes to every module component.
 export interface ModuleComponentProps {
@@ -60,7 +74,25 @@ export default function ModulePage() {
   // renders once we're sure it's a genuine Tier 1 module, not mid-retry.
   const [bundleLoading, setBundleLoading] = useState(true);
 
-  // Fetch module metadata.
+  // Module-scoped token (auth/moduletoken.go), NOT the caller's full
+  // session token: minted once the module is confirmed active (see the
+  // metadata effect below) and handed to the module's own bundle/locale/api
+  // calls instead — a buggy or compromised module bundle then only ever
+  // holds a credential good for its own /v1/modules/{name}/* routes, never
+  // the full session. `moduleTokenReady` flips true exactly once per module
+  // and is what the locale/bundle-loading effects below key off of - it
+  // deliberately does NOT flip back on refresh, so a periodic token refresh
+  // (see scheduleModuleTokenRefresh) only ever updates the *value* handed to
+  // the already-mounted module component via props, never re-triggers the
+  // bundle's dynamic import() (which would unmount it mid-interaction, the
+  // same class of bug the `t`-dependency comments elsewhere in this file
+  // already guard against).
+  const moduleTokenRef = useRef<string | null>(null);
+  const [moduleTokenReady, setModuleTokenReady] = useState(false);
+  const [moduleToken, setModuleToken] = useState<string | null>(null);
+
+  // Fetch module metadata, then (once confirmed active) mint a module-scoped
+  // token and schedule its refresh.
   // NOTE: `t` is intentionally NOT in the dependency array — same reason as
   // the bundle-load effect below: locale loading fires a re-render with a new
   // `t` reference, which would re-fetch metadata, set a new `mod` object, and
@@ -70,6 +102,28 @@ export default function ModulePage() {
     const token = getSessionToken();
     if (!token) return;
 
+    let cancelled = false;
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function scheduleModuleTokenRefresh(name: string, expiresInSeconds: number) {
+      const delay = Math.max(expiresInSeconds * 1000 - MODULE_TOKEN_REFRESH_MARGIN_MS, 30_000);
+      refreshTimer = setTimeout(async () => {
+        const sessionToken = getSessionToken();
+        if (cancelled || !sessionToken) return;
+        try {
+          const mt = await fetchModuleToken(sessionToken, name);
+          if (cancelled) return;
+          moduleTokenRef.current = mt.token;
+          setModuleToken(mt.token);
+          scheduleModuleTokenRefresh(name, mt.expires_in);
+        } catch {
+          // Best-effort: if a refresh fails (session expired, network hiccup),
+          // the module's next own API call will surface a 401 on its own -
+          // no need to duplicate that error handling here.
+        }
+      }, delay);
+    }
+
     fetch(`/v1/modules/${encodeURIComponent(moduleName)}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
@@ -77,22 +131,35 @@ export default function ModulePage() {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json() as Promise<InstalledModule>;
       })
-      .then((m) => {
+      .then(async (m) => {
+        if (cancelled) return;
         setMod(m);
         if (m.status !== "active") {
           setLoadError(`module_page.not_active:${m.status}`);
+          return;
         }
+        const mt = await fetchModuleToken(token, m.name);
+        if (cancelled) return;
+        moduleTokenRef.current = mt.token;
+        setModuleToken(mt.token);
+        setModuleTokenReady(true);
+        scheduleModuleTokenRefresh(m.name, mt.expires_in);
       })
       .catch((e) => setLoadError(`module_page.fetch_error:${e instanceof Error ? e.message : String(e)}`))
       .finally(() => setFetching(false));
+
+    return () => {
+      cancelled = true;
+      if (refreshTimer !== null) clearTimeout(refreshTimer);
+    };
   }, [session, moduleName]);
 
   // Load the module's own locale files and register them in i18next under the
   // "mod_{name}" namespace. This runs before the bundle is imported so that
   // the module component can call useTranslation("mod_{name}") immediately.
   useEffect(() => {
-    if (!mod || mod.status !== "active") return;
-    const token = getSessionToken();
+    if (!mod || mod.status !== "active" || !moduleTokenReady) return;
+    const token = moduleTokenRef.current;
     if (!token) return;
 
     const ns = `mod_${mod.name}`;
@@ -120,7 +187,7 @@ export default function ModulePage() {
       if (fbData) i18n.addResourceBundle(fallback, ns, fbData, true, true);
       if (lngData) i18n.addResourceBundle(lng, ns, lngData, true, true);
     })();
-  }, [mod]);
+  }, [mod, moduleTokenReady]);
 
   // Dynamically import the module's UI bundle with auth.
   //
@@ -150,7 +217,15 @@ export default function ModulePage() {
       return;
     }
 
-    const token = getSessionToken();
+    if (!moduleTokenReady) {
+      // Module confirmed active, but the module-scoped token (see the
+      // metadata effect above) hasn't been minted yet - this effect re-runs
+      // once moduleTokenReady flips true (see the dependency array below),
+      // so just wait rather than falling through to the "no bundle"
+      // fallback.
+      return;
+    }
+    const token = moduleTokenRef.current;
     if (!token) {
       setBundleLoading(false);
       return;
@@ -216,7 +291,7 @@ export default function ModulePage() {
       cancelled = true;
       if (retryTimer !== null) clearTimeout(retryTimer);
     };
-  }, [mod]);
+  }, [mod, moduleTokenReady]);
 
   if (loading || !session) return null;
   if (!moduleName) {
@@ -224,7 +299,11 @@ export default function ModulePage() {
     return null;
   }
 
-  const token = getSessionToken() ?? "";
+  // Module-scoped token (see the metadata effect above), NOT the caller's
+  // full session token - this is what reaches the module's own component
+  // via props, and what ModuleFallback's JSON viewer uses for its own
+  // authenticated fetch.
+  const token = moduleToken ?? "";
   const apiBase = moduleApiUrl(moduleName);
 
   return (

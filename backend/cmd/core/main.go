@@ -921,6 +921,20 @@ func secHeadersMiddleware(next http.Handler) http.Handler {
 				"object-src 'none'; "+
 				"frame-ancestors 'none'; "+
 				"base-uri 'none'")
+		// Permissions-Policy: default-deny every powerful browser feature,
+		// then allow back exactly the three a module actually uses -
+		// geolocation (my-place's MapLibre view), clipboard-write (copy
+		// buttons), fullscreen (map view's fullscreen control). Scoped to
+		// (self) only, never a third-party origin: modules run in this same
+		// top-level document (no iframe sandbox yet - see the module-token
+		// work in auth/moduletoken.go), so (self) already covers every
+		// module's own UI. Camera/microphone/payment/usb/midi/sensors are
+		// denied outright - nothing in ModuLab or any current module uses
+		// them, so there is no cost to closing them off.
+		w.Header().Set("Permissions-Policy",
+			"geolocation=(self), clipboard-write=(self), fullscreen=(self), "+
+				"camera=(), microphone=(), payment=(), usb=(), midi=(), "+
+				"magnetometer=(), gyroscope=(), accelerometer=()")
 		next.ServeHTTP(w, r)
 	})
 }

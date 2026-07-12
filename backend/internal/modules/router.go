@@ -125,18 +125,25 @@ func MaxUploadBodyBytes(ctx context.Context, pool *db.Pool) int64 {
 // to the Deno handler as Body.file_path instead of raw bytes.
 func ModuleProxyHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// ── Auth ──────────────────────────────────────────────────────────
-		sess, ok := auth.RequireActiveSession(authDeps, w, r)
-		if !ok {
-			return
-		}
-
 		// ── Resolve module name from path ─────────────────────────────────
 		// Path pattern: /v1/modules/{name}/*subpath
 		// We strip the prefix up to and including {name}.
 		moduleName := r.PathValue("name")
 		if moduleName == "" {
 			http.Error(w, "missing module name", http.StatusBadRequest)
+			return
+		}
+
+		// ── Auth ──────────────────────────────────────────────────────────
+		// Module-scoped token only (see auth/moduletoken.go) - resolved
+		// before the auth check above needs moduleName, so this moved ahead
+		// of the "resolve module name" block that used to come after it. A
+		// module's own API must never be reachable with the caller's full
+		// session token; the frontend mints a token scoped to this exact
+		// module via GET /v1/modules/{name}/token (ModuleTokenHandler) before
+		// ever loading the module's bundle.
+		sess, ok := auth.RequireModuleToken(authDeps, moduleName, w, r, false)
+		if !ok {
 			return
 		}
 
@@ -369,18 +376,20 @@ func saveUploadedFile(r *http.Request, dataDir, moduleName string, limit int64) 
 // ModuleLocaleHandler serves a module's locale file from its installed
 // directory. Path: GET /v1/modules/{name}/locales/{lng}.json
 //
-// Auth is required (any active session) to prevent locale enumeration by
-// unauthenticated clients. The file is served with Cache-Control: no-store
-// so the frontend always gets the version matching the installed module.
+// Auth is required: a module-scoped token minted for this exact module (see
+// auth/moduletoken.go) - same reasoning as ModuleProxyHandler, this is a
+// route the module's own frontend code calls, not a host-only endpoint.
+// The file is served with Cache-Control: no-store so the frontend always
+// gets the version matching the installed module.
 func ModuleLocaleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := auth.RequireActiveSession(authDeps, w, r); !ok {
-			return
-		}
 		moduleName := r.PathValue("name")
 		lng := r.PathValue("lng")
 		if moduleName == "" || lng == "" {
 			http.Error(w, "missing module name or language", http.StatusBadRequest)
+			return
+		}
+		if _, ok := auth.RequireModuleToken(authDeps, moduleName, w, r, false); !ok {
 			return
 		}
 		// Sanitise: only allow simple language codes like "en", "de", "en-US".
@@ -405,21 +414,22 @@ func ModuleLocaleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 // ModuleBundleHandler serves a module's compiled UI bundle.
 // Path: GET /v1/modules/{name}/ui/bundle.js
 //
-// Auth is required. The frontend fetches the bundle via fetch() with a Bearer
-// token, then loads it via a Blob URL — this avoids the limitation of dynamic
-// import() not being able to send Authorization headers.
+// Auth is required: a module-scoped token minted for this exact module (see
+// auth/moduletoken.go) - this is the file whose contents then run with full
+// DOM access in the host page (ModulePage.tsx's Blob-URL import()), so it
+// must never be fetchable with the caller's full session token either. The
+// frontend fetches it via fetch() with a Bearer header, then loads it via a
+// Blob URL — this avoids the limitation of dynamic import() not being able
+// to send Authorization headers. Query-token fallback kept narrowly scoped
+// to this handler and ModuleStorageHandler. See auth.BearerTokenAllowQuery.
 func ModuleBundleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Loaded via fetch() with a Bearer header per the doc comment above,
-		// but also reachable as a <script src> in some module-loading paths —
-		// query-token fallback kept narrowly scoped to this handler and
-		// ModuleStorageHandler. See auth.BearerTokenAllowQuery.
-		if _, ok := auth.RequireActiveSessionAllowQueryToken(authDeps, w, r); !ok {
-			return
-		}
 		moduleName := r.PathValue("name")
 		if moduleName == "" {
 			http.Error(w, "missing module name", http.StatusBadRequest)
+			return
+		}
+		if _, ok := auth.RequireModuleToken(authDeps, moduleName, w, r, true); !ok {
 			return
 		}
 		// Sanitise: only allow simple module names (alphanumeric, dash, underscore).
@@ -444,20 +454,21 @@ func ModuleBundleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 // ModuleStorageHandler serves files from a module's storage/uploads directory.
 // Path: GET /v1/modules/{name}/storage/{path...}
 //
-// Auth is required. Only files within the module's own storage directory are
+// Auth is required: a module-scoped token minted for this exact module (see
+// auth/moduletoken.go). <img src="...">-loaded files cannot carry an
+// Authorization header, so this is one of the two places a ?t= query token
+// is accepted — see auth.BearerTokenAllowQuery for why this must stay
+// narrowly scoped. Only files within the module's own storage directory are
 // served; path traversal attempts are rejected by filepath.Clean.
 func ModuleStorageHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// <img src="...">-loaded files cannot carry an Authorization header,
-		// so this is the one place a ?t= query token is accepted — see
-		// auth.BearerTokenAllowQuery for why this must stay narrowly scoped.
-		if _, ok := auth.RequireActiveSessionAllowQueryToken(authDeps, w, r); !ok {
-			return
-		}
 		moduleName := r.PathValue("name")
 		filePath := r.PathValue("path")
 		if moduleName == "" || filePath == "" {
 			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		if _, ok := auth.RequireModuleToken(authDeps, moduleName, w, r, true); !ok {
 			return
 		}
 		// Sanitise module name.
@@ -485,15 +496,59 @@ func ModuleStorageHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	}
 }
 
-// RegisterModuleRoutes wires the module proxy, locale, bundle, and storage
-// handlers into mux. Called from main.go after module install and at startup
-// for each already-installed module.
+// ModuleTokenHandler is GET /v1/modules/{name}/token: mints a short-lived,
+// module-scoped token (auth.CreateModuleToken) for the caller's own
+// already-active, full session - so the frontend can hand THAT to a
+// module's UI bundle (ModulePage.tsx) instead of the caller's full session
+// bearer token. Requires a full session, not a module token, deliberately:
+// this is the one door through which a module-scoped token gets minted at
+// all, so it must not itself be reachable with one (that would let an
+// already-loaded module mint itself a token for a different module).
+func ModuleTokenHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := auth.RequireActiveSession(authDeps, w, r); !ok {
+			return
+		}
+		moduleName := r.PathValue("name")
+		if moduleName == "" {
+			http.Error(w, "missing module name", http.StatusBadRequest)
+			return
+		}
+		row, found, err := d.DB.GetInstalledModule(r.Context(), moduleName)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if !found {
+			http.Error(w, "module not installed", http.StatusNotFound)
+			return
+		}
+		if row.Status != "active" {
+			http.Error(w, fmt.Sprintf("module is %s", row.Status), http.StatusServiceUnavailable)
+			return
+		}
+		token, err := auth.CreateModuleToken(r.Context(), authDeps, auth.BearerToken(r), moduleName)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeModuleJSON(w, http.StatusOK, struct {
+			Token     string `json:"token"`
+			ExpiresIn int    `json:"expires_in"`
+		}{Token: token, ExpiresIn: int(auth.ModuleTokenTTL.Seconds())})
+	}
+}
+
+// RegisterModuleRoutes wires the module proxy, locale, bundle, storage, and
+// token handlers into mux. Called from main.go after module install and at
+// startup for each already-installed module.
 //
 // Note: the literal /v1/modules and /v1/modules/install etc. routes that
 // handle the lifecycle API are registered first in main.go and take
 // precedence over this wildcard because Go's 1.22 ServeMux gives more-
 // specific paths priority over less-specific ones.
 func RegisterModuleRoutes(mux *http.ServeMux, d Deps, authDeps auth.Deps) {
+	mux.HandleFunc("GET /v1/modules/{name}/token", ModuleTokenHandler(d, authDeps))
 	mux.HandleFunc("GET /v1/modules/{name}/locales/{lng}", ModuleLocaleHandler(d, authDeps))
 	mux.HandleFunc("/v1/modules/{name}/api/", ModuleProxyHandler(d, authDeps))
 	mux.HandleFunc("GET /v1/modules/{name}/ui/bundle.js", ModuleBundleHandler(d, authDeps))

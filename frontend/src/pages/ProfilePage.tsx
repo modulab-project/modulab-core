@@ -4,8 +4,9 @@ import { useTranslation } from "react-i18next";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell, Avatar } from "../components/AppShell";
 import { AuthButton } from "../components/AuthShell";
-import { deleteSelf, exportMyData } from "../lib/api";
+import { deleteSelf, exportMyData, loginRedirectUrl } from "../lib/api";
 import { clearSessionToken, getSessionToken } from "../lib/session";
+import { isReauthRequiredError } from "../lib/authErrors";
 
 // "/profile" route, linked from the profile panel AppShell renders on every
 // page (header avatar -> "View profile"). Core has no UI of its own for
@@ -33,6 +34,9 @@ export default function ProfilePage() {
   const { session, loading } = useAuthenticatedSession();
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  // See AdminUsersPage.tsx's identical flag for lock/delete - self-delete
+  // goes through the same requireRecentLogin gate (admin.go/handlers.go).
+  const [reauthRequired, setReauthRequired] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
 
@@ -81,13 +85,19 @@ export default function ProfilePage() {
     }
     setDeleting(true);
     setDeleteError(null);
+    setReauthRequired(false);
     try {
       await deleteSelf(token);
       clearSessionToken();
       navigate("/login", { replace: true });
     } catch (err) {
-      const message = err instanceof Error ? err.message : t("profile.delete_error_fallback");
-      setDeleteError(message);
+      if (isReauthRequiredError(err)) {
+        setReauthRequired(true);
+        setDeleteError(t("profile.reauth_required"));
+      } else {
+        const message = err instanceof Error ? err.message : t("profile.delete_error_fallback");
+        setDeleteError(message);
+      }
       setDeleting(false);
     }
   }
@@ -171,7 +181,17 @@ export default function ProfilePage() {
             {t("profile.delete_section_body")}
           </p>
           {deleteError && (
-            <p className="mt-2 text-sm text-red-600 dark:text-red-400">{deleteError}</p>
+            <p className="mt-2 text-sm text-red-600 dark:text-red-400">
+              {deleteError}
+              {reauthRequired && (
+                <>
+                  {" "}
+                  <a href={loginRedirectUrl()} className="font-medium underline">
+                    {t("profile.reauth_login_link")}
+                  </a>
+                </>
+              )}
+            </p>
           )}
           <button
             type="button"

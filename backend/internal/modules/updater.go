@@ -150,8 +150,12 @@ func Update(ctx context.Context, d Deps, entry store.Entry) error {
 			}
 		}
 	} else {
-		// Official without sig URL: skip with log
-		log.Printf("modules: update %q: cosign skipped (no sig URL in registry)", entry.Name)
+		// Official module without cosign_sig_url: reject outright, same
+		// reasoning as installer.go's Install - every official module has
+		// carried a real cosign_sig_url since all three were re-released
+		// with signing (confirmed 2026-07-12), so a missing one now means an
+		// unsigned rollback or a tampered registry, not "not yet signed".
+		return fmt.Errorf("modules: update %q: official module has no cosign_sig_url in registry - refusing to update to an unsigned official release", entry.Name)
 	}
 
 	// ── 6. Extract new ZIP ────────────────────────────────────────────────

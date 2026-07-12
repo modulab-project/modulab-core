@@ -44,7 +44,9 @@
     "delete_confirm": "Konto löschen? Das kann nicht rückgängig gemacht werden.",
     "delete_button": "Mein Konto löschen",
     "deleting": "Wird gelöscht…",
-    "delete_error_fallback": "Konto konnte nicht gelöscht werden."
+    "delete_error_fallback": "Konto konnte nicht gelöscht werden.",
+    "reauth_required": "Aus Sicherheitsgründen erfordert diese Aktion einen kürzlichen Login.",
+    "reauth_login_link": "Erneut anmelden"
   },
   "admin": {
     "users": {
@@ -53,6 +55,8 @@
       "empty": "Noch keine Benutzer",
       "load_error": "Benutzer konnten nicht geladen werden.",
       "action_error": "Diese Aktion ist fehlgeschlagen.",
+      "reauth_required": "Aus Sicherheitsgründen erfordert diese Aktion einen kürzlichen Login.",
+      "reauth_login_link": "Erneut anmelden",
       "you": "(du)",
       "delete_confirm": "{{name}} löschen? Das kann nicht rückgängig gemacht werden.",
       "joined": "beigetreten",

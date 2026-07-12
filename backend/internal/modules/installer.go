@@ -295,9 +295,14 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 			cosignSkipped = true
 		}
 	} else {
-		// Official module without cosign_sig_url → skip (not yet signed).
-		cosignSkipped = true
-		log.Printf("modules: install %q: cosign skipped (no sig URL in registry)", entry.Name)
+		// Official module without cosign_sig_url: reject outright, not a
+		// best-effort skip. Every official module in registry.json has
+		// carried a real cosign_sig_url since all three (my-places, recipes,
+		// unifi-network) were re-released with signing - confirmed 2026-07-12
+		// - so a registry entry missing one now is either a rollback to an
+		// unsigned release or a tampered/spoofed registry, not the expected
+		// "not yet signed" case this branch used to allow through.
+		return fmt.Errorf("modules: install %q: official module has no cosign_sig_url in registry - refusing to install an unsigned official release", entry.Name)
 	}
 	// cosignVerified is persisted below (step 8, InsertInstalledModule) so
 	// System Info can show a signature badge - previously computed here and

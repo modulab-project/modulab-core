@@ -44,7 +44,9 @@
     "delete_confirm": "¿Eliminar su cuenta? Esta acción es irreversible.",
     "delete_button": "Eliminar mi cuenta",
     "deleting": "Eliminando…",
-    "delete_error_fallback": "No se puede eliminar su cuenta."
+    "delete_error_fallback": "No se puede eliminar su cuenta.",
+    "reauth_required": "Por su seguridad, esta acción requiere un inicio de sesión reciente.",
+    "reauth_login_link": "Iniciar sesión de nuevo"
   },
   "admin": {
     "users": {
@@ -53,6 +55,8 @@
       "empty": "Aún no hay usuarios",
       "load_error": "No se pueden cargar los usuarios.",
       "action_error": "Esta acción falló.",
+      "reauth_required": "Por su seguridad, esta acción requiere un inicio de sesión reciente.",
+      "reauth_login_link": "Iniciar sesión de nuevo",
       "you": "(usted)",
       "delete_confirm": "¿Eliminar a {{name}}? Esta acción es irreversible.",
       "joined": "registrado",
