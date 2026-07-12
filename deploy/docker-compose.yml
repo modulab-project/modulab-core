@@ -298,11 +298,17 @@ services:
       - "traefik.http.routers.searxng.entrypoints=websecure"
       - "traefik.http.routers.searxng.tls.certresolver=le"
       - "traefik.http.middlewares.searxng-strip.stripprefix.prefixes=/searxng"
-      # hsts middleware defined on the modulab (nginx) service above - same
-      # domain, so the header should apply here too. Order matters for
-      # Traefik middleware chains but not for these two (strip only rewrites
-      # the path, hsts only adds a response header).
-      - "traefik.http.routers.searxng.middlewares=searxng-strip,hsts"
+      # Own copy of the hsts middleware (same settings as the modulab
+      # router's, deploy/docker-compose.yml's nginx service) rather than
+      # referencing that one by name across containers: Traefik's Docker
+      # provider discovers each container's labels independently of Compose's
+      # depends_on, so if searxng is discovered before nginx at startup, a
+      # cross-container "hsts" reference here briefly does not exist yet -
+      # exactly the "middleware \"hsts@docker\" does not exist" error seen in
+      # the logs (2026-07-12). A self-contained definition on this container
+      # removes that race entirely.
+      - "traefik.http.middlewares.searxng-hsts.headers.stsSeconds=31536000"
+      - "traefik.http.routers.searxng.middlewares=searxng-strip,searxng-hsts"
       - "traefik.http.services.searxng.loadbalancer.server.port=8080"
     networks:
       - modulab-internal
