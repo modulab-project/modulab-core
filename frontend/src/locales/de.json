@@ -174,7 +174,8 @@
         "check_has_images": "mit Bilder",
         "check_no_images": "ohne Bilder",
         "check_unreachable": "Feed nicht erreichbar",
-        "check_error": "Feed konnte nicht geprüft werden."
+        "check_error": "Feed konnte nicht geprüft werden.",
+        "label_placeholder": "z. B. Hacker News"
       },
       "catalog_open": "Aus Katalog",
       "catalog_checking": "Feeds werden geprüft…",
@@ -202,7 +203,9 @@
         "import": "Ausgewählte importieren ({{count}})",
         "importing": "Wird importiert…",
         "none_selected": "Mindestens einen Feed auswählen.",
-        "unreachable": "nicht erreichbar"
+        "unreachable": "nicht erreichbar",
+        "entry_count_one": "{{count}} Feed",
+        "entry_count_other": "{{count}} Feeds"
       }
     },
     "searxng": {
@@ -279,7 +282,8 @@
         "save": "Speichern",
         "create": "Erstellen",
         "saving": "Speichern…",
-        "error": "Fehler"
+        "error": "Fehler",
+        "url_placeholder": "https://… oder /modules/…"
       },
       "edit_title": "Bearbeiten",
       "delete_title": "Löschen"
@@ -338,7 +342,8 @@
       "global_rate_limit_max_hint": "Gilt für alle Routen außer dem Health-Check. Muss größer als 0 sein. Standard: 600.",
       "deno_conn_pool_size_label": "Verbindungspool-Größe der Modul-Worker",
       "deno_conn_pool_size_hint": "Wie viele Anfragen gleichzeitig gegen den Worker-Prozess eines Moduls laufen können. Muss mindestens 1 sein. Standard: 4. Wirkt erst beim nächsten Neustart oder Update des jeweiligen Moduls — nicht sofort.",
-      "validation_error": "Byte-Limits müssen 0 oder größer sein; Rate-Limits und Pool-Größe müssen größer als 0 sein."
+      "validation_error": "Byte-Limits müssen 0 oder größer sein; Rate-Limits und Pool-Größe müssen größer als 0 sein.",
+      "unit_bytes": "Bytes"
     },
     "system_info": {
       "title": "Systeminfo",
@@ -397,7 +402,8 @@
       "title": "Sicherheitsinfos",
       "subtitle": "Aktive Sitzungen und Rate Limits auf einen Blick.",
       "card_desc": "Aktive Sitzungen und Live-Rate-Limit-Zähler.",
-      "load_error": "Sicherheitsinfos konnten nicht geladen werden."
+      "load_error": "Sicherheitsinfos konnten nicht geladen werden.",
+      "unknown": "Unbekannt"
     },
     "audit": {
       "title": "Audit-Log",
@@ -504,6 +510,7 @@
     "quick_links_module_required": "Bitte ein Modul auswählen.",
     "quick_links_modules_loading": "Module werden geladen…",
     "quick_links_modules_empty": "Keine aktiven Module installiert.",
+    "quick_links_tile_icon_hint": "(Tabler, z. B. ti-cloud)",
     "search": {
       "tab_web": "Web",
       "tab_images": "Bilder",
@@ -530,7 +537,13 @@
       "choose_feeds": "Feeds auswählen",
       "show_all": "Alle {{count}} Artikel anzeigen",
       "empty_panel": "Noch keine Artikel.",
-      "choose_feeds_link": "Feeds auswählen"
+      "choose_feeds_link": "Feeds auswählen",
+      "time_minutes_ago_one": "vor {{count}} Min.",
+      "time_minutes_ago_other": "vor {{count}} Min.",
+      "time_hours_ago_one": "vor {{count}} Std.",
+      "time_hours_ago_other": "vor {{count}} Std.",
+      "time_days_ago_one": "vor {{count}} Tg.",
+      "time_days_ago_other": "vor {{count}} Tg."
     },
     "feeds": {
       "panel_title": "Meine Feeds",
@@ -636,7 +649,13 @@
       "waiting_toast": "{{name}} wartet auf Genehmigung.",
       "no_module_updates": "Alle Module aktuell",
       "module_updates_one": "{{count}} Modul-Update verfügbar",
-      "module_updates_many": "{{count}} Modul-Updates verfügbar"
+      "module_updates_many": "{{count}} Modul-Updates verfügbar",
+      "someone_fallback": "Jemand",
+      "time_just_now": "gerade eben",
+      "time_minutes_ago_one": "vor {{count}} Min.",
+      "time_minutes_ago_other": "vor {{count}} Min.",
+      "time_hours_ago_one": "vor {{count}} Std.",
+      "time_hours_ago_other": "vor {{count}} Std."
     },
     "chat": {
       "no_provider": "Kein Anbieter",
@@ -723,7 +742,8 @@
     "saving": "Wird gespeichert…",
     "loading": "Wird geladen…",
     "saved": "Gespeichert",
-    "dismiss": "Schließen"
+    "dismiss": "Schließen",
+    "tier": "Tier {{tier}}"
   },
   "user": {
     "ai": {

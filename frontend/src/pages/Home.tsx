@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { safeHref } from "../lib/url";
@@ -1298,8 +1299,9 @@ function ArticleCard({
   showImage: boolean;
   compact?: boolean;
 }) {
+  const { t } = useTranslation();
   const pub = article.published_at ? new Date(article.published_at) : null;
-  const age = pub ? relativeNewsTime(pub) : null;
+  const age = pub ? relativeNewsTime(pub, t) : null;
 
   if (compact) {
     return (
@@ -1372,14 +1374,14 @@ function ArticleCard({
   );
 }
 
-function relativeNewsTime(date: Date): string {
+function relativeNewsTime(date: Date, t: TFunction): string {
   const diff = Math.max(0, Date.now() - date.getTime());
   const mins = Math.floor(diff / 60_000);
-  if (mins < 60) return `${mins}m ago`;
+  if (mins < 60) return t("home.news.time_minutes_ago", { count: mins });
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return t("home.news.time_hours_ago", { count: hours });
   const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+  return t("home.news.time_days_ago", { count: days });
 }
 
 // --- Feeds selection panel -----------------------------------------------

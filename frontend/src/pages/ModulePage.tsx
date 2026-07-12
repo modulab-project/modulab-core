@@ -306,7 +306,7 @@ function ModuleFallback({
             </span>
           )}
           <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-300">
-            Tier {mod.tier}
+            {t("common.tier", { tier: mod.tier })}
           </span>
           <span className="rounded-full bg-teal-50 px-2.5 py-0.5 text-xs text-teal-700 dark:bg-teal-950 dark:text-teal-300">
             {mod.status}

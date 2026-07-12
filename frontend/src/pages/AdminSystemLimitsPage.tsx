@@ -257,7 +257,7 @@ function ByteField({
           onChange={(e) => onUnitChange(e.target.value as ByteUnit)}
           className="rounded-lg border border-gray-200 bg-white px-2 py-2 text-base outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-800"
         >
-          <option value="B">Bytes</option>
+          <option value="B">{t("admin.system_limits.unit_bytes")}</option>
           <option value="KB">KB</option>
           <option value="MB">MB</option>
         </select>

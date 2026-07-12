@@ -11,6 +11,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, Link } from "react-router";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import {
   getSystemInfo,
   revokeSession,
@@ -279,7 +280,7 @@ function SessionRow({
   onRevoke: () => void;
 }) {
   const { t } = useTranslation();
-  const device = session.user_agent ? parseUserAgent(session.user_agent) : null;
+  const device = session.user_agent ? parseUserAgent(session.user_agent, t) : null;
   return (
     <tr className={`border-b border-gray-100 last:border-0 dark:border-gray-800 ${session.current ? "bg-teal-50/60 dark:bg-teal-950/30" : ""}`}>
       <td className="whitespace-nowrap px-4 py-2.5 text-gray-700 dark:text-gray-300">
@@ -381,15 +382,15 @@ function RateLimitRow({
 // mainstream browser/OS combination in practice. Order matters - Edge and
 // Opera both contain "Chrome" in their own UA strings, so those checks must
 // come first.
-function parseUserAgent(ua: string): { browser: string; os: string } {
-  let browser = "Unknown";
+function parseUserAgent(ua: string, t: TFunction): { browser: string; os: string } {
+  let browser = t("admin.security_info.unknown");
   if (ua.includes("Edg/")) browser = "Edge";
   else if (ua.includes("OPR/") || ua.includes("Opera")) browser = "Opera";
   else if (ua.includes("Firefox/")) browser = "Firefox";
   else if (ua.includes("CriOS") || ua.includes("Chrome/")) browser = "Chrome";
   else if (ua.includes("Safari/")) browser = "Safari";
 
-  let os = "Unknown";
+  let os = t("admin.security_info.unknown");
   if (ua.includes("Windows")) os = "Windows";
   else if (ua.includes("Mac OS X") || ua.includes("Macintosh")) os = "macOS";
   else if (ua.includes("Android")) os = "Android";

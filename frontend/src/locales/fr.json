@@ -174,7 +174,8 @@
         "check_has_images": "avec images",
         "check_no_images": "sans images",
         "check_unreachable": "Flux inaccessible",
-        "check_error": "Impossible de vérifier le flux."
+        "check_error": "Impossible de vérifier le flux.",
+        "label_placeholder": "p. ex. Hacker News"
       },
       "catalog_open": "Depuis le catalogue",
       "catalog_checking": "Vérification des flux…",
@@ -202,7 +203,9 @@
         "import": "Importer la sélection ({{count}})",
         "importing": "Importation…",
         "none_selected": "Sélectionnez au moins un flux.",
-        "unreachable": "inaccessible"
+        "unreachable": "inaccessible",
+        "entry_count_one": "{{count}} flux",
+        "entry_count_other": "{{count}} flux"
       }
     },
     "searxng": {
@@ -279,7 +282,8 @@
         "save": "Enregistrer",
         "create": "Créer",
         "saving": "Enregistrement…",
-        "error": "Erreur"
+        "error": "Erreur",
+        "url_placeholder": "https://… ou /modules/…"
       },
       "edit_title": "Modifier",
       "delete_title": "Supprimer"
@@ -338,7 +342,8 @@
       "global_rate_limit_max_hint": "S'applique à toutes les routes sauf le contrôle de santé. Doit être supérieur à 0. Par défaut : 600.",
       "deno_conn_pool_size_label": "Taille du pool de connexions des workers de module",
       "deno_conn_pool_size_hint": "Nombre de requêtes pouvant s'exécuter simultanément sur le processus worker d'un module. Doit être au moins 1. Par défaut : 4. Prend effet au prochain redémarrage ou mise à jour du module concerné — pas immédiatement.",
-      "validation_error": "Les limites en octets doivent être ≥ 0 ; les limites de débit et la taille du pool doivent être > 0."
+      "validation_error": "Les limites en octets doivent être ≥ 0 ; les limites de débit et la taille du pool doivent être > 0.",
+      "unit_bytes": "Octets"
     },
     "system_info": {
       "title": "Informations système",
@@ -397,7 +402,8 @@
       "title": "Informations de sécurité",
       "subtitle": "Sessions actives et limites de débit en un coup d'œil.",
       "card_desc": "Sessions actives et compteurs de limite de débit en direct.",
-      "load_error": "Impossible de charger les informations de sécurité."
+      "load_error": "Impossible de charger les informations de sécurité.",
+      "unknown": "Inconnu"
     },
     "audit": {
       "title": "Journal d'audit",
@@ -504,6 +510,7 @@
     "quick_links_module_required": "Veuillez sélectionner un module.",
     "quick_links_modules_loading": "Chargement des modules…",
     "quick_links_modules_empty": "Aucun module actif installé.",
+    "quick_links_tile_icon_hint": "(Tabler, p. ex. ti-cloud)",
     "search": {
       "tab_web": "Web",
       "tab_images": "Images",
@@ -530,7 +537,13 @@
       "choose_feeds": "Choisir des flux",
       "show_all": "Afficher les {{count}} articles",
       "empty_panel": "Aucun article pour l'instant.",
-      "choose_feeds_link": "Choisir des flux"
+      "choose_feeds_link": "Choisir des flux",
+      "time_minutes_ago_one": "il y a {{count}} min",
+      "time_minutes_ago_other": "il y a {{count}} min",
+      "time_hours_ago_one": "il y a {{count}} h",
+      "time_hours_ago_other": "il y a {{count}} h",
+      "time_days_ago_one": "il y a {{count}} j",
+      "time_days_ago_other": "il y a {{count}} j"
     },
     "feeds": {
       "panel_title": "Mes flux",
@@ -636,7 +649,13 @@
       "waiting_toast": "{{name}} attend une approbation.",
       "no_module_updates": "Tous les modules sont à jour",
       "module_updates_one": "{{count}} mise à jour de module disponible",
-      "module_updates_many": "{{count}} mises à jour de modules disponibles"
+      "module_updates_many": "{{count}} mises à jour de modules disponibles",
+      "someone_fallback": "Quelqu'un",
+      "time_just_now": "à l'instant",
+      "time_minutes_ago_one": "il y a {{count}} min",
+      "time_minutes_ago_other": "il y a {{count}} min",
+      "time_hours_ago_one": "il y a {{count}} h",
+      "time_hours_ago_other": "il y a {{count}} h"
     },
     "chat": {
       "no_provider": "Aucun fournisseur",
@@ -723,7 +742,8 @@
     "saving": "Enregistrement…",
     "loading": "Chargement…",
     "saved": "Enregistré",
-    "dismiss": "Fermer"
+    "dismiss": "Fermer",
+    "tier": "Niveau {{tier}}"
   },
   "user": {
     "ai": {

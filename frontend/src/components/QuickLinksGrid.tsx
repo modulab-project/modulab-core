@@ -191,7 +191,7 @@ function AddTileModal({
               <div>
                 <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   {t("home.quick_links_tile_icon")}{" "}
-                  <span className="text-gray-400">(Tabler, z. B. ti-cloud)</span>
+                  <span className="text-gray-400">{t("home.quick_links_tile_icon_hint")}</span>
                 </label>
                 <input
                   type="text"

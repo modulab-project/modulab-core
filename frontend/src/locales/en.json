@@ -174,7 +174,8 @@
         "check_has_images": "with images",
         "check_no_images": "no images",
         "check_unreachable": "Feed not reachable",
-        "check_error": "Could not check feed."
+        "check_error": "Could not check feed.",
+        "label_placeholder": "e.g. Hacker News"
       },
       "catalog_open": "From Catalog",
       "catalog_checking": "Checking feeds…",
@@ -202,7 +203,9 @@
         "import": "Import selected ({{count}})",
         "importing": "Importing…",
         "none_selected": "Select at least one feed.",
-        "unreachable": "unreachable"
+        "unreachable": "unreachable",
+        "entry_count_one": "{{count}} feed",
+        "entry_count_other": "{{count}} feeds"
       }
     },
     "searxng": {
@@ -279,7 +282,8 @@
         "save": "Save",
         "create": "Create",
         "saving": "Saving…",
-        "error": "Error"
+        "error": "Error",
+        "url_placeholder": "https://… or /modules/…"
       },
       "edit_title": "Edit",
       "delete_title": "Delete"
@@ -338,7 +342,8 @@
       "global_rate_limit_max_hint": "Applies to every route except the health check. Must be greater than 0. Default: 600.",
       "deno_conn_pool_size_label": "Module worker connection pool size",
       "deno_conn_pool_size_hint": "How many requests can run at once against a single module's worker process. Must be at least 1. Default: 4. Takes effect the next time each module restarts or updates — not immediately.",
-      "validation_error": "Byte limits must be 0 or greater; rate limits and pool size must be greater than 0."
+      "validation_error": "Byte limits must be 0 or greater; rate limits and pool size must be greater than 0.",
+      "unit_bytes": "Bytes"
     },
     "system_info": {
       "title": "System info",
@@ -397,7 +402,8 @@
       "title": "Security info",
       "subtitle": "Active sessions and rate limits at a glance.",
       "card_desc": "Active sessions and live rate-limit counters.",
-      "load_error": "Could not load security info."
+      "load_error": "Could not load security info.",
+      "unknown": "Unknown"
     },
     "audit": {
       "title": "Audit log",
@@ -504,6 +510,7 @@
     "quick_links_module_required": "Please select a module.",
     "quick_links_modules_loading": "Loading modules…",
     "quick_links_modules_empty": "No active modules installed.",
+    "quick_links_tile_icon_hint": "(Tabler, e.g. ti-cloud)",
     "search": {
       "tab_web": "Web",
       "tab_images": "Images",
@@ -530,7 +537,13 @@
       "choose_feeds": "Choose feeds",
       "show_all": "Show all {{count}} articles",
       "empty_panel": "No articles yet.",
-      "choose_feeds_link": "Choose feeds"
+      "choose_feeds_link": "Choose feeds",
+      "time_minutes_ago_one": "{{count}}m ago",
+      "time_minutes_ago_other": "{{count}}m ago",
+      "time_hours_ago_one": "{{count}}h ago",
+      "time_hours_ago_other": "{{count}}h ago",
+      "time_days_ago_one": "{{count}}d ago",
+      "time_days_ago_other": "{{count}}d ago"
     },
     "feeds": {
       "panel_title": "My feeds",
@@ -636,7 +649,13 @@
       "waiting_toast": "{{name}} is waiting for approval.",
       "no_module_updates": "All modules up to date",
       "module_updates_one": "{{count}} module update available",
-      "module_updates_many": "{{count}} module updates available"
+      "module_updates_many": "{{count}} module updates available",
+      "someone_fallback": "Someone",
+      "time_just_now": "just now",
+      "time_minutes_ago_one": "{{count}}m ago",
+      "time_minutes_ago_other": "{{count}}m ago",
+      "time_hours_ago_one": "{{count}}h ago",
+      "time_hours_ago_other": "{{count}}h ago"
     },
     "chat": {
       "no_provider": "No provider",
@@ -723,7 +742,8 @@
     "saving": "Saving…",
     "loading": "Loading…",
     "saved": "Saved",
-    "dismiss": "Dismiss"
+    "dismiss": "Dismiss",
+    "tier": "Tier {{tier}}"
   },
   "user": {
     "ai": {

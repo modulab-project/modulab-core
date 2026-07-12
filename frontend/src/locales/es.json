@@ -174,7 +174,8 @@
         "check_has_images": "con imágenes",
         "check_no_images": "sin imágenes",
         "check_unreachable": "Feed no accesible",
-        "check_error": "No se pudo verificar el feed."
+        "check_error": "No se pudo verificar el feed.",
+        "label_placeholder": "p. ej. Hacker News"
       },
       "catalog_open": "Desde Catálogo",
       "catalog_checking": "Verificando feeds…",
@@ -202,7 +203,9 @@
         "import": "Importar seleccionados ({{count}})",
         "importing": "Importando…",
         "none_selected": "Selecciona al menos un feed.",
-        "unreachable": "no accesible"
+        "unreachable": "no accesible",
+        "entry_count_one": "{{count}} feed",
+        "entry_count_other": "{{count}} feeds"
       }
     },
     "searxng": {
@@ -279,7 +282,8 @@
         "save": "Guardar",
         "create": "Crear",
         "saving": "Guardando…",
-        "error": "Error"
+        "error": "Error",
+        "url_placeholder": "https://… o /modules/…"
       },
       "edit_title": "Editar",
       "delete_title": "Eliminar"
@@ -338,7 +342,8 @@
       "global_rate_limit_max_hint": "Se aplica a todas las rutas excepto el chequeo de salud. Debe ser mayor que 0. Por defecto: 600.",
       "deno_conn_pool_size_label": "Tamaño del pool de conexiones de workers de módulo",
       "deno_conn_pool_size_hint": "Cuántas solicitudes pueden ejecutarse a la vez contra el proceso worker de un módulo. Debe ser al menos 1. Por defecto: 4. Se aplica en el próximo reinicio o actualización de cada módulo — no de inmediato.",
-      "validation_error": "Los límites en bytes deben ser 0 o mayores; los límites de velocidad y el tamaño del pool deben ser mayores que 0."
+      "validation_error": "Los límites en bytes deben ser 0 o mayores; los límites de velocidad y el tamaño del pool deben ser mayores que 0.",
+      "unit_bytes": "Bytes"
     },
     "system_info": {
       "title": "Información del sistema",
@@ -397,7 +402,8 @@
       "title": "Información de seguridad",
       "subtitle": "Sesiones activas y límites de tasa de un vistazo.",
       "card_desc": "Sesiones activas y contadores de límite de tasa en vivo.",
-      "load_error": "No se pudo cargar la información de seguridad."
+      "load_error": "No se pudo cargar la información de seguridad.",
+      "unknown": "Desconocido"
     },
     "audit": {
       "title": "Registro de auditoría",
@@ -504,6 +510,7 @@
     "quick_links_module_required": "Por favor selecciona un módulo.",
     "quick_links_modules_loading": "Cargando módulos…",
     "quick_links_modules_empty": "No hay módulos activos instalados.",
+    "quick_links_tile_icon_hint": "(Tabler, p. ej. ti-cloud)",
     "search": {
       "tab_web": "Web",
       "tab_images": "Imágenes",
@@ -530,7 +537,13 @@
       "choose_feeds": "Elegir feeds",
       "show_all": "Mostrar los {{count}} artículos",
       "empty_panel": "Aún no hay artículos.",
-      "choose_feeds_link": "Elegir feeds"
+      "choose_feeds_link": "Elegir feeds",
+      "time_minutes_ago_one": "hace {{count}} min",
+      "time_minutes_ago_other": "hace {{count}} min",
+      "time_hours_ago_one": "hace {{count}} h",
+      "time_hours_ago_other": "hace {{count}} h",
+      "time_days_ago_one": "hace {{count}} d",
+      "time_days_ago_other": "hace {{count}} d"
     },
     "feeds": {
       "panel_title": "Mis feeds",
@@ -636,7 +649,13 @@
       "waiting_toast": "{{name}} está esperando aprobación.",
       "no_module_updates": "Todos los módulos están actualizados",
       "module_updates_one": "{{count}} actualización de módulo disponible",
-      "module_updates_many": "{{count}} actualizaciones de módulos disponibles"
+      "module_updates_many": "{{count}} actualizaciones de módulos disponibles",
+      "someone_fallback": "Alguien",
+      "time_just_now": "ahora mismo",
+      "time_minutes_ago_one": "hace {{count}} min",
+      "time_minutes_ago_other": "hace {{count}} min",
+      "time_hours_ago_one": "hace {{count}} h",
+      "time_hours_ago_other": "hace {{count}} h"
     },
     "chat": {
       "no_provider": "Sin proveedor",
@@ -723,7 +742,8 @@
     "saving": "Guardando…",
     "loading": "Cargando…",
     "saved": "Guardado",
-    "dismiss": "Cerrar"
+    "dismiss": "Cerrar",
+    "tier": "Nivel {{tier}}"
   },
   "user": {
     "ai": {

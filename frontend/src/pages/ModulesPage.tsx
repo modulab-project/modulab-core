@@ -312,6 +312,7 @@ function TierBadge({ tier }: { tier: number }) {
   // next to this badge in the same row - reusing them for tier would make
   // "Tier 3" visually read as a warning. teal/gray-shades keep tier and
   // status badges unambiguous at a glance.
+  const { t } = useTranslation();
   const colors: Record<number, string> = {
     1: "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400",
     2: "bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-300",
@@ -321,7 +322,7 @@ function TierBadge({ tier }: { tier: number }) {
     <span
       className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${colors[tier] ?? colors[1]}`}
     >
-      Tier {tier}
+      {t("common.tier", { tier })}
     </span>
   );
 }

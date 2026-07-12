@@ -174,7 +174,8 @@
         "check_has_images": "met afbeeldingen",
         "check_no_images": "zonder afbeeldingen",
         "check_unreachable": "Feed niet bereikbaar",
-        "check_error": "Feed kon niet worden gecontroleerd."
+        "check_error": "Feed kon niet worden gecontroleerd.",
+        "label_placeholder": "bijv. Hacker News"
       },
       "catalog_open": "Uit catalogus",
       "catalog_checking": "Feeds controleren…",
@@ -202,7 +203,9 @@
         "import": "Geselecteerde importeren ({{count}})",
         "importing": "Importeren…",
         "none_selected": "Selecteer ten minste één feed.",
-        "unreachable": "niet bereikbaar"
+        "unreachable": "niet bereikbaar",
+        "entry_count_one": "{{count}} feed",
+        "entry_count_other": "{{count}} feeds"
       }
     },
     "searxng": {
@@ -279,7 +282,8 @@
         "save": "Opslaan",
         "create": "Aanmaken",
         "saving": "Opslaan…",
-        "error": "Fout"
+        "error": "Fout",
+        "url_placeholder": "https://… of /modules/…"
       },
       "edit_title": "Bewerken",
       "delete_title": "Verwijderen"
@@ -338,7 +342,8 @@
       "global_rate_limit_max_hint": "Van toepassing op alle routes behalve de health check. Moet groter zijn dan 0. Standaard: 600.",
       "deno_conn_pool_size_label": "Verbindingspoolgrootte van moduleworkers",
       "deno_conn_pool_size_hint": "Hoeveel verzoeken tegelijk tegen het workerproces van een module kunnen draaien. Moet minimaal 1 zijn. Standaard: 4. Wordt pas van kracht bij de volgende herstart of update van elke module — niet direct.",
-      "validation_error": "Bytelimieten moeten 0 of groter zijn; snelheidslimieten en poolgrootte moeten groter zijn dan 0."
+      "validation_error": "Bytelimieten moeten 0 of groter zijn; snelheidslimieten en poolgrootte moeten groter zijn dan 0.",
+      "unit_bytes": "Bytes"
     },
     "system_info": {
       "title": "Systeeminfo",
@@ -397,7 +402,8 @@
       "title": "Beveiligingsinfo",
       "subtitle": "Actieve sessies en rate limits in één oogopslag.",
       "card_desc": "Actieve sessies en live rate-limit-tellers.",
-      "load_error": "Beveiligingsinfo kon niet worden geladen."
+      "load_error": "Beveiligingsinfo kon niet worden geladen.",
+      "unknown": "Onbekend"
     },
     "audit": {
       "title": "Auditlogboek",
@@ -504,6 +510,7 @@
     "quick_links_module_required": "Selecteer een module.",
     "quick_links_modules_loading": "Modules laden…",
     "quick_links_modules_empty": "Geen actieve modules geïnstalleerd.",
+    "quick_links_tile_icon_hint": "(Tabler, bijv. ti-cloud)",
     "search": {
       "tab_web": "Web",
       "tab_images": "Afbeeldingen",
@@ -530,7 +537,13 @@
       "choose_feeds": "Feeds kiezen",
       "show_all": "Alle {{count}} artikelen weergeven",
       "empty_panel": "Nog geen artikelen.",
-      "choose_feeds_link": "Feeds kiezen"
+      "choose_feeds_link": "Feeds kiezen",
+      "time_minutes_ago_one": "{{count}} min geleden",
+      "time_minutes_ago_other": "{{count}} min geleden",
+      "time_hours_ago_one": "{{count}} u geleden",
+      "time_hours_ago_other": "{{count}} u geleden",
+      "time_days_ago_one": "{{count}} d geleden",
+      "time_days_ago_other": "{{count}} d geleden"
     },
     "feeds": {
       "panel_title": "Mijn feeds",
@@ -636,7 +649,13 @@
       "waiting_toast": "{{name}} wacht op goedkeuring.",
       "no_module_updates": "Alle modules zijn up-to-date",
       "module_updates_one": "{{count}} module-update beschikbaar",
-      "module_updates_many": "{{count}} module-updates beschikbaar"
+      "module_updates_many": "{{count}} module-updates beschikbaar",
+      "someone_fallback": "Iemand",
+      "time_just_now": "zojuist",
+      "time_minutes_ago_one": "{{count}} min geleden",
+      "time_minutes_ago_other": "{{count}} min geleden",
+      "time_hours_ago_one": "{{count}} u geleden",
+      "time_hours_ago_other": "{{count}} u geleden"
     },
     "chat": {
       "no_provider": "Geen provider",
@@ -723,7 +742,8 @@
     "saving": "Opslaan…",
     "loading": "Laden…",
     "saved": "Opgeslagen",
-    "dismiss": "Sluiten"
+    "dismiss": "Sluiten",
+    "tier": "Tier {{tier}}"
   },
   "user": {
     "ai": {

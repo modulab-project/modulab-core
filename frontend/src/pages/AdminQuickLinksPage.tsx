@@ -200,7 +200,7 @@ function QuickLinkForm({
                 required
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://… oder /modules/…"
+                placeholder={t("admin.quick_links.form.url_placeholder")}
                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-base focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
               />
             </div>

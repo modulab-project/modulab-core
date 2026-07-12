@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate, Link } from "react-router";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import i18n from "../lib/i18n";
 import {
   getHealth,
@@ -327,7 +328,7 @@ export function AppShell({
   useNotificationEvents(getSessionToken(), (event: ServerEvent) => {
     if (event.type === "user.pending" && isAdmin) {
       const data = (event.data ?? {}) as { email?: string; name?: string };
-      const who = data.name?.trim() || data.email || "Someone";
+      const who = data.name?.trim() || data.email || t("shell.notifications_panel.someone_fallback");
       const goReview = () => navigate("/admin/users");
       const waitingMsg = t("shell.notifications_panel.waiting_toast", { name: who });
       const reviewLabel = t("shell.notifications_panel.review");
@@ -1079,7 +1080,7 @@ function NotificationsPanelContent({
           >
             <div className="min-w-0">
               <p className="whitespace-pre-wrap break-words">{item.message}</p>
-              <p className="text-xs text-gray-400 dark:text-gray-500">{relativeTime(item.at)}</p>
+              <p className="text-xs text-gray-400 dark:text-gray-500">{relativeTime(item.at, t)}</p>
             </div>
             {item.actionLabel && item.onAction && (
               <button
@@ -1097,17 +1098,17 @@ function NotificationsPanelContent({
   );
 }
 
-function relativeTime(at: number): string {
+function relativeTime(at: number, t: TFunction): string {
   const seconds = Math.max(0, Math.floor((Date.now() - at) / 1000));
   if (seconds < 60) {
-    return "just now";
+    return t("shell.notifications_panel.time_just_now");
   }
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) {
-    return `${minutes}m ago`;
+    return t("shell.notifications_panel.time_minutes_ago", { count: minutes });
   }
   const hours = Math.floor(minutes / 60);
-  return `${hours}h ago`;
+  return t("shell.notifications_panel.time_hours_ago", { count: hours });
 }
 
 function StatusPanelContent({ health }: { health: HealthResponse }) {
