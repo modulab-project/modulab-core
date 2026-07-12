@@ -596,6 +596,13 @@
     "searxng_link": "SearXNG",
     "system_link": "Sistema",
     "audit_link": "Registro de auditoría",
+    "add_to_homescreen": "Añadir a pantalla de inicio",
+    "ios_install": {
+      "title": "Añadir a pantalla de inicio",
+      "step1": "Toca el icono Compartir en la barra de Safari",
+      "step2": "Selecciona «Añadir a pantalla de inicio»",
+      "step3": "Confirma con «Añadir»"
+    },
     "dark_mode": "Tema",
     "toggle_dark": "Alternar modo oscuro",
     "theme_light": "Claro",

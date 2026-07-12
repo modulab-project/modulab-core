@@ -596,6 +596,13 @@
     "searxng_link": "SearXNG",
     "system_link": "System",
     "audit_link": "Audit log",
+    "add_to_homescreen": "Add to Home Screen",
+    "ios_install": {
+      "title": "Add to Home Screen",
+      "step1": "Tap the Share icon in Safari's toolbar",
+      "step2": "Select \"Add to Home Screen\"",
+      "step3": "Confirm with \"Add\""
+    },
     "dark_mode": "Theme",
     "toggle_dark": "Toggle dark mode",
     "theme_light": "Light",

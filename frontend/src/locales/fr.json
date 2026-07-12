@@ -596,6 +596,13 @@
     "searxng_link": "SearXNG",
     "system_link": "Système",
     "audit_link": "Journal d'audit",
+    "add_to_homescreen": "Ajouter à l'écran d'accueil",
+    "ios_install": {
+      "title": "Ajouter à l'écran d'accueil",
+      "step1": "Appuyez sur l'icône Partager dans la barre Safari",
+      "step2": "Sélectionnez « Sur l'écran d'accueil »",
+      "step3": "Confirmez avec « Ajouter »"
+    },
     "dark_mode": "Thème",
     "toggle_dark": "Basculer le mode sombre",
     "theme_light": "Clair",

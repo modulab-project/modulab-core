@@ -596,6 +596,13 @@
     "searxng_link": "SearXNG",
     "system_link": "Systeem",
     "audit_link": "Auditlogboek",
+    "add_to_homescreen": "Toevoegen aan beginscherm",
+    "ios_install": {
+      "title": "Toevoegen aan beginscherm",
+      "step1": "Tik op het deelicoon in de Safari-balk",
+      "step2": "Kies \"Zet op beginscherm\"",
+      "step3": "Bevestig met \"Voeg toe\""
+    },
     "dark_mode": "Thema",
     "toggle_dark": "Donkere modus wisselen",
     "theme_light": "Licht",

@@ -67,6 +67,85 @@ function systemPrefersDark(): boolean {
   return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
 }
 
+// --- "Add to Home Screen" ---------------------------------------------
+//
+// Android/Chrome: the browser fires beforeinstallprompt once its own
+// installability checks pass (valid manifest + service worker, both
+// supplied by vite-plugin-pwa - see vite.config.ts). Capturing that event
+// is the *only* way to trigger the native install dialog later from our
+// own button instead of whatever mini-infobar Chrome would show on its own.
+//
+// iOS Safari: no beforeinstallprompt, no other programmatic trigger exists
+// at all - Apple deliberately doesn't expose one. The only route to the
+// home screen is Share -> "Zum Home-Bildschirm", so for iOS this hook just
+// reports "show the manual instructions" instead of an install action.
+interface BeforeInstallPromptEvent extends Event {
+  prompt(): Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+}
+
+function isIOSDevice(): boolean {
+  // iPadOS 13+ reports as "Macintosh" with touch support, not "iPad" -
+  // maxTouchPoints is what distinguishes it from an actual Mac.
+  return (
+    /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
+}
+
+function isStandaloneDisplay(): boolean {
+  return (
+    window.matchMedia?.("(display-mode: standalone)").matches === true ||
+    // iOS Safari's own pre-manifest-standard flag - still the only signal
+    // it exposes for "already added to the home screen".
+    (navigator as unknown as { standalone?: boolean }).standalone === true
+  );
+}
+
+function useInstallPrompt() {
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [isStandalone, setIsStandalone] = useState(isStandaloneDisplay);
+
+  useEffect(() => {
+    function onBeforeInstallPrompt(e: Event) {
+      e.preventDefault();
+      setDeferredPrompt(e as BeforeInstallPromptEvent);
+    }
+    function onInstalled() {
+      setDeferredPrompt(null);
+      setIsStandalone(true);
+    }
+    window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+    window.addEventListener("appinstalled", onInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+      window.removeEventListener("appinstalled", onInstalled);
+    };
+  }, []);
+
+  const isIOS = isIOSDevice();
+  // Android/Chrome (and other browsers implementing the same event) got a
+  // real deferred prompt to trigger. iOS never fires beforeinstallprompt no
+  // matter what, so it falls back to "show the manual instructions" instead
+  // - anything else (desktop Safari/Firefox without install support) shows
+  // neither.
+  const canPromptInstall = !!deferredPrompt;
+  const showIOSInstructions = isIOS && !isStandalone && !deferredPrompt;
+  const visible = !isStandalone && (canPromptInstall || showIOSInstructions);
+
+  async function promptInstall() {
+    if (!deferredPrompt) return;
+    await deferredPrompt.prompt();
+    await deferredPrompt.userChoice;
+    // Chrome clears its own eligibility after one prompt regardless of the
+    // user's choice - a dismissed prompt does not fire beforeinstallprompt
+    // again until the page is reloaded, so there is nothing to keep here.
+    setDeferredPrompt(null);
+  }
+
+  return { visible, canPromptInstall, showIOSInstructions, promptInstall };
+}
+
 // Shared chrome - header, profile/status slide panels, footer - for every
 // page reachable once a user has a fully-approved session: Home ("/") and
 // ProfilePage ("/profile") so far. Originally lived only in Home.tsx; moved
@@ -182,6 +261,8 @@ export function AppShell({
 
   const isAdmin = isAdminRole(session.role);
   const [chatOpen, setChatOpen] = useState(false);
+  const installPrompt = useInstallPrompt();
+  const [iosInstallHelpOpen, setIosInstallHelpOpen] = useState(false);
 
   // pendingCount is the authoritative "how many people are waiting right
   // now" number, fetched straight from GET /v1/admin/users (the same data
@@ -370,8 +451,13 @@ export function AppShell({
           onLogout={handleLogout}
           onClose={() => setOpenPanel(null)}
           activeModules={activeModules}
+          installPrompt={installPrompt}
+          onShowIOSInstallHelp={() => setIosInstallHelpOpen(true)}
         />
       </SlidePanel>
+      {iosInstallHelpOpen && (
+        <IOSInstallInstructions onClose={() => setIosInstallHelpOpen(false)} />
+      )}
       <SlidePanel open={openPanel === "status"} onClose={() => setOpenPanel(null)} title={t("shell.system_status")}>
         {health && <StatusPanelContent health={health} />}
       </SlidePanel>
@@ -611,6 +697,50 @@ function SlidePanel({
   );
 }
 
+// iOS Safari has no install API to call (see useInstallPrompt's doc
+// comment) - this just walks the user through the manual Share ->
+// "Zum Home-Bildschirm" steps instead of a broken/no-op button.
+function IOSInstallInstructions({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-sm rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl dark:bg-gray-900"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-base font-semibold">{t("shell.ios_install.title")}</h3>
+          <button
+            type="button"
+            aria-label={t("shell.close")}
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
+          >
+            <i className="ti ti-x" />
+          </button>
+        </div>
+        <ol className="space-y-3 text-sm text-gray-700 dark:text-gray-300">
+          <li className="flex items-start gap-2.5">
+            <i className="ti ti-square-arrow-up mt-0.5 flex-none text-[16px] text-teal-600 dark:text-teal-400" />
+            {t("shell.ios_install.step1")}
+          </li>
+          <li className="flex items-start gap-2.5">
+            <i className="ti ti-square-rounded-plus mt-0.5 flex-none text-[16px] text-teal-600 dark:text-teal-400" />
+            {t("shell.ios_install.step2")}
+          </li>
+          <li className="flex items-start gap-2.5">
+            <i className="ti ti-check mt-0.5 flex-none text-[16px] text-teal-600 dark:text-teal-400" />
+            {t("shell.ios_install.step3")}
+          </li>
+        </ol>
+      </div>
+    </div>
+  );
+}
+
 function ProfilePanelContent({
   session,
   isAdmin,
@@ -619,6 +749,8 @@ function ProfilePanelContent({
   onLogout,
   onClose,
   activeModules,
+  installPrompt,
+  onShowIOSInstallHelp,
 }: {
   session: Session;
   isAdmin: boolean;
@@ -627,6 +759,8 @@ function ProfilePanelContent({
   onLogout: () => void;
   onClose: () => void;
   activeModules: InstalledModule[];
+  installPrompt: ReturnType<typeof useInstallPrompt>;
+  onShowIOSInstallHelp: () => void;
 }) {
   const { t, i18n: i18nInstance } = useTranslation();
   const displayName = session.name.trim() || session.email;
@@ -744,6 +878,25 @@ function ProfilePanelContent({
               </Link>
             </>
           )}
+        </>
+      )}
+      {installPrompt.visible && (
+        <>
+          <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />
+          <button
+            type="button"
+            onClick={() => {
+              if (installPrompt.canPromptInstall) {
+                installPrompt.promptInstall();
+              } else if (installPrompt.showIOSInstructions) {
+                onShowIOSInstallHelp();
+              }
+            }}
+            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
+          >
+            <i className="ti ti-device-mobile-plus text-[15px] text-gray-500" />
+            {t("shell.add_to_homescreen")}
+          </button>
         </>
       )}
       <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />

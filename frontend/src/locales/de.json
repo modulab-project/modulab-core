@@ -596,6 +596,13 @@
     "searxng_link": "SearXNG",
     "system_link": "System",
     "audit_link": "Audit-Log",
+    "add_to_homescreen": "Zum Startbildschirm hinzufügen",
+    "ios_install": {
+      "title": "Zum Startbildschirm hinzufügen",
+      "step1": "Auf das Teilen-Symbol in der Safari-Leiste tippen",
+      "step2": "„Zum Home-Bildschirm“ auswählen",
+      "step3": "Mit „Hinzufügen“ bestätigen"
+    },
     "dark_mode": "Design",
     "toggle_dark": "Dunkelmodus umschalten",
     "theme_light": "Hell",
