@@ -108,8 +108,8 @@ services:
     mem_limit: 128m
     cpus: 0.5
     ports:
-      - "8080:80"
-      - "8443:443"
+      - "80:80"
+      - "443:443"
     environment:
       # Cloudflare API token — needs Zone:DNS:Edit permission for your domain.
       # Must be exactly 40 characters with no surrounding whitespace.
