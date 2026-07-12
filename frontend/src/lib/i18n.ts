@@ -26,10 +26,13 @@ i18n
       escapeValue: false,
     },
     detection: {
-      // Check localStorage first, then browser language, cache in localStorage
-      order: ["localStorage", "navigator"],
-      caches: ["localStorage"],
-      lookupLocalStorage: "modulab_language",
+      // No localStorage: the user's actual choice lives in users.ui_language
+      // (DB) and is applied by AppShell's getUserPrefs effect once a session
+      // exists. Before login (or if that fetch hasn't run yet), fall back to
+      // the browser's own language - never cache the result client-side, so
+      // there is nothing here that could go stale or leak across devices.
+      order: ["navigator"],
+      caches: [],
     },
   });
 

@@ -51,22 +51,17 @@ let nextFeedItemID = 1;
 const FEED_LIMIT = 20;
 
 const FRONTEND_VERSION = packageJson.version;
-const THEME_KEY = "modulab_theme";
 const PROJECT_URL = "https://modulab.app";
 const GITHUB_URL = "https://github.com/modulab-project/modulab-core";
 
 // Light/Dark are explicit user choices; System defers to the OS/browser's
 // prefers-color-scheme and stays live-updated if that changes while the
-// tab is open (e.g. the OS switches to dark mode at sunset). Anything other
-// than a recognized "dark"/"system" value in storage (including an absent
-// key, e.g. a first-ever visit) falls back to "light" - unchanged default
-// from before this had three options.
+// tab is open (e.g. the OS switches to dark mode at sunset). No localStorage
+// mirror any more - the authoritative value is users.theme (DB), applied by
+// the getUserPrefs effect below once a session exists. Until that fetch
+// resolves (or if there is no session yet), this renders as "light" - the
+// same default a first-ever visit always had.
 type Theme = "light" | "dark" | "system";
-
-function readStoredTheme(): Theme {
-  const stored = localStorage.getItem(THEME_KEY);
-  return stored === "dark" || stored === "system" ? stored : "light";
-}
 
 function systemPrefersDark(): boolean {
   return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
@@ -92,7 +87,7 @@ export function AppShell({
   const navigate = useNavigate();
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [openPanel, setOpenPanel] = useState<OpenPanel>(null);
-  const [theme, setTheme] = useState<Theme>(readStoredTheme);
+  const [theme, setTheme] = useState<Theme>("light");
   // The actual light/dark class always comes from this, never from `theme`
   // directly - `theme === "system"` still needs to resolve to a concrete
   // boolean before it can be applied to <html>.
@@ -106,8 +101,7 @@ export function AppShell({
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
-    localStorage.setItem(THEME_KEY, theme);
-  }, [dark, theme]);
+  }, [dark]);
 
   // Only relevant while `theme === "system"`, but kept subscribed
   // unconditionally rather than mounting/unmounting the listener on every
@@ -152,13 +146,11 @@ export function AppShell({
   }, [refreshModuleUpdateCount]);
 
   // Load the stored UI language and theme on first render for this user and
-  // apply them so both preferences survive across browsers and devices.
-  // Best-effort: a failed fetch leaves the existing browser/localStorage
-  // values in place. Theme was localStorage-only before this - an empty
-  // `prefs.theme` (nothing saved to the DB yet for this user) intentionally
-  // keeps whatever readStoredTheme() already initialized state to, rather
-  // than resetting to "light", so an existing local choice isn't clobbered
-  // the first time this user hits an updated Core instance.
+  // apply them so both preferences survive across browsers and devices -
+  // users.ui_language / users.theme are the only place either lives now,
+  // there is no client-side cache to fall back on. Best-effort: a failed
+  // fetch leaves the render at its "light"/browser-language defaults until
+  // the next successful fetch (e.g. next reload) picks up the real values.
   useEffect(() => {
     const token = getSessionToken();
     if (!token) return;
@@ -779,8 +771,9 @@ function ProfilePanelContent({
                 setTheme(opt.value);
                 // Persist to DB so the preference survives across devices,
                 // same pattern as the language <select> below. Best-effort:
-                // a failed save leaves the in-browser change (and its
-                // localStorage mirror, written by the effect above) intact.
+                // a failed save leaves the in-browser change intact for this
+                // tab, but it will not survive a reload since there is no
+                // longer a local cache of it.
                 const token = getSessionToken();
                 if (token) {
                   updateUserPrefs(token, { theme: opt.value }).catch(() => {});

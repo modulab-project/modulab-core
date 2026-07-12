@@ -148,12 +148,11 @@ func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
 		return fmt.Errorf("db: ensure users.ui_language: %w", err)
 	}
 	// theme stores the user's light/dark/system preference (AppShell.tsx's
-	// three-way toggle). Previously localStorage-only ("modulab_theme"),
-	// which meant the choice did not follow the user across browsers/
-	// devices, unlike ui_language right above it - moved here to match.
-	// Plaintext for the same reason as ui_language: not PII. Empty string
-	// means "no preference saved yet, use whatever the client already has
-	// (localStorage, falling back to light)".
+	// three-way toggle). This is now the only place it lives - the frontend
+	// no longer mirrors it into localStorage, so every device reads the same
+	// value. Plaintext for the same reason as ui_language: not PII. Empty
+	// string means "no preference saved yet"; the client renders "light"
+	// until a save happens.
 	if _, err := p.Exec(ctx, `
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS theme TEXT NOT NULL DEFAULT ''
 	`); err != nil {

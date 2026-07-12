@@ -7,33 +7,26 @@
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
     <title>ModuLab</title>
-    <!-- Applies the "dark" class before React mounts (and before first
-         paint), reading the same localStorage key AppShell.tsx writes to
-         (THEME_KEY = "modulab_theme"). Without this, /login, /setup and
-         /pending - which never run AppShell's own theme effect - would
-         flash light mode for a frame on every load whenever the user has
-         dark mode on, then snap to dark once React mounts. Wrapped in
-         try/catch because localStorage can throw in locked-down contexts
-         (e.g. some private browsing modes) and a theme flash is not worth
-         a blank page over.
-
-         Three stored values now: "dark" and "light" are explicit choices
-         (unchanged from before); "system" (added alongside the profile
-         panel's Light/Dark/System control) has no fixed answer here, so it
-         falls back to the OS/browser's prefers-color-scheme instead - same
-         source AppShell.tsx's own "system" handling reads at runtime, kept
-         in sync so this pre-paint guess never disagrees with what React
-         settles on a moment later. -->
+    <!-- Best-effort pre-paint dark-mode guess, before React mounts. There is
+         no localStorage cache of the user's actual theme choice any more
+         (that lives in users.theme, DB-only, applied by AppShell's
+         getUserPrefs effect after a session is confirmed) - so this can only
+         go by the OS/browser's prefers-color-scheme, same source
+         AppShell.tsx's own "system" handling reads at runtime. A user who
+         explicitly picked "dark" while their OS is in light mode (or vice
+         versa) will see a brief flash of the wrong mode on /login, /setup
+         and /pending, and on first paint of the main app before the DB fetch
+         resolves - an accepted trade-off of not persisting theme client-side
+         at all. Wrapped in try/catch because matchMedia can be unavailable
+         in some locked-down contexts and a theme flash is not worth a blank
+         page over. -->
     <script>
       (function () {
         try {
-          var stored = localStorage.getItem("modulab_theme");
-          var wantsDark =
-            stored === "dark" ||
-            (stored === "system" &&
-              window.matchMedia &&
-              window.matchMedia("(prefers-color-scheme: dark)").matches);
-          if (wantsDark) {
+          if (
+            window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches
+          ) {
             document.documentElement.classList.add("dark");
           }
         } catch (e) {}
