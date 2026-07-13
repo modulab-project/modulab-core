@@ -1540,7 +1540,7 @@ func systemInfoHandler(pool *db.Pool, valkeyClient *valkey.Client, cfg config.Co
 		// module's source_repo. version.Version has no leading "v" (see that
 		// constant's doc comment); GitHub release tags conventionally do, so
 		// both sides are normalized before comparing.
-		if latest, err := store.FetchLatestRelease(ctx, "https://github.com/modulab-project/modulab-core"); err == nil && latest != "" {
+		if latest, err := store.FetchLatestRelease(ctx, pool, "https://github.com/modulab-project/modulab-core"); err == nil && latest != "" {
 			normalized := strings.TrimPrefix(strings.TrimSpace(latest), "v")
 			resp.LatestCoreVersion = normalized
 			resp.CoreUpdateAvailable = normalized != version.Version
@@ -1584,7 +1584,7 @@ func systemInfoHandler(pool *db.Pool, valkeyClient *valkey.Client, cfg config.Co
 		// check, see systemInfoTimer's doc comment. last_synced_at is already
 		// persisted in module_registry (used by GET /v1/store today), so no
 		// extra in-memory tracking is needed for this one.
-		syncInterval := store.SyncInterval()
+		syncInterval := store.SyncInterval(ctx, pool)
 		resp.RegistrySync = systemInfoTimer{IntervalSeconds: int64(syncInterval / time.Second)}
 		if lastSync, err := store.LastSyncedAt(ctx, pool); err == nil && !lastSync.IsZero() {
 			lastStr := lastSync.UTC().Format(time.RFC3339)
