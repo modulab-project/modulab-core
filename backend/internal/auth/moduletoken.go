@@ -105,10 +105,11 @@ func ValidateModuleToken(ctx context.Context, d Deps, token, module string) (Ses
 // validates the request's bearer (or, if allowQuery, ?t=) token as a
 // module-scoped token minted for exactly module, and writes the appropriate
 // error status itself on failure. Use for every route a module's own UI
-// bundle/component calls directly (proxy API, bundle, locale, storage) -
-// never for host-only endpoints (e.g. GET /v1/modules/{name} metadata),
-// which must keep requiring a full session so Core's own pages still work
-// before any module-scoped token has been minted.
+// bundle/component calls directly (proxy API, bundle, locale, storage).
+//
+// Two host-only informational endpoints (GET /v1/modules/{name} and GET
+// /v1/modules/{name}/egress-hosts) are the one exception: use
+// RequireSessionOrModuleToken for those instead - see its doc comment.
 func RequireModuleToken(d Deps, module string, w http.ResponseWriter, r *http.Request, allowQuery bool) (Session, bool) {
 	token := bearerToken(r)
 	if token == "" && allowQuery {
@@ -125,6 +126,55 @@ func RequireModuleToken(d Deps, module string, w http.ResponseWriter, r *http.Re
 	}
 	if !ok {
 		http.Error(w, "invalid or expired module token", http.StatusUnauthorized)
+		return Session{}, false
+	}
+	if sess.Role == RolePending || sess.Locked {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return Session{}, false
+	}
+	return sess, true
+}
+
+// RequireSessionOrModuleToken accepts either a full session bearer token OR
+// a module-scoped token minted for exactly module. Needed because every
+// module's own UI bundle (e.g. unifi-network/recipes' ModuleInfoView "info"
+// tab) only ever holds the module-scoped token (see ModulePage.tsx /
+// ModuleComponentProps.token), never the caller's full session - yet the
+// info card calls Core's GET /v1/modules/{name} and GET
+// /v1/modules/{name}/egress-hosts directly to show version/status/egress
+// info. Those two routes previously required RequireActiveSession only, so
+// every module-info-card load 401'd ("invalid or expired session") and the
+// UI showed a permanent load error. Safe to accept the module token here
+// because both routes only ever return read-only data about the exact
+// module the token was scoped to - never anything cross-module or
+// privileged. Reported by the user 2026-07-13.
+func RequireSessionOrModuleToken(d Deps, module string, w http.ResponseWriter, r *http.Request) (Session, bool) {
+	token := bearerToken(r)
+	if token == "" {
+		http.Error(w, "missing bearer token", http.StatusUnauthorized)
+		return Session{}, false
+	}
+
+	// Try as a full session first - the common case for Core's own pages.
+	if sess, ok, err := ValidateSession(r.Context(), d, token); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return Session{}, false
+	} else if ok {
+		if sess.Role == RolePending || sess.Locked {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return Session{}, false
+		}
+		return sess, true
+	}
+
+	// Fall back to a module-scoped token minted for exactly `module`.
+	sess, ok, err := ValidateModuleToken(r.Context(), d, token, module)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return Session{}, false
+	}
+	if !ok {
+		http.Error(w, "invalid or expired session", http.StatusUnauthorized)
 		return Session{}, false
 	}
 	if sess.Role == RolePending || sess.Locked {

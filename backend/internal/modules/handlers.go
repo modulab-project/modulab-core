@@ -84,16 +84,18 @@ func CheckUpdatesHandler(d Deps, storeDeps store.Deps, authDeps auth.Deps) http.
 // ── GET /v1/modules/{name} ────────────────────────────────────────────────────
 
 // GetInstalledHandler returns a single installed module by name.
-// Requires any active session.
+// Requires any active session, OR a module-scoped token minted for exactly
+// this module (see auth.RequireSessionOrModuleToken - a module's own
+// ModuleInfoView "info" tab calls this route with only its module token).
 func GetInstalledHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := auth.RequireActiveSession(authDeps, w, r); !ok {
-			return
-		}
-
 		name := r.PathValue("name")
 		if name == "" {
 			http.Error(w, "missing module name", http.StatusBadRequest)
+			return
+		}
+
+		if _, ok := auth.RequireSessionOrModuleToken(authDeps, name, w, r); !ok {
 			return
 		}
 
@@ -132,13 +134,13 @@ func GetInstalledHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 // same way as "static allowlist is empty".
 func GetModuleEgressHostsHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := auth.RequireActiveSession(authDeps, w, r); !ok {
-			return
-		}
-
 		name := r.PathValue("name")
 		if name == "" {
 			http.Error(w, "missing module name", http.StatusBadRequest)
+			return
+		}
+
+		if _, ok := auth.RequireSessionOrModuleToken(authDeps, name, w, r); !ok {
 			return
 		}
 
