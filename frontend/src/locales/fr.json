@@ -356,14 +356,15 @@
       "news_fetch_timeout_seconds_label": "Délai des flux RSS/Atom",
       "news_fetch_timeout_seconds_hint": "Délai HTTP par récupération de flux. Les flux lents ou instables sont sinon signalés comme inaccessibles prématurément. Doit être supérieur à 0. Par défaut : 10 secondes.",
       "store_sync_interval_seconds_label": "Intervalle de synchronisation du registre de modules",
-      "store_sync_interval_seconds_hint": "Fréquence de resynchronisation du registre de modules (officiel + communautaire) depuis GitHub en arrière-plan. Doit être supérieur à 0. Par défaut : 3600 secondes (1 heure). Un changement prend effet au prochain cycle de synchronisation.",
+      "store_sync_interval_seconds_hint": "Fréquence de resynchronisation du registre de modules (officiel + communautaire) depuis GitHub en arrière-plan. Doit être supérieur à 0. Par défaut : 60 minutes (1 heure). Un changement prend effet au prochain cycle de synchronisation.",
       "store_github_api_timeout_seconds_label": "Délai de l'API GitHub",
       "store_github_api_timeout_seconds_hint": "Délai HTTP pour les appels à l'API GitHub / contenu brut lors d'une synchronisation du registre. Doit être supérieur à 0. Par défaut : 15 secondes.",
       "modules_install_download_timeout_seconds_label": "Délai de téléchargement de module",
-      "modules_install_download_timeout_seconds_hint": "Délai pour télécharger le ZIP et la somme de contrôle d'un module lors de l'installation/mise à jour. Un plafond de taille ZIP plus élevé peut aussi nécessiter une fenêtre plus longue. Doit être supérieur à 0. Par défaut : 300 secondes (5 minutes).",
+      "modules_install_download_timeout_seconds_hint": "Délai pour télécharger le ZIP et la somme de contrôle d'un module lors de l'installation/mise à jour. Un plafond de taille ZIP plus élevé peut aussi nécessiter une fenêtre plus longue. Doit être supérieur à 0. Par défaut : 5 minutes.",
       "validation_error": "Les limites en octets doivent être ≥ 0 ; les limites de débit et la taille du pool doivent être > 0.",
       "unit_bytes": "Octets",
-      "unit_seconds": "secondes"
+      "unit_seconds": "secondes",
+      "unit_minutes": "minutes"
     },
     "system_info": {
       "title": "Informations système",

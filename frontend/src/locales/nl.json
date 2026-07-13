@@ -356,14 +356,15 @@
       "news_fetch_timeout_seconds_label": "RSS/Atom-feed-time-out",
       "news_fetch_timeout_seconds_hint": "HTTP-time-out per feedophaling. Trage of instabiele feeds worden anders voortijdig als onbereikbaar gemeld. Moet groter zijn dan 0. Standaard: 10 seconden.",
       "store_sync_interval_seconds_label": "Synchronisatie-interval moduleregister",
-      "store_sync_interval_seconds_hint": "Hoe vaak het moduleregister (officieel + community) op de achtergrond opnieuw wordt gesynchroniseerd vanuit GitHub. Moet groter zijn dan 0. Standaard: 3600 seconden (1 uur). Een wijziging wordt van kracht bij de volgende synchronisatiecyclus.",
+      "store_sync_interval_seconds_hint": "Hoe vaak het moduleregister (officieel + community) op de achtergrond opnieuw wordt gesynchroniseerd vanuit GitHub. Moet groter zijn dan 0. Standaard: 60 minuten (1 uur). Een wijziging wordt van kracht bij de volgende synchronisatiecyclus.",
       "store_github_api_timeout_seconds_label": "GitHub-API-time-out",
       "store_github_api_timeout_seconds_hint": "HTTP-time-out voor GitHub-API-/raw-content-aanvragen tijdens een registersynchronisatie. Moet groter zijn dan 0. Standaard: 15 seconden.",
       "modules_install_download_timeout_seconds_label": "Module-downloadtime-out",
-      "modules_install_download_timeout_seconds_hint": "Time-out voor het downloaden van de ZIP en checksum van een module bij installatie/update. Een grotere ZIP-groottelimiet kan ook een langer tijdvenster nodig hebben. Moet groter zijn dan 0. Standaard: 300 seconden (5 minuten).",
+      "modules_install_download_timeout_seconds_hint": "Time-out voor het downloaden van de ZIP en checksum van een module bij installatie/update. Een grotere ZIP-groottelimiet kan ook een langer tijdvenster nodig hebben. Moet groter zijn dan 0. Standaard: 5 minuten.",
       "validation_error": "Bytelimieten moeten 0 of groter zijn; snelheidslimieten en poolgrootte moeten groter zijn dan 0.",
       "unit_bytes": "Bytes",
-      "unit_seconds": "seconden"
+      "unit_seconds": "seconden",
+      "unit_minutes": "minuten"
     },
     "system_info": {
       "title": "Systeeminfo",

@@ -356,14 +356,15 @@
       "news_fetch_timeout_seconds_label": "RSS/Atom feed timeout",
       "news_fetch_timeout_seconds_hint": "HTTP timeout per feed fetch. Slow or flaky feeds otherwise get reported as unreachable prematurely. Must be greater than 0. Default: 10 seconds.",
       "store_sync_interval_seconds_label": "Module registry sync interval",
-      "store_sync_interval_seconds_hint": "How often the module registry (official + community) is re-synced from GitHub in the background. Must be greater than 0. Default: 3600 seconds (1 hour). A change takes effect on the next sync cycle.",
+      "store_sync_interval_seconds_hint": "How often the module registry (official + community) is re-synced from GitHub in the background. Must be greater than 0. Default: 60 minutes (1 hour). A change takes effect on the next sync cycle.",
       "store_github_api_timeout_seconds_label": "GitHub API timeout",
       "store_github_api_timeout_seconds_hint": "HTTP timeout for GitHub API/raw-content fetches during a registry sync. Must be greater than 0. Default: 15 seconds.",
       "modules_install_download_timeout_seconds_label": "Module download timeout",
-      "modules_install_download_timeout_seconds_hint": "Timeout for downloading a module's ZIP and checksum during install/update. A larger ZIP size cap can also need a longer window. Must be greater than 0. Default: 300 seconds (5 minutes).",
+      "modules_install_download_timeout_seconds_hint": "Timeout for downloading a module's ZIP and checksum during install/update. A larger ZIP size cap can also need a longer window. Must be greater than 0. Default: 5 minutes.",
       "validation_error": "Byte limits must be 0 or greater; rate limits and pool size must be greater than 0.",
       "unit_bytes": "Bytes",
-      "unit_seconds": "seconds"
+      "unit_seconds": "seconds",
+      "unit_minutes": "minutes"
     },
     "system_info": {
       "title": "System info",

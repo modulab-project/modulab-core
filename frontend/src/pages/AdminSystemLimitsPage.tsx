@@ -22,8 +22,11 @@ import { AppShell } from "../components/AppShell";
 // re-derived from the byte value each time settings are (re)loaded. The
 // "timeouts" group's six fields are stored in seconds directly on the
 // backend (no ms/browser-API constraint at their point of use, unlike
-// geo_timeout_ms), so they render as a plain NumberField with a "seconds"
-// suffix rather than needing SecondsField's ms↔s conversion.
+// geo_timeout_ms). Four render as a plain NumberField with a "seconds"
+// suffix (small values, single-digit to ~30s); the other two - the sync
+// interval (default 3600s) and the module download timeout (default
+// 300s) - sit in the minutes range, so they use MinutesField to display/
+// edit in minutes while `inputs` still holds the canonical seconds string.
 const FIELDS: Array<{ key: keyof LimitsSettings; group: "uploads" | "rate_limits" | "performance" | "timeouts" }> = [
   { key: "max_body_bytes", group: "uploads" },
   { key: "max_upload_body_bytes", group: "uploads" },
@@ -173,11 +176,16 @@ export default function AdminSystemLimitsPage() {
             )}
           </Group>
           <Group title={t("admin.system_limits.group_timeouts")}>
-            {timeoutFields.map((f) => (
-              <NumberField key={f.key} fieldKey={f.key} value={inputs[f.key] ?? ""}
-                onChange={(v) => setInputs((prev) => ({ ...prev, [f.key]: v }))} t={t}
-                unitLabel={t("admin.system_limits.unit_seconds")} />
-            ))}
+            {timeoutFields.map((f) =>
+              f.key === "store_sync_interval_seconds" || f.key === "modules_install_download_timeout_seconds" ? (
+                <MinutesField key={f.key} fieldKey={f.key} secondsValue={inputs[f.key] ?? ""}
+                  onSecondsChange={(v) => setInputs((prev) => ({ ...prev, [f.key]: v }))} t={t} />
+              ) : (
+                <NumberField key={f.key} fieldKey={f.key} value={inputs[f.key] ?? ""}
+                  onChange={(v) => setInputs((prev) => ({ ...prev, [f.key]: v }))} t={t}
+                  unitLabel={t("admin.system_limits.unit_seconds")} />
+              ),
+            )}
           </Group>
 
           <div className="flex justify-end">
@@ -350,6 +358,61 @@ function SecondsField({
           className="w-full flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-base outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-800"
         />
         <span className="text-sm text-gray-500 dark:text-gray-400">{t("admin.system_limits.unit_seconds")}</span>
+      </div>
+      <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+        {t(`admin.system_limits.${fieldKey}_hint`)}
+      </p>
+    </div>
+  );
+}
+
+// Stores/sends the canonical value in seconds (matching what the backend's
+// time.Duration-based timeouts/tickers actually use, e.g.
+// store.SyncInterval, modules.InstallDownloadTimeoutSeconds), but displays
+// and edits it in minutes - same split as SecondsField above, just one
+// level up: these two fields (registry sync interval, module download
+// timeout) sit in the minutes-to-hour range, where a raw seconds count
+// (3600, 300) is harder to read at a glance than "60" / "5".
+const SECONDS_PER_MINUTE = 60;
+
+function MinutesField({
+  fieldKey,
+  secondsValue,
+  onSecondsChange,
+  t,
+}: {
+  fieldKey: keyof LimitsSettings;
+  secondsValue: string;
+  onSecondsChange: (v: string) => void;
+  t: (key: string) => string;
+}) {
+  const numSeconds = Number(secondsValue);
+  const displayValue = secondsValue !== "" && !isNaN(numSeconds)
+    ? String(parseFloat((numSeconds / SECONDS_PER_MINUTE).toFixed(3)))
+    : secondsValue;
+
+  function handleNumberChange(v: string) {
+    if (v === "") { onSecondsChange(""); return; }
+    const n = parseFloat(v);
+    if (isNaN(n)) { onSecondsChange(v); return; }
+    onSecondsChange(String(Math.round(n * SECONDS_PER_MINUTE)));
+  }
+
+  return (
+    <div>
+      <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">
+        {t(`admin.system_limits.${fieldKey}_label`)}
+      </label>
+      <div className="flex items-center gap-2">
+        <input
+          type="number"
+          min={0}
+          step={0.1}
+          value={displayValue}
+          onChange={(e) => handleNumberChange(e.target.value)}
+          className="w-full flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-base outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-800"
+        />
+        <span className="text-sm text-gray-500 dark:text-gray-400">{t("admin.system_limits.unit_minutes")}</span>
       </div>
       <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
         {t(`admin.system_limits.${fieldKey}_hint`)}

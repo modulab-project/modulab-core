@@ -356,14 +356,15 @@
       "news_fetch_timeout_seconds_label": "RSS/Atom-Feed-Timeout",
       "news_fetch_timeout_seconds_hint": "HTTP-Timeout pro Feed-Abruf. Langsame oder instabile Feeds werden sonst vorschnell als „nicht erreichbar“ gemeldet. Muss größer als 0 sein. Standard: 10 Sekunden.",
       "store_sync_interval_seconds_label": "Modul-Registry-Sync-Intervall",
-      "store_sync_interval_seconds_hint": "Wie oft die Modul-Registry (offiziell + Community) im Hintergrund neu von GitHub synchronisiert wird. Muss größer als 0 sein. Standard: 3600 Sekunden (1 Stunde). Eine Änderung wirkt erst ab dem nächsten Sync-Zyklus.",
+      "store_sync_interval_seconds_hint": "Wie oft die Modul-Registry (offiziell + Community) im Hintergrund neu von GitHub synchronisiert wird. Muss größer als 0 sein. Standard: 60 Minuten (1 Stunde). Eine Änderung wirkt erst ab dem nächsten Sync-Zyklus.",
       "store_github_api_timeout_seconds_label": "GitHub-API-Timeout",
       "store_github_api_timeout_seconds_hint": "HTTP-Timeout für GitHub-API- und Raw-Content-Abrufe während eines Registry-Syncs. Muss größer als 0 sein. Standard: 15 Sekunden.",
       "modules_install_download_timeout_seconds_label": "Modul-Download-Timeout",
-      "modules_install_download_timeout_seconds_hint": "Timeout für den Download von ZIP und Prüfsumme bei Installation/Update eines Moduls. Ein größeres ZIP-Größenlimit kann auch ein längeres Zeitfenster benötigen. Muss größer als 0 sein. Standard: 300 Sekunden (5 Minuten).",
+      "modules_install_download_timeout_seconds_hint": "Timeout für den Download von ZIP und Prüfsumme bei Installation/Update eines Moduls. Ein größeres ZIP-Größenlimit kann auch ein längeres Zeitfenster benötigen. Muss größer als 0 sein. Standard: 5 Minuten.",
       "validation_error": "Byte-Limits müssen 0 oder größer sein; Rate-Limits und Pool-Größe müssen größer als 0 sein.",
       "unit_bytes": "Bytes",
-      "unit_seconds": "Sekunden"
+      "unit_seconds": "Sekunden",
+      "unit_minutes": "Minuten"
     },
     "system_info": {
       "title": "Systeminfo",

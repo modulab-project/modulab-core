@@ -356,14 +356,15 @@
       "news_fetch_timeout_seconds_label": "Tiempo de espera de feeds RSS/Atom",
       "news_fetch_timeout_seconds_hint": "Tiempo de espera HTTP por cada obtención de feed. Los feeds lentos o inestables se marcan como inaccesibles prematuramente si no se ajusta. Debe ser mayor que 0. Por defecto: 10 segundos.",
       "store_sync_interval_seconds_label": "Intervalo de sincronización del registro de módulos",
-      "store_sync_interval_seconds_hint": "Con qué frecuencia se resincroniza el registro de módulos (oficial + comunidad) desde GitHub en segundo plano. Debe ser mayor que 0. Por defecto: 3600 segundos (1 hora). Un cambio se aplica en el próximo ciclo de sincronización.",
+      "store_sync_interval_seconds_hint": "Con qué frecuencia se resincroniza el registro de módulos (oficial + comunidad) desde GitHub en segundo plano. Debe ser mayor que 0. Por defecto: 60 minutos (1 hora). Un cambio se aplica en el próximo ciclo de sincronización.",
       "store_github_api_timeout_seconds_label": "Tiempo de espera de la API de GitHub",
       "store_github_api_timeout_seconds_hint": "Tiempo de espera HTTP para las solicitudes a la API de GitHub/contenido bruto durante una sincronización del registro. Debe ser mayor que 0. Por defecto: 15 segundos.",
       "modules_install_download_timeout_seconds_label": "Tiempo de espera de descarga de módulo",
-      "modules_install_download_timeout_seconds_hint": "Tiempo de espera para descargar el ZIP y la suma de verificación de un módulo durante la instalación/actualización. Un límite de tamaño ZIP mayor también puede necesitar una ventana más larga. Debe ser mayor que 0. Por defecto: 300 segundos (5 minutos).",
+      "modules_install_download_timeout_seconds_hint": "Tiempo de espera para descargar el ZIP y la suma de verificación de un módulo durante la instalación/actualización. Un límite de tamaño ZIP mayor también puede necesitar una ventana más larga. Debe ser mayor que 0. Por defecto: 5 minutos.",
       "validation_error": "Los límites en bytes deben ser 0 o mayores; los límites de velocidad y el tamaño del pool deben ser mayores que 0.",
       "unit_bytes": "Bytes",
-      "unit_seconds": "segundos"
+      "unit_seconds": "segundos",
+      "unit_minutes": "minutos"
     },
     "system_info": {
       "title": "Información del sistema",
