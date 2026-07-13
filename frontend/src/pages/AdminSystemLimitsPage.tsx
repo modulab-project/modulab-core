@@ -8,41 +8,56 @@ import { AppShell } from "../components/AppShell";
 
 // /admin/system/limits — consolidates every cross-cutting operational limit
 // that used to be a hardcoded Go constant (request body size, module/ZIP/
-// OPML upload caps, rate limits, Deno worker pool size). See
-// backend/internal/adminapi/limits.go's doc comment for the incident that
-// prompted this (module photo uploads silently capped at ~1 MB by a global
-// middleware limit nested outside the module's own, larger limit).
+// OPML upload caps, rate limits, Deno worker pool size, various HTTP
+// timeouts). See backend/internal/adminapi/limits.go's doc comment for the
+// incident that prompted this (module photo uploads silently capped at
+// ~1 MB by a global middleware limit nested outside the module's own,
+// larger limit) — that history is why every field still lives behind one
+// GET/PATCH endpoint and one save button, even though the 15 fields are
+// now split into four tabs below purely as a display grouping. A field
+// moving tabs is a one-line change to its `tab`; it never risks being
+// "lost" the way splitting into separate routes/endpoints would.
 //
-// All 15 fields are backed by raw byte/count values in `inputs`, matching
-// exactly what the backend stores and what the hint text documents. The
-// "uploads" group (byte limits) additionally gets a unit selector (Bytes/
-// KB/MB) purely as a display/edit convenience — `inputs` always holds the
-// canonical byte string, converted on the way in and out. The unit choice
-// is not persisted anywhere (not localStorage, not the backend); it's just
-// re-derived from the byte value each time settings are (re)loaded. The
-// "timeouts" group's six fields are stored in seconds directly on the
-// backend (no ms/browser-API constraint at their point of use, unlike
-// geo_timeout_ms). Four render as a plain NumberField with a "seconds"
-// suffix (small values, single-digit to ~30s); the other two - the sync
-// interval (default 3600s) and the module download timeout (default
-// 300s) - sit in the minutes range, so they use MinutesField to display/
-// edit in minutes while `inputs` still holds the canonical seconds string.
-const FIELDS: Array<{ key: keyof LimitsSettings; group: "uploads" | "rate_limits" | "performance" | "timeouts" }> = [
-  { key: "max_body_bytes", group: "uploads" },
-  { key: "max_upload_body_bytes", group: "uploads" },
-  { key: "max_module_zip_bytes", group: "uploads" },
-  { key: "max_opml_upload_bytes", group: "uploads" },
-  { key: "auth_rate_limit_max", group: "rate_limits" },
-  { key: "ai_chat_ip_rate_limit_max", group: "rate_limits" },
-  { key: "global_rate_limit_max", group: "rate_limits" },
-  { key: "deno_conn_pool_size", group: "performance" },
-  { key: "geo_timeout_ms", group: "performance" },
-  { key: "ai_provider_timeout_seconds", group: "timeouts" },
-  { key: "searxng_search_timeout_seconds", group: "timeouts" },
-  { key: "news_fetch_timeout_seconds", group: "timeouts" },
-  { key: "store_sync_interval_seconds", group: "timeouts" },
-  { key: "store_github_api_timeout_seconds", group: "timeouts" },
-  { key: "modules_install_download_timeout_seconds", group: "timeouts" },
+// Each field's `kind` selects which input component renders it (see
+// renderField below) and, for handleSave's validation, whether 0 is a
+// valid "unlimited" value (kind "byte") or not (every other kind):
+//   - "byte": canonical value is bytes; ByteField adds a Bytes/KB/MB unit
+//     selector purely as a display/edit convenience — the unit choice is
+//     not persisted anywhere, just re-derived from the byte value on load.
+//   - "count": a plain integer (rate limit, pool size) — NumberField, no unit.
+//   - "ms": canonical value is milliseconds (matches a browser API exactly,
+//     e.g. geo_timeout_ms → navigator.geolocation's timeout option) —
+//     SecondsField displays/edits in seconds.
+//   - "seconds": canonical value is seconds, small range (single digits to
+//     ~30s) — NumberField with a "seconds" suffix, no conversion needed.
+//   - "minutes": canonical value is seconds, but in the minutes-to-hour
+//     range (sync interval, download timeout) where a raw seconds count is
+//     harder to read at a glance — MinutesField displays/edits in minutes.
+type FieldKind = "byte" | "count" | "ms" | "seconds" | "minutes";
+type Tab = "uploads" | "ai_search" | "modules" | "system";
+const FIELDS: Array<{ key: keyof LimitsSettings; kind: FieldKind; tab: Tab }> = [
+  { key: "max_body_bytes", kind: "byte", tab: "uploads" },
+  { key: "max_opml_upload_bytes", kind: "byte", tab: "uploads" },
+  { key: "ai_chat_ip_rate_limit_max", kind: "count", tab: "ai_search" },
+  { key: "ai_provider_timeout_seconds", kind: "seconds", tab: "ai_search" },
+  { key: "searxng_search_timeout_seconds", kind: "seconds", tab: "ai_search" },
+  { key: "news_fetch_timeout_seconds", kind: "seconds", tab: "ai_search" },
+  { key: "max_upload_body_bytes", kind: "byte", tab: "modules" },
+  { key: "max_module_zip_bytes", kind: "byte", tab: "modules" },
+  { key: "deno_conn_pool_size", kind: "count", tab: "modules" },
+  { key: "modules_install_download_timeout_seconds", kind: "minutes", tab: "modules" },
+  { key: "store_sync_interval_seconds", kind: "minutes", tab: "modules" },
+  { key: "store_github_api_timeout_seconds", kind: "seconds", tab: "modules" },
+  { key: "auth_rate_limit_max", kind: "count", tab: "system" },
+  { key: "global_rate_limit_max", kind: "count", tab: "system" },
+  { key: "geo_timeout_ms", kind: "ms", tab: "system" },
+];
+
+const TABS: Array<{ id: Tab; icon: string }> = [
+  { id: "uploads", icon: "ti-upload" },
+  { id: "ai_search", icon: "ti-message-circle" },
+  { id: "modules", icon: "ti-puzzle" },
+  { id: "system", icon: "ti-server-2" },
 ];
 
 type ByteUnit = "B" | "KB" | "MB";
@@ -64,6 +79,7 @@ export default function AdminSystemLimitsPage() {
   const [settings, setSettings] = useState<LimitsSettings | null>(null);
   const [inputs, setInputs] = useState<Record<string, string>>({});
   const [units, setUnits] = useState<Record<string, ByteUnit>>({});
+  const [activeTab, setActiveTab] = useState<Tab>("uploads");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -81,7 +97,7 @@ export default function AdminSystemLimitsPage() {
         setSettings(s);
         setInputs(Object.fromEntries(FIELDS.map((f) => [f.key, String(s[f.key])])));
         setUnits(Object.fromEntries(
-          FIELDS.filter((f) => f.group === "uploads").map((f) => [f.key, detectUnit(Number(s[f.key]))]),
+          FIELDS.filter((f) => f.kind === "byte").map((f) => [f.key, detectUnit(Number(s[f.key]))]),
         ));
       })
       .catch(() => setMsg({ ok: false, text: t("admin.system_limits.load_error") }));
@@ -103,8 +119,10 @@ export default function AdminSystemLimitsPage() {
         setMsg({ ok: false, text: t("admin.system_limits.validation_error") });
         return;
       }
-      const isByteLimit = f.group === "uploads";
-      if (isByteLimit ? n < 0 : n <= 0) {
+      // 0 is a valid "unlimited" value for byte caps; every other kind
+      // (counts, timeouts, intervals) requires a real positive value - see
+      // AdminLimitsHandler's own two validation loops on the backend.
+      if (f.kind === "byte" ? n < 0 : n <= 0) {
         setMsg({ ok: false, text: t("admin.system_limits.validation_error") });
         return;
       }
@@ -126,10 +144,41 @@ export default function AdminSystemLimitsPage() {
     }
   }
 
-  const uploadsFields = FIELDS.filter((f) => f.group === "uploads");
-  const rateLimitFields = FIELDS.filter((f) => f.group === "rate_limits");
-  const performanceFields = FIELDS.filter((f) => f.group === "performance");
-  const timeoutFields = FIELDS.filter((f) => f.group === "timeouts");
+  const visibleFields = FIELDS.filter((f) => f.tab === activeTab);
+
+  function renderField(f: (typeof FIELDS)[number]) {
+    switch (f.kind) {
+      case "byte":
+        return (
+          <ByteField key={f.key} fieldKey={f.key} bytesValue={inputs[f.key] ?? ""}
+            unit={units[f.key] ?? "B"}
+            onBytesChange={(v) => setInputs((prev) => ({ ...prev, [f.key]: v }))}
+            onUnitChange={(u) => setUnits((prev) => ({ ...prev, [f.key]: u }))}
+            t={t} />
+        );
+      case "ms":
+        return (
+          <SecondsField key={f.key} fieldKey={f.key} msValue={inputs[f.key] ?? ""}
+            onMsChange={(v) => setInputs((prev) => ({ ...prev, [f.key]: v }))} t={t} />
+        );
+      case "minutes":
+        return (
+          <MinutesField key={f.key} fieldKey={f.key} secondsValue={inputs[f.key] ?? ""}
+            onSecondsChange={(v) => setInputs((prev) => ({ ...prev, [f.key]: v }))} t={t} />
+        );
+      case "seconds":
+        return (
+          <NumberField key={f.key} fieldKey={f.key} value={inputs[f.key] ?? ""}
+            onChange={(v) => setInputs((prev) => ({ ...prev, [f.key]: v }))} t={t}
+            unitLabel={t("admin.system_limits.unit_seconds")} />
+        );
+      case "count":
+        return (
+          <NumberField key={f.key} fieldKey={f.key} value={inputs[f.key] ?? ""}
+            onChange={(v) => setInputs((prev) => ({ ...prev, [f.key]: v }))} t={t} />
+        );
+    }
+  }
 
   return (
     <AppShell session={session}>
@@ -148,44 +197,23 @@ export default function AdminSystemLimitsPage() {
           </p>
         )}
 
+        <div className="mb-6 flex gap-1 border-b border-gray-200 dark:border-gray-800">
+          {TABS.map((tab) => (
+            <button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm ${
+                activeTab === tab.id
+                  ? "border-teal-600 font-medium text-teal-700 dark:border-teal-400 dark:text-teal-400"
+                  : "border-transparent text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
+              }`}>
+              <i className={`ti ${tab.icon} text-[14px]`} />
+              {t(`admin.system_limits.tab_${tab.id}`)}
+            </button>
+          ))}
+        </div>
+
         <form onSubmit={handleSave} className="space-y-8">
-          <Group title={t("admin.system_limits.group_uploads")}>
-            {uploadsFields.map((f) => (
-              <ByteField key={f.key} fieldKey={f.key} bytesValue={inputs[f.key] ?? ""}
-                unit={units[f.key] ?? "B"}
-                onBytesChange={(v) => setInputs((prev) => ({ ...prev, [f.key]: v }))}
-                onUnitChange={(u) => setUnits((prev) => ({ ...prev, [f.key]: u }))}
-                t={t} />
-            ))}
-          </Group>
-          <Group title={t("admin.system_limits.group_rate_limits")}>
-            {rateLimitFields.map((f) => (
-              <NumberField key={f.key} fieldKey={f.key} value={inputs[f.key] ?? ""}
-                onChange={(v) => setInputs((prev) => ({ ...prev, [f.key]: v }))} t={t} />
-            ))}
-          </Group>
-          <Group title={t("admin.system_limits.group_performance")}>
-            {performanceFields.map((f) =>
-              f.key === "geo_timeout_ms" ? (
-                <SecondsField key={f.key} fieldKey={f.key} msValue={inputs[f.key] ?? ""}
-                  onMsChange={(v) => setInputs((prev) => ({ ...prev, [f.key]: v }))} t={t} />
-              ) : (
-                <NumberField key={f.key} fieldKey={f.key} value={inputs[f.key] ?? ""}
-                  onChange={(v) => setInputs((prev) => ({ ...prev, [f.key]: v }))} t={t} />
-              ),
-            )}
-          </Group>
-          <Group title={t("admin.system_limits.group_timeouts")}>
-            {timeoutFields.map((f) =>
-              f.key === "store_sync_interval_seconds" || f.key === "modules_install_download_timeout_seconds" ? (
-                <MinutesField key={f.key} fieldKey={f.key} secondsValue={inputs[f.key] ?? ""}
-                  onSecondsChange={(v) => setInputs((prev) => ({ ...prev, [f.key]: v }))} t={t} />
-              ) : (
-                <NumberField key={f.key} fieldKey={f.key} value={inputs[f.key] ?? ""}
-                  onChange={(v) => setInputs((prev) => ({ ...prev, [f.key]: v }))} t={t}
-                  unitLabel={t("admin.system_limits.unit_seconds")} />
-              ),
-            )}
+          <Group title={t(`admin.system_limits.tab_${activeTab}`)}>
+            {visibleFields.map((f) => renderField(f))}
           </Group>
 
           <div className="flex justify-end">
