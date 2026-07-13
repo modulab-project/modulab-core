@@ -13,14 +13,18 @@ import { AppShell } from "../components/AppShell";
 // prompted this (module photo uploads silently capped at ~1 MB by a global
 // middleware limit nested outside the module's own, larger limit).
 //
-// All 9 fields are backed by raw byte/count values in `inputs`, matching
+// All 15 fields are backed by raw byte/count values in `inputs`, matching
 // exactly what the backend stores and what the hint text documents. The
 // "uploads" group (byte limits) additionally gets a unit selector (Bytes/
 // KB/MB) purely as a display/edit convenience — `inputs` always holds the
 // canonical byte string, converted on the way in and out. The unit choice
 // is not persisted anywhere (not localStorage, not the backend); it's just
-// re-derived from the byte value each time settings are (re)loaded.
-const FIELDS: Array<{ key: keyof LimitsSettings; group: "uploads" | "rate_limits" | "performance" }> = [
+// re-derived from the byte value each time settings are (re)loaded. The
+// "timeouts" group's six fields are stored in seconds directly on the
+// backend (no ms/browser-API constraint at their point of use, unlike
+// geo_timeout_ms), so they render as a plain NumberField with a "seconds"
+// suffix rather than needing SecondsField's ms↔s conversion.
+const FIELDS: Array<{ key: keyof LimitsSettings; group: "uploads" | "rate_limits" | "performance" | "timeouts" }> = [
   { key: "max_body_bytes", group: "uploads" },
   { key: "max_upload_body_bytes", group: "uploads" },
   { key: "max_module_zip_bytes", group: "uploads" },
@@ -30,6 +34,12 @@ const FIELDS: Array<{ key: keyof LimitsSettings; group: "uploads" | "rate_limits
   { key: "global_rate_limit_max", group: "rate_limits" },
   { key: "deno_conn_pool_size", group: "performance" },
   { key: "geo_timeout_ms", group: "performance" },
+  { key: "ai_provider_timeout_seconds", group: "timeouts" },
+  { key: "searxng_search_timeout_seconds", group: "timeouts" },
+  { key: "news_fetch_timeout_seconds", group: "timeouts" },
+  { key: "store_sync_interval_seconds", group: "timeouts" },
+  { key: "store_github_api_timeout_seconds", group: "timeouts" },
+  { key: "modules_install_download_timeout_seconds", group: "timeouts" },
 ];
 
 type ByteUnit = "B" | "KB" | "MB";
@@ -116,6 +126,7 @@ export default function AdminSystemLimitsPage() {
   const uploadsFields = FIELDS.filter((f) => f.group === "uploads");
   const rateLimitFields = FIELDS.filter((f) => f.group === "rate_limits");
   const performanceFields = FIELDS.filter((f) => f.group === "performance");
+  const timeoutFields = FIELDS.filter((f) => f.group === "timeouts");
 
   return (
     <AppShell session={session}>
@@ -161,6 +172,13 @@ export default function AdminSystemLimitsPage() {
               ),
             )}
           </Group>
+          <Group title={t("admin.system_limits.group_timeouts")}>
+            {timeoutFields.map((f) => (
+              <NumberField key={f.key} fieldKey={f.key} value={inputs[f.key] ?? ""}
+                onChange={(v) => setInputs((prev) => ({ ...prev, [f.key]: v }))} t={t}
+                unitLabel={t("admin.system_limits.unit_seconds")} />
+            ))}
+          </Group>
 
           <div className="flex justify-end">
             <button type="submit" disabled={saving || !dirty}
@@ -192,24 +210,34 @@ function NumberField({
   value,
   onChange,
   t,
+  unitLabel,
 }: {
   fieldKey: keyof LimitsSettings;
   value: string;
   onChange: (v: string) => void;
   t: (key: string) => string;
+  // Optional inline unit suffix (e.g. "seconds") for fields whose backend
+  // value is already in a human-friendly unit - unlike geo_timeout_ms
+  // (SecondsField above), these timeouts/intervals are stored in seconds
+  // directly (no ms/browser-API constraint at the point of use), so no
+  // canonical-unit conversion is needed, just a label.
+  unitLabel?: string;
 }) {
   return (
     <div>
       <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">
         {t(`admin.system_limits.${fieldKey}_label`)}
       </label>
-      <input
-        type="number"
-        min={0}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-base outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-800"
-      />
+      <div className="flex items-center gap-2">
+        <input
+          type="number"
+          min={0}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-base outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-800"
+        />
+        {unitLabel && <span className="text-sm text-gray-500 dark:text-gray-400">{unitLabel}</span>}
+      </div>
       <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
         {t(`admin.system_limits.${fieldKey}_hint`)}
       </p>

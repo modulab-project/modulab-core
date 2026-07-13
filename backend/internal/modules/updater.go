@@ -59,7 +59,7 @@ func Update(ctx context.Context, d Deps, entry store.Entry) error {
 		return fmt.Errorf("modules: update %q: create rollback cache dir: %w", entry.Name, err)
 	}
 	cachedZip := filepath.Join(cacheDir, entry.Name+"-"+row.Version+".zip")
-	if err := cacheCurrentZIP(ctx, row.ReleaseURL, cachedZip, maxZIPBytes); err != nil {
+	if err := cacheCurrentZIP(ctx, d.DB, row.ReleaseURL, cachedZip, maxZIPBytes); err != nil {
 		// Not fatal — we'll proceed without rollback capability and log a warning.
 		log.Printf("modules: update %q: warning: could not cache rollback zip: %v", entry.Name, err)
 		cachedZip = ""
@@ -98,6 +98,7 @@ func Update(ctx context.Context, d Deps, entry store.Entry) error {
 	zipCh := make(chan dlResult, 1)
 	hashCh := make(chan dlResult, 1)
 
+	installDownloadTimeout := time.Duration(InstallDownloadTimeoutSeconds(ctx, d.DB)) * time.Second
 	dlCtx, dlCancel := context.WithTimeout(ctx, installDownloadTimeout)
 	defer dlCancel()
 
@@ -328,7 +329,8 @@ func (d Deps) rollback(ctx context.Context, name, cachedZip string, origErr erro
 // cacheCurrentZIP re-downloads the currently installed module ZIP and saves it
 // to path. Used as a rollback snapshot before an update begins. maxBytes is
 // the caller-resolved max_module_zip_bytes value (see MaxModuleZIPBytes).
-func cacheCurrentZIP(ctx context.Context, releaseURL, path string, maxBytes int64) error {
+func cacheCurrentZIP(ctx context.Context, pool *db.Pool, releaseURL, path string, maxBytes int64) error {
+	installDownloadTimeout := time.Duration(InstallDownloadTimeoutSeconds(ctx, pool)) * time.Second
 	dlCtx, cancel := context.WithTimeout(ctx, installDownloadTimeout)
 	defer cancel()
 	return downloadFile(dlCtx, releaseURL, path, maxBytes)

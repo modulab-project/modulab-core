@@ -57,20 +57,31 @@ import (
 // full control of the Docker host (docker-compose.yml, the socket, etc.),
 // so there is no privilege boundary for netguard to enforce in the first
 // place - just a plain client with a sane timeout.
-var searxClient = &http.Client{Timeout: 30 * time.Second}
+//
+// Timeout: 0 - previously a fixed 30s. The client-level Timeout was in
+// practice almost never the thing that actually fired: fetchResults already
+// wraps every call in a shorter context.WithTimeout(ctx, searchTimeout)
+// (2s default), so the 30s client cap sat dormant behind it. Rather than
+// keep two timeouts that have to be raised in lockstep to mean anything,
+// the single admin-configurable searchTimeout (see SearchTimeoutSeconds) is
+// now the only bound; the client relies purely on the caller's context.
+var searxClient = &http.Client{Timeout: 0}
 
 const (
-	settingKeyURL        = "searxng_url_enc"
-	settingKeyMaxResults = "searxng_max_results"
-	settingKeyFetchPages = "searxng_fetch_pages"
-
-	// searchTimeout is the hard cap for a SearXNG round-trip. Both pages
-	// are fetched in parallel so the wall-clock cost is one round-trip.
-	searchTimeout = 2 * time.Second
+	settingKeyURL           = "searxng_url_enc"
+	settingKeyMaxResults    = "searxng_max_results"
+	settingKeyFetchPages    = "searxng_fetch_pages"
+	settingKeySearchTimeout = "searxng_search_timeout_seconds"
 
 	// Defaults used when no value has been saved to core_settings yet.
 	defaultMaxResults = 25
 	defaultFetchPages = 2
+	// defaultSearchTimeoutSeconds mirrors the fixed 2s this replaced. A
+	// self-hosted SearXNG instance on modest homelab hardware querying
+	// several search-engine backends can legitimately need longer than 2s,
+	// which is why this became admin-configurable rather than staying a
+	// hardcoded constant.
+	defaultSearchTimeoutSeconds = 2
 
 	// defaultURL is pre-seeded on first boot so Docker deployments that
 	// bundle SearXNG in the same Compose stack work out of the box.
@@ -189,6 +200,13 @@ func resolveInt(ctx context.Context, pool *db.Pool, key string, defaultVal int) 
 		return defaultVal
 	}
 	return v
+}
+
+// SearchTimeoutSeconds reads the per-search timeout (see searxClient's and
+// fetchResults' doc comments) from core_settings. Defaults to
+// defaultSearchTimeoutSeconds if unset.
+func SearchTimeoutSeconds(ctx context.Context, pool *db.Pool) int {
+	return resolveInt(ctx, pool, settingKeySearchTimeout, defaultSearchTimeoutSeconds)
 }
 
 // resolveConfig reads all three settings in one go.
@@ -458,7 +476,8 @@ func SearchHandler(deps auth.Deps, masterKey string) http.HandlerFunc {
 			timeRange:  timeRange,
 		}
 
-		results, err := fetchResults(r.Context(), baseURL, q, maxResults, fetchPages, sp)
+		timeoutSeconds := SearchTimeoutSeconds(r.Context(), deps.Pool)
+		results, err := fetchResults(r.Context(), baseURL, q, maxResults, fetchPages, timeoutSeconds, sp)
 		if err != nil {
 			http.Error(w, "search upstream error: "+err.Error(), http.StatusBadGateway)
 			return
@@ -547,9 +566,11 @@ func fetchPage(ctx context.Context, baseURL, query string, pageno int, sp search
 
 // fetchResults fetches up to fetchPages pages in parallel, merges them,
 // deduplicates by URL, and returns up to maxResults entries.
-// Page 1 results always appear first so ranking is preserved.
-func fetchResults(ctx context.Context, baseURL, query string, maxResults, fetchPages int, sp searchParams) ([]WebResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, searchTimeout)
+// Page 1 results always appear first so ranking is preserved. timeoutSeconds
+// is the admin-configurable searxng_search_timeout_seconds setting (see
+// SearchTimeoutSeconds) - the hard cap for the whole round-trip.
+func fetchResults(ctx context.Context, baseURL, query string, maxResults, fetchPages, timeoutSeconds int, sp searchParams) ([]WebResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
 	defer cancel()
 
 	type pageResult struct {

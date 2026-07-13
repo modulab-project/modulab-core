@@ -57,9 +57,12 @@ const (
 	feedCacheTTL   = 15 * time.Minute
 	cacheKeyPfx    = "news:feed:"
 	maxArticles    = 100
-	fetchTimeout   = 10 * time.Second
 	httpUserAgent  = "ModuLab-Core/1.0 (https://modulab.app)"
 	maxConcurrency = 10 // parallel feed reachability checks
+
+	// defaultFetchTimeoutSeconds is FetchTimeoutSeconds's fallback - mirrors
+	// the fixed 10s value this replaced.
+	defaultFetchTimeoutSeconds = 10
 )
 
 // safeFeedClient fetches admin-configured feed URLs through netguard's
@@ -67,7 +70,29 @@ const (
 // http.DefaultClient - a feed URL is arbitrary input from an admin, and
 // without this an admin account could point Core at an internal service
 // or the cloud metadata endpoint and read the response back as "articles".
-var safeFeedClient = netguard.SafeHTTPClient(fetchTimeout)
+//
+// Timeout: 0 - previously a fixed fetchTimeout const. The actual bound is
+// now the admin-configurable news_fetch_timeout_seconds setting (see
+// FetchTimeoutSeconds), applied per-call as a context deadline in fetchFeed
+// instead of baked into the client at package-init time - some RSS/Atom
+// feeds are slow or flaky enough that the old fixed 10s caused spurious
+// "unreachable" reports for feeds that just needed a bit longer.
+var safeFeedClient = netguard.SafeHTTPClient(0)
+
+// FetchTimeoutSeconds reads the feed-fetch HTTP timeout (seconds) from
+// core_settings ("news_fetch_timeout_seconds"). Defaults to
+// defaultFetchTimeoutSeconds if unset.
+func FetchTimeoutSeconds(ctx context.Context, pool *db.Pool) int {
+	val, ok, err := pool.GetSetting(ctx, "news_fetch_timeout_seconds")
+	if err != nil || !ok || val == "" {
+		return defaultFetchTimeoutSeconds
+	}
+	n, err := strconv.Atoi(val)
+	if err != nil || n <= 0 {
+		return defaultFetchTimeoutSeconds
+	}
+	return n
+}
 
 // ---- Response types ---------------------------------------------------------
 
@@ -286,8 +311,9 @@ type valkeyCache interface {
 }
 
 // fetchFeed downloads feedURL and returns parsed articles labelled with label.
-func fetchFeed(ctx context.Context, feedURL, label string) ([]Article, error) {
-	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
+func fetchFeed(ctx context.Context, pool *db.Pool, feedURL, label string) ([]Article, error) {
+	timeout := time.Duration(FetchTimeoutSeconds(ctx, pool)) * time.Second
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, feedURL, nil)
@@ -319,7 +345,7 @@ func fetchFeed(ctx context.Context, feedURL, label string) ([]Article, error) {
 
 // cachedFeed serves from Valkey when available; otherwise fetches, parses,
 // and stores under cacheKey(feedID) with a 15-minute TTL.
-func cachedFeed(ctx context.Context, vk valkeyCache, feedID int, feedURL, label string) ([]Article, error) {
+func cachedFeed(ctx context.Context, vk valkeyCache, pool *db.Pool, feedID int, feedURL, label string) ([]Article, error) {
 	key := cacheKey(feedID)
 	if cached, ok, err := vk.Get(ctx, key); err == nil && ok {
 		var arts []Article
@@ -327,7 +353,7 @@ func cachedFeed(ctx context.Context, vk valkeyCache, feedID int, feedURL, label 
 			return arts, nil
 		}
 	}
-	arts, err := fetchFeed(ctx, feedURL, label)
+	arts, err := fetchFeed(ctx, pool, feedURL, label)
 	if err != nil {
 		return nil, err
 	}
@@ -548,7 +574,7 @@ func AdminParseOPMLHandler(d auth.Deps) http.HandlerFunc {
 				defer wg.Done()
 				sem <- struct{}{}
 				defer func() { <-sem }()
-				_, fetchErr := fetchFeed(r.Context(), feedURL, label)
+				_, fetchErr := fetchFeed(r.Context(), d.Pool, feedURL, label)
 				if fetchErr != nil {
 					entries[idx].Reachable = false
 					entries[idx].ReachError = fetchErr.Error()
@@ -688,7 +714,7 @@ func AdminCheckHandler(d auth.Deps) http.HandlerFunc {
 			return
 		}
 
-		arts, err := fetchFeed(r.Context(), body.URL, "check")
+		arts, err := fetchFeed(r.Context(), d.Pool, body.URL, "check")
 		if err != nil {
 			writeJSON(w, http.StatusOK, CheckResult{Reachable: false, Error: err.Error()})
 			return
@@ -980,7 +1006,7 @@ func NewsHandler(d auth.Deps) http.HandlerFunc {
 			wg.Add(1)
 			go func(i int, f db.FeedRow) {
 				defer wg.Done()
-				arts, err := cachedFeed(r.Context(), d.Valkey, f.ID, f.URL, f.Label)
+				arts, err := cachedFeed(r.Context(), d.Valkey, d.Pool, f.ID, f.URL, f.Label)
 				results[i] = result{arts: arts, err: err}
 			}(i, feed)
 		}
@@ -1294,7 +1320,7 @@ func AdminCatalogHandler(d auth.Deps) http.HandlerFunc {
 				defer wg.Done()
 				sem <- struct{}{}
 				defer func() { <-sem }()
-				_, fetchErr := fetchFeed(r.Context(), entries[idx].URL, entries[idx].Label)
+				_, fetchErr := fetchFeed(r.Context(), d.Pool, entries[idx].URL, entries[idx].Label)
 				if fetchErr != nil {
 					entries[idx].Reachable = false
 					entries[idx].ReachError = fetchErr.Error()

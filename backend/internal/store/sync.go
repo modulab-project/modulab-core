@@ -4,16 +4,37 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
 	"time"
+
+	"github.com/modulab-project/modulab-core/backend/internal/db"
 )
 
-const syncInterval = 1 * time.Hour
+// defaultSyncIntervalSeconds is SyncIntervalSeconds's fallback - mirrors the
+// fixed 1h value this replaced.
+const defaultSyncIntervalSeconds = 3600
 
-// SyncInterval exposes syncInterval to callers outside this package (the
-// GET /v1/admin/system/info handler in cmd/core, which pairs it with
-// LastSyncedAt to show an admin a "next registry sync in X" countdown).
-func SyncInterval() time.Duration {
-	return syncInterval
+// SyncIntervalSeconds reads the registry-sync interval (seconds) from
+// core_settings ("store_sync_interval_seconds"), same pattern as
+// modules.MaxUploadBodyBytes. Defaults to defaultSyncIntervalSeconds if
+// unset. Exposed to callers outside this package (e.g. a future
+// GET /v1/admin/system/info countdown) via SyncInterval below.
+func SyncIntervalSeconds(ctx context.Context, pool *db.Pool) int {
+	val, ok, err := pool.GetSetting(ctx, "store_sync_interval_seconds")
+	if err != nil || !ok || val == "" {
+		return defaultSyncIntervalSeconds
+	}
+	n, err := strconv.Atoi(val)
+	if err != nil || n <= 0 {
+		return defaultSyncIntervalSeconds
+	}
+	return n
+}
+
+// SyncInterval is SyncIntervalSeconds as a time.Duration, for callers that
+// want it pre-converted (e.g. an admin "next sync in X" countdown).
+func SyncInterval(ctx context.Context, pool *db.Pool) time.Duration {
+	return time.Duration(SyncIntervalSeconds(ctx, pool)) * time.Second
 }
 
 // onSynced is called after every sync attempt (manual or scheduled),
@@ -27,22 +48,30 @@ func SyncInterval() time.Duration {
 type onSyncedFunc func(ctx context.Context)
 
 // RunSync is the long-running background goroutine for registry synchronisation.
-// It runs once immediately on startup, then again every hour. Designed to
-// be started with `go store.RunSync(ctx, deps, onSynced)` from main.go,
-// mirroring the same pattern as mail.RunWorker. Stopping ctx stops the
-// goroutine cleanly.
+// It runs once immediately on startup, then again every SyncInterval (default
+// 1h, admin-configurable via store_sync_interval_seconds). Designed to be
+// started with `go store.RunSync(ctx, deps, onSynced)` from main.go, mirroring
+// the same pattern as mail.RunWorker. Stopping ctx stops the goroutine cleanly.
+//
+// Uses a manually re-armed time.Timer instead of a time.Ticker: a Ticker's
+// period is fixed at creation and Go's stdlib has no way to change it short
+// of Reset, so re-reading the current interval fresh before each Reset (via
+// SyncIntervalSeconds) is how an admin's change to the setting takes effect
+// on the very next cycle instead of requiring a Core restart.
 func RunSync(ctx context.Context, d Deps, onSynced onSyncedFunc) {
 	// Run immediately on first start so the store is populated before any
-	// admin opens the UI, rather than showing an empty list for up to 1h.
+	// admin opens the UI, rather than showing an empty list for up to the
+	// full interval.
 	runSync(ctx, d, onSynced)
 
-	ticker := time.NewTicker(syncInterval)
-	defer ticker.Stop()
+	timer := time.NewTimer(SyncInterval(ctx, d.Pool))
+	defer timer.Stop()
 
 	for {
 		select {
-		case <-ticker.C:
+		case <-timer.C:
 			runSync(ctx, d, onSynced)
+			timer.Reset(SyncInterval(ctx, d.Pool))
 		case <-ctx.Done():
 			return
 		}
@@ -96,7 +125,7 @@ func syncBoth(ctx context.Context, d Deps) (offErr, comErr error) {
 	seen := make(map[string]bool)
 
 	// ── Official ────────────────────────────────────────────────────────────
-	official, err := FetchOfficialRegistry(ctx)
+	official, err := FetchOfficialRegistry(ctx, d.Pool)
 	if err != nil {
 		offErr = err
 	} else {
@@ -110,7 +139,7 @@ func syncBoth(ctx context.Context, d Deps) (offErr, comErr error) {
 	}
 
 	// ── Community ───────────────────────────────────────────────────────────
-	community, err := FetchCommunityRegistry(ctx)
+	community, err := FetchCommunityRegistry(ctx, d.Pool)
 	if err != nil {
 		comErr = err
 	} else {
@@ -118,7 +147,7 @@ func syncBoth(ctx context.Context, d Deps) (offErr, comErr error) {
 			// Community entries don't carry a version in the index — fetch it
 			// from the GitHub Releases API so the store can show "v1.2.0".
 			if e.LatestVersion == "" {
-				version, err := FetchLatestRelease(ctx, e.SourceRepo)
+				version, err := FetchLatestRelease(ctx, d.Pool, e.SourceRepo)
 				if err != nil {
 					log.Printf("store: sync: latest release for %q: %v", e.Name, err)
 				} else {

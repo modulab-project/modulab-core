@@ -66,10 +66,38 @@ import (
 // one relies solely on the caller's request context for cancellation
 // (Timeout: 0 disables the client-level cutoff), same as the existing
 // Anthropic streaming client below already does via http.DefaultClient.
+//
+// safeProviderClient itself now has Timeout: 0 too (previously a fixed 30s)
+// - the actual bound is the admin-configurable ai_provider_timeout_seconds
+// setting (see ProviderTimeoutSeconds), applied per-request in fetchModels
+// via context.WithTimeout instead of baked into the client at package-init
+// time. This matters in practice for local/self-hosted model backends
+// (Ollama etc.), which can legitimately take longer than 30s to answer a
+// models-list request on modest homelab hardware.
 var (
-	safeProviderClient       = netguard.SafeHTTPClient(30 * time.Second)
+	safeProviderClient       = netguard.SafeHTTPClient(0)
 	safeProviderStreamClient = netguard.SafeHTTPClient(0)
 )
+
+// defaultProviderTimeoutSeconds is ProviderTimeoutSeconds's fallback - mirrors
+// the fixed value this replaced.
+const defaultProviderTimeoutSeconds = 30
+
+// ProviderTimeoutSeconds reads the fetchModels HTTP timeout (seconds) from
+// core_settings ("ai_provider_timeout_seconds"), same pattern as
+// modules.MaxUploadBodyBytes. Defaults to defaultProviderTimeoutSeconds if
+// unset. See AdminLimitsHandler's doc comment.
+func ProviderTimeoutSeconds(ctx context.Context, pool *db.Pool) int {
+	val, ok, err := pool.GetSetting(ctx, "ai_provider_timeout_seconds")
+	if err != nil || !ok || val == "" {
+		return defaultProviderTimeoutSeconds
+	}
+	n, err := strconv.Atoi(val)
+	if err != nil || n <= 0 {
+		return defaultProviderTimeoutSeconds
+	}
+	return n
+}
 
 // ---- types -----------------------------------------------------------------
 
@@ -473,7 +501,7 @@ func AdminListModelsHandler(deps auth.Deps) http.HandlerFunc {
 			baseURL = defaultBaseURL(prov.Type)
 		}
 
-		models, err := fetchModels(r.Context(), prov.Type, baseURL, adminKey)
+		models, err := fetchModels(r.Context(), deps.Pool, prov.Type, baseURL, adminKey)
 		if err != nil {
 			log.Printf("ai: fetch models (provider=%s): %v", id, err)
 			http.Error(w, "failed to fetch models from provider", http.StatusBadGateway)
@@ -488,7 +516,11 @@ func AdminListModelsHandler(deps auth.Deps) http.HandlerFunc {
 // fetchModels calls the provider's model-list endpoint and returns sorted
 // model IDs. Anthropic uses a dedicated header; all others use Bearer auth
 // against their OpenAI-compatible /models endpoint.
-func fetchModels(ctx context.Context, provType, baseURL, apiKey string) ([]string, error) {
+func fetchModels(ctx context.Context, pool *db.Pool, provType, baseURL, apiKey string) ([]string, error) {
+	timeout := time.Duration(ProviderTimeoutSeconds(ctx, pool)) * time.Second
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	var req *http.Request
 	var err error
 
@@ -976,7 +1008,7 @@ func UserListModelsHandler(deps auth.Deps) http.HandlerFunc {
 		if baseURL == "" {
 			baseURL = defaultBaseURL(prov.Type)
 		}
-		models, err := fetchModels(r.Context(), prov.Type, baseURL, userKey)
+		models, err := fetchModels(r.Context(), deps.Pool, prov.Type, baseURL, userKey)
 		if err != nil {
 			log.Printf("ai: user fetch models (provider=%s): %v", providerID, err)
 			http.Error(w, "failed to fetch models from provider", http.StatusBadGateway)

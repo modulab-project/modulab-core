@@ -38,7 +38,9 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/db"
 	"github.com/modulab-project/modulab-core/backend/internal/modules"
 	"github.com/modulab-project/modulab-core/backend/internal/news"
+	"github.com/modulab-project/modulab-core/backend/internal/searxng"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
+	"github.com/modulab-project/modulab-core/backend/internal/store"
 	"github.com/modulab-project/modulab-core/backend/internal/weather"
 )
 
@@ -93,19 +95,50 @@ const (
 //     effect). Must be > 0, default 5000. A Wi-Fi-based location fix
 //     (enableHighAccuracy: false) can take longer than the default on some
 //     corporate networks - this used to be a hardcoded frontend constant.
+//   - ai_provider_timeout_seconds: HTTP timeout for fetchModels calls to an
+//     admin-configured AI provider's base_url (see ai.ProviderTimeoutSeconds).
+//     Must be > 0, default 30. Local/self-hosted model backends (Ollama etc.)
+//     can need longer than 30s on modest hardware.
+//   - searxng_search_timeout_seconds: hard cap for a SearXNG search
+//     round-trip (see searxng.SearchTimeoutSeconds). Must be > 0, default 2.
+//     A self-hosted SearXNG instance querying several search-engine backends
+//     can need longer than 2s on modest hardware.
+//   - news_fetch_timeout_seconds: HTTP timeout per RSS/Atom feed fetch (see
+//     news.FetchTimeoutSeconds). Must be > 0, default 10. Slow or flaky
+//     feeds otherwise get reported as "unreachable" prematurely.
+//   - store_sync_interval_seconds: how often the module registry
+//     (official + community) is re-synced from GitHub in the background
+//     (see store.SyncIntervalSeconds). Must be > 0, default 3600 (1h).
+//   - store_github_api_timeout_seconds: HTTP timeout for GitHub
+//     API/raw-content fetches during a registry sync (see
+//     store.GithubAPITimeoutSeconds). Must be > 0, default 15.
+//   - modules_install_download_timeout_seconds: timeout for downloading a
+//     module's ZIP + checksum during install/update (see
+//     modules.InstallDownloadTimeoutSeconds). Must be > 0, default 300 (5min).
+//     Companion setting to max_module_zip_bytes - a larger ZIP cap can also
+//     need a longer download window on a slow connection.
 //
 // Every field except deno_conn_pool_size takes effect immediately, on the
-// next request, with no restart required.
+// next request, with no restart required. store_sync_interval_seconds is a
+// partial exception: a change takes effect on the *next* sync cycle rather
+// than instantly, since the background goroutine is already sleeping until
+// then (see store.RunSync's doc comment).
 type LimitsSettings struct {
-	MaxBodyBytes         int64 `json:"max_body_bytes"`
-	MaxUploadBodyBytes   int64 `json:"max_upload_body_bytes"`
-	MaxModuleZIPBytes    int64 `json:"max_module_zip_bytes"`
-	MaxOPMLUploadBytes   int64 `json:"max_opml_upload_bytes"`
-	AuthRateLimitMax     int64 `json:"auth_rate_limit_max"`
-	AIChatIPRateLimitMax int64 `json:"ai_chat_ip_rate_limit_max"`
-	GlobalRateLimitMax   int64 `json:"global_rate_limit_max"`
-	DenoConnPoolSize     int   `json:"deno_conn_pool_size"`
-	GeoTimeoutMS         int   `json:"geo_timeout_ms"`
+	MaxBodyBytes                      int64 `json:"max_body_bytes"`
+	MaxUploadBodyBytes                int64 `json:"max_upload_body_bytes"`
+	MaxModuleZIPBytes                 int64 `json:"max_module_zip_bytes"`
+	MaxOPMLUploadBytes                int64 `json:"max_opml_upload_bytes"`
+	AuthRateLimitMax                  int64 `json:"auth_rate_limit_max"`
+	AIChatIPRateLimitMax              int64 `json:"ai_chat_ip_rate_limit_max"`
+	GlobalRateLimitMax                int64 `json:"global_rate_limit_max"`
+	DenoConnPoolSize                  int   `json:"deno_conn_pool_size"`
+	GeoTimeoutMS                      int   `json:"geo_timeout_ms"`
+	AIProviderTimeoutSeconds          int   `json:"ai_provider_timeout_seconds"`
+	SearxngSearchTimeoutSeconds       int   `json:"searxng_search_timeout_seconds"`
+	NewsFetchTimeoutSeconds           int   `json:"news_fetch_timeout_seconds"`
+	StoreSyncIntervalSeconds          int   `json:"store_sync_interval_seconds"`
+	StoreGithubAPITimeoutSeconds      int   `json:"store_github_api_timeout_seconds"`
+	ModulesInstallDownloadTimeoutSecs int   `json:"modules_install_download_timeout_seconds"`
 }
 
 // readRateLimitInt is a copy of main.go's readRateLimitSetting (see this
@@ -143,6 +176,13 @@ func currentLimitsSettings(r *http.Request, pool *db.Pool) LimitsSettings {
 		GlobalRateLimitMax:   readRateLimitInt(pool, r, "global_rate_limit_max", defaultGlobalRateLimitMax),
 		DenoConnPoolSize:     modules.ConnPoolSize(ctx, pool),
 		GeoTimeoutMS:         weather.GeoTimeoutMS(ctx, pool),
+
+		AIProviderTimeoutSeconds:          ai.ProviderTimeoutSeconds(ctx, pool),
+		SearxngSearchTimeoutSeconds:       searxng.SearchTimeoutSeconds(ctx, pool),
+		NewsFetchTimeoutSeconds:           news.FetchTimeoutSeconds(ctx, pool),
+		StoreSyncIntervalSeconds:          store.SyncIntervalSeconds(ctx, pool),
+		StoreGithubAPITimeoutSeconds:      store.GithubAPITimeoutSeconds(ctx, pool),
+		ModulesInstallDownloadTimeoutSecs: modules.InstallDownloadTimeoutSeconds(ctx, pool),
 	}
 }
 
@@ -192,6 +232,12 @@ func AdminLimitsHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 				{"global_rate_limit_max", body.GlobalRateLimitMax},
 				{"deno_conn_pool_size", int64(body.DenoConnPoolSize)},
 				{"geo_timeout_ms", int64(body.GeoTimeoutMS)},
+				{"ai_provider_timeout_seconds", int64(body.AIProviderTimeoutSeconds)},
+				{"searxng_search_timeout_seconds", int64(body.SearxngSearchTimeoutSeconds)},
+				{"news_fetch_timeout_seconds", int64(body.NewsFetchTimeoutSeconds)},
+				{"store_sync_interval_seconds", int64(body.StoreSyncIntervalSeconds)},
+				{"store_github_api_timeout_seconds", int64(body.StoreGithubAPITimeoutSeconds)},
+				{"modules_install_download_timeout_seconds", int64(body.ModulesInstallDownloadTimeoutSecs)},
 			} {
 				if f.val <= 0 {
 					http.Error(w, f.name+" must be > 0", http.StatusBadRequest)
@@ -209,6 +255,12 @@ func AdminLimitsHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 				"global_rate_limit_max":     strconv.FormatInt(body.GlobalRateLimitMax, 10),
 				"deno_conn_pool_size":       strconv.Itoa(body.DenoConnPoolSize),
 				"geo_timeout_ms":            strconv.Itoa(body.GeoTimeoutMS),
+				"ai_provider_timeout_seconds":               strconv.Itoa(body.AIProviderTimeoutSeconds),
+				"searxng_search_timeout_seconds":             strconv.Itoa(body.SearxngSearchTimeoutSeconds),
+				"news_fetch_timeout_seconds":                 strconv.Itoa(body.NewsFetchTimeoutSeconds),
+				"store_sync_interval_seconds":                strconv.Itoa(body.StoreSyncIntervalSeconds),
+				"store_github_api_timeout_seconds":           strconv.Itoa(body.StoreGithubAPITimeoutSeconds),
+				"modules_install_download_timeout_seconds":   strconv.Itoa(body.ModulesInstallDownloadTimeoutSecs),
 			}
 			for key, val := range settings {
 				if err := pool.SetSetting(ctx, key, val); err != nil {

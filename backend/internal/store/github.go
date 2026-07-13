@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/modulab-project/modulab-core/backend/internal/db"
 	"gopkg.in/yaml.v3"
 )
 
@@ -35,8 +36,26 @@ const (
 	// path (e.g. manifest.yaml's own "logo" field). %[1]s = directory, %[2]s = path.
 	communityFileRawURLFmt = "https://raw.githubusercontent.com/modulab-project/modulab-community/main/%[1]s/%[2]s"
 
-	githubAPITimeout = 15 * time.Second
+	// defaultGithubAPITimeoutSeconds is GithubAPITimeoutSeconds's fallback -
+	// mirrors the fixed 15s value this replaced.
+	defaultGithubAPITimeoutSeconds = 15
 )
+
+// GithubAPITimeoutSeconds reads the GitHub API/raw-content fetch timeout
+// (seconds) from core_settings ("store_github_api_timeout_seconds"), same
+// pattern as modules.MaxUploadBodyBytes. Defaults to
+// defaultGithubAPITimeoutSeconds if unset.
+func GithubAPITimeoutSeconds(ctx context.Context, pool *db.Pool) int {
+	val, ok, err := pool.GetSetting(ctx, "store_github_api_timeout_seconds")
+	if err != nil || !ok || val == "" {
+		return defaultGithubAPITimeoutSeconds
+	}
+	n, err := strconv.Atoi(val)
+	if err != nil || n <= 0 {
+		return defaultGithubAPITimeoutSeconds
+	}
+	return n
+}
 
 // communityExcludedDirs are root-level directories in modulab-community that
 // are never real module entries: "example-module" is the CONTRIBUTING.md
@@ -115,8 +134,9 @@ type githubRelease struct {
 // FetchOfficialRegistry downloads and parses the official registry.json.
 // Returns an empty slice (not an error) when the file exists but is empty,
 // so a not-yet-populated monorepo doesn't prevent Core from starting.
-func FetchOfficialRegistry(ctx context.Context) ([]Entry, error) {
-	ctx, cancel := context.WithTimeout(ctx, githubAPITimeout)
+func FetchOfficialRegistry(ctx context.Context, pool *db.Pool) ([]Entry, error) {
+	timeout := time.Duration(GithubAPITimeoutSeconds(ctx, pool)) * time.Second
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	// Append a Unix timestamp to bypass raw.githubusercontent.com's CDN cache,
@@ -162,8 +182,9 @@ func FetchOfficialRegistry(ctx context.Context) ([]Entry, error) {
 // (see communityManifest and CONTRIBUTING.md in that repo). Directories that
 // cannot be fetched or parsed are logged and skipped, not fatal - one broken
 // community submission must not take down the whole sync.
-func FetchCommunityRegistry(ctx context.Context) ([]Entry, error) {
-	ctx, cancel := context.WithTimeout(ctx, githubAPITimeout)
+func FetchCommunityRegistry(ctx context.Context, pool *db.Pool) ([]Entry, error) {
+	timeout := time.Duration(GithubAPITimeoutSeconds(ctx, pool)) * time.Second
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	data, err := httpGet(ctx, communityRepoRootURL)
@@ -227,8 +248,9 @@ func FetchCommunityRegistry(ctx context.Context) ([]Entry, error) {
 // FetchLatestRelease calls the GitHub Releases API for sourceRepo and returns
 // the tag name of the latest release, or ("", nil) when the repo has no
 // releases yet. Used by the daily update-check for community modules.
-func FetchLatestRelease(ctx context.Context, sourceRepo string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, githubAPITimeout)
+func FetchLatestRelease(ctx context.Context, pool *db.Pool, sourceRepo string) (string, error) {
+	timeout := time.Duration(GithubAPITimeoutSeconds(ctx, pool)) * time.Second
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	// Convert https://github.com/owner/repo → owner/repo for the API path.

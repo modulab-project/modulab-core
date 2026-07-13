@@ -875,6 +875,12 @@ export interface LimitsSettings {
   global_rate_limit_max: number;
   deno_conn_pool_size: number;
   geo_timeout_ms: number;
+  ai_provider_timeout_seconds: number;
+  searxng_search_timeout_seconds: number;
+  news_fetch_timeout_seconds: number;
+  store_sync_interval_seconds: number;
+  store_github_api_timeout_seconds: number;
+  modules_install_download_timeout_seconds: number;
 }
 
 // GET /v1/admin/system/limits — super-admin only.

@@ -137,7 +137,10 @@ type ManifestJob struct {
 }
 
 const (
-	installDownloadTimeout = 5 * time.Minute
+	// defaultInstallDownloadTimeoutSeconds is
+	// InstallDownloadTimeoutSeconds's fallback - mirrors the fixed 5min
+	// value this replaced.
+	defaultInstallDownloadTimeoutSeconds = 300
 	// defaultMaxModuleZIPBytes is the fallback used when the
 	// max_module_zip_bytes setting (see MaxModuleZIPBytes) has never been
 	// set.
@@ -149,6 +152,23 @@ const (
 	maxSHA256FileBytes = 1024
 	maxSigFileBytes    = 4096
 )
+
+// InstallDownloadTimeoutSeconds reads the module install/update ZIP download
+// timeout (seconds) from core_settings ("modules_install_download_timeout_seconds").
+// Defaults to defaultInstallDownloadTimeoutSeconds if unset. Companion
+// setting to MaxModuleZIPBytes: a larger admin-configured ZIP cap can also
+// need a longer download window on a slow connection.
+func InstallDownloadTimeoutSeconds(ctx context.Context, pool *db.Pool) int {
+	val, ok, err := pool.GetSetting(ctx, "modules_install_download_timeout_seconds")
+	if err != nil || !ok || val == "" {
+		return defaultInstallDownloadTimeoutSeconds
+	}
+	n, err := strconv.Atoi(val)
+	if err != nil || n <= 0 {
+		return defaultInstallDownloadTimeoutSeconds
+	}
+	return n
+}
 
 // MaxModuleZIPBytes reads the module-install ZIP size cap from
 // core_settings ("max_module_zip_bytes"). Defaults to
@@ -237,6 +257,7 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 	zipCh := make(chan dlResult, 1)
 	hashCh := make(chan dlResult, 1)
 
+	installDownloadTimeout := time.Duration(InstallDownloadTimeoutSeconds(ctx, d.DB)) * time.Second
 	dlCtx, dlCancel := context.WithTimeout(ctx, installDownloadTimeout)
 	defer dlCancel()
 
