@@ -29,17 +29,40 @@ search:
 
 # Engine overrides on top of use_default_settings' defaults.
 #
-# Disabled below: pure HTML-scraping engines that were observed CAPTCHA-
-# walling or 429-rate-limiting this instance in production (2026-07-06 logs)
-# duckduckgo, brave, startpage - plus qwant, which the upstream SearXNG
-# project tracks as commonly CAPTCHA-blocked for self-hosted instances
-# (searxng/searxng#3929) even though it hadn't shown up in our own logs yet.
+# IMPORTANT: reaching the engine list below via /config on a running
+# instance (`curl .../config` or the python3 urllib snippet in the
+# ModuLab admin notes) is the only reliable way to know what's actually
+# active. use_default_settings' upstream defaults disable almost every
+# general/web engine out of the box (bing, mojeek, startpage, yahoo,
+# duckduckgo, brave, qwant, yandex, google cse, yep, ...) - an earlier
+# version of this file assumed bing/mojeek were "kept enabled by
+# default", which was wrong and meant this instance was silently running
+# on wikipedia alone for a while (diagnosed 2026-07-13).
 #
-# Kept enabled: engines that are either real public APIs rather than HTML
-# scraping (wikipedia, wikidata, github, stackoverflow) or empirically more
-# tolerant of self-hosted scraping (mojeek, bing). Revisit this list if new
-# CAPTCHA/429 errors show up for any of the kept engines - blocking is IP-
-# reputation-based and can change over time.
+# Disabled explicitly: pure HTML-scraping engines that were observed
+# CAPTCHA-walling or rate-limiting this instance in production -
+# duckduckgo, brave, qwant (2026-07-06 logs), google cse (2026-07-13 log:
+# SearxEngineTooManyRequestsException, "unusual traffic from your
+# network", rolling 180s suspend - falls back to HTML scraping without a
+# real api_key/cx, re-enable only with a real Programmable Search Engine
+# key, free tier capped at 100 queries/day). yahoo and yep were also
+# tried and dropped: yahoo failed with a persistent httpx
+# RemoteProtocolError ("server disconnected", HTTP/2 issue) and yep
+# returned HTTP 403 access-denied - both 2026-07-13.
+#
+# Enabled explicitly: bing, startpage, mojeek (independent web indexes,
+# tested clean against several real queries), wolframalpha (computational
+# / factual answers, different backend from the scrapers above), ddg
+# definitions (DuckDuckGo's instant-answer API - technically separate
+# from the disabled duckduckgo HTML engine, runs without errors). All
+# four confirmed working together 2026-07-13 - unresponsive_engines came
+# back empty and each returned relevant results for test queries
+# ("modulab", "docker compose").
+#
+# Revisit this list if new CAPTCHA/429/403 errors show up for any kept
+# engine - blocking is IP-reputation-based and can change over time in
+# either direction (an engine disabled today may work again later, and
+# vice versa).
 #
 # NOT listed here: ahmia, torch. Tried disabling them too, but their
 # "can't register engine (loading engine failed)" error happens while
@@ -61,7 +84,17 @@ engines:
     disabled: true
   - name: brave
     disabled: true
-  - name: startpage
-    disabled: true
   - name: qwant
     disabled: true
+  - name: google cse
+    disabled: true
+  - name: bing
+    disabled: false
+  - name: startpage
+    disabled: false
+  - name: mojeek
+    disabled: false
+  - name: wolframalpha
+    disabled: false
+  - name: ddg definitions
+    disabled: false
