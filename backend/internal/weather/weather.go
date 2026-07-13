@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/modulab-project/modulab-core/backend/internal/db"
 	"github.com/modulab-project/modulab-core/backend/internal/netguard"
 	"github.com/modulab-project/modulab-core/backend/internal/valkey"
 )
@@ -56,6 +57,16 @@ const (
 	// change to LocationResponse's shape.
 	locationCacheKeyPfx = "geoloc:v2:"
 	nominatimReverseURL = "https://nominatim.openstreetmap.org/reverse"
+
+	// defaultGeoTimeoutMS is the fallback for the browser's
+	// navigator.geolocation.getCurrentPosition() timeout option (see
+	// GeoTimeoutMS below and Home.tsx's geolocation effect). Matches the
+	// hardcoded value this replaced - see AdminLimitsHandler's doc comment
+	// for why this became admin-configurable: a Wi-Fi-based location fix
+	// (enableHighAccuracy: false) can take longer than 5s on some corporate
+	// networks, and until now fixing that required a code change instead of
+	// an admin settings update.
+	defaultGeoTimeoutMS = 5000
 )
 
 // safeWeatherClient guards against SSRF the same way news/ai do, even
@@ -493,4 +504,46 @@ func fetchNominatimLocation(ctx context.Context, lat, lon float64) (LocationResp
 		label = settlement + ", " + raw.Address.Country
 	}
 	return LocationResponse{City: city, Label: label}, nil
+}
+
+// --- Geolocation timeout config --------------------------------------------
+
+// GeoConfigResponse is the JSON body of GET /v1/widgets/weather/geo-config.
+type GeoConfigResponse struct {
+	GeoTimeoutMS int `json:"geo_timeout_ms"`
+}
+
+// GeoTimeoutMS reads the browser geolocation timeout (milliseconds) from
+// core_settings ("geo_timeout_ms"), same pattern as
+// modules.MaxUploadBodyBytes. Defaults to defaultGeoTimeoutMS if unset;
+// admin.AdminLimitsHandler validates the stored value is always > 0, so a
+// zero/negative value here only happens for an unset or corrupted key.
+func GeoTimeoutMS(ctx context.Context, pool *db.Pool) int {
+	val, ok, err := pool.GetSetting(ctx, "geo_timeout_ms")
+	if err != nil || !ok || val == "" {
+		return defaultGeoTimeoutMS
+	}
+	n, err := strconv.Atoi(val)
+	if err != nil || n <= 0 {
+		return defaultGeoTimeoutMS
+	}
+	return n
+}
+
+// GeoConfigHandler returns the HTTP handler for GET /v1/widgets/weather/geo-config.
+// Same trust model as Handler/LocationHandler above: no auth, this is a
+// single non-sensitive integer the frontend needs *before* it can even ask
+// for a geolocation fix (see Home.tsx's geolocation effect) - there is no
+// coordinate to gate this on, unlike the two handlers above.
+func GeoConfigHandler(pool *db.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(GeoConfigResponse{GeoTimeoutMS: GeoTimeoutMS(r.Context(), pool)}); err != nil {
+			log.Printf("weather: write geo-config response: %v", err)
+		}
+	}
 }

@@ -39,6 +39,7 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/modules"
 	"github.com/modulab-project/modulab-core/backend/internal/news"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
+	"github.com/modulab-project/modulab-core/backend/internal/weather"
 )
 
 // The default* constants below intentionally mirror the unexported
@@ -86,6 +87,12 @@ const (
 //     field here, this one only takes effect the next time each module's
 //     worker (re)starts — a running worker's connection pool is sized once,
 //     at creation.
+//   - geo_timeout_ms: how long (in milliseconds) the browser's
+//     navigator.geolocation.getCurrentPosition() call is allowed to run
+//     before giving up (see weather.GeoTimeoutMS and Home.tsx's geolocation
+//     effect). Must be > 0, default 5000. A Wi-Fi-based location fix
+//     (enableHighAccuracy: false) can take longer than the default on some
+//     corporate networks - this used to be a hardcoded frontend constant.
 //
 // Every field except deno_conn_pool_size takes effect immediately, on the
 // next request, with no restart required.
@@ -98,6 +105,7 @@ type LimitsSettings struct {
 	AIChatIPRateLimitMax int64 `json:"ai_chat_ip_rate_limit_max"`
 	GlobalRateLimitMax   int64 `json:"global_rate_limit_max"`
 	DenoConnPoolSize     int   `json:"deno_conn_pool_size"`
+	GeoTimeoutMS         int   `json:"geo_timeout_ms"`
 }
 
 // readRateLimitInt is a copy of main.go's readRateLimitSetting (see this
@@ -134,6 +142,7 @@ func currentLimitsSettings(r *http.Request, pool *db.Pool) LimitsSettings {
 		AIChatIPRateLimitMax: readRateLimitInt(pool, r, "ai_chat_ip_rate_limit_max", defaultAIChatRateLimitMax),
 		GlobalRateLimitMax:   readRateLimitInt(pool, r, "global_rate_limit_max", defaultGlobalRateLimitMax),
 		DenoConnPoolSize:     modules.ConnPoolSize(ctx, pool),
+		GeoTimeoutMS:         weather.GeoTimeoutMS(ctx, pool),
 	}
 }
 
@@ -182,6 +191,7 @@ func AdminLimitsHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 				{"ai_chat_ip_rate_limit_max", body.AIChatIPRateLimitMax},
 				{"global_rate_limit_max", body.GlobalRateLimitMax},
 				{"deno_conn_pool_size", int64(body.DenoConnPoolSize)},
+				{"geo_timeout_ms", int64(body.GeoTimeoutMS)},
 			} {
 				if f.val <= 0 {
 					http.Error(w, f.name+" must be > 0", http.StatusBadRequest)
@@ -198,6 +208,7 @@ func AdminLimitsHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 				"ai_chat_ip_rate_limit_max": strconv.FormatInt(body.AIChatIPRateLimitMax, 10),
 				"global_rate_limit_max":     strconv.FormatInt(body.GlobalRateLimitMax, 10),
 				"deno_conn_pool_size":       strconv.Itoa(body.DenoConnPoolSize),
+				"geo_timeout_ms":            strconv.Itoa(body.GeoTimeoutMS),
 			}
 			for key, val := range settings {
 				if err := pool.SetSetting(ctx, key, val); err != nil {

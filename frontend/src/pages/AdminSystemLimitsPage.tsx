@@ -13,7 +13,7 @@ import { AppShell } from "../components/AppShell";
 // prompted this (module photo uploads silently capped at ~1 MB by a global
 // middleware limit nested outside the module's own, larger limit).
 //
-// All 8 fields are backed by raw byte/count values in `inputs`, matching
+// All 9 fields are backed by raw byte/count values in `inputs`, matching
 // exactly what the backend stores and what the hint text documents. The
 // "uploads" group (byte limits) additionally gets a unit selector (Bytes/
 // KB/MB) purely as a display/edit convenience — `inputs` always holds the
@@ -29,6 +29,7 @@ const FIELDS: Array<{ key: keyof LimitsSettings; group: "uploads" | "rate_limits
   { key: "ai_chat_ip_rate_limit_max", group: "rate_limits" },
   { key: "global_rate_limit_max", group: "rate_limits" },
   { key: "deno_conn_pool_size", group: "performance" },
+  { key: "geo_timeout_ms", group: "performance" },
 ];
 
 type ByteUnit = "B" | "KB" | "MB";
@@ -150,10 +151,15 @@ export default function AdminSystemLimitsPage() {
             ))}
           </Group>
           <Group title={t("admin.system_limits.group_performance")}>
-            {performanceFields.map((f) => (
-              <NumberField key={f.key} fieldKey={f.key} value={inputs[f.key] ?? ""}
-                onChange={(v) => setInputs((prev) => ({ ...prev, [f.key]: v }))} t={t} />
-            ))}
+            {performanceFields.map((f) =>
+              f.key === "geo_timeout_ms" ? (
+                <SecondsField key={f.key} fieldKey={f.key} msValue={inputs[f.key] ?? ""}
+                  onMsChange={(v) => setInputs((prev) => ({ ...prev, [f.key]: v }))} t={t} />
+              ) : (
+                <NumberField key={f.key} fieldKey={f.key} value={inputs[f.key] ?? ""}
+                  onChange={(v) => setInputs((prev) => ({ ...prev, [f.key]: v }))} t={t} />
+              ),
+            )}
           </Group>
 
           <div className="flex justify-end">
@@ -261,6 +267,61 @@ function ByteField({
           <option value="KB">KB</option>
           <option value="MB">MB</option>
         </select>
+      </div>
+      <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+        {t(`admin.system_limits.${fieldKey}_hint`)}
+      </p>
+    </div>
+  );
+}
+
+// Stores/sends the canonical value in milliseconds (matching the backend's
+// geo_timeout_ms and the browser's native
+// navigator.geolocation.getCurrentPosition() timeout option exactly, no
+// conversion at the point of use in Home.tsx), but displays and edits it in
+// seconds - same "canonical unit + friendlier display" split as ByteField
+// above, just with a fixed unit instead of a selector since seconds is the
+// only sensible display unit for a value in the single-digit-second range.
+const MS_PER_SECOND = 1000;
+
+function SecondsField({
+  fieldKey,
+  msValue,
+  onMsChange,
+  t,
+}: {
+  fieldKey: keyof LimitsSettings;
+  msValue: string;
+  onMsChange: (v: string) => void;
+  t: (key: string) => string;
+}) {
+  const numMs = Number(msValue);
+  const displayValue = msValue !== "" && !isNaN(numMs)
+    ? String(parseFloat((numMs / MS_PER_SECOND).toFixed(3)))
+    : msValue;
+
+  function handleNumberChange(v: string) {
+    if (v === "") { onMsChange(""); return; }
+    const n = parseFloat(v);
+    if (isNaN(n)) { onMsChange(v); return; }
+    onMsChange(String(Math.round(n * MS_PER_SECOND)));
+  }
+
+  return (
+    <div>
+      <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">
+        {t(`admin.system_limits.${fieldKey}_label`)}
+      </label>
+      <div className="flex items-center gap-2">
+        <input
+          type="number"
+          min={0}
+          step={0.1}
+          value={displayValue}
+          onChange={(e) => handleNumberChange(e.target.value)}
+          className="w-full flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-base outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-800"
+        />
+        <span className="text-sm text-gray-500 dark:text-gray-400">{t("admin.system_limits.unit_seconds")}</span>
       </div>
       <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
         {t(`admin.system_limits.${fieldKey}_hint`)}

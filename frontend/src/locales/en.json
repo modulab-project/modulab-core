@@ -346,8 +346,11 @@
       "global_rate_limit_max_hint": "Applies to every route except the health check. Must be greater than 0. Default: 600.",
       "deno_conn_pool_size_label": "Module worker connection pool size",
       "deno_conn_pool_size_hint": "How many requests can run at once against a single module's worker process. Must be at least 1. Default: 4. Takes effect the next time each module restarts or updates — not immediately.",
+      "geo_timeout_ms_label": "Location lookup timeout",
+      "geo_timeout_ms_hint": "How long the browser waits for a location fix before giving up (e.g. when Wi-Fi-based positioning on a corporate network takes longer). Must be greater than 0. Default: 5 seconds.",
       "validation_error": "Byte limits must be 0 or greater; rate limits and pool size must be greater than 0.",
-      "unit_bytes": "Bytes"
+      "unit_bytes": "Bytes",
+      "unit_seconds": "seconds"
     },
     "system_info": {
       "title": "System info",

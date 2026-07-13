@@ -9,6 +9,7 @@ import { USER_FEEDS_QUERY_KEY } from "../lib/queryKeys";
 import {
   getWeather,
   getWeatherLocation,
+  getWeatherGeoConfig,
   getNews,
   getNewsConfig,
   listFeeds,
@@ -68,6 +69,22 @@ import { listQuickLinks, type Tile } from "../lib/quicklinks";
 // per-tab lifetime: a cached weather reading should not survive past the
 // tab/session it was fetched in, same as the auth token itself.
 const WEATHER_CACHE_KEY = "modulab_weather_cache";
+
+// Fallback used if /v1/widgets/weather/geo-config can't be reached in time -
+// mirrors the backend's own defaultGeoTimeoutMS (weather.go), so behavior is
+// identical to before this became admin-configurable.
+const DEFAULT_GEO_TIMEOUT_MS = 5000;
+
+// Kicked off at module load (not gated on `session`, unlike the geolocation
+// effect itself) so the network round-trip overlaps with session
+// verification instead of adding to it - by the time the geolocation effect
+// below actually needs the value, this has usually already resolved. The
+// value is a global admin setting, not per-user, so one shared promise for
+// the whole module lifetime is correct; a failed fetch just falls back to
+// DEFAULT_GEO_TIMEOUT_MS rather than blocking the geolocation prompt.
+const geoTimeoutMsPromise: Promise<number> = getWeatherGeoConfig()
+  .then((c) => c.geo_timeout_ms)
+  .catch(() => DEFAULT_GEO_TIMEOUT_MS);
 
 interface WeatherCache {
   weather: WeatherResponse;
@@ -202,48 +219,52 @@ export default function Home() {
       setWeatherLoading(false);
       return;
     }
-    navigator.geolocation.getCurrentPosition(
-      ({ coords }) => {
-        // Cache is written from a small helper below rather than inline in
-        // both .then()s, since either the weather or the location call can
-        // resolve first (they're independent/parallel) and either one
-        // succeeding should update the cache with whatever the latest
-        // combined state is.
-        const writeCache = (w: WeatherResponse | null, loc: WeatherLocation | null) => {
-          if (!w) return;
-          try {
-            sessionStorage.setItem(WEATHER_CACHE_KEY, JSON.stringify({ weather: w, weatherLocation: loc }));
-          } catch {
-            // sessionStorage full/unavailable (e.g. private browsing) - not
-            // fatal, just means no instant-paint next time.
-          }
-        };
-        getWeather(coords.latitude, coords.longitude)
-          .then((w) => {
-            setWeather(w);
-            setWeatherLoading(false);
-            writeCache(w, weatherLocationRef.current);
-          })
-          .catch(() => setWeatherLoading(false));
-        // Independent request, independent failure mode: if Nominatim is
-        // slow/unreachable the temperature above still renders fine, just
-        // without a place-name caption.
-        getWeatherLocation(coords.latitude, coords.longitude)
-          .then((loc) => {
-            const resolved = loc.city ? loc : null;
-            setWeatherLocation(resolved);
-            writeCache(weatherRef.current, resolved);
-          })
-          .catch(() => {});
-      },
-      () => setWeatherLoading(false),
-      // enableHighAccuracy: false uses Wi-Fi/cell-based positioning instead
-      // of the GPS chip - much faster indoors (where this app is used) and
-      // plenty precise for weather. Timeout dropped from 8s to 5s to match:
-      // a network-based fix that hasn't resolved in 5s is unlikely to
-      // resolve much sooner, so failing fast beats a long hang.
-      { enableHighAccuracy: false, timeout: 5000 },
-    );
+    // enableHighAccuracy: false uses Wi-Fi/cell-based positioning instead of
+    // the GPS chip - much faster indoors (where this app is used) and
+    // plenty precise for weather. The timeout itself is an admin-configurable
+    // setting (geo_timeout_ms, default 5000ms - see geoTimeoutMsPromise
+    // above and AdminLimitsHandler's doc comment): on some corporate
+    // networks a Wi-Fi-based fix takes longer than the old hardcoded 5s, so
+    // failing fast is no longer a one-size-fits-all assumption.
+    geoTimeoutMsPromise.then((geoTimeoutMs) => {
+      navigator.geolocation.getCurrentPosition(
+        ({ coords }) => {
+          // Cache is written from a small helper below rather than inline in
+          // both .then()s, since either the weather or the location call can
+          // resolve first (they're independent/parallel) and either one
+          // succeeding should update the cache with whatever the latest
+          // combined state is.
+          const writeCache = (w: WeatherResponse | null, loc: WeatherLocation | null) => {
+            if (!w) return;
+            try {
+              sessionStorage.setItem(WEATHER_CACHE_KEY, JSON.stringify({ weather: w, weatherLocation: loc }));
+            } catch {
+              // sessionStorage full/unavailable (e.g. private browsing) - not
+              // fatal, just means no instant-paint next time.
+            }
+          };
+          getWeather(coords.latitude, coords.longitude)
+            .then((w) => {
+              setWeather(w);
+              setWeatherLoading(false);
+              writeCache(w, weatherLocationRef.current);
+            })
+            .catch(() => setWeatherLoading(false));
+          // Independent request, independent failure mode: if Nominatim is
+          // slow/unreachable the temperature above still renders fine, just
+          // without a place-name caption.
+          getWeatherLocation(coords.latitude, coords.longitude)
+            .then((loc) => {
+              const resolved = loc.city ? loc : null;
+              setWeatherLocation(resolved);
+              writeCache(weatherRef.current, resolved);
+            })
+            .catch(() => {});
+        },
+        () => setWeatherLoading(false),
+        { enableHighAccuracy: false, timeout: geoTimeoutMs },
+      );
+    });
   }, [session]);
 
   const loadNews = useCallback(() => {

@@ -346,8 +346,11 @@
       "global_rate_limit_max_hint": "Se aplica a todas las rutas excepto el chequeo de salud. Debe ser mayor que 0. Por defecto: 600.",
       "deno_conn_pool_size_label": "Tamaño del pool de conexiones de workers de módulo",
       "deno_conn_pool_size_hint": "Cuántas solicitudes pueden ejecutarse a la vez contra el proceso worker de un módulo. Debe ser al menos 1. Por defecto: 4. Se aplica en el próximo reinicio o actualización de cada módulo — no de inmediato.",
+      "geo_timeout_ms_label": "Tiempo de espera de geolocalización",
+      "geo_timeout_ms_hint": "Cuánto tiempo espera el navegador una posición antes de rendirse (p. ej. cuando la localización por Wi-Fi en una red corporativa tarda más). Debe ser mayor que 0. Por defecto: 5 segundos.",
       "validation_error": "Los límites en bytes deben ser 0 o mayores; los límites de velocidad y el tamaño del pool deben ser mayores que 0.",
-      "unit_bytes": "Bytes"
+      "unit_bytes": "Bytes",
+      "unit_seconds": "segundos"
     },
     "system_info": {
       "title": "Información del sistema",

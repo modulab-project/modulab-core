@@ -605,6 +605,19 @@ export function getWeatherLocation(lat: number, lon: number): Promise<WeatherLoc
   );
 }
 
+// GET /v1/widgets/weather/geo-config — admin-configurable timeout (ms) for
+// the browser's navigator.geolocation.getCurrentPosition() call (see
+// AdminLimitsHandler's geo_timeout_ms field). Same trust model as getWeather
+// above (no auth) - Home.tsx needs this *before* it can even request a
+// position fix, so it can't ride along with getWeather/getWeatherLocation.
+export interface WeatherGeoConfig {
+  geo_timeout_ms: number;
+}
+
+export function getWeatherGeoConfig(): Promise<WeatherGeoConfig> {
+  return request<WeatherGeoConfig>("/v1/widgets/weather/geo-config");
+}
+
 // --- SearXNG web search --------------------------------------------------
 // Mirrors backend/internal/searxng's JSON shapes exactly.
 
@@ -861,6 +874,7 @@ export interface LimitsSettings {
   ai_chat_ip_rate_limit_max: number;
   global_rate_limit_max: number;
   deno_conn_pool_size: number;
+  geo_timeout_ms: number;
 }
 
 // GET /v1/admin/system/limits — super-admin only.

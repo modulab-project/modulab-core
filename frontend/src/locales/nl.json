@@ -346,8 +346,11 @@
       "global_rate_limit_max_hint": "Van toepassing op alle routes behalve de health check. Moet groter zijn dan 0. Standaard: 600.",
       "deno_conn_pool_size_label": "Verbindingspoolgrootte van moduleworkers",
       "deno_conn_pool_size_hint": "Hoeveel verzoeken tegelijk tegen het workerproces van een module kunnen draaien. Moet minimaal 1 zijn. Standaard: 4. Wordt pas van kracht bij de volgende herstart of update van elke module — niet direct.",
+      "geo_timeout_ms_label": "Time-out voor locatiebepaling",
+      "geo_timeout_ms_hint": "Hoe lang de browser wacht op een locatie voordat hij het opgeeft (bijv. als wifi-gebaseerde positiebepaling op een bedrijfsnetwerk langer duurt). Moet groter dan 0 zijn. Standaard: 5 seconden.",
       "validation_error": "Bytelimieten moeten 0 of groter zijn; snelheidslimieten en poolgrootte moeten groter zijn dan 0.",
-      "unit_bytes": "Bytes"
+      "unit_bytes": "Bytes",
+      "unit_seconds": "seconden"
     },
     "system_info": {
       "title": "Systeeminfo",

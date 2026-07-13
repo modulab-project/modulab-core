@@ -449,6 +449,10 @@ func main() {
 	// above (no auth, coordinates never stored/logged), just a much longer
 	// cache TTL since a place name doesn't go stale the way weather does.
 	mux.HandleFunc("GET /v1/widgets/weather/location", weather.LocationHandler(valkeyClient))
+	// Admin-configurable geolocation timeout (see AdminLimitsHandler /
+	// geo_timeout_ms) - the frontend needs this before it can even request a
+	// position fix, so it can't just ride along with the two handlers above.
+	mux.HandleFunc("GET /v1/widgets/weather/geo-config", weather.GeoConfigHandler(pool))
 
 	// SearXNG web-search proxy (spec section 6.4, search widget).
 	// Admin configuration: super-admin only (same tier as SMTP).
