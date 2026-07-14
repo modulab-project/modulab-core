@@ -113,6 +113,35 @@ export default function ModulePage() {
     const token = getSessionToken();
     if (!token) return;
 
+    // Reset every piece of per-module state up front. ModulePage is NOT
+    // remounted when navigating from one module to another via the SPA
+    // router (only `moduleName` changes) - so without this, switching
+    // straight from module A to module B left `moduleTokenReady`/
+    // `moduleToken`/`moduleTokenRef` sitting at module A's (still "ready",
+    // still valid-looking) values. The bundle-load effect below keys off
+    // `moduleTokenReady` to decide whether it's safe to fetch - seeing it
+    // already `true` from the previous module, it fired immediately against
+    // module B's routes using module A's token, which the backend correctly
+    // rejects as "invalid or expired module token" (auth/moduletoken.go:
+    // ValidateModuleToken checks the token was minted for exactly this
+    // module). Reported by the user 2026-07-14, second occurrence after the
+    // visibilitychange fix above - this is a distinct bug, not the same one.
+    // Deliberate: this must clear the previous module's state before this
+    // same effect's fetch below can start, precisely to prevent the
+    // stale-token bug this fix addresses; deferring it out of the effect
+    // body would reopen the same race.
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setMod(null);
+    setModuleComponent(null);
+    setLoadError(null);
+    setFetching(true);
+    setBundleLoading(true);
+    setModuleTokenReady(false);
+    setModuleToken(null);
+    /* eslint-enable react-hooks/set-state-in-effect */
+    moduleTokenRef.current = null;
+    tokenExpiresAtRef.current = 0;
+
     let cancelled = false;
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
     let refreshing = false;
