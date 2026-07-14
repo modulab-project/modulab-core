@@ -231,6 +231,28 @@
         "remove": "Remove configuration"
       }
     },
+    "search": {
+      "title": "Web search",
+      "subtitle": "Configure the providers behind ModuLab's home-page web search. Multiple providers (SearXNG, Serper.dev) can be configured at once, with one set as primary and optionally one as fallback.",
+      "url_label": "Base URL",
+      "key_label": "API key",
+      "key_set_placeholder": "•••••••••••• (set — leave blank to keep unchanged)",
+      "clear_key": "Remove key",
+      "max_results_label": "Max results",
+      "fetch_pages_label": "Pages fetched",
+      "enabled_label": "Enabled",
+      "user_can_override_label": "Users may add their own key",
+      "mode_title": "Provider priority",
+      "mode_hint": "The primary provider is tried first. If a fallback is set, ModuLab switches to it automatically when the primary provider errors or times out.",
+      "primary_label": "Primary provider",
+      "fallback_label": "Fallback provider",
+      "fallback_none": "No fallback",
+      "timeout_label": "Search timeout (seconds)",
+      "fallback_timeout_label": "Fallback switch timeout (seconds)",
+      "fallback_timeout_hint": "How long the primary provider gets before ModuLab switches to the fallback.",
+      "saved": "Saved successfully.",
+      "save": "Save"
+    },
     "smtp": {
       "title": "SMTP",
       "subtitle": "Outbound mail for account notifications.",
@@ -351,8 +373,10 @@
       "geo_timeout_ms_hint": "How long the browser waits for a location fix before giving up (e.g. when Wi-Fi-based positioning on a corporate network takes longer). Must be greater than 0. Default: 5 seconds.",
       "ai_provider_timeout_seconds_label": "AI provider timeout",
       "ai_provider_timeout_seconds_hint": "HTTP timeout when fetching an AI provider's model list. Local/self-hosted models (e.g. Ollama) can take longer than cloud providers on modest hardware. Must be greater than 0. Default: 30 seconds.",
-      "searxng_search_timeout_seconds_label": "SearXNG search timeout",
-      "searxng_search_timeout_seconds_hint": "Hard cap for a full SearXNG search round-trip. A self-hosted instance querying several search-engine backends can need longer on modest hardware. Must be greater than 0. Default: 2 seconds.",
+      "search_timeout_seconds_label": "Search timeout",
+      "search_timeout_seconds_hint": "Hard cap for a full web search round-trip, shared across every configured provider (SearXNG, Serper.dev, ...). A self-hosted SearXNG instance can need longer than a hosted API on modest hardware. Must be greater than 0. Default: 5 seconds.",
+      "search_fallback_timeout_seconds_label": "Fallback switch timeout",
+      "search_fallback_timeout_seconds_hint": "How long the primary search provider gets before ModuLab gives up and tries the configured fallback provider (only relevant when one is set). Must be greater than 0. Default: 3 seconds.",
       "news_fetch_timeout_seconds_label": "RSS/Atom feed timeout",
       "news_fetch_timeout_seconds_hint": "HTTP timeout per feed fetch. Slow or flaky feeds otherwise get reported as unreachable prematurely. Must be greater than 0. Default: 10 seconds.",
       "store_sync_interval_seconds_label": "Module registry sync interval",
@@ -809,7 +833,15 @@
       "language_desc": "Prefer results in a specific language.",
       "saved": "Saved",
       "load_error": "Could not load your search preferences.",
-      "save_error": "Could not save that change — please try again."
+      "save_error": "Could not save that change — please try again.",
+      "own_key_title": "Your own Serper.dev key",
+      "own_key_desc": "Optional: add your own Serper.dev API key instead of using the one provided by the administrator.",
+      "own_key_placeholder": "Serper.dev API key",
+      "own_key_set": "Your own key is set.",
+      "own_key_not_set": "No key of your own set — the default access is used.",
+      "own_key_save": "Save",
+      "own_key_remove": "Remove",
+      "own_key_not_allowed": "The administrator does not allow custom keys for this provider."
     }
   },
   "store": {

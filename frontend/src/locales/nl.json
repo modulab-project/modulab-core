@@ -231,6 +231,28 @@
         "remove": "Configuratie verwijderen"
       }
     },
+    "search": {
+      "title": "Websearch",
+      "subtitle": "Configureer de providers achter ModuLabs websearch op de startpagina. Er kunnen meerdere providers (SearXNG, Serper.dev) tegelijk worden ingesteld, met één als primair en optioneel één als fallback.",
+      "url_label": "Basis-URL",
+      "key_label": "API-sleutel",
+      "key_set_placeholder": "•••••••••••• (ingesteld — leeg laten om ongewijzigd te houden)",
+      "clear_key": "Sleutel verwijderen",
+      "max_results_label": "Max. resultaten",
+      "fetch_pages_label": "Opgehaalde pagina's",
+      "enabled_label": "Ingeschakeld",
+      "user_can_override_label": "Gebruikers mogen een eigen sleutel toevoegen",
+      "mode_title": "Providerprioriteit",
+      "mode_hint": "De primaire provider wordt eerst geprobeerd. Als een fallback is ingesteld, schakelt ModuLab er automatisch naar over bij een fout of time-out van de primaire provider.",
+      "primary_label": "Primaire provider",
+      "fallback_label": "Fallback-provider",
+      "fallback_none": "Geen",
+      "timeout_label": "Zoek-time-out (seconden)",
+      "fallback_timeout_label": "Fallback-wisseltime-out (seconden)",
+      "fallback_timeout_hint": "Hoe lang de primaire provider krijgt voordat ModuLab overschakelt naar de fallback.",
+      "saved": "Succesvol opgeslagen.",
+      "save": "Opslaan"
+    },
     "smtp": {
       "title": "SMTP",
       "subtitle": "Uitgaande mail voor accountmeldingen.",
@@ -351,8 +373,10 @@
       "geo_timeout_ms_hint": "Hoe lang de browser wacht op een locatie voordat hij het opgeeft (bijv. als wifi-gebaseerde positiebepaling op een bedrijfsnetwerk langer duurt). Moet groter dan 0 zijn. Standaard: 5 seconden.",
       "ai_provider_timeout_seconds_label": "AI-provider-time-out",
       "ai_provider_timeout_seconds_hint": "HTTP-time-out bij het ophalen van de modellenlijst van een AI-provider. Lokale/zelfgehoste modellen (bijv. Ollama) kunnen op bescheiden hardware langer duren dan cloudproviders. Moet groter zijn dan 0. Standaard: 30 seconden.",
-      "searxng_search_timeout_seconds_label": "SearXNG-zoek-time-out",
-      "searxng_search_timeout_seconds_hint": "Bovengrens voor een volledige SearXNG-zoekopdracht. Een zelfgehoste instantie die meerdere zoekmachine-backends bevraagt kan op bescheiden hardware langer nodig hebben. Moet groter zijn dan 0. Standaard: 2 seconden.",
+      "search_timeout_seconds_label": "Zoek-time-out",
+      "search_timeout_seconds_hint": "Bovengrens voor een volledige websearch, gedeeld door elke geconfigureerde provider (SearXNG, Serper.dev, …). Een zelfgehoste SearXNG-instantie kan op bescheiden hardware langer nodig hebben dan een gehoste API. Moet groter zijn dan 0. Standaard: 5 seconden.",
+      "search_fallback_timeout_seconds_label": "Fallback-wisseltime-out",
+      "search_fallback_timeout_seconds_hint": "Hoe lang de primaire zoekprovider krijgt voordat ModuLab overschakelt naar de geconfigureerde fallback-provider (alleen relevant als er één is ingesteld). Moet groter zijn dan 0. Standaard: 3 seconden.",
       "news_fetch_timeout_seconds_label": "RSS/Atom-feed-time-out",
       "news_fetch_timeout_seconds_hint": "HTTP-time-out per feedophaling. Trage of instabiele feeds worden anders voortijdig als onbereikbaar gemeld. Moet groter zijn dan 0. Standaard: 10 seconden.",
       "store_sync_interval_seconds_label": "Synchronisatie-interval moduleregister",
@@ -809,7 +833,15 @@
       "language_desc": "Resultaten in een specifieke taal verkiezen.",
       "saved": "Opgeslagen",
       "load_error": "Uw zoekvoorkeuren konden niet worden geladen.",
-      "save_error": "Deze wijziging kon niet worden opgeslagen — probeer het opnieuw."
+      "save_error": "Deze wijziging kon niet worden opgeslagen — probeer het opnieuw.",
+      "own_key_title": "Eigen Serper.dev-sleutel",
+      "own_key_desc": "Optioneel: voeg uw eigen Serper.dev API-sleutel toe in plaats van de door de beheerder aangeboden toegang te gebruiken.",
+      "own_key_placeholder": "Serper.dev API-sleutel",
+      "own_key_set": "Uw eigen sleutel is ingesteld.",
+      "own_key_not_set": "Geen eigen sleutel ingesteld — de standaardtoegang wordt gebruikt.",
+      "own_key_save": "Opslaan",
+      "own_key_remove": "Verwijderen",
+      "own_key_not_allowed": "De beheerder staat geen eigen sleutels toe voor deze provider."
     }
   },
   "store": {

@@ -231,6 +231,28 @@
         "remove": "Supprimer la configuration"
       }
     },
+    "search": {
+      "title": "Recherche web",
+      "subtitle": "Configurer les fournisseurs de recherche web de ModuLab. Plusieurs fournisseurs (SearXNG, Serper.dev) peuvent être configurés à la fois, avec un fournisseur principal et un fournisseur de secours optionnel.",
+      "url_label": "URL de base",
+      "key_label": "Clé API",
+      "key_set_placeholder": "•••••••••••• (définie — laisser vide pour ne pas modifier)",
+      "clear_key": "Supprimer la clé",
+      "max_results_label": "Résultats max.",
+      "fetch_pages_label": "Pages récupérées",
+      "enabled_label": "Activé",
+      "user_can_override_label": "Les utilisateurs peuvent ajouter leur propre clé",
+      "mode_title": "Priorité des fournisseurs",
+      "mode_hint": "Le fournisseur principal est utilisé en premier. Si un fournisseur de secours est défini, ModuLab bascule automatiquement dessus en cas d'erreur ou de délai dépassé du fournisseur principal.",
+      "primary_label": "Fournisseur principal",
+      "fallback_label": "Fournisseur de secours",
+      "fallback_none": "Aucun",
+      "timeout_label": "Délai de recherche (secondes)",
+      "fallback_timeout_label": "Délai de bascule (secondes)",
+      "fallback_timeout_hint": "Durée accordée au fournisseur principal avant de basculer sur le fournisseur de secours.",
+      "saved": "Enregistré avec succès.",
+      "save": "Enregistrer"
+    },
     "smtp": {
       "title": "SMTP",
       "subtitle": "Courrier sortant pour les notifications de compte.",
@@ -351,8 +373,10 @@
       "geo_timeout_ms_hint": "Durée pendant laquelle le navigateur attend une position avant d'abandonner (par ex. lorsque la localisation via Wi-Fi sur un réseau d'entreprise met plus de temps). Doit être supérieur à 0. Par défaut : 5 secondes.",
       "ai_provider_timeout_seconds_label": "Délai du fournisseur IA",
       "ai_provider_timeout_seconds_hint": "Délai HTTP lors de la récupération de la liste des modèles d'un fournisseur IA. Les modèles locaux/auto-hébergés (ex. Ollama) peuvent être plus lents que les fournisseurs cloud sur du matériel modeste. Doit être supérieur à 0. Par défaut : 30 secondes.",
-      "searxng_search_timeout_seconds_label": "Délai de recherche SearXNG",
-      "searxng_search_timeout_seconds_hint": "Plafond pour un aller-retour complet de recherche SearXNG. Une instance auto-hébergée interrogeant plusieurs moteurs de recherche peut nécessiter plus de temps sur du matériel modeste. Doit être supérieur à 0. Par défaut : 2 secondes.",
+      "search_timeout_seconds_label": "Délai de recherche",
+      "search_timeout_seconds_hint": "Plafond pour un aller-retour complet de recherche web, partagé par tous les fournisseurs configurés (SearXNG, Serper.dev, …). Une instance SearXNG auto-hébergée peut nécessiter plus de temps qu'une API hébergée sur du matériel modeste. Doit être supérieur à 0. Par défaut : 5 secondes.",
+      "search_fallback_timeout_seconds_label": "Délai de bascule",
+      "search_fallback_timeout_seconds_hint": "Durée accordée au fournisseur de recherche principal avant que ModuLab bascule sur le fournisseur de secours configuré (pertinent uniquement si un fournisseur de secours est défini). Doit être supérieur à 0. Par défaut : 3 secondes.",
       "news_fetch_timeout_seconds_label": "Délai des flux RSS/Atom",
       "news_fetch_timeout_seconds_hint": "Délai HTTP par récupération de flux. Les flux lents ou instables sont sinon signalés comme inaccessibles prématurément. Doit être supérieur à 0. Par défaut : 10 secondes.",
       "store_sync_interval_seconds_label": "Intervalle de synchronisation du registre de modules",
@@ -809,7 +833,15 @@
       "language_desc": "Préférer les résultats dans une langue spécifique.",
       "saved": "Enregistré",
       "load_error": "Impossible de charger vos préférences de recherche.",
-      "save_error": "Impossible d'enregistrer cette modification — veuillez réessayer."
+      "save_error": "Impossible d'enregistrer cette modification — veuillez réessayer.",
+      "own_key_title": "Votre propre clé Serper.dev",
+      "own_key_desc": "Facultatif : ajoutez votre propre clé API Serper.dev au lieu d'utiliser celle fournie par l'administrateur.",
+      "own_key_placeholder": "Clé API Serper.dev",
+      "own_key_set": "Votre propre clé est définie.",
+      "own_key_not_set": "Aucune clé personnelle définie — l'accès par défaut est utilisé.",
+      "own_key_save": "Enregistrer",
+      "own_key_remove": "Supprimer",
+      "own_key_not_allowed": "L'administrateur n'autorise pas de clés personnalisées pour ce fournisseur."
     }
   },
   "store": {

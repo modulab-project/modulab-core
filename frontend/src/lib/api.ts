@@ -618,39 +618,123 @@ export function getWeatherGeoConfig(): Promise<WeatherGeoConfig> {
   return request<WeatherGeoConfig>("/v1/widgets/weather/geo-config");
 }
 
-// --- SearXNG web search --------------------------------------------------
-// Mirrors backend/internal/searxng's JSON shapes exactly.
+// --- Web search providers --------------------------------------------------
+// Mirrors backend/internal/search's JSON shapes. Web search can be backed by
+// more than one provider now (SearXNG, Serper.dev, ...) - see that
+// package's doc comment. Replaces the old single-provider SearXNG-only API
+// (searxngStatus/configureSearxng/deleteSearxngConfig).
 
-export interface SearXNGStatus {
-  configured: boolean;
-  url?: string;
-  // Both fields are always present (backend fills defaults when unset).
+// Admin view: full provider details.
+export interface SearchProvider {
+  id: string;
+  type: string;
+  name: string;
+  base_url?: string;
+  has_admin_key: boolean;
   max_results: number;
   fetch_pages: number;
+  user_can_override: boolean;
+  enabled: boolean;
+  sort_order: number;
 }
 
-// GET /v1/admin/searxng/status — super-admin only.
-export function searxngStatus(token: string): Promise<SearXNGStatus> {
-  return request<SearXNGStatus>("/v1/admin/searxng/status", {
+// GET /v1/admin/search/providers — super-admin only.
+export function adminListSearchProviders(token: string): Promise<SearchProvider[]> {
+  return request<SearchProvider[]>("/v1/admin/search/providers", {
     headers: bearerHeaders(token),
   });
 }
 
-// POST /v1/admin/searxng/configure — super-admin only.
-export function configureSearxng(
+// PATCH /v1/admin/search/providers/{id} — super-admin only. Only send
+// admin_key when the admin actually typed a new one - omitting it (or
+// sending "") leaves the stored key untouched, matching UpdateSearchProvider's
+// COALESCE-on-conflict behavior on the backend.
+export function adminPatchSearchProvider(
   token: string,
-  body: { url: string; max_results: number; fetch_pages: number },
-): Promise<SearXNGStatus> {
-  return request<SearXNGStatus>("/v1/admin/searxng/configure", {
-    method: "POST",
+  id: string,
+  patch: Partial<{
+    base_url: string;
+    admin_key: string;
+    max_results: number;
+    fetch_pages: number;
+    user_can_override: boolean;
+    enabled: boolean;
+    sort_order: number;
+  }>,
+): Promise<SearchProvider> {
+  return request<SearchProvider>(`/v1/admin/search/providers/${encodeURIComponent(id)}`, {
+    method: "PATCH",
     headers: bearerHeaders(token),
-    body: JSON.stringify(body),
+    body: JSON.stringify(patch),
   });
 }
 
-// DELETE /v1/admin/searxng — super-admin only.
-export function deleteSearxngConfig(token: string): Promise<void> {
-  return request<void>("/v1/admin/searxng", {
+// DELETE /v1/admin/search/providers/{id}/key — super-admin only. Clears the
+// admin key without touching the rest of the provider row.
+export function adminClearSearchProviderKey(token: string, id: string): Promise<void> {
+  return request<void>(`/v1/admin/search/providers/${encodeURIComponent(id)}/key`, {
+    method: "DELETE",
+    headers: bearerHeaders(token),
+  });
+}
+
+// Which provider is primary/fallback, and the two shared search timeouts.
+export interface SearchSettings {
+  primary_provider_id: string;
+  fallback_provider_id: string;
+  timeout_seconds: number;
+  fallback_timeout_seconds: number;
+}
+
+// GET /v1/admin/search/settings — super-admin only.
+export function adminGetSearchSettings(token: string): Promise<SearchSettings> {
+  return request<SearchSettings>("/v1/admin/search/settings", {
+    headers: bearerHeaders(token),
+  });
+}
+
+// PATCH /v1/admin/search/settings — super-admin only.
+export function adminPatchSearchSettings(token: string, settings: SearchSettings): Promise<SearchSettings> {
+  return request<SearchSettings>("/v1/admin/search/settings", {
+    method: "PATCH",
+    headers: bearerHeaders(token),
+    body: JSON.stringify(settings),
+  });
+}
+
+// User view: whether a provider is usable, and whether the user has their
+// own key stored for it — no secret material ever included.
+export interface UserSearchProvider {
+  id: string;
+  name: string;
+  type: string;
+  enabled: boolean;
+  available: boolean;
+  has_user_key: boolean;
+  has_admin_key: boolean;
+  can_override: boolean;
+}
+
+// GET /v1/search/providers — any approved session.
+export function listSearchProvidersForUser(token: string): Promise<UserSearchProvider[]> {
+  return request<UserSearchProvider[]>("/v1/search/providers", {
+    headers: bearerHeaders(token),
+  });
+}
+
+// PUT /v1/user/search/keys/{id} — any approved session. Only allowed for
+// providers with can_override = true (e.g. Serper, not SearXNG).
+export function setUserSearchKey(token: string, providerId: string, key: string): Promise<void> {
+  return request<void>(`/v1/user/search/keys/${encodeURIComponent(providerId)}`, {
+    method: "PUT",
+    headers: bearerHeaders(token),
+    body: JSON.stringify({ key }),
+  });
+}
+
+// DELETE /v1/user/search/keys/{id} — any approved session.
+export function deleteUserSearchKey(token: string, providerId: string): Promise<void> {
+  return request<void>(`/v1/user/search/keys/${encodeURIComponent(providerId)}`, {
     method: "DELETE",
     headers: bearerHeaders(token),
   });
@@ -876,7 +960,8 @@ export interface LimitsSettings {
   deno_conn_pool_size: number;
   geo_timeout_ms: number;
   ai_provider_timeout_seconds: number;
-  searxng_search_timeout_seconds: number;
+  search_timeout_seconds: number;
+  search_fallback_timeout_seconds: number;
   news_fetch_timeout_seconds: number;
   store_sync_interval_seconds: number;
   store_github_api_timeout_seconds: number;

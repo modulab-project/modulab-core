@@ -2,26 +2,33 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "rea
 import { useNavigate, Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import {
-  searxngStatus as fetchSearxngStatus,
-  configureSearxng,
-  deleteSearxngConfig,
-  type SearXNGStatus,
+  adminListSearchProviders,
+  adminPatchSearchProvider,
+  adminClearSearchProviderKey,
+  adminGetSearchSettings,
+  adminPatchSearchSettings,
+  type SearchProvider,
+  type SearchSettings,
 } from "../lib/api";
 import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
 
+// /admin/system/searxng — despite the URL (kept for backward-compat
+// bookmarks/links), this is now the general web-search provider admin page:
+// it lists every configured provider (SearXNG, Serper.dev, and whatever
+// gets added later on the backend) and lets an admin edit each one's
+// credentials, pick a primary + optional fallback provider, and tune the
+// two shared timeouts. See backend/internal/search's package doc comment
+// for the provider-dispatch/fallback model this configures.
 export default function AdminSystemSearxngPage() {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { session, loading } = useAuthenticatedSession();
 
-  const [status, setStatus] = useState<SearXNGStatus | null>(null);
-  const [url, setUrl] = useState("");
-  const [maxResults, setMaxResults] = useState(25);
-  const [fetchPages, setFetchPages] = useState(2);
-  const [saving, setSaving] = useState(false);
-  const [removing, setRemoving] = useState(false);
+  const [providers, setProviders] = useState<SearchProvider[]>([]);
+  const [settings, setSettings] = useState<SearchSettings | null>(null);
+  const [fetching, setFetching] = useState(true);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const hasFetched = useRef(false);
 
@@ -32,101 +39,216 @@ export default function AdminSystemSearxngPage() {
     hasFetched.current = true;
     const token = getSessionToken();
     if (!token) return;
-    fetchSearxngStatus(token)
-      .then((s) => {
-        setStatus(s);
-        if (s.configured && s.url) setUrl(s.url);
-        setMaxResults(s.max_results);
-        setFetchPages(s.fetch_pages);
-      })
-      .catch((err) => setMsg({ ok: false, text: err instanceof Error ? err.message : String(err) }));
+    Promise.all([adminListSearchProviders(token), adminGetSearchSettings(token)])
+      .then(([provs, sett]) => { setProviders(provs); setSettings(sett); })
+      .catch((err) => setMsg({ ok: false, text: err instanceof Error ? err.message : String(err) }))
+      .finally(() => setFetching(false));
   }, [session, navigate]);
 
   if (loading || !session || session.role !== "super-admin") return null;
 
-  async function handleSave(e: FormEvent) {
-    e.preventDefault();
+  function updateProviderLocal(id: string, patch: Partial<SearchProvider>) {
+    setProviders((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  }
+
+  async function handleSaveProvider(id: string, adminKeyInput: string) {
     const token = getSessionToken();
-    if (!token || saving) return;
-    setSaving(true);
+    if (!token) return;
+    const prov = providers.find((p) => p.id === id);
+    if (!prov) return;
     setMsg(null);
     try {
-      const result = await configureSearxng(token, { url: url.trim(), max_results: maxResults, fetch_pages: fetchPages });
-      setStatus(result);
-      setMsg({ ok: true, text: t("admin.searxng.saved") });
+      const patch: Record<string, unknown> = {
+        base_url: prov.base_url ?? "",
+        max_results: prov.max_results,
+        fetch_pages: prov.fetch_pages,
+        user_can_override: prov.user_can_override,
+        enabled: prov.enabled,
+        sort_order: prov.sort_order,
+      };
+      if (adminKeyInput.trim()) patch.admin_key = adminKeyInput.trim();
+      const updated = await adminPatchSearchProvider(token, id, patch);
+      setProviders((prev) => prev.map((p) => (p.id === id ? updated : p)));
+      setMsg({ ok: true, text: t("admin.search.saved") });
     } catch (err) {
       setMsg({ ok: false, text: err instanceof Error ? err.message : String(err) });
-    } finally {
-      setSaving(false);
     }
   }
 
-  async function handleRemove() {
+  async function handleClearKey(id: string) {
     const token = getSessionToken();
-    if (!token || removing) return;
-    setRemoving(true);
-    setMsg(null);
+    if (!token) return;
     try {
-      await deleteSearxngConfig(token);
-      setStatus({ configured: false, max_results: 25, fetch_pages: 2 });
-      setUrl(""); setMaxResults(25); setFetchPages(2);
+      await adminClearSearchProviderKey(token, id);
+      updateProviderLocal(id, { has_admin_key: false });
     } catch (err) {
       setMsg({ ok: false, text: err instanceof Error ? err.message : String(err) });
-    } finally {
-      setRemoving(false);
+    }
+  }
+
+  async function handleSaveSettings(e: FormEvent) {
+    e.preventDefault();
+    const token = getSessionToken();
+    if (!token || !settings) return;
+    setMsg(null);
+    try {
+      const updated = await adminPatchSearchSettings(token, settings);
+      setSettings(updated);
+      setMsg({ ok: true, text: t("admin.search.saved") });
+    } catch (err) {
+      setMsg({ ok: false, text: err instanceof Error ? err.message : String(err) });
     }
   }
 
   return (
     <AppShell session={session}>
-      <div className="mx-auto w-full max-w-md py-10">
+      <div className="mx-auto w-full max-w-2xl py-10">
         <BackLink />
-        <div className="mb-1 flex items-center gap-2">
-          <h1 className="text-xl font-semibold">{t("admin.searxng.title")}</h1>
-          {status && (
-            <span className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
-              <span className={`h-2 w-2 rounded-full ${status.configured ? "bg-teal-500" : "bg-gray-300 dark:bg-gray-600"}`} />
-              {status.configured ? t("admin.searxng.status_configured") : t("admin.searxng.status_not_configured")}
-            </span>
-          )}
-        </div>
-        <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">{t("admin.searxng.subtitle")}</p>
+        <h1 className="mb-1 text-xl font-semibold">{t("admin.search.title")}</h1>
+        <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">{t("admin.search.subtitle")}</p>
         {msg && <Msg msg={msg} />}
-        <form onSubmit={handleSave} className="space-y-4">
-          <Field label={t("admin.searxng.url_label")}>
-            <input type="url" required value={url} onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://search.example.com" className={inputClass} />
-            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("admin.searxng.url_hint")}</p>
-          </Field>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label={t("admin.searxng.max_results_label")}>
-              <input type="number" min={1} max={100} value={maxResults}
-                onChange={(e) => setMaxResults(Math.max(1, Math.min(100, Number(e.target.value))))}
-                className={inputClass} />
-              <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("admin.searxng.max_results_hint")}</p>
-            </Field>
-            <Field label={t("admin.searxng.fetch_pages_label")}>
-              <input type="number" min={1} max={5} value={fetchPages}
-                onChange={(e) => setFetchPages(Math.max(1, Math.min(5, Number(e.target.value))))}
-                className={inputClass} />
-              <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("admin.searxng.fetch_pages_hint")}</p>
-            </Field>
+
+        {fetching ? (
+          <div className="flex flex-col gap-4">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="animate-pulse h-32 rounded-xl bg-gray-100 dark:bg-gray-800" />
+            ))}
           </div>
-          <div className="flex gap-3">
-            <button type="submit" disabled={saving}
-              className="flex-1 rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50 dark:bg-teal-500 dark:hover:bg-teal-400">
-              {saving ? t("admin.searxng.saving") : t("admin.searxng.save")}
-            </button>
-            {status?.configured && (
-              <button type="button" disabled={removing} onClick={handleRemove}
-                className="flex-1 rounded-lg border border-red-300 px-4 py-2.5 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950">
-                {removing ? t("admin.searxng.action.removing") : t("admin.searxng.action.remove")}
-              </button>
+        ) : (
+          <div className="flex flex-col gap-6">
+            {providers.map((prov) => (
+              <ProviderCard
+                key={prov.id}
+                provider={prov}
+                onChangeLocal={(patch) => updateProviderLocal(prov.id, patch)}
+                onSave={(adminKey) => handleSaveProvider(prov.id, adminKey)}
+                onClearKey={() => handleClearKey(prov.id)}
+              />
+            ))}
+
+            {settings && (
+              <form onSubmit={handleSaveSettings} className="rounded-2xl border border-gray-100 p-5 dark:border-gray-800">
+                <h2 className="mb-1 text-sm font-semibold">{t("admin.search.mode_title")}</h2>
+                <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">{t("admin.search.mode_hint")}</p>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <Field label={t("admin.search.primary_label")}>
+                    <select value={settings.primary_provider_id}
+                      onChange={(e) => setSettings({ ...settings, primary_provider_id: e.target.value })}
+                      className={inputClass}>
+                      {providers.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label={t("admin.search.fallback_label")}>
+                    <select value={settings.fallback_provider_id}
+                      onChange={(e) => setSettings({ ...settings, fallback_provider_id: e.target.value })}
+                      className={inputClass}>
+                      <option value="">{t("admin.search.fallback_none")}</option>
+                      {providers.filter((p) => p.id !== settings.primary_provider_id).map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label={t("admin.search.timeout_label")}>
+                    <input type="number" min={1} value={settings.timeout_seconds}
+                      onChange={(e) => setSettings({ ...settings, timeout_seconds: Math.max(1, Number(e.target.value)) })}
+                      className={inputClass} />
+                  </Field>
+                  <Field label={t("admin.search.fallback_timeout_label")}>
+                    <input type="number" min={1} value={settings.fallback_timeout_seconds}
+                      onChange={(e) => setSettings({ ...settings, fallback_timeout_seconds: Math.max(1, Number(e.target.value)) })}
+                      className={inputClass} />
+                    <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("admin.search.fallback_timeout_hint")}</p>
+                  </Field>
+                </div>
+                <button type="submit"
+                  className="mt-4 rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-teal-700 dark:bg-teal-500 dark:hover:bg-teal-400">
+                  {t("admin.search.save")}
+                </button>
+              </form>
             )}
           </div>
-        </form>
+        )}
       </div>
     </AppShell>
+  );
+}
+
+function ProviderCard({
+  provider, onChangeLocal, onSave, onClearKey,
+}: {
+  provider: SearchProvider;
+  onChangeLocal: (patch: Partial<SearchProvider>) => void;
+  onSave: (adminKeyInput: string) => void;
+  onClearKey: () => void;
+}) {
+  const { t } = useTranslation();
+  const [adminKeyInput, setAdminKeyInput] = useState("");
+  const usesURL = provider.type === "searxng";
+  const usesKey = !usesURL;
+
+  return (
+    <div className="rounded-2xl border border-gray-100 p-5 dark:border-gray-800">
+      <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-semibold">{provider.name}</h2>
+          <span className={`h-2 w-2 rounded-full ${provider.enabled ? "bg-teal-500" : "bg-gray-300 dark:bg-gray-600"}`} />
+        </div>
+        <label className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+          {t("admin.search.enabled_label")}
+          <input type="checkbox" checked={provider.enabled}
+            onChange={(e) => onChangeLocal({ enabled: e.target.checked })} />
+        </label>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {usesURL && (
+          <Field label={t("admin.search.url_label")}>
+            <input type="url" value={provider.base_url ?? ""}
+              onChange={(e) => onChangeLocal({ base_url: e.target.value })}
+              placeholder="https://search.example.com" className={inputClass} />
+          </Field>
+        )}
+        {usesKey && (
+          <Field label={t("admin.search.key_label")}>
+            <input type="password" value={adminKeyInput} onChange={(e) => setAdminKeyInput(e.target.value)}
+              placeholder={provider.has_admin_key ? t("admin.search.key_set_placeholder") : ""}
+              className={inputClass} />
+            {provider.has_admin_key && (
+              <button type="button" onClick={onClearKey}
+                className="mt-1 text-xs text-red-600 hover:underline dark:text-red-400">
+                {t("admin.search.clear_key")}
+              </button>
+            )}
+          </Field>
+        )}
+        <Field label={t("admin.search.max_results_label")}>
+          <input type="number" min={1} max={100} value={provider.max_results}
+            onChange={(e) => onChangeLocal({ max_results: Math.max(1, Math.min(100, Number(e.target.value))) })}
+            className={inputClass} />
+        </Field>
+        {usesURL && (
+          <Field label={t("admin.search.fetch_pages_label")}>
+            <input type="number" min={1} max={5} value={provider.fetch_pages}
+              onChange={(e) => onChangeLocal({ fetch_pages: Math.max(1, Math.min(5, Number(e.target.value))) })}
+              className={inputClass} />
+          </Field>
+        )}
+        {usesKey && (
+          <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300 sm:col-span-2">
+            <input type="checkbox" checked={provider.user_can_override}
+              onChange={(e) => onChangeLocal({ user_can_override: e.target.checked })} />
+            {t("admin.search.user_can_override_label")}
+          </label>
+        )}
+      </div>
+
+      <button type="button" onClick={() => onSave(adminKeyInput)}
+        className="mt-4 rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 dark:bg-teal-500 dark:hover:bg-teal-400">
+        {t("admin.search.save")}
+      </button>
+    </div>
   );
 }
 

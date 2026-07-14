@@ -231,6 +231,28 @@
         "remove": "Konfiguration entfernen"
       }
     },
+    "search": {
+      "title": "Websuche",
+      "subtitle": "Anbieter für ModuLabs Startseiten-Websuche konfigurieren. Es können mehrere Anbieter (SearXNG, Serper.dev) gleichzeitig hinterlegt und einer als primär sowie optional einer als Fallback festgelegt werden.",
+      "url_label": "Basis-URL",
+      "key_label": "API-Key",
+      "key_set_placeholder": "•••••••••••• (gesetzt — leer lassen, um unverändert zu übernehmen)",
+      "clear_key": "Key entfernen",
+      "max_results_label": "Max. Ergebnisse",
+      "fetch_pages_label": "Geladene Seiten",
+      "enabled_label": "Aktiviert",
+      "user_can_override_label": "Nutzer dürfen einen eigenen Key hinterlegen",
+      "mode_title": "Anbieter-Priorität",
+      "mode_hint": "Der primäre Anbieter wird zuerst versucht. Ist ein Fallback gesetzt, wird bei einem Fehler oder Timeout des primären Anbieters automatisch auf ihn gewechselt.",
+      "primary_label": "Primärer Anbieter",
+      "fallback_label": "Fallback-Anbieter",
+      "fallback_none": "Kein Fallback",
+      "timeout_label": "Such-Timeout (Sekunden)",
+      "fallback_timeout_label": "Fallback-Wechsel-Timeout (Sekunden)",
+      "fallback_timeout_hint": "Wie lange der primäre Anbieter Zeit bekommt, bevor auf den Fallback gewechselt wird.",
+      "saved": "Erfolgreich gespeichert.",
+      "save": "Speichern"
+    },
     "smtp": {
       "title": "SMTP",
       "subtitle": "Ausgehende E-Mails für Kontobenachrichtigungen.",
@@ -351,8 +373,10 @@
       "geo_timeout_ms_hint": "Wie lange der Browser auf einen Standort-Fix wartet, bevor er abbricht (z. B. wenn WLAN-basierte Ortung im Firmennetz länger dauert). Muss größer als 0 sein. Standard: 5 Sekunden.",
       "ai_provider_timeout_seconds_label": "KI-Anbieter-Timeout",
       "ai_provider_timeout_seconds_hint": "HTTP-Timeout beim Abrufen der Modellliste eines KI-Anbieters. Lokale/selbstgehostete Modelle (z. B. Ollama) können auf bescheidener Hardware länger brauchen als Cloud-Anbieter. Muss größer als 0 sein. Standard: 30 Sekunden.",
-      "searxng_search_timeout_seconds_label": "SearXNG-Such-Timeout",
-      "searxng_search_timeout_seconds_hint": "Obergrenze für eine komplette SearXNG-Suchanfrage. Eine selbstgehostete Instanz mit mehreren Suchmaschinen-Backends kann auf bescheidener Hardware länger brauchen. Muss größer als 0 sein. Standard: 2 Sekunden.",
+      "search_timeout_seconds_label": "Such-Timeout",
+      "search_timeout_seconds_hint": "Obergrenze für eine komplette Websuche, gilt für jeden konfigurierten Anbieter (SearXNG, Serper.dev, …). Eine selbstgehostete SearXNG-Instanz kann auf bescheidener Hardware länger brauchen als ein gehosteter Dienst. Muss größer als 0 sein. Standard: 5 Sekunden.",
+      "search_fallback_timeout_seconds_label": "Fallback-Wechsel-Timeout",
+      "search_fallback_timeout_seconds_hint": "Wie lange der primäre Such-Anbieter Zeit bekommt, bevor auf den Fallback-Anbieter gewechselt wird (nur relevant, wenn einer konfiguriert ist). Muss größer als 0 sein. Standard: 3 Sekunden.",
       "news_fetch_timeout_seconds_label": "RSS/Atom-Feed-Timeout",
       "news_fetch_timeout_seconds_hint": "HTTP-Timeout pro Feed-Abruf. Langsame oder instabile Feeds werden sonst vorschnell als „nicht erreichbar“ gemeldet. Muss größer als 0 sein. Standard: 10 Sekunden.",
       "store_sync_interval_seconds_label": "Modul-Registry-Sync-Intervall",
@@ -809,7 +833,15 @@
       "language_desc": "Ergebnisse in einer bestimmten Sprache bevorzugen.",
       "saved": "Gespeichert",
       "load_error": "Deine Sucheinstellungen konnten nicht geladen werden.",
-      "save_error": "Änderung konnte nicht gespeichert werden — bitte erneut versuchen."
+      "save_error": "Änderung konnte nicht gespeichert werden — bitte erneut versuchen.",
+      "own_key_title": "Eigener Serper.dev-Key",
+      "own_key_desc": "Optional: eigenen API-Key für Serper.dev hinterlegen, statt den vom Administrator bereitgestellten Zugang zu nutzen.",
+      "own_key_placeholder": "Serper.dev API-Key",
+      "own_key_set": "Eigener Key ist hinterlegt.",
+      "own_key_not_set": "Kein eigener Key hinterlegt — es wird der Standard-Zugang genutzt.",
+      "own_key_save": "Speichern",
+      "own_key_remove": "Entfernen",
+      "own_key_not_allowed": "Der Administrator erlaubt für diesen Anbieter keine eigenen Keys."
     }
   },
   "store": {

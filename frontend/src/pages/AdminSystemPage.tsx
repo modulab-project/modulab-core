@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import {
   getSystemStatus,
   smtpStatus as fetchSmtpStatus,
-  searxngStatus as fetchSearxngStatus,
+  adminListSearchProviders,
 } from "../lib/api";
 import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
@@ -38,12 +38,16 @@ export default function AdminSystemPage() {
     Promise.all([
       getSystemStatus(token),
       fetchSmtpStatus(token),
-      fetchSearxngStatus(token),
+      adminListSearchProviders(token),
     ])
-      .then(([sys, smtp, searxng]) => {
+      .then(([sys, smtp, providers]) => {
         setOidcConfigured(sys.oidc.configured);
         setSmtpConfigured(smtp.configured);
-        setSearxngConfigured(searxng.configured);
+        // "Configured" here means at least one provider is both enabled and
+        // has a credential (base URL for SearXNG, admin key for Serper) -
+        // matches the old single-provider searxng.configured check, just
+        // generalized to however many providers are set up now.
+        setSearxngConfigured(providers.some((p) => p.enabled && (p.has_admin_key || !!p.base_url)));
       })
       .catch(() => setLoadError(t("admin.system.load_error")));
   }, [session, navigate, t]);
@@ -90,7 +94,7 @@ export default function AdminSystemPage() {
 
           <ConfigCard
             icon="ti-search"
-            title={t("admin.searxng.title")}
+            title={t("admin.search.title")}
             description={t("admin.system.searxng_card_desc")}
             configured={searxngConfigured}
             href="/admin/system/searxng"

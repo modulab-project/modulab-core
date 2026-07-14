@@ -45,6 +45,7 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/notify"
 	ntpcheck "github.com/modulab-project/modulab-core/backend/internal/ntp"
 	"github.com/modulab-project/modulab-core/backend/internal/quicklinks"
+	"github.com/modulab-project/modulab-core/backend/internal/search"
 	"github.com/modulab-project/modulab-core/backend/internal/searxng"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
 	"github.com/modulab-project/modulab-core/backend/internal/store"
@@ -156,10 +157,11 @@ func main() {
 		log.Printf("valkey: reachable at %s:%s", cfg.ValkeyHost, cfg.ValkeyPort)
 	}
 
-	// Pre-seed the SearXNG URL so Docker deployments work out of the box.
-	// EnsureDefault is a no-op when a URL is already configured.
-	if err := searxng.EnsureDefault(ctx, pool, cfg.MasterKey); err != nil {
-		log.Printf("searxng: could not seed default URL: %v", err)
+	// One-time move from the old single-provider SearXNG settings into the
+	// search_providers table (also seeds a disabled Serper.dev row). No-op
+	// once already migrated - see MigrateSearchProviders's doc comment.
+	if err := pool.MigrateSearchProviders(ctx); err != nil {
+		log.Printf("search: could not migrate search providers: %v", err)
 	}
 
 	// No master-key check here anymore: MODULAB_MASTER_KEY is mandatory and
@@ -218,16 +220,18 @@ func main() {
 			MasterKeySetUp: cfg.MasterKey != "",
 			SetupCompleted: bootstrapMgr.Completed(),
 		}
-		// SearXNG is optional: only check reachability when a URL is saved.
-		// resolveURL is a fast DB lookup; the Ping adds ~1 RTT on the internal
-		// network (same order of magnitude as the Postgres/Valkey checks).
-		if configured, err := searxng.IsConfigured(r.Context(), pool, cfg.MasterKey); err == nil {
+		// SearXNG is optional: only check reachability when a base URL is
+		// saved. GetSearchProviderBaseURL is a fast DB lookup; the Ping adds
+		// ~1 RTT on the internal network (same order of magnitude as the
+		// Postgres/Valkey checks). Kept as its own healthz field (rather than
+		// generalized to "any configured search provider") since SearXNG is
+		// the only provider type with an admin-chosen network address worth
+		// probing this way - Serper is a fixed public API host.
+		if baseURL, configured, err := pool.GetSearchProviderBaseURL(r.Context(), "searxng"); err == nil {
 			status.SearXNGConfigured = configured
 			if configured {
-				if rawURL, _, err := searxng.ResolveURLPublic(r.Context(), pool, cfg.MasterKey); err == nil {
-					up := searxng.Ping(r.Context(), rawURL)
-					status.SearXNGUp = &up
-				}
+				up := searxng.Ping(r.Context(), baseURL)
+				status.SearXNGUp = &up
 			}
 		}
 		// NTP drift check: best-effort, 3 s timeout. If pool.ntp.org is not
@@ -454,23 +458,23 @@ func main() {
 	// position fix, so it can't just ride along with the two handlers above.
 	mux.HandleFunc("GET /v1/widgets/weather/geo-config", weather.GeoConfigHandler(pool))
 
-	// SearXNG web-search proxy (spec section 6.4, search widget).
-	// Admin configuration: super-admin only (same tier as SMTP).
-	// Search endpoint: any approved session - proxies the query to the
-	// configured SearXNG instance and returns trimmed JSON results.
-	mux.Handle("GET /v1/admin/searxng/status", superAdminOnly(searxng.StatusHandler(pool, cfg.MasterKey)))
-	mux.Handle("POST /v1/admin/searxng/configure", superAdminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		masterKey, err := setup.ResolveMasterKey(r.Context(), pool, cfg.MasterKey)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusPreconditionFailed)
-			return
-		}
-		searxng.ConfigureHandler(pool, masterKey)(w, r)
-	})))
-	mux.Handle("DELETE /v1/admin/searxng", superAdminOnly(searxng.DeleteHandler(pool, cfg.MasterKey)))
-	mux.HandleFunc("GET /v1/search/web", searxng.SearchHandler(authDeps, cfg.MasterKey))
-	mux.HandleFunc("GET /v1/user/search-prefs", searxng.SearchPrefsHandler(authDeps))
-	mux.HandleFunc("POST /v1/user/search-prefs", searxng.SearchPrefsHandler(authDeps))
+	// Web-search proxy (spec section 6.4, search widget). Backed by one or
+	// more configurable providers (SearXNG, Serper.dev, ...) - see
+	// internal/search's package doc comment. Admin configuration: super-admin
+	// only (same tier as SMTP/AI providers). Search endpoint: any approved
+	// session - resolves the active provider(s) and returns normalized JSON
+	// results regardless of which one answered.
+	mux.Handle("GET /v1/admin/search/providers", superAdminOnly(search.AdminListProvidersHandler(authDeps)))
+	mux.Handle("PATCH /v1/admin/search/providers/{id}", superAdminOnly(search.AdminPatchProviderHandler(authDeps)))
+	mux.Handle("DELETE /v1/admin/search/providers/{id}/key", superAdminOnly(search.AdminClearProviderKeyHandler(authDeps)))
+	mux.Handle("GET /v1/admin/search/settings", superAdminOnly(search.AdminSettingsHandler(authDeps)))
+	mux.Handle("PATCH /v1/admin/search/settings", superAdminOnly(search.AdminSettingsHandler(authDeps)))
+	mux.HandleFunc("GET /v1/search/web", search.SearchHandler(authDeps))
+	mux.HandleFunc("GET /v1/search/providers", search.UserProvidersHandler(authDeps))
+	mux.HandleFunc("PUT /v1/user/search/keys/{id}", search.UserSetKeyHandler(authDeps))
+	mux.HandleFunc("DELETE /v1/user/search/keys/{id}", search.UserDeleteKeyHandler(authDeps))
+	mux.HandleFunc("GET /v1/user/search-prefs", search.SearchPrefsHandler(authDeps))
+	mux.HandleFunc("POST /v1/user/search-prefs", search.SearchPrefsHandler(authDeps))
 
 	// News feed management (internal/news):
 	//   Admin CRUD: org-admin and super-admin can manage the global feed pool.
@@ -1520,13 +1524,11 @@ func systemInfoHandler(pool *db.Pool, valkeyClient *valkey.Client, cfg config.Co
 			CosignAvailable:   modules.CosignAvailable(cfg.CosignBinaryPath),
 		}
 
-		if configured, err := searxng.IsConfigured(ctx, pool, cfg.MasterKey); err == nil {
+		if baseURL, configured, err := pool.GetSearchProviderBaseURL(ctx, "searxng"); err == nil {
 			resp.SearxngConfigured = configured
 			if configured {
-				if rawURL, _, err := searxng.ResolveURLPublic(ctx, pool, cfg.MasterKey); err == nil {
-					up := searxng.Ping(ctx, rawURL)
-					resp.SearxngReachable = &up
-				}
+				up := searxng.Ping(ctx, baseURL)
+				resp.SearxngReachable = &up
 			}
 		}
 

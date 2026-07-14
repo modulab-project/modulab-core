@@ -1,25 +1,11 @@
-// Package searxng implements the web-search proxy (GET /v1/search/web) and
-// the super-admin configuration endpoints (GET|POST|DELETE /v1/admin/searxng)
-// for ModuLab's SearXNG integration (spec section 6.4, search widget).
-//
-// Configuration lives in core_settings:
-//   - "searxng_url_enc"      — GCM-encrypted base URL (spec 2.4 URL tier)
-//   - "searxng_max_results"  — plaintext integer, max results forwarded
-//   - "searxng_fetch_pages"  — plaintext integer, pages fetched in parallel
-//
-// Both integer settings are purely technical values (no PII) and are
-// therefore stored as plaintext, matching the same classify/encrypt logic
-// used for SMTP port and encryption-mode fields.
-//
-// Admin endpoints (super-admin only, same tier as SMTP):
-//
-//	GET  /v1/admin/searxng/status    → SearXNGStatus
-//	POST /v1/admin/searxng/configure → body SearXNGConfigRequest → SearXNGStatus
-//	DELETE /v1/admin/searxng         → 204
-//
-// Search endpoint (any approved session):
-//
-//	GET /v1/search/web?q=<query>     → []WebResult
+// Package searxng is a thin HTTP client for a SearXNG instance's
+// format=json search API. It has no knowledge of ModuLab's admin/user
+// config layer (core_settings, search_providers, etc.) — that orchestration
+// (which provider is active, key/URL resolution, fallback) lives in
+// internal/search, which calls FetchResults with a resolved base URL. This
+// split keeps the client trivially reusable/testable and mirrors how
+// internal/ai keeps its actual HTTP clients (streamAnthropic,
+// streamOpenAICompat) separate from the provider-table bookkeeping.
 package searxng
 
 import (
@@ -31,116 +17,33 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
-
-	"github.com/modulab-project/modulab-core/backend/internal/audit"
-	"github.com/modulab-project/modulab-core/backend/internal/auth"
-	"github.com/modulab-project/modulab-core/backend/internal/crypto"
-	"github.com/modulab-project/modulab-core/backend/internal/db"
-	"github.com/modulab-project/modulab-core/backend/internal/setup"
 )
 
-// searxClient is used for every request to the admin-configured SearXNG base
-// URL (Ping, fetchPage).
+// searxClient is used for every request to an admin-configured SearXNG base
+// URL.
 //
 // Bugfix (2026-07-05, later same day): this previously went through
 // netguard.SafeHTTPClient, the same SSRF guard used for news feeds and AI
 // providers. That broke SearXNG outright: unlike those two, which are meant
 // to reach arbitrary *public* endpoints chosen by an admin, SearXNG's
 // base_url is expected to point at a private, Docker-internal address by
-// design (defaultURL above is "http://searxng:8080", itself a private IP on
-// the Docker bridge network) - netguard's allowlist rejects exactly that.
+// design (defaultURL is "http://searxng:8080", itself a private IP on the
+// Docker bridge network) - netguard's allowlist rejects exactly that.
 // Restricting outbound requests here would also add no real security value:
 // only a super-admin can change this URL, and a super-admin already has
 // full control of the Docker host (docker-compose.yml, the socket, etc.),
 // so there is no privilege boundary for netguard to enforce in the first
 // place - just a plain client with a sane timeout.
 //
-// Timeout: 0 - previously a fixed 30s. The client-level Timeout was in
-// practice almost never the thing that actually fired: fetchResults already
-// wraps every call in a shorter context.WithTimeout(ctx, searchTimeout)
-// (2s default), so the 30s client cap sat dormant behind it. Rather than
-// keep two timeouts that have to be raised in lockstep to mean anything,
-// the single admin-configurable searchTimeout (see SearchTimeoutSeconds) is
-// now the only bound; the client relies purely on the caller's context.
+// Timeout: 0 - the client-level Timeout was in practice almost never the
+// thing that actually fired: FetchResults already wraps every call in a
+// shorter context.WithTimeout (the caller-supplied timeoutSeconds), so a
+// client-level cap would just sit dormant behind it.
 var searxClient = &http.Client{Timeout: 0}
 
-const (
-	settingKeyURL           = "searxng_url_enc"
-	settingKeyMaxResults    = "searxng_max_results"
-	settingKeyFetchPages    = "searxng_fetch_pages"
-	settingKeySearchTimeout = "searxng_search_timeout_seconds"
-
-	// Defaults used when no value has been saved to core_settings yet.
-	defaultMaxResults = 25
-	defaultFetchPages = 2
-	// defaultSearchTimeoutSeconds mirrors the fixed 2s this replaced. A
-	// self-hosted SearXNG instance on modest homelab hardware querying
-	// several search-engine backends can legitimately need longer than 2s,
-	// which is why this became admin-configurable rather than staying a
-	// hardcoded constant.
-	defaultSearchTimeoutSeconds = 2
-
-	// defaultURL is pre-seeded on first boot so Docker deployments that
-	// bundle SearXNG in the same Compose stack work out of the box.
-	// Admins can override it at any time via POST /v1/admin/searxng/configure.
-	defaultURL = "http://searxng:8080"
-
-	// Hard limits to prevent accidental DoS of the SearXNG instance.
-	limitMaxResults = 100
-	limitFetchPages = 5
-)
-
-// SearXNGStatus is the JSON body of GET /v1/admin/searxng/status.
-type SearXNGStatus struct {
-	Configured bool   `json:"configured"`
-	URL        string `json:"url,omitempty"`
-	MaxResults int    `json:"max_results"`
-	FetchPages int    `json:"fetch_pages"`
-}
-
-// SearXNGConfigRequest is the body of POST /v1/admin/searxng/configure.
-type SearXNGConfigRequest struct {
-	URL        string `json:"url"`
-	MaxResults int    `json:"max_results"`
-	FetchPages int    `json:"fetch_pages"`
-}
-
-// IsConfigured returns true when a SearXNG URL has been saved to
-// core_settings. Used by /healthz to decide whether to show a reachability
-// row for SearXNG at all.
-func IsConfigured(ctx context.Context, pool *db.Pool, masterKey string) (bool, error) {
-	_, ok, err := resolveURL(ctx, pool, masterKey)
-	return ok, err
-}
-
-// EnsureDefault pre-seeds the SearXNG URL with defaultURL when no URL has
-// been configured yet. Called once at startup so Docker deployments that
-// bundle SearXNG in the same Compose stack work without manual admin setup.
-func EnsureDefault(ctx context.Context, pool *db.Pool, masterKey string) error {
-	_, ok, err := resolveURL(ctx, pool, masterKey)
-	if err != nil || ok {
-		return err // already configured (or DB error — skip)
-	}
-	enc, err := crypto.Encrypt(masterKey, defaultURL)
-	if err != nil {
-		return fmt.Errorf("searxng: seed default url: %w", err)
-	}
-	if err := pool.SetSetting(ctx, settingKeyURL, enc); err != nil {
-		return fmt.Errorf("searxng: seed default url: %w", err)
-	}
-	return nil
-}
-
-// ResolveURLPublic is the exported counterpart of resolveURL, used by
-// main.go's /healthz handler to retrieve the base URL for Ping.
-func ResolveURLPublic(ctx context.Context, pool *db.Pool, masterKey string) (string, bool, error) {
-	return resolveURL(ctx, pool, masterKey)
-}
-
-// Ping performs a lightweight GET against the SearXNG base URL and returns
+// Ping performs a lightweight GET against a SearXNG base URL and returns
 // true if the instance responds with any non-5xx status within 1 second.
 // Intended only for /healthz — not a full search round-trip.
 func Ping(ctx context.Context, baseURL string) bool {
@@ -161,8 +64,10 @@ func Ping(ctx context.Context, baseURL string) bool {
 	return resp.StatusCode < 500
 }
 
-// WebResult is one entry in GET /v1/search/web's response array.
-// Thumbnail and ImgSrc are only populated for category=images results.
+// WebResult is one search result. Thumbnail and ImgSrc are only populated
+// for category=images results. Shared across every provider internal/search
+// dispatches to (SearXNG, Serper, ...) so callers never need to know which
+// backend answered a given query.
 type WebResult struct {
 	Title     string `json:"title"`
 	URL       string `json:"url"`
@@ -171,321 +76,14 @@ type WebResult struct {
 	ImgSrc    string `json:"img_src,omitempty"`
 }
 
-// resolveURL reads the encrypted SearXNG URL from core_settings.
-// Returns ("", false, nil) when not configured.
-func resolveURL(ctx context.Context, pool *db.Pool, masterKey string) (string, bool, error) {
-	enc, ok, err := pool.GetSetting(ctx, settingKeyURL)
-	if err != nil {
-		return "", false, err
-	}
-	if !ok || enc == "" {
-		return "", false, nil
-	}
-	plain, err := crypto.Decrypt(masterKey, enc)
-	if err != nil {
-		return "", false, fmt.Errorf("searxng: decrypt url: %w", err)
-	}
-	return plain, true, nil
-}
-
-// resolveInt reads an integer setting from core_settings, returning
-// defaultVal when the key is absent or unparseable.
-func resolveInt(ctx context.Context, pool *db.Pool, key string, defaultVal int) int {
-	raw, ok, err := pool.GetSetting(ctx, key)
-	if err != nil || !ok || raw == "" {
-		return defaultVal
-	}
-	v, err := strconv.Atoi(raw)
-	if err != nil || v <= 0 {
-		return defaultVal
-	}
-	return v
-}
-
-// SearchTimeoutSeconds reads the per-search timeout (see searxClient's and
-// fetchResults' doc comments) from core_settings. Defaults to
-// defaultSearchTimeoutSeconds if unset.
-func SearchTimeoutSeconds(ctx context.Context, pool *db.Pool) int {
-	return resolveInt(ctx, pool, settingKeySearchTimeout, defaultSearchTimeoutSeconds)
-}
-
-// resolveConfig reads all three settings in one go.
-func resolveConfig(ctx context.Context, pool *db.Pool, masterKey string) (rawURL string, configured bool, maxResults int, fetchPages int, err error) {
-	rawURL, configured, err = resolveURL(ctx, pool, masterKey)
-	if err != nil {
-		return
-	}
-	maxResults = resolveInt(ctx, pool, settingKeyMaxResults, defaultMaxResults)
-	fetchPages = resolveInt(ctx, pool, settingKeyFetchPages, defaultFetchPages)
-	return
-}
-
-// clamp ensures v is within [min, max].
-func clamp(v, min, max int) int {
-	if v < min {
-		return min
-	}
-	if v > max {
-		return max
-	}
-	return v
-}
-
-// StatusHandler returns the HTTP handler for GET /v1/admin/searxng/status.
-func StatusHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		rawURL, ok, maxResults, fetchPages, err := resolveConfig(r.Context(), pool, masterKey)
-		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(SearXNGStatus{
-			Configured: ok,
-			URL:        rawURL,
-			MaxResults: maxResults,
-			FetchPages: fetchPages,
-		})
-	}
-}
-
-// ConfigureHandler returns the HTTP handler for POST /v1/admin/searxng/configure.
-func ConfigureHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		var req SearXNGConfigRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "invalid request body", http.StatusBadRequest)
-			return
-		}
-		rawURL := strings.TrimRight(strings.TrimSpace(req.URL), "/")
-		if rawURL == "" {
-			http.Error(w, "url is required", http.StatusBadRequest)
-			return
-		}
-		if _, err := url.ParseRequestURI(rawURL); err != nil {
-			http.Error(w, "url is not a valid URL", http.StatusBadRequest)
-			return
-		}
-
-		// Apply defaults when the caller sends zero values.
-		maxResults := req.MaxResults
-		if maxResults <= 0 {
-			maxResults = defaultMaxResults
-		}
-		fetchPages := req.FetchPages
-		if fetchPages <= 0 {
-			fetchPages = defaultFetchPages
-		}
-		maxResults = clamp(maxResults, 1, limitMaxResults)
-		fetchPages = clamp(fetchPages, 1, limitFetchPages)
-
-		enc, err := crypto.Encrypt(masterKey, rawURL)
-		if err != nil {
-			http.Error(w, "encrypt error", http.StatusInternalServerError)
-			return
-		}
-		ctx := r.Context()
-		if err := pool.SetSetting(ctx, settingKeyURL, enc); err != nil {
-			http.Error(w, "database error", http.StatusInternalServerError)
-			return
-		}
-		if err := pool.SetSetting(ctx, settingKeyMaxResults, strconv.Itoa(maxResults)); err != nil {
-			http.Error(w, "database error", http.StatusInternalServerError)
-			return
-		}
-		if err := pool.SetSetting(ctx, settingKeyFetchPages, strconv.Itoa(fetchPages)); err != nil {
-			http.Error(w, "database error", http.StatusInternalServerError)
-			return
-		}
-
-		// Best-effort audit; a failed write must not undo the saved config.
-		sess, _ := auth.SessionFromContext(r.Context())
-		if err := audit.Log(ctx, pool, masterKey, audit.LogParams{
-			EventType:  audit.EventConfigSearXNG,
-			ActorID:    sess.UserID,
-			ActorEmail: sess.Email,
-			Details:    fmt.Sprintf(`{"url":%q}`, rawURL),
-		}); err != nil {
-			log.Printf("searxng: audit configure: %v", err)
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(SearXNGStatus{
-			Configured: true,
-			URL:        rawURL,
-			MaxResults: maxResults,
-			FetchPages: fetchPages,
-		})
-	}
-}
-
-// DeleteHandler returns the HTTP handler for DELETE /v1/admin/searxng.
-// masterKeyEnv is the raw MODULAB_MASTER_KEY value (or "" to fall back to the
-// DB-persisted key) — passed so the handler can write an audit entry without
-// a separate wrapper in main.go.
-func DeleteHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodDelete {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		ctx := r.Context()
-		for _, key := range []string{settingKeyURL, settingKeyMaxResults, settingKeyFetchPages} {
-			if err := pool.DeleteSetting(ctx, key); err != nil {
-				http.Error(w, "database error", http.StatusInternalServerError)
-				return
-			}
-		}
-
-		// Best-effort audit; a failed write must not turn a successful delete
-		// into an error.
-		sess, _ := auth.SessionFromContext(ctx)
-		if masterKey, err := setup.ResolveMasterKey(ctx, pool, masterKeyEnv); err == nil {
-			if err := audit.Log(ctx, pool, masterKey, audit.LogParams{
-				EventType:  audit.EventConfigSearXNGDel,
-				ActorID:    sess.UserID,
-				ActorEmail: sess.Email,
-			}); err != nil {
-				log.Printf("searxng: audit delete: %v", err)
-			}
-		}
-
-		w.WriteHeader(http.StatusNoContent)
-	}
-}
-
-// SearchPrefsHandler returns the HTTP handler for GET and POST /v1/user/search-prefs.
-// GET returns the current prefs; POST accepts a partial or full JSON body and saves it.
-func SearchPrefsHandler(deps auth.Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		sess, ok := auth.RequireActiveSession(deps, w, r)
-		if !ok {
-			return
-		}
-
-		switch r.Method {
-		case http.MethodGet:
-			prefs, err := deps.Pool.GetSearchPrefs(r.Context(), sess.UserID)
-			if err != nil {
-				http.Error(w, "internal error", http.StatusInternalServerError)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(prefs)
-
-		case http.MethodPost:
-			// Decode only the fields present in the body so a partial update
-			// (e.g. just changing safesearch) works without overwriting language.
-			current, err := deps.Pool.GetSearchPrefs(r.Context(), sess.UserID)
-			if err != nil {
-				http.Error(w, "internal error", http.StatusInternalServerError)
-				return
-			}
-			var patch db.SearchPrefs
-			if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
-				http.Error(w, "invalid request body", http.StatusBadRequest)
-				return
-			}
-			// Merge: zero value means "not provided" — keep existing.
-			if patch.Language != "" {
-				current.Language = patch.Language
-			}
-			// safesearch 0 is a valid value (off), so we can always accept it.
-			current.Safesearch = patch.Safesearch
-
-			if err := deps.Pool.SetSearchPrefs(r.Context(), sess.UserID, current); err != nil {
-				http.Error(w, "database error", http.StatusInternalServerError)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(current)
-
-		default:
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		}
-	}
-}
-
-// SearchHandler returns the HTTP handler for GET /v1/search/web?q=<query>.
-func SearchHandler(deps auth.Deps, masterKey string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		sess, ok := auth.RequireActiveSession(deps, w, r)
-		if !ok {
-			return
-		}
-
-		q := strings.TrimSpace(r.URL.Query().Get("q"))
-		if q == "" {
-			http.Error(w, "q is required", http.StatusBadRequest)
-			return
-		}
-
-		baseURL, configured, maxResults, fetchPages, err := resolveConfig(r.Context(), deps.Pool, masterKey)
-		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		if !configured {
-			http.Error(w, "web search not configured", http.StatusServiceUnavailable)
-			return
-		}
-
-		// Load user search prefs for safesearch + language defaults.
-		prefs, err := deps.Pool.GetSearchPrefs(r.Context(), sess.UserID)
-		if err != nil {
-			// Non-fatal: fall back to the same defaults GetSearchPrefs itself
-			// uses for a user with no saved row (db.go) - kept in sync there,
-			// this branch is only reached if GetSearchPrefs' own DB call
-			// fails outright, which today it treats as "no row" internally
-			// and never actually surfaces as an error.
-			prefs = db.SearchPrefs{Safesearch: 2, Language: "all"}
-		}
-
-		// Query params can override stored prefs for this request.
-		category := r.URL.Query().Get("category")
-		if category == "" {
-			category = "general"
-		}
-
-		// Validate time_range against the set SearXNG accepts.
-		timeRange := r.URL.Query().Get("time_range")
-		switch timeRange {
-		case "day", "week", "month", "year":
-			// valid
-		default:
-			timeRange = ""
-		}
-
-		sp := searchParams{
-			category:   category,
-			safesearch: prefs.Safesearch,
-			language:   prefs.Language,
-			timeRange:  timeRange,
-		}
-
-		timeoutSeconds := SearchTimeoutSeconds(r.Context(), deps.Pool)
-		results, err := fetchResults(r.Context(), baseURL, q, maxResults, fetchPages, timeoutSeconds, sp)
-		if err != nil {
-			http.Error(w, "search upstream error: "+err.Error(), http.StatusBadGateway)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(results)
-	}
+// SearchParams holds the per-request parameters forwarded to a search
+// provider. Exported so internal/search can build one without needing its
+// own parallel type.
+type SearchParams struct {
+	Category   string // "general" or "images"
+	Safesearch int    // 0, 1, or 2
+	Language   string // "all", "de", "en", …
+	TimeRange  string // "", "day", "week", "month", "year"
 }
 
 // searxngResponse is the minimal shape of SearXNG's format=json output.
@@ -499,17 +97,9 @@ type searxngResponse struct {
 	} `json:"results"`
 }
 
-// searchParams holds the per-request parameters forwarded to SearXNG.
-type searchParams struct {
-	category   string // "general" or "images"
-	safesearch int    // 0, 1, or 2
-	language   string // "all", "de", "en", …
-	timeRange  string // "", "day", "week", "month", "year"
-}
-
 // fetchPage fetches one SearXNG result page (1-indexed pageno).
-func fetchPage(ctx context.Context, baseURL, query string, pageno int, sp searchParams) ([]WebResult, error) {
-	category := sp.category
+func fetchPage(ctx context.Context, baseURL, query string, pageno int, sp SearchParams) ([]WebResult, error) {
+	category := sp.Category
 	if category == "" {
 		category = "general"
 	}
@@ -518,11 +108,11 @@ func fetchPage(ctx context.Context, baseURL, query string, pageno int, sp search
 		"format":     {"json"},
 		"pageno":     {strconv.Itoa(pageno)},
 		"categories": {category},
-		"safesearch": {strconv.Itoa(sp.safesearch)},
-		"language":   {sp.language},
+		"safesearch": {strconv.Itoa(sp.Safesearch)},
+		"language":   {sp.Language},
 	}
-	if sp.timeRange != "" {
-		params.Set("time_range", sp.timeRange)
+	if sp.TimeRange != "" {
+		params.Set("time_range", sp.TimeRange)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/search?"+params.Encode(), nil)
 	if err != nil {
@@ -564,14 +154,17 @@ func fetchPage(ctx context.Context, baseURL, query string, pageno int, sp search
 	return out, nil
 }
 
-// fetchResults fetches up to fetchPages pages in parallel, merges them,
-// deduplicates by URL, and returns up to maxResults entries.
-// Page 1 results always appear first so ranking is preserved. timeoutSeconds
-// is the admin-configurable searxng_search_timeout_seconds setting (see
-// SearchTimeoutSeconds) - the hard cap for the whole round-trip.
-func fetchResults(ctx context.Context, baseURL, query string, maxResults, fetchPages, timeoutSeconds int, sp searchParams) ([]WebResult, error) {
+// FetchResults fetches up to fetchPages pages in parallel, merges them,
+// deduplicates by URL, and returns up to maxResults entries. Page 1 results
+// always appear first so ranking is preserved. timeoutSeconds is the hard
+// cap for the whole round-trip, resolved by the caller (internal/search).
+func FetchResults(ctx context.Context, baseURL, query string, maxResults, fetchPages, timeoutSeconds int, sp SearchParams) ([]WebResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
 	defer cancel()
+
+	if fetchPages < 1 {
+		fetchPages = 1
+	}
 
 	type pageResult struct {
 		page    int

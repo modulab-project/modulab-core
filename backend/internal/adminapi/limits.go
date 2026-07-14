@@ -38,7 +38,7 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/db"
 	"github.com/modulab-project/modulab-core/backend/internal/modules"
 	"github.com/modulab-project/modulab-core/backend/internal/news"
-	"github.com/modulab-project/modulab-core/backend/internal/searxng"
+	"github.com/modulab-project/modulab-core/backend/internal/search"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
 	"github.com/modulab-project/modulab-core/backend/internal/store"
 	"github.com/modulab-project/modulab-core/backend/internal/weather"
@@ -99,10 +99,16 @@ const (
 //     admin-configured AI provider's base_url (see ai.ProviderTimeoutSeconds).
 //     Must be > 0, default 30. Local/self-hosted model backends (Ollama etc.)
 //     can need longer than 30s on modest hardware.
-//   - searxng_search_timeout_seconds: hard cap for a SearXNG search
-//     round-trip (see searxng.SearchTimeoutSeconds). Must be > 0, default 2.
-//     A self-hosted SearXNG instance querying several search-engine backends
-//     can need longer than 2s on modest hardware.
+//   - search_timeout_seconds: hard cap for a web-search provider round-trip,
+//     shared across every configured provider (see
+//     search.SearchTimeoutSeconds). Must be > 0, default 5. A self-hosted
+//     SearXNG instance querying several search-engine backends can need
+//     longer than a fast hosted API like Serper on modest hardware.
+//   - search_fallback_timeout_seconds: how long the primary search provider
+//     gets before ModuLab gives up on it and tries the configured fallback
+//     provider (see search.FallbackTimeoutSeconds). Must be > 0, default 3.
+//     Only relevant when a fallback provider is actually configured
+//     (GET/PATCH /v1/admin/search/settings).
 //   - news_fetch_timeout_seconds: HTTP timeout per RSS/Atom feed fetch (see
 //     news.FetchTimeoutSeconds). Must be > 0, default 10. Slow or flaky
 //     feeds otherwise get reported as "unreachable" prematurely.
@@ -134,7 +140,8 @@ type LimitsSettings struct {
 	DenoConnPoolSize                  int   `json:"deno_conn_pool_size"`
 	GeoTimeoutMS                      int   `json:"geo_timeout_ms"`
 	AIProviderTimeoutSeconds          int   `json:"ai_provider_timeout_seconds"`
-	SearxngSearchTimeoutSeconds       int   `json:"searxng_search_timeout_seconds"`
+	SearchTimeoutSeconds              int   `json:"search_timeout_seconds"`
+	SearchFallbackTimeoutSeconds      int   `json:"search_fallback_timeout_seconds"`
 	NewsFetchTimeoutSeconds           int   `json:"news_fetch_timeout_seconds"`
 	StoreSyncIntervalSeconds          int   `json:"store_sync_interval_seconds"`
 	StoreGithubAPITimeoutSeconds      int   `json:"store_github_api_timeout_seconds"`
@@ -178,7 +185,8 @@ func currentLimitsSettings(r *http.Request, pool *db.Pool) LimitsSettings {
 		GeoTimeoutMS:         weather.GeoTimeoutMS(ctx, pool),
 
 		AIProviderTimeoutSeconds:          ai.ProviderTimeoutSeconds(ctx, pool),
-		SearxngSearchTimeoutSeconds:       searxng.SearchTimeoutSeconds(ctx, pool),
+		SearchTimeoutSeconds:              search.SearchTimeoutSeconds(ctx, pool),
+		SearchFallbackTimeoutSeconds:      search.FallbackTimeoutSeconds(ctx, pool),
 		NewsFetchTimeoutSeconds:           news.FetchTimeoutSeconds(ctx, pool),
 		StoreSyncIntervalSeconds:          store.SyncIntervalSeconds(ctx, pool),
 		StoreGithubAPITimeoutSeconds:      store.GithubAPITimeoutSeconds(ctx, pool),
@@ -233,7 +241,8 @@ func AdminLimitsHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 				{"deno_conn_pool_size", int64(body.DenoConnPoolSize)},
 				{"geo_timeout_ms", int64(body.GeoTimeoutMS)},
 				{"ai_provider_timeout_seconds", int64(body.AIProviderTimeoutSeconds)},
-				{"searxng_search_timeout_seconds", int64(body.SearxngSearchTimeoutSeconds)},
+				{"search_timeout_seconds", int64(body.SearchTimeoutSeconds)},
+				{"search_fallback_timeout_seconds", int64(body.SearchFallbackTimeoutSeconds)},
 				{"news_fetch_timeout_seconds", int64(body.NewsFetchTimeoutSeconds)},
 				{"store_sync_interval_seconds", int64(body.StoreSyncIntervalSeconds)},
 				{"store_github_api_timeout_seconds", int64(body.StoreGithubAPITimeoutSeconds)},
@@ -256,7 +265,8 @@ func AdminLimitsHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 				"deno_conn_pool_size":       strconv.Itoa(body.DenoConnPoolSize),
 				"geo_timeout_ms":            strconv.Itoa(body.GeoTimeoutMS),
 				"ai_provider_timeout_seconds":               strconv.Itoa(body.AIProviderTimeoutSeconds),
-				"searxng_search_timeout_seconds":             strconv.Itoa(body.SearxngSearchTimeoutSeconds),
+				"search_timeout_seconds":                     strconv.Itoa(body.SearchTimeoutSeconds),
+				"search_fallback_timeout_seconds":            strconv.Itoa(body.SearchFallbackTimeoutSeconds),
 				"news_fetch_timeout_seconds":                 strconv.Itoa(body.NewsFetchTimeoutSeconds),
 				"store_sync_interval_seconds":                strconv.Itoa(body.StoreSyncIntervalSeconds),
 				"store_github_api_timeout_seconds":           strconv.Itoa(body.StoreGithubAPITimeoutSeconds),
