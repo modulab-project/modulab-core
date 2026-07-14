@@ -41,8 +41,8 @@ type Deps struct {
 // Manifest is the parsed content of manifest.yaml inside a module ZIP.
 // Every module must ship this file at the archive root.
 type Manifest struct {
-	Name        string `yaml:"name"         json:"name"`
-	Version     string `yaml:"version"      json:"version"`
+	Name    string `yaml:"name"         json:"name"`
+	Version string `yaml:"version"      json:"version"`
 	Tier    int    `yaml:"tier"         json:"tier"`
 	Scope   string `yaml:"scope"        json:"scope"`
 	// Description is a map of language code → short blurb, e.g.

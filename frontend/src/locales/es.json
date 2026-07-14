@@ -834,14 +834,22 @@
       "saved": "Guardado",
       "load_error": "No se pudieron cargar sus preferencias de búsqueda.",
       "save_error": "No se pudo guardar ese cambio — inténtelo de nuevo.",
-      "own_key_title": "Tu propia clave de Serper.dev",
-      "own_key_desc": "Opcional: añade tu propia clave API de Serper.dev en lugar de usar la proporcionada por el administrador.",
-      "own_key_placeholder": "Clave API de Serper.dev",
-      "own_key_set": "Tu propia clave está configurada.",
-      "own_key_not_set": "No hay una clave propia configurada — se usa el acceso predeterminado.",
-      "own_key_save": "Guardar",
-      "own_key_remove": "Eliminar",
-      "own_key_not_allowed": "El administrador no permite claves personalizadas para este proveedor."
+      "own_key_title": "Tu propia clave API",
+      "own_key_desc": "Opcional: para proveedores como Serper.dev, añade tu propia clave API en lugar de usar la proporcionada por el administrador.",
+      "status": {
+        "your_key": "Tu clave",
+        "modulab_key": "Clave API de ModuLab",
+        "no_key": "Sin clave",
+        "not_enabled": "No activado"
+      },
+      "action": {
+        "save": "Guardar",
+        "cancel": "Cancelar",
+        "update_key": "Actualizar clave",
+        "add_key": "Añadir tu propia clave API",
+        "remove_key": "Eliminar clave"
+      },
+      "override_not_allowed": "Claves propias no permitidas"
     }
   },
   "store": {

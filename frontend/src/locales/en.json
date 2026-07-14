@@ -834,14 +834,22 @@
       "saved": "Saved",
       "load_error": "Could not load your search preferences.",
       "save_error": "Could not save that change — please try again.",
-      "own_key_title": "Your own Serper.dev key",
-      "own_key_desc": "Optional: add your own Serper.dev API key instead of using the one provided by the administrator.",
-      "own_key_placeholder": "Serper.dev API key",
-      "own_key_set": "Your own key is set.",
-      "own_key_not_set": "No key of your own set — the default access is used.",
-      "own_key_save": "Save",
-      "own_key_remove": "Remove",
-      "own_key_not_allowed": "The administrator does not allow custom keys for this provider."
+      "own_key_title": "Your own API key",
+      "own_key_desc": "Optional: for providers like Serper.dev, add your own API key instead of using the one provided by the administrator.",
+      "status": {
+        "your_key": "Your key",
+        "modulab_key": "ModuLab API key",
+        "no_key": "No key",
+        "not_enabled": "Not enabled"
+      },
+      "action": {
+        "save": "Save",
+        "cancel": "Cancel",
+        "update_key": "Update key",
+        "add_key": "Add your own API key",
+        "remove_key": "Remove key"
+      },
+      "override_not_allowed": "Own keys not allowed"
     }
   },
   "store": {

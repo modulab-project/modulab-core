@@ -127,8 +127,8 @@ func NewWorkerPool(dataDir, dbURL string, connPoolSize int) *WorkerPool {
 		dbURL:        dbURL,
 		dbHost:       dbHost,
 		connPoolSize: connPoolSize,
-		dnsResolver: "127.0.0.11:53", // Docker's embedded DNS resolver — see field doc comment
-		workers:     make(map[string]*denoWorker),
+		dnsResolver:  "127.0.0.11:53", // Docker's embedded DNS resolver — see field doc comment
+		workers:      make(map[string]*denoWorker),
 	}
 }
 

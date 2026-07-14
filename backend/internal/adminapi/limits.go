@@ -255,22 +255,22 @@ func AdminLimitsHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 			}
 
 			settings := map[string]string{
-				"max_body_bytes":            strconv.FormatInt(body.MaxBodyBytes, 10),
-				"max_upload_body_bytes":     strconv.FormatInt(body.MaxUploadBodyBytes, 10),
-				"max_module_zip_bytes":      strconv.FormatInt(body.MaxModuleZIPBytes, 10),
-				"max_opml_upload_bytes":     strconv.FormatInt(body.MaxOPMLUploadBytes, 10),
-				"auth_rate_limit_max":       strconv.FormatInt(body.AuthRateLimitMax, 10),
-				"ai_chat_ip_rate_limit_max": strconv.FormatInt(body.AIChatIPRateLimitMax, 10),
-				"global_rate_limit_max":     strconv.FormatInt(body.GlobalRateLimitMax, 10),
-				"deno_conn_pool_size":       strconv.Itoa(body.DenoConnPoolSize),
-				"geo_timeout_ms":            strconv.Itoa(body.GeoTimeoutMS),
-				"ai_provider_timeout_seconds":               strconv.Itoa(body.AIProviderTimeoutSeconds),
-				"search_timeout_seconds":                     strconv.Itoa(body.SearchTimeoutSeconds),
-				"search_fallback_timeout_seconds":            strconv.Itoa(body.SearchFallbackTimeoutSeconds),
-				"news_fetch_timeout_seconds":                 strconv.Itoa(body.NewsFetchTimeoutSeconds),
-				"store_sync_interval_seconds":                strconv.Itoa(body.StoreSyncIntervalSeconds),
-				"store_github_api_timeout_seconds":           strconv.Itoa(body.StoreGithubAPITimeoutSeconds),
-				"modules_install_download_timeout_seconds":   strconv.Itoa(body.ModulesInstallDownloadTimeoutSecs),
+				"max_body_bytes":                           strconv.FormatInt(body.MaxBodyBytes, 10),
+				"max_upload_body_bytes":                    strconv.FormatInt(body.MaxUploadBodyBytes, 10),
+				"max_module_zip_bytes":                     strconv.FormatInt(body.MaxModuleZIPBytes, 10),
+				"max_opml_upload_bytes":                    strconv.FormatInt(body.MaxOPMLUploadBytes, 10),
+				"auth_rate_limit_max":                      strconv.FormatInt(body.AuthRateLimitMax, 10),
+				"ai_chat_ip_rate_limit_max":                strconv.FormatInt(body.AIChatIPRateLimitMax, 10),
+				"global_rate_limit_max":                    strconv.FormatInt(body.GlobalRateLimitMax, 10),
+				"deno_conn_pool_size":                      strconv.Itoa(body.DenoConnPoolSize),
+				"geo_timeout_ms":                           strconv.Itoa(body.GeoTimeoutMS),
+				"ai_provider_timeout_seconds":              strconv.Itoa(body.AIProviderTimeoutSeconds),
+				"search_timeout_seconds":                   strconv.Itoa(body.SearchTimeoutSeconds),
+				"search_fallback_timeout_seconds":          strconv.Itoa(body.SearchFallbackTimeoutSeconds),
+				"news_fetch_timeout_seconds":               strconv.Itoa(body.NewsFetchTimeoutSeconds),
+				"store_sync_interval_seconds":              strconv.Itoa(body.StoreSyncIntervalSeconds),
+				"store_github_api_timeout_seconds":         strconv.Itoa(body.StoreGithubAPITimeoutSeconds),
+				"modules_install_download_timeout_seconds": strconv.Itoa(body.ModulesInstallDownloadTimeoutSecs),
 			}
 			for key, val := range settings {
 				if err := pool.SetSetting(ctx, key, val); err != nil {

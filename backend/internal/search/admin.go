@@ -201,10 +201,10 @@ func AdminClearProviderKeyHandler(deps auth.Deps) http.HandlerFunc {
 
 // SettingsResponse is the JSON shape of GET/PATCH /v1/admin/search/settings.
 type SettingsResponse struct {
-	PrimaryProviderID     string `json:"primary_provider_id"`
-	FallbackProviderID    string `json:"fallback_provider_id"`
-	TimeoutSeconds        int    `json:"timeout_seconds"`
-	FallbackTimeoutSeconds int   `json:"fallback_timeout_seconds"`
+	PrimaryProviderID      string `json:"primary_provider_id"`
+	FallbackProviderID     string `json:"fallback_provider_id"`
+	TimeoutSeconds         int    `json:"timeout_seconds"`
+	FallbackTimeoutSeconds int    `json:"fallback_timeout_seconds"`
 }
 
 func currentSettings(r *http.Request, pool *db.Pool) SettingsResponse {

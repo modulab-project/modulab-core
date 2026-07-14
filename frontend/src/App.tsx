@@ -12,7 +12,7 @@ import AdminUsersPage from "./pages/AdminUsersPage";
 import AdminFeedsPage from "./pages/AdminFeedsPage";
 import AdminSystemOIDCPage from "./pages/AdminSystemOIDCPage";
 import AdminSystemSmtpPage from "./pages/AdminSystemSmtpPage";
-import AdminSystemSearxngPage from "./pages/AdminSystemSearxngPage";
+import AdminSystemSearchPage from "./pages/AdminSystemSearchPage";
 import AdminAIPage from "./pages/AdminAIPage";
 import AdminSystemLimitsPage from "./pages/AdminSystemLimitsPage";
 import AdminQuickLinksPage from "./pages/AdminQuickLinksPage";
@@ -61,7 +61,7 @@ export default function App() {
       <Route path="/admin/users" element={<AdminUsersPage />} />
       {/* Legacy direct routes redirect to the sub-pages under /admin/system */}
       <Route path="/admin/smtp" element={<Navigate to="/admin/system/smtp" replace />} />
-      <Route path="/admin/searxng" element={<Navigate to="/admin/system/searxng" replace />} />
+      <Route path="/admin/searxng" element={<Navigate to="/admin/system/search" replace />} />
       <Route path="/admin/feeds" element={<AdminFeedsPage />} />
       <Route path="/admin/ai" element={<Navigate to="/admin/system/ai" replace />} />
       <Route path="/admin/system/ai" element={<AdminAIPage />} />
@@ -72,7 +72,10 @@ export default function App() {
       <Route path="/admin/security/info" element={<AdminSecurityInfoPage />} />
       <Route path="/admin/system/oidc" element={<AdminSystemOIDCPage />} />
       <Route path="/admin/system/smtp" element={<AdminSystemSmtpPage />} />
-      <Route path="/admin/system/searxng" element={<AdminSystemSearxngPage />} />
+      {/* Legacy URL redirect: page was renamed from SearXNG-only to a
+          general multi-provider search admin page. */}
+      <Route path="/admin/system/searxng" element={<Navigate to="/admin/system/search" replace />} />
+      <Route path="/admin/system/search" element={<AdminSystemSearchPage />} />
       <Route path="/admin/audit" element={<AdminAuditPage />} />
       <Route
         path="/setup"

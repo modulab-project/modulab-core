@@ -834,14 +834,22 @@
       "saved": "Opgeslagen",
       "load_error": "Uw zoekvoorkeuren konden niet worden geladen.",
       "save_error": "Deze wijziging kon niet worden opgeslagen — probeer het opnieuw.",
-      "own_key_title": "Eigen Serper.dev-sleutel",
-      "own_key_desc": "Optioneel: voeg uw eigen Serper.dev API-sleutel toe in plaats van de door de beheerder aangeboden toegang te gebruiken.",
-      "own_key_placeholder": "Serper.dev API-sleutel",
-      "own_key_set": "Uw eigen sleutel is ingesteld.",
-      "own_key_not_set": "Geen eigen sleutel ingesteld — de standaardtoegang wordt gebruikt.",
-      "own_key_save": "Opslaan",
-      "own_key_remove": "Verwijderen",
-      "own_key_not_allowed": "De beheerder staat geen eigen sleutels toe voor deze provider."
+      "own_key_title": "Eigen API-sleutel",
+      "own_key_desc": "Optioneel: voeg voor providers zoals Serper.dev uw eigen API-sleutel toe in plaats van de door de beheerder aangeboden toegang te gebruiken.",
+      "status": {
+        "your_key": "Uw sleutel",
+        "modulab_key": "ModuLab API-sleutel",
+        "no_key": "Geen sleutel",
+        "not_enabled": "Niet ingeschakeld"
+      },
+      "action": {
+        "save": "Opslaan",
+        "cancel": "Annuleren",
+        "update_key": "Sleutel bijwerken",
+        "add_key": "Eigen API-sleutel toevoegen",
+        "remove_key": "Sleutel verwijderen"
+      },
+      "override_not_allowed": "Eigen sleutels niet toegestaan"
     }
   },
   "store": {

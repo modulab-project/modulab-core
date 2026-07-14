@@ -97,7 +97,7 @@ export default function AdminSystemPage() {
             title={t("admin.search.title")}
             description={t("admin.system.searxng_card_desc")}
             configured={searxngConfigured}
-            href="/admin/system/searxng"
+            href="/admin/system/search"
             t={t}
           />
 

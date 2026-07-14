@@ -50,11 +50,10 @@ export default function UserSearchPrefsPage() {
   const [loadError, setLoadError] = useState(false);
   const [saveError, setSaveError] = useState(false);
 
-  // Providers that allow a per-user key override (currently: Serper.dev, if
-  // an admin has enabled it and switched on user_can_override). SearXNG
-  // never appears here - it has no per-user key concept, only an admin-wide
-  // base URL.
-  const [overridableProviders, setOverridableProviders] = useState<UserSearchProvider[]>([]);
+  // Providers with a per-user key concept at all (currently: Serper.dev).
+  // SearXNG never appears here - it has no key, only an admin-wide base URL,
+  // same distinction the admin provider page draws via "usesURL"/"usesKey".
+  const [keyProviders, setKeyProviders] = useState<UserSearchProvider[]>([]);
 
   useEffect(() => {
     const token = getSessionToken();
@@ -64,7 +63,7 @@ export default function UserSearchPrefsPage() {
       .catch(() => setLoadError(true))
       .finally(() => setFetching(false));
     listSearchProvidersForUser(token)
-      .then((provs) => setOverridableProviders(provs.filter((p) => p.can_override)))
+      .then((provs) => setKeyProviders(provs.filter((p) => p.type !== "searxng")))
       .catch(() => {
         // Non-fatal: the own-key section simply stays hidden.
       });
@@ -171,14 +170,14 @@ export default function UserSearchPrefsPage() {
               </select>
             </div>
 
-            {overridableProviders.map((prov) => (
-              <OwnKeyCard key={prov.id} provider={prov}
-                onChanged={(hasKey) =>
-                  setOverridableProviders((prev) =>
-                    prev.map((p) => (p.id === prov.id ? { ...p, has_user_key: hasKey } : p)),
-                  )
-                } />
-            ))}
+            {keyProviders.length > 0 && (
+              <OwnKeySection
+                providers={keyProviders}
+                onChanged={(id, hasKey) =>
+                  setKeyProviders((prev) => prev.map((p) => (p.id === id ? { ...p, has_user_key: hasKey } : p)))
+                }
+              />
+            )}
           </div>
         )}
       </div>
@@ -186,75 +185,155 @@ export default function UserSearchPrefsPage() {
   );
 }
 
-// Optional per-user API key for a provider that allows overriding the
-// admin-wide key (see backend/internal/search's ResolveSearchKey: own key
-// wins over the admin key when both exist). Kept as its own small
-// component/card so it only renders when at least one such provider exists,
-// same pattern as the AI provider key cards on the AI settings page.
-function OwnKeyCard({ provider, onChanged }: { provider: UserSearchProvider; onChanged: (hasKey: boolean) => void }) {
+// Optional per-user API key for providers that have a key concept at all
+// (currently: Serper.dev). Mirrors UserAIKeysPage.tsx's status-badge +
+// inline-edit pattern exactly (same "your key" / "ModuLab API key" / "no
+// key" pill, same edit-row/save/cancel/remove flow) so it reads as the same
+// pattern the user already knows from /user/ai-keys, rather than a
+// different-looking one-off just because it's a different feature -
+// backend/internal/search's ResolveSearchKey resolves own-key-over-admin-key
+// the same way internal/ai's ResolveAIKey does.
+function OwnKeySection({
+  providers,
+  onChanged,
+}: {
+  providers: UserSearchProvider[];
+  onChanged: (id: string, hasKey: boolean) => void;
+}) {
   const { t } = useTranslation();
+  const [editingKeyId, setEditingKeyId] = useState<string | null>(null);
   const [keyInput, setKeyInput] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  async function handleSave() {
+  async function handleSaveKey(providerId: string) {
+    if (!keyInput.trim()) return;
     const token = getSessionToken();
-    if (!token || !keyInput.trim() || saving) return;
-    setSaving(true);
-    setError(false);
+    if (!token) return;
+    setBusy(true);
+    setError(null);
     try {
-      await setUserSearchKey(token, provider.id, keyInput.trim());
+      await setUserSearchKey(token, providerId, keyInput.trim());
+      setEditingKeyId(null);
       setKeyInput("");
-      onChanged(true);
-    } catch {
-      setError(true);
+      onChanged(providerId, true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t("user.search.save_error"));
     } finally {
-      setSaving(false);
+      setBusy(false);
     }
   }
 
-  async function handleRemove() {
+  async function handleRemove(providerId: string) {
     const token = getSessionToken();
-    if (!token || saving) return;
-    setSaving(true);
-    setError(false);
+    if (!token) return;
+    setBusy(true);
+    setError(null);
     try {
-      await deleteUserSearchKey(token, provider.id);
-      onChanged(false);
-    } catch {
-      setError(true);
+      await deleteUserSearchKey(token, providerId);
+      onChanged(providerId, false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t("user.search.save_error"));
     } finally {
-      setSaving(false);
+      setBusy(false);
     }
   }
 
   return (
-    <div className="rounded-2xl border border-gray-100 px-5 py-4 dark:border-gray-800">
-      <p className="mb-1 text-sm font-medium">{t("user.search.own_key_title")}</p>
-      <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">{t("user.search.own_key_desc")}</p>
-      <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
-        {provider.has_user_key ? t("user.search.own_key_set") : t("user.search.own_key_not_set")}
-      </p>
-      {error && <p className="mb-3 text-xs text-red-600 dark:text-red-400">{t("user.search.save_error")}</p>}
-      <div className="flex gap-2">
-        <input
-          type="password"
-          value={keyInput}
-          disabled={saving}
-          onChange={(e) => setKeyInput(e.target.value)}
-          placeholder={t("user.search.own_key_placeholder")}
-          className="flex-1 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-base text-gray-700 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
-        />
-        <button type="button" disabled={saving || !keyInput.trim()} onClick={handleSave}
-          className="rounded-xl bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50 dark:bg-teal-500 dark:hover:bg-teal-400">
-          {t("user.search.own_key_save")}
-        </button>
-        {provider.has_user_key && (
-          <button type="button" disabled={saving} onClick={handleRemove}
-            className="rounded-xl border border-red-300 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950">
-            {t("user.search.own_key_remove")}
-          </button>
-        )}
+    <div>
+      <p className="mb-1 px-1 text-sm font-medium">{t("user.search.own_key_title")}</p>
+      <p className="mb-3 px-1 text-xs text-gray-500 dark:text-gray-400">{t("user.search.own_key_desc")}</p>
+      {error && <p className="mb-3 px-1 text-xs text-red-600 dark:text-red-400">{error}</p>}
+
+      <div className="rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+        {providers.map((p, i) => {
+          const isEditingKey = editingKeyId === p.id;
+          const isLast = i === providers.length - 1;
+          return (
+            <div key={p.id} className={`px-4 py-3.5 text-sm ${isLast ? "" : "border-b border-gray-100 dark:border-gray-800"}`}>
+              {/* Header row: name + badges */}
+              <div className="flex items-center justify-between gap-2">
+                <p className={`font-medium ${!p.enabled ? "text-gray-400 dark:text-gray-500" : ""}`}>{p.name}</p>
+                <div className="flex items-center gap-1.5">
+                  {!p.enabled && (
+                    <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                      {t("user.search.status.not_enabled")}
+                    </span>
+                  )}
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                      p.has_user_key || p.has_admin_key
+                        ? "bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-400"
+                        : "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400"
+                    }`}
+                  >
+                    {p.has_user_key ? t("user.search.status.your_key") : p.has_admin_key ? t("user.search.status.modulab_key") : t("user.search.status.no_key")}
+                  </span>
+                </div>
+              </div>
+
+              {/* Key edit row */}
+              {isEditingKey ? (
+                <div className="mt-2 flex items-center gap-2">
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    // eslint-disable-next-line jsx-a11y/no-autofocus -- input appears only after explicit user click on "edit", not on page load
+                    autoFocus
+                    value={keyInput}
+                    onChange={(e) => setKeyInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleSaveKey(p.id);
+                      if (e.key === "Escape") { setEditingKeyId(null); setKeyInput(""); }
+                    }}
+                    className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-base outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-800"
+                  />
+                  <button
+                    type="button"
+                    disabled={busy || !keyInput.trim()}
+                    onClick={() => handleSaveKey(p.id)}
+                    className="rounded-md bg-teal-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-700 disabled:opacity-50"
+                  >
+                    {busy ? "…" : t("user.search.action.save")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setEditingKeyId(null); setKeyInput(""); }}
+                    className="rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300"
+                  >
+                    {t("user.search.action.cancel")}
+                  </button>
+                </div>
+              ) : (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  {p.can_override && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => { setEditingKeyId(p.id); setKeyInput(""); }}
+                      className="rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+                    >
+                      {p.has_user_key ? t("user.search.action.update_key") : t("user.search.action.add_key")}
+                    </button>
+                  )}
+                  {p.has_user_key && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => handleRemove(p.id)}
+                      className="rounded-md border border-red-300 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
+                    >
+                      {t("user.search.action.remove_key")}
+                    </button>
+                  )}
+                  {!p.can_override && (
+                    <span className="text-xs text-gray-400 dark:text-gray-600">{t("user.search.override_not_allowed")}</span>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

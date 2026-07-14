@@ -99,11 +99,11 @@ const (
 	// gets added later). The two legacy constants above are kept (not
 	// removed) purely so historic audit_log rows written before this change
 	// still decode to a recognizable event type.
-	EventConfigSearchProvider     = "config.search_provider"
-	EventConfigSearchKeyCleared   = "config.search_provider.key_cleared"
-	EventConfigSearchSettings     = "config.search_settings"
-	EventSearchUserKeySet         = "search.user_key_set"
-	EventSearchUserKeyDeleted     = "search.user_key_deleted"
+	EventConfigSearchProvider   = "config.search_provider"
+	EventConfigSearchKeyCleared = "config.search_provider.key_cleared"
+	EventConfigSearchSettings   = "config.search_settings"
+	EventSearchUserKeySet       = "search.user_key_set"
+	EventSearchUserKeyDeleted   = "search.user_key_deleted"
 	// Cross-cutting operational limits (adminapi.AdminLimitsHandler):
 	// upload size caps, rate limits, worker pool size. See that handler's
 	// doc comment for the full list - all DoS/availability-relevant, hence

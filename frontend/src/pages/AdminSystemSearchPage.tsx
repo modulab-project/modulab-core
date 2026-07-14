@@ -14,14 +14,13 @@ import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
 
-// /admin/system/searxng — despite the URL (kept for backward-compat
-// bookmarks/links), this is now the general web-search provider admin page:
-// it lists every configured provider (SearXNG, Serper.dev, and whatever
-// gets added later on the backend) and lets an admin edit each one's
-// credentials, pick a primary + optional fallback provider, and tune the
-// two shared timeouts. See backend/internal/search's package doc comment
-// for the provider-dispatch/fallback model this configures.
-export default function AdminSystemSearxngPage() {
+// /admin/system/search — general web-search provider admin page: lists
+// every configured provider (SearXNG, Serper.dev, and whatever gets added
+// later on the backend) and lets an admin edit each one's credentials, pick
+// a primary + optional fallback provider, and tune the two shared timeouts.
+// See backend/internal/search's package doc comment for the
+// provider-dispatch/fallback model this configures.
+export default function AdminSystemSearchPage() {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { session, loading } = useAuthenticatedSession();

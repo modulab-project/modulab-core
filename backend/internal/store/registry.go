@@ -34,9 +34,9 @@ type Entry struct {
 	ReleaseAsset string `json:"release_asset"`
 	// CosignSigURL is the URL of the Cosign signature file. Empty string means
 	// no signature is available and Cosign verification should be skipped.
-	CosignSigURL  string          `json:"cosign_sig_url,omitempty"`
-	Category      string          `json:"category"`
-	LatestVersion string          `json:"latest_version,omitempty"`
+	CosignSigURL  string `json:"cosign_sig_url,omitempty"`
+	Category      string `json:"category"`
+	LatestVersion string `json:"latest_version,omitempty"`
 	// Description is a map of language code → short blurb, taken from the
 	// module's own manifest.yaml (same shape as manifest.yaml's display_name -
 	// see Manifest.Description in installer.go). Official modules carry it in
