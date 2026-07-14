@@ -9,7 +9,7 @@ package version
 // No leading "v" - the frontend's package.json version has never had one
 // either, and showing both with/without "v" side by side (e.g. footer:
 // "Core v1.0.0 . Frontend 1.0.0") read as inconsistent.
-const Version = "1.0.8"
+const Version = "1.0.9"
 
 // ProjectURL points operators at the project's homepage for docs and
 // updates.
