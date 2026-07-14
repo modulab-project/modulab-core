@@ -88,6 +88,17 @@ export default function ModulePage() {
   // same class of bug the `t`-dependency comments elsewhere in this file
   // already guard against).
   const moduleTokenRef = useRef<string | null>(null);
+  // Wall-clock timestamp (ms) the current module token expires at. Tracked
+  // separately from the setTimeout-based refresh below because setTimeout is
+  // throttled (sometimes to once a minute or less) in backgrounded/inactive
+  // tabs - a tab left in the background across the token's 20-min TTL can
+  // miss its scheduled refresh entirely, or fire it too late. This lets the
+  // visibilitychange handler below independently notice "the token is
+  // already expired (or about to be)" the moment the tab regains focus,
+  // instead of relying solely on the timer. Reported by the user 2026-07-14:
+  // every /v1/modules/{name}/api/* call 401'd with "invalid or expired
+  // module token" and only a manual page reload recovered it.
+  const tokenExpiresAtRef = useRef<number>(0);
   const [moduleTokenReady, setModuleTokenReady] = useState(false);
   const [moduleToken, setModuleToken] = useState<string | null>(null);
 
@@ -104,25 +115,60 @@ export default function ModulePage() {
 
     let cancelled = false;
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    let refreshing = false;
+    let currentModuleName: string | null = null;
+
+    // RETRY_DELAY_MS is intentionally short relative to ModuleTokenTTL: a
+    // failed refresh (network hiccup, momentary backend hiccup) used to be
+    // silently given up on entirely, leaving the module token to expire for
+    // good with no further attempt - see the tokenExpiresAtRef comment
+    // above. Retrying keeps trying instead of leaving that dead end.
+    const RETRY_DELAY_MS = 15_000;
+
+    async function refreshModuleToken(name: string) {
+      if (refreshing) return;
+      refreshing = true;
+      try {
+        const sessionToken = getSessionToken();
+        if (cancelled || !sessionToken) return;
+        const mt = await fetchModuleToken(sessionToken, name);
+        if (cancelled) return;
+        moduleTokenRef.current = mt.token;
+        tokenExpiresAtRef.current = Date.now() + mt.expires_in * 1000;
+        setModuleToken(mt.token);
+        scheduleModuleTokenRefresh(name, mt.expires_in);
+      } catch {
+        // Refresh failed (session expired, network hiccup) - retry shortly
+        // instead of giving up for the rest of the tab's lifetime. If the
+        // underlying session really is gone, the module's next own API call
+        // will surface that on its own; this just stops a transient hiccup
+        // from becoming a permanent dead token.
+        if (!cancelled) {
+          refreshTimer = setTimeout(() => refreshModuleToken(name), RETRY_DELAY_MS);
+        }
+      } finally {
+        refreshing = false;
+      }
+    }
 
     function scheduleModuleTokenRefresh(name: string, expiresInSeconds: number) {
       const delay = Math.max(expiresInSeconds * 1000 - MODULE_TOKEN_REFRESH_MARGIN_MS, 30_000);
-      refreshTimer = setTimeout(async () => {
-        const sessionToken = getSessionToken();
-        if (cancelled || !sessionToken) return;
-        try {
-          const mt = await fetchModuleToken(sessionToken, name);
-          if (cancelled) return;
-          moduleTokenRef.current = mt.token;
-          setModuleToken(mt.token);
-          scheduleModuleTokenRefresh(name, mt.expires_in);
-        } catch {
-          // Best-effort: if a refresh fails (session expired, network hiccup),
-          // the module's next own API call will surface a 401 on its own -
-          // no need to duplicate that error handling here.
-        }
-      }, delay);
+      if (refreshTimer !== null) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => refreshModuleToken(name), delay);
     }
+
+    // Backstop for the setTimeout throttling described above: whenever the
+    // tab regains focus, check wall-clock time directly instead of trusting
+    // that the timer fired on schedule. If the token is already expired (or
+    // within the refresh margin), refresh immediately rather than waiting
+    // for whatever's left of the (possibly very stale) scheduled timer.
+    function handleVisibilityChange() {
+      if (document.visibilityState !== "visible" || !currentModuleName || cancelled) return;
+      if (Date.now() >= tokenExpiresAtRef.current - MODULE_TOKEN_REFRESH_MARGIN_MS) {
+        refreshModuleToken(currentModuleName);
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     fetch(`/v1/modules/${encodeURIComponent(moduleName)}`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -138,9 +184,11 @@ export default function ModulePage() {
           setLoadError(`module_page.not_active:${m.status}`);
           return;
         }
+        currentModuleName = m.name;
         const mt = await fetchModuleToken(token, m.name);
         if (cancelled) return;
         moduleTokenRef.current = mt.token;
+        tokenExpiresAtRef.current = Date.now() + mt.expires_in * 1000;
         setModuleToken(mt.token);
         setModuleTokenReady(true);
         scheduleModuleTokenRefresh(m.name, mt.expires_in);
@@ -150,6 +198,7 @@ export default function ModulePage() {
 
     return () => {
       cancelled = true;
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       if (refreshTimer !== null) clearTimeout(refreshTimer);
     };
   }, [session, moduleName]);
