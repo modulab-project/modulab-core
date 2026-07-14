@@ -251,7 +251,24 @@
       "fallback_timeout_label": "Fallback-Wechsel-Timeout (Sekunden)",
       "fallback_timeout_hint": "Wie lange der primäre Anbieter Zeit bekommt, bevor auf den Fallback gewechselt wird.",
       "saved": "Erfolgreich gespeichert.",
-      "save": "Speichern"
+      "save": "Speichern",
+      "save_error": "Änderung konnte nicht gespeichert werden — bitte erneut versuchen.",
+      "status": {
+        "active": "Aktiv",
+        "disabled": "Deaktiviert",
+        "no_key": "Kein Key"
+      },
+      "action": {
+        "edit": "Bearbeiten",
+        "enable": "Aktivieren",
+        "disable": "Deaktivieren",
+        "clear_key": "Key entfernen"
+      },
+      "modal": {
+        "edit_title": "{{name}} bearbeiten",
+        "api_key": "API-Key",
+        "api_key_keep": "API-Key (leer lassen, um aktuellen zu behalten)"
+      }
     },
     "smtp": {
       "title": "SMTP",

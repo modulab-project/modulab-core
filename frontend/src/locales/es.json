@@ -251,7 +251,24 @@
       "fallback_timeout_label": "Tiempo de cambio a respaldo (segundos)",
       "fallback_timeout_hint": "Cuánto tiempo se le da al proveedor principal antes de cambiar al de respaldo.",
       "saved": "Guardado correctamente.",
-      "save": "Guardar"
+      "save": "Guardar",
+      "save_error": "No se pudo guardar ese cambio — inténtelo de nuevo.",
+      "status": {
+        "active": "Activo",
+        "disabled": "Desactivado",
+        "no_key": "Sin clave"
+      },
+      "action": {
+        "edit": "Editar",
+        "enable": "Activar",
+        "disable": "Desactivar",
+        "clear_key": "Eliminar clave"
+      },
+      "modal": {
+        "edit_title": "Editar {{name}}",
+        "api_key": "Clave API",
+        "api_key_keep": "Clave API (dejar en blanco para mantener la actual)"
+      }
     },
     "smtp": {
       "title": "SMTP",

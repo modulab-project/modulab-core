@@ -251,7 +251,24 @@
       "fallback_timeout_label": "Fallback switch timeout (seconds)",
       "fallback_timeout_hint": "How long the primary provider gets before ModuLab switches to the fallback.",
       "saved": "Saved successfully.",
-      "save": "Save"
+      "save": "Save",
+      "save_error": "Could not save that change — please try again.",
+      "status": {
+        "active": "Active",
+        "disabled": "Disabled",
+        "no_key": "No key"
+      },
+      "action": {
+        "edit": "Edit",
+        "enable": "Enable",
+        "disable": "Disable",
+        "clear_key": "Clear key"
+      },
+      "modal": {
+        "edit_title": "Edit {{name}}",
+        "api_key": "API key",
+        "api_key_keep": "API key (leave blank to keep current)"
+      }
     },
     "smtp": {
       "title": "SMTP",

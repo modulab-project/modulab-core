@@ -251,7 +251,24 @@
       "fallback_timeout_label": "Délai de bascule (secondes)",
       "fallback_timeout_hint": "Durée accordée au fournisseur principal avant de basculer sur le fournisseur de secours.",
       "saved": "Enregistré avec succès.",
-      "save": "Enregistrer"
+      "save": "Enregistrer",
+      "save_error": "Impossible d'enregistrer cette modification — veuillez réessayer.",
+      "status": {
+        "active": "Actif",
+        "disabled": "Désactivé",
+        "no_key": "Aucune clé"
+      },
+      "action": {
+        "edit": "Modifier",
+        "enable": "Activer",
+        "disable": "Désactiver",
+        "clear_key": "Supprimer la clé"
+      },
+      "modal": {
+        "edit_title": "Modifier {{name}}",
+        "api_key": "Clé API",
+        "api_key_keep": "Clé API (laisser vide pour conserver l'actuelle)"
+      }
     },
     "smtp": {
       "title": "SMTP",

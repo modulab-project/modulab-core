@@ -251,7 +251,24 @@
       "fallback_timeout_label": "Fallback-wisseltime-out (seconden)",
       "fallback_timeout_hint": "Hoe lang de primaire provider krijgt voordat ModuLab overschakelt naar de fallback.",
       "saved": "Succesvol opgeslagen.",
-      "save": "Opslaan"
+      "save": "Opslaan",
+      "save_error": "Deze wijziging kon niet worden opgeslagen — probeer het opnieuw.",
+      "status": {
+        "active": "Actief",
+        "disabled": "Uitgeschakeld",
+        "no_key": "Geen sleutel"
+      },
+      "action": {
+        "edit": "Bewerken",
+        "enable": "Inschakelen",
+        "disable": "Uitschakelen",
+        "clear_key": "Sleutel verwijderen"
+      },
+      "modal": {
+        "edit_title": "{{name}} bewerken",
+        "api_key": "API-sleutel",
+        "api_key_keep": "API-sleutel (leeg laten om huidige te behouden)"
+      }
     },
     "smtp": {
       "title": "SMTP",
