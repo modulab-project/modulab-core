@@ -382,7 +382,25 @@ export default function ModulePage() {
   // via props, and what ModuleFallback's JSON viewer uses for its own
   // authenticated fetch.
   const token = moduleToken ?? "";
-  const apiBase = moduleApiUrl(moduleName);
+  // Deliberately built from `mod.name` (confirmed-loaded state), NOT the raw
+  // `moduleName` route param, and only used when `mod` matches it (see
+  // `moduleMatchesRoute` below). When the route switches from module A to
+  // module B, React re-renders this component with the new `moduleName`
+  // BEFORE the metadata effect's cleanup/reset runs (effects always run
+  // after the render/commit they're triggered by) - so for that one render,
+  // `ModuleComponent` is still module A's instance while `moduleName` (and
+  // therefore, if apiBase were built from it) already says module B. That
+  // mismatched combination — module A's mounted component, module B's
+  // apiBase, module A's still-valid-but-wrong-module token — is exactly
+  // what let module A's own hardcoded relative paths (e.g. recipes'
+  // /categories, /tags, /ai-providers) reach module B's API prefix and get
+  // rejected as "invalid or expired module token". Reported by the user
+  // 2026-07-14 (third occurrence, switching recipes -> unifi-network); the
+  // earlier state-reset fix above closes the gap one render too late for
+  // this specific case, since it only takes effect once the effect body
+  // runs, not for the render that triggered it.
+  const moduleMatchesRoute = mod?.name === moduleName;
+  const apiBase = moduleApiUrl(mod?.name ?? moduleName);
 
   return (
     <AppShell session={session}>
@@ -416,11 +434,11 @@ export default function ModulePage() {
           </div>
         )}
 
-        {!fetching && !bundleLoading && !loadError && ModuleComponent && (
+        {!fetching && !bundleLoading && !loadError && moduleMatchesRoute && ModuleComponent && (
           <ModuleComponent moduleName={moduleName} apiBase={apiBase} token={token} initialQuery={searchParams} />
         )}
 
-        {!fetching && !bundleLoading && !loadError && !ModuleComponent && mod && (
+        {!fetching && !bundleLoading && !loadError && moduleMatchesRoute && !ModuleComponent && mod && (
           <ModuleFallback mod={mod} apiBase={apiBase} token={token} />
         )}
       </div>
