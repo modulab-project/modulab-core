@@ -126,9 +126,8 @@ export default function AdminSystemOIDCPage() {
             <input type="text" value={clientId} onChange={(e) => setClientId(e.target.value)}
               className={inputClass} />
           </Field>
-          <Field label={t("setup.step2.client_secret")}>
+          <Field label={configured ? `${t("setup.step2.client_secret")} (${t("admin.system.secret_placeholder_existing")})` : t("setup.step2.client_secret")}>
             <input type="password" value={secret} onChange={(e) => setSecret(e.target.value)}
-              placeholder={configured ? t("admin.system.secret_placeholder_existing") : ""}
               className={inputClass} />
           </Field>
           <div className="flex gap-3">

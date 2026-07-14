@@ -156,9 +156,8 @@ export default function AdminSystemSmtpPage() {
             <input type="text" value={username} onChange={(e) => setUsername(e.target.value)}
               placeholder={t("admin.smtp.username_placeholder")} className={inputClass} />
           </Field>
-          <Field label={t("admin.smtp.password")}>
+          <Field label={status?.configured ? `${t("admin.smtp.password")} (${t("admin.smtp.password_placeholder_existing")})` : t("admin.smtp.password")}>
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-              placeholder={status?.configured ? t("admin.smtp.password_placeholder_existing") : ""}
               className={inputClass} />
           </Field>
           <Field label={t("admin.smtp.from_address")}>
