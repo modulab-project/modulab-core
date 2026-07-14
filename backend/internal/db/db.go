@@ -1391,10 +1391,14 @@ func (p *Pool) GetSearchProvider(ctx context.Context, id string) (SearchProvider
 
 // GetSearchProviderBaseURL returns the decrypted base_url for a provider
 // (used by the SearXNG client and by /healthz's reachability check).
-// Returns ("", false, nil) when unset.
+// Returns ("", false, nil) when unset OR when the provider has been
+// disabled in /admin/system/search - a disabled provider (e.g. SearXNG
+// removed from docker-compose but its old base_url row left behind) should
+// not show up as an infrastructure check on the System Status page, since
+// there is nothing left to reach on purpose.
 func (p *Pool) GetSearchProviderBaseURL(ctx context.Context, id string) (string, bool, error) {
 	row, found, err := p.GetSearchProvider(ctx, id)
-	if err != nil || !found || row.BaseURL == "" {
+	if err != nil || !found || row.BaseURL == "" || !row.Enabled {
 		return "", false, err
 	}
 	return row.BaseURL, true, nil

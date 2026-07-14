@@ -42,6 +42,11 @@ export default function AdminSystemSearchPage() {
   const [modal, setModal] = useState<ModalState>({ kind: "closed" });
   const hasFetched = useRef(false);
 
+  // Only enabled providers make sense as primary/fallback — a disabled one
+  // (e.g. SearXNG after it was pulled from docker-compose) has nothing to
+  // actually search with.
+  const enabledProviders = providers.filter((p) => p.enabled);
+
   const refresh = useCallback(() => {
     const token = getSessionToken();
     if (!token) return;
@@ -186,9 +191,27 @@ export default function AdminSystemSearchPage() {
                     <select value={settings.primary_provider_id}
                       onChange={(e) => setSettings({ ...settings, primary_provider_id: e.target.value })}
                       className={inputCls}>
-                      {providers.map((p) => (
+                      {/* Only enabled providers are selectable — a disabled
+                          provider (e.g. SearXNG removed from docker-compose)
+                          has nothing to actually search with. If the
+                          currently saved primary is itself disabled, it's
+                          still listed once so the <select> has a matching
+                          option instead of silently showing the wrong
+                          value — saving the form without changing it would
+                          otherwise re-submit a disabled provider. */}
+                      {enabledProviders.map((p) => (
                         <option key={p.id} value={p.id}>{p.name}</option>
                       ))}
+                      {!enabledProviders.some((p) => p.id === settings.primary_provider_id) && (
+                        (() => {
+                          const current = providers.find((p) => p.id === settings.primary_provider_id);
+                          return current ? (
+                            <option key={current.id} value={current.id}>
+                              {current.name} ({t("admin.search.status.disabled")})
+                            </option>
+                          ) : null;
+                        })()
+                      )}
                     </select>
                   </Field>
                   <Field label={t("admin.search.fallback_label")}>
@@ -196,9 +219,20 @@ export default function AdminSystemSearchPage() {
                       onChange={(e) => setSettings({ ...settings, fallback_provider_id: e.target.value })}
                       className={inputCls}>
                       <option value="">{t("admin.search.fallback_none")}</option>
-                      {providers.filter((p) => p.id !== settings.primary_provider_id).map((p) => (
+                      {enabledProviders.filter((p) => p.id !== settings.primary_provider_id).map((p) => (
                         <option key={p.id} value={p.id}>{p.name}</option>
                       ))}
+                      {settings.fallback_provider_id &&
+                        !enabledProviders.some((p) => p.id === settings.fallback_provider_id) && (
+                          (() => {
+                            const current = providers.find((p) => p.id === settings.fallback_provider_id);
+                            return current ? (
+                              <option key={current.id} value={current.id}>
+                                {current.name} ({t("admin.search.status.disabled")})
+                              </option>
+                            ) : null;
+                          })()
+                        )}
                     </select>
                   </Field>
                   <Field label={t("admin.search.timeout_label")}>

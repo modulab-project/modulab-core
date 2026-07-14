@@ -238,13 +238,23 @@ func AdminSettingsHandler(deps auth.Deps) http.HandlerFunc {
 				http.Error(w, "primary_provider_id is required", http.StatusBadRequest)
 				return
 			}
-			if _, found, err := deps.Pool.GetSearchProvider(r.Context(), body.PrimaryProviderID); err != nil || !found {
+			primary, found, err := deps.Pool.GetSearchProvider(r.Context(), body.PrimaryProviderID)
+			if err != nil || !found {
 				http.Error(w, "primary_provider_id does not exist", http.StatusBadRequest)
 				return
 			}
+			if !primary.Enabled {
+				http.Error(w, "primary_provider_id is disabled", http.StatusBadRequest)
+				return
+			}
 			if body.FallbackProviderID != "" {
-				if _, found, err := deps.Pool.GetSearchProvider(r.Context(), body.FallbackProviderID); err != nil || !found {
+				fallback, found, err := deps.Pool.GetSearchProvider(r.Context(), body.FallbackProviderID)
+				if err != nil || !found {
 					http.Error(w, "fallback_provider_id does not exist", http.StatusBadRequest)
+					return
+				}
+				if !fallback.Enabled {
+					http.Error(w, "fallback_provider_id is disabled", http.StatusBadRequest)
 					return
 				}
 			}
