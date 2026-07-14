@@ -9,10 +9,7 @@ import {
   adminClearAIProviderKey,
   adminFetchAIProviderModels,
   adminFetchAIProviderBalance,
-  adminGetAISettings,
-  adminPatchAISettings,
   type AIProvider,
-  type AISettings,
   type AIBalanceResult,
 } from "../lib/api";
 import { getSessionToken } from "../lib/session";
@@ -46,15 +43,6 @@ export default function AdminAIPage() {
   const [modal, setModal] = useState<ModalState>({ kind: "closed" });
   const [balances, setBalances] = useState<Record<string, AIBalanceResult & { loading?: boolean }>>({});
 
-  // AI chat rate limit setting. max_body_bytes used to live here too — moved
-  // to /admin/system/limits alongside every other cross-cutting operational
-  // limit, since it was never actually AI-specific (see
-  // adminapi.AdminLimitsHandler's doc comment).
-  const [aiSettings, setAiSettings] = useState<AISettings | null>(null);
-  const [rpmInput, setRpmInput] = useState("");
-  const [settingsBusy, setSettingsBusy] = useState(false);
-  const [settingsSaved, setSettingsSaved] = useState(false);
-
   const refresh = useCallback(() => {
     const token = getSessionToken();
     if (!token) return;
@@ -70,15 +58,6 @@ export default function AdminAIPage() {
       return;
     }
     refresh();
-    const token = getSessionToken();
-    if (token) {
-      adminGetAISettings(token)
-        .then((s) => {
-          setAiSettings(s);
-          setRpmInput(String(s.chat_rpm_limit));
-        })
-        .catch(() => setError(t("admin.ai.settings.load_error")));
-    }
   }, [session, navigate, refresh, t]);
 
   if (loading || !session || !isAdminRole(session.role)) return null;
@@ -115,26 +94,6 @@ export default function AdminAIPage() {
       setError(e instanceof Error ? e.message : t("admin.ai.delete_error"));
     } finally {
       setBusy(false);
-    }
-  }
-
-  async function handleSaveSettings(e: React.FormEvent) {
-    e.preventDefault();
-    const rpm = parseInt(rpmInput, 10);
-    if (isNaN(rpm) || rpm < 0) return;
-    const token = getSessionToken();
-    if (!token) return;
-    setSettingsBusy(true);
-    try {
-      const s = await adminPatchAISettings(token, { chat_rpm_limit: rpm });
-      setAiSettings(s);
-      setRpmInput(String(s.chat_rpm_limit));
-      setSettingsSaved(true);
-      setTimeout(() => setSettingsSaved(false), 2000);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t("admin.ai.settings.save_error"));
-    } finally {
-      setSettingsBusy(false);
     }
   }
 
@@ -366,44 +325,15 @@ export default function AdminAIPage() {
           </div>
         )}
 
-        {/* AI settings */}
-        <h2 className="mb-2 mt-8 text-sm font-semibold text-gray-700 dark:text-gray-300">
-          {t("admin.ai.settings.title")}
-        </h2>
-        <div className="rounded-2xl border border-gray-200 bg-white px-4 py-4 dark:border-gray-800 dark:bg-gray-900">
-          <form onSubmit={handleSaveSettings} className="space-y-4">
-            <div>
-              <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">
-                {t("admin.ai.settings.rpm_label")}
-              </label>
-              <input
-                type="number"
-                min={0}
-                value={rpmInput}
-                onChange={(e) => setRpmInput(e.target.value)}
-                className={inputCls}
-              />
-              <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-                {t("admin.ai.settings.rpm_hint")}
-              </p>
-            </div>
-            <p className="text-xs text-gray-400 dark:text-gray-500">
-              {t("admin.ai.settings.limits_moved_hint")}{" "}
-              <Link to="/admin/system/limits" className="text-teal-600 hover:underline dark:text-teal-400">
-                {t("admin.system_limits.title")}
-              </Link>
-            </p>
-            <div className="flex justify-end">
-              <button
-                type="submit"
-                disabled={settingsBusy || rpmInput === String(aiSettings?.chat_rpm_limit)}
-                className="rounded-md bg-teal-600 px-3 py-2 text-xs font-medium text-white hover:bg-teal-700 disabled:opacity-50"
-              >
-                {settingsSaved ? t("admin.ai.settings.saved") : settingsBusy ? t("common.saving") : t("common.save")}
-              </button>
-            </div>
-          </form>
-        </div>
+        {/* Rate limits for the chat endpoint (per-user + per-IP) now live on
+            the consolidated limits page alongside every other cross-cutting
+            operational limit — see AdminSystemLimitsPage's "ai" tab. */}
+        <p className="mt-8 text-xs text-gray-400 dark:text-gray-500">
+          {t("admin.ai.settings.limits_moved_hint")}{" "}
+          <Link to="/admin/system/limits" className="text-teal-600 hover:underline dark:text-teal-400">
+            {t("admin.system_limits.title")}
+          </Link>
+        </p>
       </div>
 
       {/* Modals */}

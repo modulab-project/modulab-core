@@ -501,8 +501,11 @@ func main() {
 	// require any approved session. The chat endpoint streams SSE, so
 	// Traefik/Nginx buffering is suppressed via X-Accel-Buffering: no inside
 	// ChatHandler itself.
-	mux.Handle("GET /v1/admin/ai/settings", superAdminOnly(ai.AdminSettingsHandler(authDeps)))
-	mux.Handle("PATCH /v1/admin/ai/settings", superAdminOnly(ai.AdminSettingsHandler(authDeps)))
+	//
+	// There used to be a GET/PATCH /v1/admin/ai/settings pair here
+	// (ai.AdminSettingsHandler) for chat_rpm_limit — removed once that single
+	// field moved to GET/PATCH /v1/admin/system/limits alongside its sibling
+	// ai_chat_ip_rate_limit_max (see adminapi.AdminLimitsHandler).
 	mux.Handle("GET /v1/admin/ai/providers", superAdminOnly(ai.AdminListHandler(authDeps)))
 	mux.Handle("POST /v1/admin/ai/providers", superAdminOnly(ai.AdminCreateHandler(authDeps)))
 	mux.Handle("PATCH /v1/admin/ai/providers/{id}", superAdminOnly(ai.AdminPatchHandler(authDeps)))

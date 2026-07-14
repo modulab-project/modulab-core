@@ -188,10 +188,17 @@ func rowToResponse(r db.AIProviderRow) ProviderResponse {
 	}
 }
 
-// chatRPMLimit reads the configured chat requests-per-minute limit from
+// ChatRPMLimit reads the configured chat requests-per-minute limit from
 // core_settings. Returns 60 as the default when the key is absent or
-// unparseable; 0 means unlimited.
-func chatRPMLimit(ctx context.Context, pool *db.Pool) int {
+// unparseable; 0 means unlimited. Exported so adminapi.AdminLimitsHandler
+// can surface/persist it on GET/PATCH /v1/admin/system/limits — the setting
+// used to have its own PATCH /v1/admin/ai/settings endpoint (ai.
+// AdminSettingsHandler), but that handler only ever exposed this one field,
+// so it was folded into the same cross-cutting-limits page as its sibling
+// ai_chat_ip_rate_limit_max instead of staying on a single-field page of its
+// own. See adminapi/limits.go's package doc comment for the underlying
+// "hardcoded, undiscoverable, wrong place" pattern this consolidation fixes.
+func ChatRPMLimit(ctx context.Context, pool *db.Pool) int {
 	val, ok, err := pool.GetSetting(ctx, "ai_chat_rpm_limit")
 	if err != nil || !ok || val == "" {
 		return 60 // default: 60 RPM
@@ -724,72 +731,6 @@ func fetchDeepSeekBalance(ctx context.Context, apiKey string) (float64, string, 
 	return total, info.Currency, nil
 }
 
-// AdminSettingsHandler handles GET and PATCH /v1/admin/ai/settings.
-// Auth is enforced by the superAdminOnly middleware in main.go.
-//
-// Configurable settings:
-//   - chat_rpm_limit: POST /v1/ai/chat requests per user per minute (0 = unlimited, default 60).
-//
-// max_body_bytes used to live here too, but it was never actually
-// AI-specific (see its own doc comment: "applied to every route") — it now
-// lives on GET/PATCH /v1/admin/system/limits (adminapi.AdminLimitsHandler),
-// alongside every other cross-cutting operational limit that had the same
-// "hardcoded, undiscoverable, wrong place" problem. See that handler's
-// package doc comment for the incident this consolidation came from.
-//
-// Changes take effect immediately — no restart needed.
-func AdminSettingsHandler(deps auth.Deps) http.HandlerFunc {
-	type aiSettings struct {
-		ChatRPMLimit int `json:"chat_rpm_limit"`
-	}
-
-	return func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(aiSettings{
-				ChatRPMLimit: chatRPMLimit(r.Context(), deps.Pool),
-			})
-
-		case http.MethodPatch:
-			var body aiSettings
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				http.Error(w, "invalid request body", http.StatusBadRequest)
-				return
-			}
-			if body.ChatRPMLimit < 0 {
-				http.Error(w, "chat_rpm_limit must be >= 0 (0 = unlimited)", http.StatusBadRequest)
-				return
-			}
-			if err := deps.Pool.SetSetting(r.Context(), "ai_chat_rpm_limit", strconv.Itoa(body.ChatRPMLimit)); err != nil {
-				http.Error(w, "database error", http.StatusInternalServerError)
-				return
-			}
-
-			// Best-effort audit; a failed write must not block the response.
-			sess, _ := auth.SessionFromContext(r.Context())
-			if masterKey, err := setup.ResolveMasterKey(r.Context(), deps.Pool, deps.MasterKeyEnv); err == nil {
-				if err := audit.Log(r.Context(), deps.Pool, masterKey, audit.LogParams{
-					EventType:  audit.EventConfigAISettings,
-					ActorID:    sess.UserID,
-					ActorEmail: sess.Email,
-					Details:    fmt.Sprintf(`{"chat_rpm_limit":%d}`, body.ChatRPMLimit),
-				}); err != nil {
-					log.Printf("ai: audit settings update: %v", err)
-				}
-			}
-
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(aiSettings{
-				ChatRPMLimit: body.ChatRPMLimit,
-			})
-
-		default:
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		}
-	}
-}
-
 // ---- user handlers ---------------------------------------------------------
 
 // userProvidersResponse wraps the provider list with the user's preferred
@@ -1045,7 +986,7 @@ func ChatHandler(deps auth.Deps) http.HandlerFunc {
 		// Per-user rate limiting: check the configured RPM cap before doing
 		// any DB or upstream AI work. A Valkey error here is non-fatal (fail
 		// open) — a cache hiccup must not block legitimate chat traffic.
-		rpmLimit := chatRPMLimit(r.Context(), deps.Pool)
+		rpmLimit := ChatRPMLimit(r.Context(), deps.Pool)
 		if rpmLimit > 0 {
 			rlKey := "ratelimit:chat:" + sess.UserID
 			count, rlErr := deps.Valkey.IncrExpire(r.Context(), rlKey, time.Minute)

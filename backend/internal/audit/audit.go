@@ -79,9 +79,14 @@ const (
 	EventConfigAIProvider    = "config.ai_provider"
 	EventConfigAIProviderDel = "config.ai_provider.deleted"
 	EventConfigAIKeyCleared  = "config.ai_provider.key_cleared"
-	// chat_rpm_limit and max_body_bytes (ai.AdminSettingsHandler) - unlike
-	// the provider CRUD above, this one had no audit call at all despite
-	// max_body_bytes being a DoS-relevant limit.
+	// Legacy: used to cover chat_rpm_limit and max_body_bytes
+	// (ai.AdminSettingsHandler). Both fields have since moved to
+	// EventConfigSystemLimits below (max_body_bytes first, chat_rpm_limit
+	// later once its single-field admin endpoint was folded into
+	// adminapi.AdminLimitsHandler). Kept, not removed, so historic
+	// audit_log rows written before either move still decode to a
+	// recognizable event type - same reasoning as the legacy
+	// config.searxng* constants further down.
 	EventConfigAISettings = "config.ai_settings"
 	// User-owned AI provider key events (internal/ai) - distinct from the
 	// config.ai_provider* family above, which is exclusively admin-driven
@@ -105,9 +110,10 @@ const (
 	EventSearchUserKeySet       = "search.user_key_set"
 	EventSearchUserKeyDeleted   = "search.user_key_deleted"
 	// Cross-cutting operational limits (adminapi.AdminLimitsHandler):
-	// upload size caps, rate limits, worker pool size. See that handler's
-	// doc comment for the full list - all DoS/availability-relevant, hence
-	// audited the same way max_body_bytes is above.
+	// upload size caps, rate limits (including chat_rpm_limit, moved here
+	// from EventConfigAISettings above), worker pool size. See that
+	// handler's doc comment for the full list - all DoS/availability-
+	// relevant, hence audited the same way max_body_bytes is above.
 	EventConfigSystemLimits = "config.system_limits"
 	// Setup
 	EventSetupComplete = "setup.completed"

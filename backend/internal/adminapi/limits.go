@@ -123,6 +123,14 @@ const (
 //     modules.InstallDownloadTimeoutSeconds). Must be > 0, default 300 (5min).
 //     Companion setting to max_module_zip_bytes - a larger ZIP cap can also
 //     need a longer download window on a slow connection.
+//   - chat_rpm_limit: POST /v1/ai/chat requests per user per minute (see
+//     ai.ChatRPMLimit). 0 = unlimited, default 60. Moved here from its own
+//     PATCH /v1/admin/ai/settings endpoint (ai.AdminSettingsHandler, now
+//     removed) - that handler only ever exposed this one field, and it sat
+//     right next to its IP-based sibling, ai_chat_ip_rate_limit_max, on two
+//     different admin pages. Unlike every other rate limit/pool/timeout
+//     field above, 0 is a valid "unlimited" value here, same as the byte
+//     caps - not a config mistake to reject.
 //
 // Every field except deno_conn_pool_size takes effect immediately, on the
 // next request, with no restart required. store_sync_interval_seconds is a
@@ -146,6 +154,7 @@ type LimitsSettings struct {
 	StoreSyncIntervalSeconds          int   `json:"store_sync_interval_seconds"`
 	StoreGithubAPITimeoutSeconds      int   `json:"store_github_api_timeout_seconds"`
 	ModulesInstallDownloadTimeoutSecs int   `json:"modules_install_download_timeout_seconds"`
+	ChatRPMLimit                      int   `json:"chat_rpm_limit"`
 }
 
 // readRateLimitInt is a copy of main.go's readRateLimitSetting (see this
@@ -191,6 +200,7 @@ func currentLimitsSettings(r *http.Request, pool *db.Pool) LimitsSettings {
 		StoreSyncIntervalSeconds:          store.SyncIntervalSeconds(ctx, pool),
 		StoreGithubAPITimeoutSeconds:      store.GithubAPITimeoutSeconds(ctx, pool),
 		ModulesInstallDownloadTimeoutSecs: modules.InstallDownloadTimeoutSeconds(ctx, pool),
+		ChatRPMLimit:                      ai.ChatRPMLimit(ctx, pool),
 	}
 }
 
@@ -212,7 +222,10 @@ func AdminLimitsHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 				return
 			}
 
-			// Byte-size caps: 0 means unlimited, negative is invalid.
+			// Byte-size caps and chat_rpm_limit: 0 means unlimited, negative
+			// is invalid. chat_rpm_limit isn't a byte size, but shares the
+			// same "0 = unlimited" semantics (see this file's doc comment),
+			// unlike every rate limit/pool/timeout in the loop below.
 			for _, f := range []struct {
 				name string
 				val  int64
@@ -221,6 +234,7 @@ func AdminLimitsHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 				{"max_upload_body_bytes", body.MaxUploadBodyBytes},
 				{"max_module_zip_bytes", body.MaxModuleZIPBytes},
 				{"max_opml_upload_bytes", body.MaxOPMLUploadBytes},
+				{"chat_rpm_limit", int64(body.ChatRPMLimit)},
 			} {
 				if f.val < 0 {
 					http.Error(w, f.name+" must be >= 0 (0 = unlimited)", http.StatusBadRequest)
@@ -271,6 +285,7 @@ func AdminLimitsHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 				"store_sync_interval_seconds":              strconv.Itoa(body.StoreSyncIntervalSeconds),
 				"store_github_api_timeout_seconds":         strconv.Itoa(body.StoreGithubAPITimeoutSeconds),
 				"modules_install_download_timeout_seconds": strconv.Itoa(body.ModulesInstallDownloadTimeoutSecs),
+				"ai_chat_rpm_limit":                        strconv.Itoa(body.ChatRPMLimit),
 			}
 			for key, val := range settings {
 				if err := pool.SetSetting(ctx, key, val); err != nil {

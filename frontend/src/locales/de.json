@@ -101,13 +101,7 @@
         "delete": "Löschen"
       },
       "settings": {
-        "title": "Einstellungen",
-        "rpm_label": "Chat-Rate-Limit (Anfragen pro Minute pro Nutzer)",
-        "rpm_hint": "0 = unbegrenzt. Standard: 60.",
-        "limits_moved_hint": "Request-Body-Größe und weitere übergreifende Limits wurden verschoben nach",
-        "save_error": "Einstellungen konnten nicht gespeichert werden.",
-        "load_error": "Einstellungen konnten nicht geladen werden.",
-        "saved": "Gespeichert"
+        "limits_moved_hint": "Rate-Limits, Timeouts und weitere übergreifende Limits liegen jetzt unter"
       },
       "modal": {
         "edit_builtin_title": "Bearbeiten — {{name}}",
@@ -367,7 +361,8 @@
       "save_error": "Limits konnten nicht gespeichert werden.",
       "saved": "Gespeichert",
       "tab_uploads": "Uploads",
-      "tab_ai_search": "KI & Suche",
+      "tab_ai": "KI",
+      "tab_search": "Suche",
       "tab_modules": "Module",
       "tab_system": "System",
       "max_body_bytes_label": "Max. Request-Body-Größe",
@@ -380,8 +375,10 @@
       "max_opml_upload_bytes_hint": "Feed-Liste, die auf der News-Admin-Seite hochgeladen wird. 0 = unbegrenzt. Standard: 2097152 (2 MB).",
       "auth_rate_limit_max_label": "Login-Rate-Limit (pro IP pro Minute)",
       "auth_rate_limit_max_hint": "Gilt für Login- und SSO-Callback-Endpunkte. Muss größer als 0 sein. Standard: 20.",
+      "chat_rpm_limit_label": "Chat-Rate-Limit (Anfragen pro Minute pro Nutzer)",
+      "chat_rpm_limit_hint": "0 = unbegrenzt. Standard: 60.",
       "ai_chat_ip_rate_limit_max_label": "KI-Chat-Rate-Limit (pro IP pro Minute)",
-      "ai_chat_ip_rate_limit_max_hint": "Ein grober IP-basierter Grenzwert zusätzlich zum nutzerbezogenen Chat-Rate-Limit auf der KI-Anbieter-Seite. Muss größer als 0 sein. Standard: 30.",
+      "ai_chat_ip_rate_limit_max_hint": "Ein grober IP-basierter Grenzwert zusätzlich zum nutzerbezogenen Chat-Rate-Limit oben. Muss größer als 0 sein. Standard: 30.",
       "global_rate_limit_max_label": "Globales Rate-Limit (pro Nutzer/IP pro Minute)",
       "global_rate_limit_max_hint": "Gilt für alle Routen außer dem Health-Check. Muss größer als 0 sein. Standard: 600.",
       "deno_conn_pool_size_label": "Verbindungspool-Größe der Modul-Worker",

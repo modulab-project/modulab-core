@@ -101,13 +101,7 @@
         "delete": "Delete"
       },
       "settings": {
-        "title": "Settings",
-        "rpm_label": "Chat rate limit (requests per minute per user)",
-        "rpm_hint": "0 = unlimited. Default: 60.",
-        "limits_moved_hint": "Request body size and other cross-cutting limits moved to",
-        "save_error": "Failed to save settings.",
-        "load_error": "Could not load settings.",
-        "saved": "Saved"
+        "limits_moved_hint": "Rate limits, timeouts, and other cross-cutting limits now live at"
       },
       "modal": {
         "edit_builtin_title": "Edit — {{name}}",
@@ -367,7 +361,8 @@
       "save_error": "Failed to save limits.",
       "saved": "Saved",
       "tab_uploads": "Uploads",
-      "tab_ai_search": "AI & search",
+      "tab_ai": "AI",
+      "tab_search": "Search",
       "tab_modules": "Modules",
       "tab_system": "System",
       "max_body_bytes_label": "Max request body size",
@@ -380,8 +375,10 @@
       "max_opml_upload_bytes_hint": "Feed list uploaded on the News admin page. 0 = unlimited. Default: 2097152 (2 MB).",
       "auth_rate_limit_max_label": "Login rate limit (per IP per minute)",
       "auth_rate_limit_max_hint": "Applies to the login and SSO callback endpoints. Must be greater than 0. Default: 20.",
+      "chat_rpm_limit_label": "Chat rate limit (requests per minute per user)",
+      "chat_rpm_limit_hint": "0 = unlimited. Default: 60.",
       "ai_chat_ip_rate_limit_max_label": "AI chat rate limit (per IP per minute)",
-      "ai_chat_ip_rate_limit_max_hint": "A coarse per-IP backstop on top of the per-user chat rate limit on the AI providers page. Must be greater than 0. Default: 30.",
+      "ai_chat_ip_rate_limit_max_hint": "A coarse per-IP backstop on top of the per-user chat rate limit above. Must be greater than 0. Default: 30.",
       "global_rate_limit_max_label": "Global rate limit (per user/IP per minute)",
       "global_rate_limit_max_hint": "Applies to every route except the health check. Must be greater than 0. Default: 600.",
       "deno_conn_pool_size_label": "Module worker connection pool size",

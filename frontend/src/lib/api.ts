@@ -920,26 +920,6 @@ export async function adminFetchAIProviderBalance(token: string, id: string): Pr
   );
 }
 
-export interface AISettings {
-  chat_rpm_limit: number;
-}
-
-// GET /v1/admin/ai/settings — super-admin only.
-export function adminGetAISettings(token: string): Promise<AISettings> {
-  return request<AISettings>("/v1/admin/ai/settings", {
-    headers: bearerHeaders(token),
-  });
-}
-
-// PATCH /v1/admin/ai/settings — super-admin only.
-export function adminPatchAISettings(token: string, settings: Partial<AISettings>): Promise<AISettings> {
-  return request<AISettings>("/v1/admin/ai/settings", {
-    method: "PATCH",
-    headers: bearerHeaders(token),
-    body: JSON.stringify(settings),
-  });
-}
-
 // LimitsSettings mirrors backend/internal/adminapi/limits.go's
 // LimitsSettings — the cross-cutting operational limits (upload/body size
 // caps, rate limits, Deno worker pool size) that used to be hardcoded Go
@@ -966,6 +946,7 @@ export interface LimitsSettings {
   store_sync_interval_seconds: number;
   store_github_api_timeout_seconds: number;
   modules_install_download_timeout_seconds: number;
+  chat_rpm_limit: number;
 }
 
 // GET /v1/admin/system/limits — super-admin only.

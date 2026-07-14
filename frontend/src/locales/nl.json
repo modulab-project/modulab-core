@@ -101,13 +101,7 @@
         "delete": "Verwijderen"
       },
       "settings": {
-        "title": "Instellingen",
-        "rpm_label": "Chat-snelheidslimiet (verzoeken per minuut per gebruiker)",
-        "rpm_hint": "0 = onbeperkt. Standaard: 60.",
-        "limits_moved_hint": "Grootte van de verzoekbody en andere overkoepelende limieten zijn verplaatst naar",
-        "save_error": "Opslaan van instellingen mislukt.",
-        "load_error": "Kan instellingen niet laden.",
-        "saved": "Opgeslagen"
+        "limits_moved_hint": "Snelheidslimieten, timeouts en andere overkoepelende limieten staan nu op"
       },
       "modal": {
         "edit_builtin_title": "Bewerken — {{name}}",
@@ -367,7 +361,8 @@
       "save_error": "Opslaan van limieten mislukt.",
       "saved": "Opgeslagen",
       "tab_uploads": "Uploads",
-      "tab_ai_search": "AI & zoeken",
+      "tab_ai": "AI",
+      "tab_search": "Zoeken",
       "tab_modules": "Modules",
       "tab_system": "Systeem",
       "max_body_bytes_label": "Maximale grootte van verzoekbody",
@@ -380,8 +375,10 @@
       "max_opml_upload_bytes_hint": "Feedlijst geüpload op de News-adminpagina. 0 = onbeperkt. Standaard: 2097152 (2 MB).",
       "auth_rate_limit_max_label": "Login-snelheidslimiet (per IP per minuut)",
       "auth_rate_limit_max_hint": "Van toepassing op login- en SSO-callback-eindpunten. Moet groter zijn dan 0. Standaard: 20.",
+      "chat_rpm_limit_label": "Chat-snelheidslimiet (verzoeken per minuut per gebruiker)",
+      "chat_rpm_limit_hint": "0 = onbeperkt. Standaard: 60.",
       "ai_chat_ip_rate_limit_max_label": "AI-chat-snelheidslimiet (per IP per minuut)",
-      "ai_chat_ip_rate_limit_max_hint": "Een grove IP-gebaseerde ondergrens naast de gebruikersgebonden chat-snelheidslimiet op de AI-providerspagina. Moet groter zijn dan 0. Standaard: 30.",
+      "ai_chat_ip_rate_limit_max_hint": "Een grove IP-gebaseerde ondergrens naast de gebruikersgebonden chat-snelheidslimiet hierboven. Moet groter zijn dan 0. Standaard: 30.",
       "global_rate_limit_max_label": "Globale snelheidslimiet (per gebruiker/IP per minuut)",
       "global_rate_limit_max_hint": "Van toepassing op alle routes behalve de health check. Moet groter zijn dan 0. Standaard: 600.",
       "deno_conn_pool_size_label": "Verbindingspoolgrootte van moduleworkers",

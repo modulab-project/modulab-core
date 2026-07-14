@@ -13,14 +13,22 @@ import { AppShell } from "../components/AppShell";
 // incident that prompted this (module photo uploads silently capped at
 // ~1 MB by a global middleware limit nested outside the module's own,
 // larger limit) — that history is why every field still lives behind one
-// GET/PATCH endpoint and one save button, even though the 15 fields are
-// now split into four tabs below purely as a display grouping. A field
+// GET/PATCH endpoint and one save button, even though the 16 fields are
+// now split into five tabs below purely as a display grouping. A field
 // moving tabs is a one-line change to its `tab`; it never risks being
 // "lost" the way splitting into separate routes/endpoints would.
 //
+// The tabs used to be "uploads" / "ai_search" / "modules" / "system", but
+// "ai_search" bundled two unrelated concerns (AI chat limits/timeouts vs.
+// web-search timeouts) onto one tab purely because both happened to be
+// small. Split into "ai" and "search"; news_fetch_timeout_seconds (RSS/Atom
+// feed fetching — neither AI nor search) moved to "system", where the
+// other single-purpose cross-cutting timeouts already live.
+//
 // Each field's `kind` selects which input component renders it (see
 // renderField below) and, for handleSave's validation, whether 0 is a
-// valid "unlimited" value (kind "byte") or not (every other kind):
+// valid "unlimited" value (kind "byte", or `allowZero: true`) or not
+// (every other field):
 //   - "byte": canonical value is bytes; ByteField adds a Bytes/KB/MB unit
 //     selector purely as a display/edit convenience — the unit choice is
 //     not persisted anywhere, just re-derived from the byte value on load.
@@ -33,16 +41,22 @@ import { AppShell } from "../components/AppShell";
 //   - "minutes": canonical value is seconds, but in the minutes-to-hour
 //     range (sync interval, download timeout) where a raw seconds count is
 //     harder to read at a glance — MinutesField displays/edits in minutes.
+//
+// `allowZero` is independent of `kind`: chat_rpm_limit is a plain "count"
+// like auth_rate_limit_max/global_rate_limit_max, but — like the byte caps
+// — 0 means "unlimited" rather than being a rejected config mistake, since
+// it moved here from max_body_bytes-style "0 = unlimited" semantics on its
+// old single-field admin endpoint (see AdminLimitsHandler's doc comment).
 type FieldKind = "byte" | "count" | "ms" | "seconds" | "minutes";
-type Tab = "uploads" | "ai_search" | "modules" | "system";
-const FIELDS: Array<{ key: keyof LimitsSettings; kind: FieldKind; tab: Tab }> = [
+type Tab = "uploads" | "ai" | "search" | "modules" | "system";
+const FIELDS: Array<{ key: keyof LimitsSettings; kind: FieldKind; tab: Tab; allowZero?: boolean }> = [
   { key: "max_body_bytes", kind: "byte", tab: "uploads" },
   { key: "max_opml_upload_bytes", kind: "byte", tab: "uploads" },
-  { key: "ai_chat_ip_rate_limit_max", kind: "count", tab: "ai_search" },
-  { key: "ai_provider_timeout_seconds", kind: "seconds", tab: "ai_search" },
-  { key: "search_timeout_seconds", kind: "seconds", tab: "ai_search" },
-  { key: "search_fallback_timeout_seconds", kind: "seconds", tab: "ai_search" },
-  { key: "news_fetch_timeout_seconds", kind: "seconds", tab: "ai_search" },
+  { key: "chat_rpm_limit", kind: "count", tab: "ai", allowZero: true },
+  { key: "ai_chat_ip_rate_limit_max", kind: "count", tab: "ai" },
+  { key: "ai_provider_timeout_seconds", kind: "seconds", tab: "ai" },
+  { key: "search_timeout_seconds", kind: "seconds", tab: "search" },
+  { key: "search_fallback_timeout_seconds", kind: "seconds", tab: "search" },
   { key: "max_upload_body_bytes", kind: "byte", tab: "modules" },
   { key: "max_module_zip_bytes", kind: "byte", tab: "modules" },
   { key: "deno_conn_pool_size", kind: "count", tab: "modules" },
@@ -52,11 +66,13 @@ const FIELDS: Array<{ key: keyof LimitsSettings; kind: FieldKind; tab: Tab }> = 
   { key: "auth_rate_limit_max", kind: "count", tab: "system" },
   { key: "global_rate_limit_max", kind: "count", tab: "system" },
   { key: "geo_timeout_ms", kind: "ms", tab: "system" },
+  { key: "news_fetch_timeout_seconds", kind: "seconds", tab: "system" },
 ];
 
 const TABS: Array<{ id: Tab; icon: string }> = [
   { id: "uploads", icon: "ti-upload" },
-  { id: "ai_search", icon: "ti-message-circle" },
+  { id: "ai", icon: "ti-message-circle" },
+  { id: "search", icon: "ti-search" },
   { id: "modules", icon: "ti-puzzle" },
   { id: "system", icon: "ti-server-2" },
 ];
@@ -120,10 +136,11 @@ export default function AdminSystemLimitsPage() {
         setMsg({ ok: false, text: t("admin.system_limits.validation_error") });
         return;
       }
-      // 0 is a valid "unlimited" value for byte caps; every other kind
+      // 0 is a valid "unlimited" value for byte caps and any field marked
+      // allowZero (currently just chat_rpm_limit); every other kind
       // (counts, timeouts, intervals) requires a real positive value - see
       // AdminLimitsHandler's own two validation loops on the backend.
-      if (f.kind === "byte" ? n < 0 : n <= 0) {
+      if (f.kind === "byte" || f.allowZero ? n < 0 : n <= 0) {
         setMsg({ ok: false, text: t("admin.system_limits.validation_error") });
         return;
       }
