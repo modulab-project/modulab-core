@@ -100,9 +100,6 @@
         "add_provider": "Provider toevoegen",
         "delete": "Verwijderen"
       },
-      "settings": {
-        "limits_moved_hint": "Snelheidslimieten, timeouts en andere overkoepelende limieten staan nu op"
-      },
       "modal": {
         "edit_builtin_title": "Bewerken — {{name}}",
         "default_model": "Standaardmodel",

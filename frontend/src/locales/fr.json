@@ -100,9 +100,6 @@
         "add_provider": "Ajouter un fournisseur",
         "delete": "Supprimer"
       },
-      "settings": {
-        "limits_moved_hint": "Les limites de débit, délais d'attente et autres limites transversales se trouvent maintenant sur"
-      },
       "modal": {
         "edit_builtin_title": "Modifier — {{name}}",
         "default_model": "Modèle par défaut",

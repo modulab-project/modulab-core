@@ -100,9 +100,6 @@
         "add_provider": "Añadir proveedor",
         "delete": "Eliminar"
       },
-      "settings": {
-        "limits_moved_hint": "Los límites de velocidad, tiempos de espera y otros límites transversales ahora están en"
-      },
       "modal": {
         "edit_builtin_title": "Editar — {{name}}",
         "default_model": "Modelo predeterminado",

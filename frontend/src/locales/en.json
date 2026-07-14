@@ -100,9 +100,6 @@
         "add_provider": "Add provider",
         "delete": "Delete"
       },
-      "settings": {
-        "limits_moved_hint": "Rate limits, timeouts, and other cross-cutting limits now live at"
-      },
       "modal": {
         "edit_builtin_title": "Edit — {{name}}",
         "default_model": "Default model",

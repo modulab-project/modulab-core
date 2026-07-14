@@ -325,15 +325,6 @@ export default function AdminAIPage() {
           </div>
         )}
 
-        {/* Rate limits for the chat endpoint (per-user + per-IP) now live on
-            the consolidated limits page alongside every other cross-cutting
-            operational limit — see AdminSystemLimitsPage's "ai" tab. */}
-        <p className="mt-8 text-xs text-gray-400 dark:text-gray-500">
-          {t("admin.ai.settings.limits_moved_hint")}{" "}
-          <Link to="/admin/system/limits" className="text-teal-600 hover:underline dark:text-teal-400">
-            {t("admin.system_limits.title")}
-          </Link>
-        </p>
       </div>
 
       {/* Modals */}

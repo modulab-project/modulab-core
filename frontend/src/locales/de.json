@@ -100,9 +100,6 @@
         "add_provider": "Anbieter hinzufügen",
         "delete": "Löschen"
       },
-      "settings": {
-        "limits_moved_hint": "Rate-Limits, Timeouts und weitere übergreifende Limits liegen jetzt unter"
-      },
       "modal": {
         "edit_builtin_title": "Bearbeiten — {{name}}",
         "default_model": "Standardmodell",
