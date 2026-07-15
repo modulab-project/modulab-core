@@ -790,6 +790,20 @@ func ExportSelfHandler(d Deps) http.HandlerFunc {
 // get a clean 204, not an error.
 func LogoutHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Enforced explicitly (main.go registers this route without a
+		// method prefix, so it would otherwise accept a GET too): a plain
+		// GET logout endpoint is a cross-site top-level navigation away
+		// from being CSRF-able via a naked <a href> or auto-redirect, since
+		// SameSite=Lax still allows the cookie on that specific case (see
+		// corsMiddleware's doc comment for the fuller picture). Logging
+		// someone out against their will is low-severity compared to the
+		// admin-action endpoints that doc comment is really about, but
+		// there is no reason to leave this one open too now that it's
+		// cheap to close.
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		ctx := r.Context()
 		token := sessionToken(r)
 		if token == "" {

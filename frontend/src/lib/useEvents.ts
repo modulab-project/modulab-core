@@ -46,7 +46,13 @@ export function useNotificationEvents(enabled: boolean, onEvent: (event: ServerE
     if (!enabled) {
       return;
     }
-    const source = new EventSource(eventsUrl());
+    // withCredentials: true is a no-op in production (same-origin requests
+    // always send cookies regardless of this flag) but is required in local
+    // dev, where the frontend runs on a different port than Core - EventSource
+    // otherwise silently omits the modulab_session cookie on a cross-origin
+    // request, same as any other credentialed fetch (see main.go's
+    // corsMiddleware doc comment for the matching CORS-side change).
+    const source = new EventSource(eventsUrl(), { withCredentials: true });
     source.onmessage = (e) => {
       try {
         onEventRef.current(JSON.parse(e.data) as ServerEvent);

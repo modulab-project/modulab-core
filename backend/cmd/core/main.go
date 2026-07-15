@@ -1688,13 +1688,60 @@ func revokeSessionHandler(authDeps auth.Deps) http.HandlerFunc {
 // from the same production origin. Allowing exactly one configured origin
 // (rather than "*") keeps this from becoming an accidental open API. DELETE
 // is allowed alongside GET/POST/OPTIONS for DeleteUserHandler above.
+//
+// Two additions made alongside the session-cookie migration (2026-07-15,
+// see auth/handlers.go's setSessionCookie), both pre-existing gaps this
+// change turned from theoretical into real:
+//
+//  1. Access-Control-Allow-Credentials: true, plus only ever echoing
+//     Access-Control-Allow-Origin back when the request's own Origin header
+//     actually matches allowedOrigin (never blindly, and never "*", which
+//     credentialed CORS forbids anyway). Before this, a cross-origin dev
+//     setup (Vite on a different port) would have had its cookie silently
+//     dropped by the browser: credentialed fetches require the server to
+//     explicitly opt in with this header, which the previous version never
+//     sent because there was no cookie to protect yet - the old bearer
+//     token travelled in an Authorization header instead, which CORS's
+//     credentials flag has never governed.
+//
+//  2. A same-origin check for every state-changing request (anything but
+//     GET/HEAD/OPTIONS), independent of the CORS headers above: if the
+//     request carries an Origin header at all (browsers always send one on
+//     cross-origin requests, and on same-origin POST/PUT/PATCH/DELETE too)
+//     and it does not match allowedOrigin, the request is rejected before
+//     it ever reaches an auth check. This is the CSRF defense-in-depth that
+//     the old Authorization-header transport got for free (a foreign page
+//     cannot set a custom header on a cross-site request) but a cookie does
+//     not: SameSite=Lax alone still allows a cross-site top-level GET
+//     navigation to carry the cookie, and (in Chromium, as a compatibility
+//     mitigation) a cross-site top-level POST form submission within ~2
+//     minutes of the cookie being set. Requests with no Origin header at
+//     all are allowed through unchanged - some legitimate same-origin
+//     requests omit it - so this narrows the attack surface rather than
+//     closing every theoretical gap, which is an acceptable trade for a
+//     single-tenant homelab app with no untrusted origins to defend against
+//     beyond "some other website the user also has open".
 func corsMiddleware(allowedOrigin string, next http.Handler) http.Handler {
+	// Normalized once here rather than at every call site: an Origin header
+	// never has a trailing slash (or a path at all), but cfg.FrontendBaseURL
+	// is operator-supplied and main.go's own frontendCallbackURL-adjacent
+	// code already has to guard against a trailing "/" for the same reason.
+	allowedOrigin = strings.TrimRight(allowedOrigin, "/")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
+		origin := r.Header.Get("Origin")
+		if origin == allowedOrigin {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, "+bootstrap.HeaderName)
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if origin != "" && origin != allowedOrigin &&
+			r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "cross-origin request rejected", http.StatusForbidden)
 			return
 		}
 		next.ServeHTTP(w, r)
