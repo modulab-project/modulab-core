@@ -371,7 +371,7 @@
       "max_opml_upload_bytes_label": "Max. Größe des OPML-Imports",
       "max_opml_upload_bytes_hint": "Feed-Liste, die auf der News-Admin-Seite hochgeladen wird. 0 = unbegrenzt. Standard: 2097152 (2 MB).",
       "auth_rate_limit_max_label": "Login-Rate-Limit (pro IP pro Minute)",
-      "auth_rate_limit_max_hint": "Gilt für Login- und SSO-Callback-Endpunkte. Muss größer als 0 sein. Standard: 20.",
+      "auth_rate_limit_max_hint": "Gilt für Login-, SSO-Callback- und Logout-Endpunkte. Muss größer als 0 sein. Standard: 20.",
       "chat_rpm_limit_label": "Chat-Rate-Limit (Anfragen pro Minute pro Nutzer)",
       "chat_rpm_limit_hint": "0 = unbegrenzt. Standard: 60.",
       "ai_chat_ip_rate_limit_max_label": "KI-Chat-Rate-Limit (pro IP pro Minute)",

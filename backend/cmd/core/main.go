@@ -330,7 +330,14 @@ func main() {
 	// DSGVO data-portability export (GDPR Article 20): returns all personal
 	// data stored for the calling user as a JSON attachment.
 	mux.HandleFunc("GET /v1/auth/me/export", auth.ExportSelfHandler(authDeps))
-	mux.HandleFunc("/v1/auth/logout", auth.LogoutHandler(authDeps))
+	// Rate-limited the same as login/callback (2026-07-15 security review):
+	// reuses authRateLimitMiddleware/auth_rate_limit_max rather than a
+	// dedicated logout_rate_limit_max setting - logout has far less abuse
+	// potential than login (nothing to brute-force, no IdP round-trip to
+	// exhaust), so a second configurable knob for it isn't worth the extra
+	// admin-UI/settings surface. Falls back to the global 600/min backstop
+	// like every other route if this were ever removed.
+	mux.HandleFunc("/v1/auth/logout", authRateLimitMiddleware(valkeyClient, pool, cfg.MasterKey, "logout", auth.LogoutHandler(authDeps)))
 	// UI language preference: GET returns {"ui_language":"en|de|"}, PATCH updates.
 	mux.HandleFunc("/v1/user/preferences", auth.UserPrefsHandler(authDeps))
 
@@ -1153,7 +1160,15 @@ func authRateLimitMiddleware(vk *valkey.Client, pool *db.Pool, masterKeyEnv stri
 // IncrExpire counter itself.
 func identifyBySessionOrIP(authDeps auth.Deps) func(*http.Request) string {
 	return func(r *http.Request) string {
-		if token := bearerToken(r); token != "" {
+		// Reads the session cookie, not the Authorization header - see
+		// sessionToken's doc comment. Before this fix (found during the
+		// 2026-07-15 post-migration security review), this always checked
+		// bearerToken(r) instead, which ordinary browser sessions stopped
+		// sending the moment the cookie migration landed - every logged-in
+		// caller silently fell back to per-IP bucketing below, defeating
+		// the whole point of bucketing by user (see this function's
+		// package doc comment on the shared-NAT/office-egress case).
+		if token := sessionToken(r); token != "" {
 			if sess, ok, err := auth.ValidateSession(r.Context(), authDeps, token); err == nil && ok {
 				return "user:" + sess.UserID
 			}
@@ -1237,11 +1252,11 @@ func isTrustedProxyPeer(host string) bool {
 // that's an admin-configurable setting, not a compile-time constant, and
 // doing a DB round trip per live key just to fill in a number isn't worth it
 // for a diagnostics page; the UI shows count-only for that one label.
-var knownRateLimitLabels = []string{"auth:login", "auth:callback", "ai-chat", "global", "chat"}
+var knownRateLimitLabels = []string{"auth:login", "auth:callback", "auth:logout", "ai-chat", "global", "chat"}
 
 func rateLimitMax(ctx context.Context, pool *db.Pool, label string) int64 {
 	switch label {
-	case "auth:login", "auth:callback":
+	case "auth:login", "auth:callback", "auth:logout":
 		return authRateLimitMax(ctx, pool)
 	case "ai-chat":
 		return aiChatRateLimitMax(ctx, pool)
@@ -1502,6 +1517,25 @@ func bearerToken(r *http.Request) string {
 		return strings.TrimPrefix(h, prefix)
 	}
 	return ""
+}
+
+// sessionToken reads the caller's session bearer token from its httpOnly
+// modulab_session cookie - a package-local duplicate of auth's own
+// unexported sessionToken (same reasoning as bearerToken above: can't call
+// an unexported function in another package). Used by
+// identifyBySessionOrIP below, which needs to resolve a live session to
+// bucket the global rate limit per-user rather than per-IP - that lookup
+// has to read the same cookie the browser actually sends now, not the
+// Authorization header, which ordinary session-authenticated requests
+// stopped carrying once the cookie migration landed (2026-07-15). Module-
+// scoped tokens are unaffected and still travel via bearerToken/header
+// only, so this addition does not change how those are identified.
+func sessionToken(r *http.Request) string {
+	c, err := r.Cookie("modulab_session")
+	if err != nil {
+		return ""
+	}
+	return c.Value
 }
 
 // systemInfoHandler serves GET /v1/admin/system/info (super-admin only).

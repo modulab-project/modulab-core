@@ -371,7 +371,7 @@
       "max_opml_upload_bytes_label": "Taille maximale de l'import OPML",
       "max_opml_upload_bytes_hint": "Liste de flux uploadée sur la page admin Actualités. 0 = illimité. Par défaut : 2097152 (2 Mo).",
       "auth_rate_limit_max_label": "Limite de débit de connexion (par IP par minute)",
-      "auth_rate_limit_max_hint": "S'applique aux points de terminaison de connexion et de callback SSO. Doit être supérieur à 0. Par défaut : 20.",
+      "auth_rate_limit_max_hint": "S'applique aux points de terminaison de connexion, de callback SSO et de déconnexion. Doit être supérieur à 0. Par défaut : 20.",
       "chat_rpm_limit_label": "Limite de débit du chat (requêtes par minute par utilisateur)",
       "chat_rpm_limit_hint": "0 = illimité. Par défaut : 60.",
       "ai_chat_ip_rate_limit_max_label": "Limite de débit du chat IA (par IP par minute)",

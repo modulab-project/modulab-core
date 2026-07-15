@@ -371,7 +371,7 @@
       "max_opml_upload_bytes_label": "Tamaño máximo de importación OPML",
       "max_opml_upload_bytes_hint": "Lista de feeds subida en la página de administración de Noticias. 0 = sin límite. Por defecto: 2097152 (2 MB).",
       "auth_rate_limit_max_label": "Límite de velocidad de inicio de sesión (por IP por minuto)",
-      "auth_rate_limit_max_hint": "Se aplica a los endpoints de inicio de sesión y callback SSO. Debe ser mayor que 0. Por defecto: 20.",
+      "auth_rate_limit_max_hint": "Se aplica a los endpoints de inicio de sesión, callback SSO y cierre de sesión. Debe ser mayor que 0. Por defecto: 20.",
       "chat_rpm_limit_label": "Límite de velocidad del chat (solicitudes por minuto por usuario)",
       "chat_rpm_limit_hint": "0 = sin límite. Por defecto: 60.",
       "ai_chat_ip_rate_limit_max_label": "Límite de velocidad del chat IA (por IP por minuto)",

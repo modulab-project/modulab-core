@@ -371,7 +371,7 @@
       "max_opml_upload_bytes_label": "Max OPML import size",
       "max_opml_upload_bytes_hint": "Feed list uploaded on the News admin page. 0 = unlimited. Default: 2097152 (2 MB).",
       "auth_rate_limit_max_label": "Login rate limit (per IP per minute)",
-      "auth_rate_limit_max_hint": "Applies to the login and SSO callback endpoints. Must be greater than 0. Default: 20.",
+      "auth_rate_limit_max_hint": "Applies to the login, SSO callback, and logout endpoints. Must be greater than 0. Default: 20.",
       "chat_rpm_limit_label": "Chat rate limit (requests per minute per user)",
       "chat_rpm_limit_hint": "0 = unlimited. Default: 60.",
       "ai_chat_ip_rate_limit_max_label": "AI chat rate limit (per IP per minute)",

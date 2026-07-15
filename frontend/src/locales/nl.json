@@ -371,7 +371,7 @@
       "max_opml_upload_bytes_label": "Maximale grootte van OPML-import",
       "max_opml_upload_bytes_hint": "Feedlijst geüpload op de News-adminpagina. 0 = onbeperkt. Standaard: 2097152 (2 MB).",
       "auth_rate_limit_max_label": "Login-snelheidslimiet (per IP per minuut)",
-      "auth_rate_limit_max_hint": "Van toepassing op login- en SSO-callback-eindpunten. Moet groter zijn dan 0. Standaard: 20.",
+      "auth_rate_limit_max_hint": "Van toepassing op login-, SSO-callback- en logout-eindpunten. Moet groter zijn dan 0. Standaard: 20.",
       "chat_rpm_limit_label": "Chat-snelheidslimiet (verzoeken per minuut per gebruiker)",
       "chat_rpm_limit_hint": "0 = onbeperkt. Standaard: 60.",
       "ai_chat_ip_rate_limit_max_label": "AI-chat-snelheidslimiet (per IP per minuut)",
