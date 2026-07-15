@@ -1503,33 +1503,25 @@ type systemInfoRateLimit struct {
 	ResetInSeconds int64  `json:"reset_in_seconds"`
 }
 
-// bearerToken extracts the raw token from an "Authorization: Bearer ..."
-// header - header-only, deliberately not the query-parameter fallback
-// auth.BearerTokenAllowQuery offers for asset-serving GETs (see that
-// function's doc comment on why a token in the URL is worse here): every
-// request to this admin JSON endpoint already comes from the SPA via the
-// header, same as auth's own unexported bearerToken this duplicates -
-// can't call that one directly since it is unexported.
-func bearerToken(r *http.Request) string {
-	const prefix = "Bearer "
-	h := r.Header.Get("Authorization")
-	if strings.HasPrefix(h, prefix) {
-		return strings.TrimPrefix(h, prefix)
-	}
-	return ""
-}
-
 // sessionToken reads the caller's session bearer token from its httpOnly
 // modulab_session cookie - a package-local duplicate of auth's own
-// unexported sessionToken (same reasoning as bearerToken above: can't call
-// an unexported function in another package). Used by
-// identifyBySessionOrIP below, which needs to resolve a live session to
-// bucket the global rate limit per-user rather than per-IP - that lookup
-// has to read the same cookie the browser actually sends now, not the
-// Authorization header, which ordinary session-authenticated requests
-// stopped carrying once the cookie migration landed (2026-07-15). Module-
-// scoped tokens are unaffected and still travel via bearerToken/header
-// only, so this addition does not change how those are identified.
+// unexported sessionToken (can't call that one directly since it is
+// unexported, and main imports auth, not the other way around). Used by
+// identifyBySessionOrIP and systemInfoHandler below, both of which need to
+// resolve a live session from the request to bucket the global rate limit
+// per-user (rather than per-IP) or flag the caller's own row as "current"
+// in the Security Info active-sessions table - both lookups have to read
+// the same cookie the browser actually sends now, not the Authorization
+// header, which ordinary session-authenticated requests stopped carrying
+// once the cookie migration landed (2026-07-15). Module-scoped tokens are
+// unaffected and still travel via a header only (auth.BearerToken /
+// auth.BearerTokenAllowQuery), so this addition does not change how those
+// are identified. This replaced a package-local bearerToken(r) helper that
+// used to serve the same two call sites via the Authorization header -
+// removed once the cookie migration made it dead code (its only remaining
+// caller was systemInfoHandler, fixed to use this function instead) rather
+// than leaving an now always-empty, unused-by-anything-else function
+// around.
 func sessionToken(r *http.Request) string {
 	c, err := r.Cookie("modulab_session")
 	if err != nil {
@@ -1589,11 +1581,18 @@ func systemInfoHandler(pool *db.Pool, valkeyClient *valkey.Client, cfg config.Co
 		// tabs/devices (see auth.ActiveSession's doc comment for exactly
 		// what's shown) - best-effort, nil if the underlying SCAN failed.
 		// The viewing admin's own row is flagged Current by recomputing
-		// SessionID from this same request's own bearer token - only the
+		// SessionID from this same request's own session cookie - only the
 		// caller holding that token can know which row is "you", so this
 		// can't happen inside ListActiveSessions itself.
+		//
+		// Read via sessionToken(r), not bearerToken(r) (found during a
+		// post-release check, 2026-07-15): the cookie migration means an
+		// ordinary browser request no longer carries the session in the
+		// Authorization header at all, so bearerToken(r) here always
+		// returned "" and no row was ever flagged Current - the same class
+		// of bug identifyBySessionOrIP had.
 		if sessions, err := auth.ListActiveSessions(ctx, authDeps); err == nil {
-			if ownID := auth.SessionID(bearerToken(r)); ownID != "" {
+			if ownID := auth.SessionID(sessionToken(r)); ownID != "" {
 				for i := range sessions {
 					if sessions[i].ID == ownID {
 						sessions[i].Current = true

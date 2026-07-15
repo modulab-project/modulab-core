@@ -70,6 +70,13 @@ export default function AuthComplete() {
           navigate("/login", { replace: true });
           return;
         }
+        // Nothing downstream reads the stashed result on this success path
+        // (unlike the two branches above, which leave it for Login.tsx or
+        // SetupWizard.tsx's consumeAuthResult() to pick up) - found during
+        // a post-release check (2026-07-15) that it was sitting in
+        // sessionStorage for the entire tab lifetime otherwise, holding the
+        // user's email unnecessarily long after login already succeeded.
+        sessionStorage.removeItem(AUTH_RESULT_STORAGE_KEY);
         navigate(result.role === "pending" ? "/pending" : "/", { replace: true });
       })
       .catch(() => navigate("/setup", { replace: true }));
