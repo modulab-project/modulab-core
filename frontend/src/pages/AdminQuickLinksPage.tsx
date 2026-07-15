@@ -3,7 +3,6 @@ import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthenticatedSession } from "../lib/useSession";
-import { getSessionToken } from "../lib/session";
 import { AppShell } from "../components/AppShell";
 import { isAdminRole } from "../lib/roles";
 import {
@@ -31,12 +30,10 @@ type FormMode = "url" | "module";
 
 function QuickLinkForm({
   initial,
-  token,
   onSave,
   onCancel,
 }: {
   initial?: AdminTile;
-  token: string;
   onSave: (data: {
     title: string;
     url: string;
@@ -66,9 +63,9 @@ function QuickLinkForm({
   const [error, setError] = useState("");
 
   const { data: modules = [], isLoading: modulesLoading } = useQuery({
-    queryKey: [...ACTIVE_MODULES_QUERY_KEY, token],
+    queryKey: ACTIVE_MODULES_QUERY_KEY,
     queryFn: async () => {
-      const mods = await listInstalledModules(token);
+      const mods = await listInstalledModules();
       return mods.filter((m) => m.status === "active");
     },
     enabled: mode === "module",
@@ -283,19 +280,17 @@ export default function AdminQuickLinksPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
 
-  const token = getSessionToken() ?? "";
-
   useEffect(() => {
     if (!session) return;
     if (!isAdminRole(session.role)) {
       navigate("/", { replace: true });
       return;
     }
-    listAdminQuickLinks(token)
+    listAdminQuickLinks()
       .then(setLinks)
       .catch(() => {})
       .finally(() => setFetching(false));
-  }, [session, token, navigate]);
+  }, [session, navigate]);
 
   if (loading || !session || fetching) return null;
 
@@ -306,7 +301,7 @@ export default function AdminQuickLinksPage() {
     description: string;
     sort_order: number;
   }) {
-    const created = await createAdminQuickLink(token, data);
+    const created = await createAdminQuickLink(data);
     setLinks((prev) => [...prev, created]);
     setShowCreate(false);
   }
@@ -315,7 +310,7 @@ export default function AdminQuickLinksPage() {
     id: string,
     data: { title: string; url: string; icon: string; description: string; sort_order: number }
   ) {
-    await updateAdminQuickLink(token, id, data);
+    await updateAdminQuickLink(id, data);
     setLinks((prev) =>
       prev.map((l) => (l.id === id ? { ...l, ...data } : l))
     );
@@ -323,7 +318,7 @@ export default function AdminQuickLinksPage() {
   }
 
   async function handleDelete(id: string) {
-    await deleteAdminQuickLink(token, id);
+    await deleteAdminQuickLink(id);
     setLinks((prev) => prev.filter((l) => l.id !== id));
   }
 
@@ -357,7 +352,6 @@ export default function AdminQuickLinksPage() {
             {t("admin.quick_links.new_tile")}
           </h2>
           <QuickLinkForm
-            token={token}
             onSave={handleCreate}
             onCancel={() => setShowCreate(false)}
           />
@@ -380,7 +374,6 @@ export default function AdminQuickLinksPage() {
                 <div className="p-4">
                   <QuickLinkForm
                     initial={link}
-                    token={token}
                     onSave={(data) => handleUpdate(link.id, data)}
                     onCancel={() => setEditId(null)}
                   />

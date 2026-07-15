@@ -11,7 +11,6 @@ import {
   type SearchPrefs,
   type UserSearchProvider,
 } from "../lib/api";
-import { getSessionToken } from "../lib/session";
 
 // Individual language names are intentionally left as native endonyms
 // (Deutsch, English, Français, ...) rather than translated - standard
@@ -56,13 +55,11 @@ export default function UserSearchPrefsPage() {
   const [keyProviders, setKeyProviders] = useState<UserSearchProvider[]>([]);
 
   useEffect(() => {
-    const token = getSessionToken();
-    if (!token) return;
-    getSearchPrefs(token)
+    getSearchPrefs()
       .then(setPrefs)
       .catch(() => setLoadError(true))
       .finally(() => setFetching(false));
-    listSearchProvidersForUser(token)
+    listSearchProvidersForUser()
       .then((provs) => setKeyProviders(provs.filter((p) => p.type !== "searxng")))
       .catch(() => {
         // Non-fatal: the own-key section simply stays hidden.
@@ -70,15 +67,14 @@ export default function UserSearchPrefsPage() {
   }, []);
 
   async function handleChange(patch: Partial<SearchPrefs>) {
-    const token = getSessionToken();
-    if (!token || saving) return;
+    if (saving) return;
     const next = { ...prefs, ...patch };
     setPrefs(next);
     setSaving(true);
     setSaved(false);
     setSaveError(false);
     try {
-      const updated = await updateSearchPrefs(token, next);
+      const updated = await updateSearchPrefs(next);
       setPrefs(updated);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -208,12 +204,10 @@ function OwnKeySection({
 
   async function handleSaveKey(providerId: string) {
     if (!keyInput.trim()) return;
-    const token = getSessionToken();
-    if (!token) return;
     setBusy(true);
     setError(null);
     try {
-      await setUserSearchKey(token, providerId, keyInput.trim());
+      await setUserSearchKey(providerId, keyInput.trim());
       setEditingKeyId(null);
       setKeyInput("");
       onChanged(providerId, true);
@@ -225,12 +219,10 @@ function OwnKeySection({
   }
 
   async function handleRemove(providerId: string) {
-    const token = getSessionToken();
-    if (!token) return;
     setBusy(true);
     setError(null);
     try {
-      await deleteUserSearchKey(token, providerId);
+      await deleteUserSearchKey(providerId);
       onChanged(providerId, false);
     } catch (e) {
       setError(e instanceof Error ? e.message : t("user.search.save_error"));

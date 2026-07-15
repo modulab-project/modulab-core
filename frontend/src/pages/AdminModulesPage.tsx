@@ -13,7 +13,6 @@ import {
   listStore,
   syncStore,
 } from "../lib/api";
-import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
 import { isAdminRole } from "../lib/roles";
@@ -55,20 +54,18 @@ export default function AdminModulesPage() {
   const { data, isFetching: syncing } = useQuery({
     queryKey: MODULES_HUB_QUERY_KEY,
     queryFn: async (): Promise<ModulesHubData> => {
-      const token = getSessionToken();
-      if (!token) throw new Error("no session token");
 
       let syncError = false;
       try {
-        await syncStore(token);
+        await syncStore();
       } catch {
         syncError = true;
       }
 
       const [storeRes, updateRes, installedRes] = await Promise.allSettled([
-        listStore(token),
-        checkModuleUpdates(token),
-        listInstalledModules(token),
+        listStore(),
+        checkModuleUpdates(),
+        listInstalledModules(),
       ]);
 
       const storeCount = storeRes.status === "fulfilled" ? storeRes.value.total_count : null;

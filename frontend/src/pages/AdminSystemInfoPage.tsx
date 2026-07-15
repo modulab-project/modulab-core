@@ -14,7 +14,6 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import { getSystemInfo, type SystemInfo, type SystemInfoModule, type SystemInfoTimer } from "../lib/api";
-import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { useNow } from "../lib/useNow";
 import { AppShell } from "../components/AppShell";
@@ -40,9 +39,7 @@ export default function AdminSystemInfoPage() {
     if (hasFetched.current) return;
     hasFetched.current = true;
 
-    const token = getSessionToken();
-    if (!token) return;
-    getSystemInfo(token)
+    getSystemInfo()
       .then(setInfo)
       .catch(() => setError(t("admin.system_info.load_error")));
   }, [session, navigate, t]);

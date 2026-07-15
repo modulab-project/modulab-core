@@ -10,7 +10,6 @@ import {
   type SearchProvider,
   type SearchSettings,
 } from "../lib/api";
-import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
 
@@ -48,9 +47,7 @@ export default function AdminSystemSearchPage() {
   const enabledProviders = providers.filter((p) => p.enabled);
 
   const refresh = useCallback(() => {
-    const token = getSessionToken();
-    if (!token) return;
-    adminListSearchProviders(token)
+    adminListSearchProviders()
       .then((p) => { setProviders(p); setError(null); })
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
   }, []);
@@ -60,9 +57,7 @@ export default function AdminSystemSearchPage() {
     if (session.role !== "super-admin") { navigate("/", { replace: true }); return; }
     if (hasFetched.current) return;
     hasFetched.current = true;
-    const token = getSessionToken();
-    if (!token) return;
-    Promise.all([adminListSearchProviders(token), adminGetSearchSettings(token)])
+    Promise.all([adminListSearchProviders(), adminGetSearchSettings()])
       .then(([provs, sett]) => { setProviders(provs); setSettings(sett); })
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
       .finally(() => setFetching(false));
@@ -78,12 +73,10 @@ export default function AdminSystemSearchPage() {
   }
 
   async function handleToggleEnabled(p: SearchProvider) {
-    const token = getSessionToken();
-    if (!token) return;
     setBusy(true);
     setError(null);
     try {
-      await adminPatchSearchProvider(token, p.id, { enabled: !p.enabled });
+      await adminPatchSearchProvider(p.id, { enabled: !p.enabled });
       refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : t("admin.search.save_error"));
@@ -93,12 +86,10 @@ export default function AdminSystemSearchPage() {
   }
 
   async function handleClearKey(id: string) {
-    const token = getSessionToken();
-    if (!token) return;
     setBusy(true);
     setError(null);
     try {
-      await adminClearSearchProviderKey(token, id);
+      await adminClearSearchProviderKey(id);
       refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : t("admin.search.save_error"));
@@ -109,11 +100,10 @@ export default function AdminSystemSearchPage() {
 
   async function handleSaveSettings(e: React.FormEvent) {
     e.preventDefault();
-    const token = getSessionToken();
-    if (!token || !settings) return;
+    if (!settings) return;
     setError(null);
     try {
-      const updated = await adminPatchSearchSettings(token, settings);
+      const updated = await adminPatchSearchSettings(settings);
       setSettings(updated);
     } catch (e) {
       setError(e instanceof Error ? e.message : t("admin.search.save_error"));
@@ -297,12 +287,10 @@ function EditProviderModal({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const token = getSessionToken();
-    if (!token) return;
     setBusy(true);
     setError(null);
     try {
-      const patch: Parameters<typeof adminPatchSearchProvider>[2] = {
+      const patch: Parameters<typeof adminPatchSearchProvider>[1] = {
         max_results: Math.max(1, Math.min(100, maxResults)),
       };
       if (isSearXNG) {
@@ -312,7 +300,7 @@ function EditProviderModal({
         patch.user_can_override = userCanOverride;
         if (key.trim()) patch.admin_key = key.trim();
       }
-      await adminPatchSearchProvider(token, provider.id, patch);
+      await adminPatchSearchProvider(provider.id, patch);
       onSaved();
       onClose();
     } catch (e) {

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { getAuditLog, verifyAuditLog, type AuditEntry, type AuditVerifyResult } from "../lib/api";
-import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
 
@@ -93,12 +92,11 @@ export default function AdminAuditPage() {
   const [verifyError, setVerifyError] = useState(false);
 
   function handleVerify() {
-    const token = getSessionToken();
-    if (!token || verifying) return;
+    if (verifying) return;
     setVerifying(true);
     setVerifyError(false);
     setVerifyResult(null);
-    verifyAuditLog(token)
+    verifyAuditLog()
       .then(setVerifyResult)
       .catch(() => setVerifyError(true))
       .finally(() => setVerifying(false));
@@ -115,13 +113,11 @@ export default function AdminAuditPage() {
 
   // Load the first page whenever filter changes or on initial mount.
   const loadFirstPage = useCallback((eventType: string) => {
-    const token = getSessionToken();
-    if (!token) return;
     cursorRef.current = undefined;
     appliedFilter.current = eventType;
     setFetching(true);
     setError(null);
-    getAuditLog(token, { event_type: eventType || undefined, limit: PAGE_SIZE })
+    getAuditLog({ event_type: eventType || undefined, limit: PAGE_SIZE })
       .then((data) => {
         setEntries(data);
         setHasMore(data.length === PAGE_SIZE);
@@ -153,10 +149,9 @@ export default function AdminAuditPage() {
   }
 
   function loadMore() {
-    const token = getSessionToken();
-    if (!token || !cursorRef.current) return;
+    if (!cursorRef.current) return;
     setFetching(true);
-    getAuditLog(token, {
+    getAuditLog({
       event_type: appliedFilter.current || undefined,
       before: cursorRef.current,
       limit: PAGE_SIZE,

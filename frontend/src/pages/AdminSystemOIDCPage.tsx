@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "rea
 import { useNavigate, Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import { getSystemStatus, updateOIDC, deleteOIDCConfig } from "../lib/api";
-import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
 
@@ -30,9 +29,7 @@ export default function AdminSystemOIDCPage() {
     if (session.role !== "super-admin") { navigate("/", { replace: true }); return; }
     if (hasFetched.current) return;
     hasFetched.current = true;
-    const token = getSessionToken();
-    if (!token) return;
-    getSystemStatus(token)
+    getSystemStatus()
       .then((s) => {
         setConfigured(s.oidc.configured);
         if (s.oidc.configured) {
@@ -48,8 +45,6 @@ export default function AdminSystemOIDCPage() {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    const token = getSessionToken();
-    if (!token) return;
     if (!issuer.trim() || !clientId.trim()) {
       setMsg({ ok: false, text: t("admin.system.oidc_validation_error") });
       return;
@@ -57,7 +52,7 @@ export default function AdminSystemOIDCPage() {
     setSaving(true);
     setMsg(null);
     try {
-      await updateOIDC(token, {
+      await updateOIDC({
         issuer_url: issuer.trim(),
         client_id: clientId.trim(),
         client_secret: secret.trim() || undefined,
@@ -73,12 +68,11 @@ export default function AdminSystemOIDCPage() {
   }
 
   async function handleRemove() {
-    const token = getSessionToken();
-    if (!token || removing) return;
+    if (removing) return;
     setRemoving(true);
     setMsg(null);
     try {
-      await deleteOIDCConfig(token);
+      await deleteOIDCConfig();
       setConfigured(false);
       setIssuer(""); setClientId(""); setSecret("");
     } catch (err) {

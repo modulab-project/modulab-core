@@ -28,7 +28,6 @@ import {
   type SearchCategory,
   type SearchTimeRange,
 } from "../lib/api";
-import { getSessionToken } from "../lib/session";
 import { AppShell } from "../components/AppShell";
 import { QuickLinksGrid } from "../components/QuickLinksGrid";
 import { listQuickLinks, type Tile } from "../lib/quicklinks";
@@ -268,35 +267,27 @@ export default function Home() {
   }, [session]);
 
   const loadNews = useCallback(() => {
-    const token = getSessionToken();
-    if (!token) return;
     setNewsLoading(true);
-    getNews(token)
+    getNews()
       .then((arts) => setArticles(arts ?? []))
       .catch(() => setArticles([]))
       .finally(() => setNewsLoading(false));
   }, []);
 
   const loadPrefs = useCallback(() => {
-    const token = getSessionToken();
-    if (!token) return;
-    getNewsConfig(token)
+    getNewsConfig()
       .then(setPrefs)
       .catch(() => {});
   }, []);
 
   const loadSearchPrefs = useCallback(() => {
-    const token = getSessionToken();
-    if (!token) return;
-    getSearchPrefs(token)
+    getSearchPrefs()
       .then(setSearchPrefs)
       .catch(() => {});
   }, []);
 
   const loadTiles = useCallback(() => {
-    const token = getSessionToken();
-    if (!token) return;
-    listQuickLinks(token)
+    listQuickLinks()
       .then((t) => setTiles(t ?? []))
       .catch(() => {});
   }, []);
@@ -346,13 +337,11 @@ export default function Home() {
         return;
       }
 
-      const token = getSessionToken();
-      if (!token) return;
 
       setWebLoading(true);
       setWebResults(null);
       try {
-        const results = await searchWeb(token, trimmed, cat, tr);
+        const results = await searchWeb(trimmed, cat, tr);
         if (mySeq !== searchSeq.current) return; // a newer search has since started - discard
         setWebResults(results);
       } catch (err) {
@@ -433,10 +422,8 @@ export default function Home() {
             onTimeRangeChange={handleTimeRangeChange}
             searchPrefs={searchPrefs}
             onPrefsChange={async (patch) => {
-              const token = getSessionToken();
-              if (!token) return;
               try {
-                const updated = await updateSearchPrefs(token, patch);
+                const updated = await updateSearchPrefs(patch);
                 setSearchPrefs(updated);
               } catch {
                 // silently ignore — local state stays unchanged
@@ -450,7 +437,7 @@ export default function Home() {
               {t("home.quick_links")}
             </p>
           </div>
-          <QuickLinksGrid initialTiles={tiles} token={getSessionToken() ?? ""} />
+          <QuickLinksGrid initialTiles={tiles} />
         </div>
         <NewsPreview
           articles={articles}
@@ -1419,9 +1406,7 @@ function FeedsPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { data: feeds = [], isLoading: fetching } = useQuery({
     queryKey: USER_FEEDS_QUERY_KEY,
     queryFn: async () => {
-      const token = getSessionToken();
-      if (!token) throw new Error("no session token");
-      return (await listFeeds(token)) ?? [];
+      return (await listFeeds()) ?? [];
     },
     enabled: open,
   });
@@ -1437,8 +1422,7 @@ function FeedsPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   }, [open, onClose]);
 
   async function handleToggle(feed: Feed) {
-    const token = getSessionToken();
-    if (!token || toggling !== null) return;
+    if (toggling !== null) return;
     const next = !feed.enabled;
     setToggling(feed.id);
     // Optimistic update
@@ -1446,7 +1430,7 @@ function FeedsPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
       (prev ?? []).map((f) => (f.id === feed.id ? { ...f, enabled: next } : f)),
     );
     try {
-      await setFeedSubscription(token, feed.id, next);
+      await setFeedSubscription(feed.id, next);
     } catch {
       // Roll back on error
       queryClient.setQueryData<Feed[]>(USER_FEEDS_QUERY_KEY, (prev) =>

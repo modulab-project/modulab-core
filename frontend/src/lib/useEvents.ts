@@ -12,19 +12,25 @@ export interface ServerEvent {
   data?: unknown;
 }
 
-// Subscribes to GET /v1/events (spec section 3.5) for as long as token is
-// non-null, calling onEvent for every message received. Reconnection on a
+// Subscribes to GET /v1/events (spec section 3.5) for as long as enabled is
+// true, calling onEvent for every message received. Reconnection on a
 // dropped connection is handled by the browser's EventSource
 // implementation itself (automatic retry with backoff) - this hook only
-// opens/closes the connection as token appears, disappears, or changes,
-// nothing more.
+// opens/closes the connection as enabled flips, nothing more.
+//
+// Used to be gated on a session token (string | null) that this hook
+// attached to the EventSource URL as ?token=... - now that the session
+// lives in an httpOnly cookie the browser sends automatically (see
+// backend/internal/auth/events.go's EventsHandler and lib/api.ts's
+// eventsUrl), there is no token value left for this hook to hold or pass
+// along, only "should a connection be open right now or not".
 //
 // onEvent is read through a ref rather than depended on directly in the
 // effect below, so passing a fresh inline arrow function on every render
 // (the common case for both current call sites) does not tear down and
-// reopen the EventSource on every render - only an actual token change
+// reopen the EventSource on every render - only an actual enabled change
 // does that.
-export function useNotificationEvents(token: string | null, onEvent: (event: ServerEvent) => void): void {
+export function useNotificationEvents(enabled: boolean, onEvent: (event: ServerEvent) => void): void {
   const onEventRef = useRef(onEvent);
   // Assigning a ref during render is flagged by react-hooks/refs (React
   // Compiler treats it as a side effect); moving it into its own
@@ -37,10 +43,10 @@ export function useNotificationEvents(token: string | null, onEvent: (event: Ser
   });
 
   useEffect(() => {
-    if (!token) {
+    if (!enabled) {
       return;
     }
-    const source = new EventSource(eventsUrl(token));
+    const source = new EventSource(eventsUrl());
     source.onmessage = (e) => {
       try {
         onEventRef.current(JSON.parse(e.data) as ServerEvent);
@@ -53,5 +59,5 @@ export function useNotificationEvents(token: string | null, onEvent: (event: Ser
       }
     };
     return () => source.close();
-  }, [token]);
+  }, [enabled]);
 }

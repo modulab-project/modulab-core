@@ -333,8 +333,13 @@ func RevokeUserSessions(ctx context.Context, d Deps, subject string) error {
 // holds it. Used by the System Info page's per-row "end session" action:
 // unlike RevokeUserSessions (which kills every session belonging to a user,
 // for the existing lock/delete-user admin actions), this targets a single
-// browser tab/device and leaves that same user's other active sessions
-// alone.
+// row and leaves that same user's other active sessions alone.
+//
+// Since the session token now travels in a single httpOnly cookie shared
+// by every tab of one browser (see handlers.go's setSessionCookie), one row
+// here corresponds to one signed-in browser/device, not one open tab the
+// way it did when each tab held its own independent sessionStorage token -
+// ending this row signs out every tab of that browser at once.
 //
 // Has to scan every active session and recompute each one's ID to find the
 // match, since Valkey only indexes these keys by token and by user, never

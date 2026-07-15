@@ -10,7 +10,6 @@ import {
   unlockUser,
   type AdminUser,
 } from "../lib/api";
-import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
 import { isAdminRole } from "../lib/roles";
@@ -52,11 +51,7 @@ export default function AdminUsersPage() {
   const [busySubject, setBusySubject] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
-    const token = getSessionToken();
-    if (!token) {
-      return;
-    }
-    listUsers(token)
+    listUsers()
       .then((u) => {
         setUsers(u);
         setError(null);
@@ -83,16 +78,12 @@ export default function AdminUsersPage() {
     return null;
   }
 
-  async function runAction(subject: string, action: (token: string, subject: string) => Promise<void>) {
-    const token = getSessionToken();
-    if (!token) {
-      return;
-    }
+  async function runAction(subject: string, action: (subject: string) => Promise<void>) {
     setBusySubject(subject);
     setError(null);
     setReauthRequired(false);
     try {
-      await action(token, subject);
+      await action(subject);
       refresh();
     } catch (err) {
       if (isReauthRequiredError(err)) {

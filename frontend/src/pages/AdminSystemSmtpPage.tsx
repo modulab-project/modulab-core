@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "rea
 import { useNavigate, Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import { smtpStatus as fetchSmtpStatus, configureSmtp, deleteSmtpConfig, testSmtp, type SMTPStatus } from "../lib/api";
-import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
 
@@ -31,9 +30,7 @@ export default function AdminSystemSmtpPage() {
     if (session.role !== "super-admin") { navigate("/", { replace: true }); return; }
     if (hasFetched.current) return;
     hasFetched.current = true;
-    const token = getSessionToken();
-    if (!token) return;
-    fetchSmtpStatus(token)
+    fetchSmtpStatus()
       .then((s) => {
         setStatus(s);
         if (s.configured) {
@@ -51,8 +48,6 @@ export default function AdminSystemSmtpPage() {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    const token = getSessionToken();
-    if (!token) return;
     const parsedPort = parseInt(port, 10);
     if (!host.trim() || !fromAddress.trim() || Number.isNaN(parsedPort) || parsedPort <= 0) {
       setMsg({ ok: false, text: t("admin.smtp.validation_error") });
@@ -61,7 +56,7 @@ export default function AdminSystemSmtpPage() {
     setSaving(true);
     setMsg(null);
     try {
-      const result = await configureSmtp(token, {
+      const result = await configureSmtp({
         host: host.trim(), port: parsedPort, username: username.trim(),
         password, from_address: fromAddress.trim(), encryption,
       });
@@ -77,8 +72,6 @@ export default function AdminSystemSmtpPage() {
 
   async function handleTest(e: FormEvent) {
     e.preventDefault();
-    const token = getSessionToken();
-    if (!token) return;
     const parsedPort = parseInt(port, 10);
     if (!host.trim() || !fromAddress.trim() || Number.isNaN(parsedPort) || parsedPort <= 0) {
       setTestResult({ ok: false, text: t("admin.smtp.validation_error") });
@@ -91,7 +84,7 @@ export default function AdminSystemSmtpPage() {
     setTestBusy(true);
     setTestResult(null);
     try {
-      await testSmtp(token, {
+      await testSmtp({
         host: host.trim(),
         port: parsedPort,
         username: username.trim(),
@@ -109,13 +102,11 @@ export default function AdminSystemSmtpPage() {
   }
 
   async function handleRemove() {
-    const token = getSessionToken();
-    if (!token) return;
     if (!window.confirm(t("admin.smtp.remove_confirm"))) return;
     setRemoving(true);
     setMsg(null);
     try {
-      await deleteSmtpConfig(token);
+      await deleteSmtpConfig();
       setStatus({ configured: false });
       setHost(""); setPort("465"); setUsername(""); setPassword(""); setFromAddress(""); setEncryption("tls");
     } catch (err) {

@@ -22,19 +22,20 @@ import (
 // Gigabytes") is for exactly this: one goroutine plus one Valkey Pub/Sub
 // subscription per open tab, not per user.
 //
-// The bearer token travels as a query parameter (?token=...), unlike
-// every other endpoint's Authorization header: the browser's EventSource
-// API cannot set custom request headers at all, so a query parameter is
-// the only transport available to it. This does mean the token can end up
-// in an access log or proxy log in a way the header form does not - an
-// accepted tradeoff given EventSource leaves no alternative, and it is
-// still the same opaque, server-revocable token (RevokeUserSessions kills
-// it exactly the same way regardless of how it travelled to get here).
+// The session token travels as the httpOnly modulab_session cookie (see
+// handlers.go's setSessionCookie), same as every other endpoint now -
+// EventSource cannot set custom request headers, but it does send cookies
+// automatically for a same-origin URL, so no special-cased transport is
+// needed here anymore. This used to require a ?token=... query parameter
+// instead (the one alternative EventSource had for a header-only bearer
+// token), which meant the token could end up in an access log or proxy log
+// in a way the header form did not - the cookie switch removes that
+// exposure entirely, not just relocates it.
 func EventsHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token := r.URL.Query().Get("token")
+		token := sessionToken(r)
 		if token == "" {
-			http.Error(w, "missing token", http.StatusUnauthorized)
+			http.Error(w, "missing session cookie", http.StatusUnauthorized)
 			return
 		}
 

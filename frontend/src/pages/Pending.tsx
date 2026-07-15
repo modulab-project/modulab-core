@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { getMe, logoutRequest } from "../lib/api";
-import { clearSessionToken, getSessionToken } from "../lib/session";
+import { queryClient } from "../lib/queryClient";
 import { useNotificationEvents, type ServerEvent } from "../lib/useEvents";
 import { AuthShell } from "../components/AuthShell";
 
@@ -23,12 +23,12 @@ const POLL_INTERVAL_MS = 15_000;
 // the moment an admin approves (UpdateSessionsRole, session.go) rather
 // than waiting for a fresh login, so the check below does detect approval:
 // once getMe() reports a role other than "pending", this page sends the
-// user straight to "/" with the same token, no sign-out/back-in required.
+// user straight to "/" with the same session, no sign-out/back-in required.
 // Lock is the one case that still requires a fresh login - LockUserHandler
-// revokes the token outright (RevokeUserSessions) instead of patching it,
+// revokes the session outright (RevokeUserSessions) instead of patching it,
 // so a locked session's next getMe() call fails closed below and lands on
 // /login. The periodic poll exists for that case, and for catching this
-// token being revoked for any other reason (logout elsewhere, expiry); the
+// session being revoked for any other reason (logout elsewhere, expiry); the
 // "user.approved" SSE handler further down just means approval itself does
 // not have to wait for the next POLL_INTERVAL_MS tick.
 export default function Pending() {
@@ -40,56 +40,34 @@ export default function Pending() {
   // Pulled out of the polling effect below (as a useCallback, so it has a
   // stable identity across renders) so the SSE handler further down can
   // trigger the exact same re-check on demand instead of duplicating it.
-  // Takes the token as an explicit parameter rather than reading
-  // getSessionToken() itself - same TypeScript narrowing limitation every
-  // version of this function has had: a `string | null` read needs to be
-  // confirmed non-null at the call site, it does not stay narrowed if
-  // re-derived inside a separately declared function.
-  const check = useCallback(
-    async (currentToken: string) => {
-      try {
-        const session = await getMe(currentToken);
-        setEmail(session.email);
-        setLocked(session.locked === true);
-        if (session.role !== "pending") {
-          // Someone approved this account since the last check - no need
-          // to make the user log in again, the existing token is still
-          // good, it just authorizes more now.
-          navigate("/", { replace: true });
-        }
-      } catch {
-        // TEMP DIAGNOSTIC (remove once swipe-logout root cause confirmed,
-        // same three cases as useSession.ts's useAuthenticatedSession):
-        // this is case C, token present but rejected.
-        console.warn("[auth-diag] Pending: token present but rejected", {
-          time: new Date().toISOString(),
-        });
-        // Expired or otherwise invalid token - fail closed, back to login.
-        clearSessionToken();
-        navigate("/login", { replace: true });
+  const check = useCallback(async () => {
+    try {
+      const session = await getMe();
+      setEmail(session.email);
+      setLocked(session.locked === true);
+      if (session.role !== "pending") {
+        // Someone approved this account since the last check - no need
+        // to make the user log in again, the existing session cookie is
+        // still good, it just authorizes more now.
+        navigate("/", { replace: true });
       }
-    },
-    [navigate],
-  );
+    } catch {
+      // Expired, revoked, or otherwise invalid session - fail closed, back
+      // to login.
+      navigate("/login", { replace: true });
+    }
+  }, [navigate]);
 
   useEffect(() => {
-    const token = getSessionToken();
-    if (!token) {
-      // TEMP DIAGNOSTIC: case B - token gone from sessionStorage on mount.
-      console.warn("[auth-diag] Pending: no token on mount", { time: new Date().toISOString() });
-      navigate("/login", { replace: true });
-      return;
-    }
-
     let cancelled = false;
-    function poll(currentToken: string) {
+    function poll() {
       if (!cancelled) {
-        check(currentToken);
+        check();
       }
     }
 
-    poll(token);
-    const id = window.setInterval(() => poll(token), POLL_INTERVAL_MS);
+    poll();
+    const id = window.setInterval(poll, POLL_INTERVAL_MS);
 
     // Same bfcache-restore gap useSession.ts's useAuthenticatedSession
     // closes (see its comment) - iOS Safari's swipe back/forward gesture
@@ -98,11 +76,7 @@ export default function Pending() {
     // up to POLL_INTERVAL_MS for the next tick.
     const onPageShow = (event: PageTransitionEvent) => {
       if (event.persisted) {
-        // TEMP DIAGNOSTIC: case A - bfcache restore caught here.
-        console.warn("[auth-diag] Pending: pageshow persisted=true, re-checking", {
-          time: new Date().toISOString(),
-        });
-        poll(token);
+        poll();
       }
     };
     window.addEventListener("pageshow", onPageShow);
@@ -112,7 +86,7 @@ export default function Pending() {
       window.clearInterval(id);
       window.removeEventListener("pageshow", onPageShow);
     };
-  }, [navigate, check]);
+  }, [check]);
 
   // Spec section 3.5's "user.approved" event: re-checks the instant it
   // arrives instead of waiting for the next POLL_INTERVAL_MS tick above -
@@ -121,26 +95,20 @@ export default function Pending() {
   // exception to "pending sessions only get /v1/auth/me and
   // /v1/auth/logout", specifically so this event can reach the person it
   // is about while they are still sitting on this very screen).
-  useNotificationEvents(getSessionToken(), (event: ServerEvent) => {
+  useNotificationEvents(true, (event: ServerEvent) => {
     if (event.type !== "user.approved") {
       return;
     }
-    const token = getSessionToken();
-    if (token) {
-      check(token);
-    }
+    check();
   });
 
   async function handleLogout() {
-    const token = getSessionToken();
-    clearSessionToken();
-    if (token) {
-      try {
-        await logoutRequest(token);
-      } catch {
-        // Already invalid server-side - the local sign-out still succeeds.
-      }
+    try {
+      await logoutRequest();
+    } catch {
+      // Already invalid server-side - the local sign-out still succeeds.
     }
+    queryClient.clear();
     navigate("/login", { replace: true });
   }
 

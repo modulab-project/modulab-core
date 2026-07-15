@@ -30,23 +30,24 @@ export interface TileRef {
 }
 
 // ---- User endpoints ---------------------------------------------------------
+// No token parameter on any function below: every request relies on the
+// browser attaching the httpOnly modulab_session cookie automatically
+// (credentials: "include"), same as lib/api.ts's request() wrapper - see
+// backend/internal/auth/handlers.go's setSessionCookie.
 
-export async function listQuickLinks(token: string): Promise<Tile[]> {
-  const res = await fetch(`${API}/v1/quick-links`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+export async function listQuickLinks(): Promise<Tile[]> {
+  const res = await fetch(`${API}/v1/quick-links`, { credentials: "include" });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
 export async function createUserQuickLink(
-  token: string,
   body: { title: string; url: string; icon: string; description: string }
 ): Promise<Tile> {
   const res = await fetch(`${API}/v1/quick-links`, {
     method: "POST",
+    credentials: "include",
     headers: {
-      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
@@ -65,19 +66,19 @@ export async function createUserQuickLink(
   };
 }
 
-export async function deleteUserQuickLink(token: string, id: string): Promise<void> {
+export async function deleteUserQuickLink(id: string): Promise<void> {
   const res = await fetch(`${API}/v1/quick-links/${id}`, {
     method: "DELETE",
-    headers: { Authorization: `Bearer ${token}` },
+    credentials: "include",
   });
   if (!res.ok) throw new Error(await res.text());
 }
 
-export async function saveOrder(token: string, order: TileRef[]): Promise<void> {
+export async function saveOrder(order: TileRef[]): Promise<void> {
   const res = await fetch(`${API}/v1/quick-links/order`, {
     method: "PATCH",
+    credentials: "include",
     headers: {
-      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ order }),
@@ -87,22 +88,19 @@ export async function saveOrder(token: string, order: TileRef[]): Promise<void> 
 
 // ---- Admin endpoints --------------------------------------------------------
 
-export async function listAdminQuickLinks(token: string): Promise<AdminTile[]> {
-  const res = await fetch(`${API}/v1/admin/quick-links`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+export async function listAdminQuickLinks(): Promise<AdminTile[]> {
+  const res = await fetch(`${API}/v1/admin/quick-links`, { credentials: "include" });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
 export async function createAdminQuickLink(
-  token: string,
   body: { title: string; url: string; icon: string; description: string; sort_order: number }
 ): Promise<AdminTile> {
   const res = await fetch(`${API}/v1/admin/quick-links`, {
     method: "POST",
+    credentials: "include",
     headers: {
-      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
@@ -112,14 +110,13 @@ export async function createAdminQuickLink(
 }
 
 export async function updateAdminQuickLink(
-  token: string,
   id: string,
   body: { title: string; url: string; icon: string; description: string; sort_order: number }
 ): Promise<void> {
   const res = await fetch(`${API}/v1/admin/quick-links/${id}`, {
     method: "PATCH",
+    credentials: "include",
     headers: {
-      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
@@ -127,10 +124,10 @@ export async function updateAdminQuickLink(
   if (!res.ok) throw new Error(await res.text());
 }
 
-export async function deleteAdminQuickLink(token: string, id: string): Promise<void> {
+export async function deleteAdminQuickLink(id: string): Promise<void> {
   const res = await fetch(`${API}/v1/admin/quick-links/${id}`, {
     method: "DELETE",
-    headers: { Authorization: `Bearer ${token}` },
+    credentials: "include",
   });
   if (!res.ok) throw new Error(await res.text());
 }

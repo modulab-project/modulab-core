@@ -5,8 +5,8 @@ import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell, Avatar } from "../components/AppShell";
 import { AuthButton } from "../components/AuthShell";
 import { deleteSelf, exportMyData, loginRedirectUrl } from "../lib/api";
-import { clearSessionToken, getSessionToken } from "../lib/session";
 import { isReauthRequiredError } from "../lib/authErrors";
+import { queryClient } from "../lib/queryClient";
 
 // "/profile" route, linked from the profile panel AppShell renders on every
 // page (header avatar -> "View profile"). Core has no UI of its own for
@@ -54,12 +54,10 @@ export default function ProfilePage() {
   // as deleteError, same as AdminUsersPage's runAction does for its own
   // guard violations.
   async function handleExportData() {
-    const token = getSessionToken();
-    if (!token) return;
     setExporting(true);
     setExportError(null);
     try {
-      const blob = await exportMyData(token);
+      const blob = await exportMyData();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -79,16 +77,12 @@ export default function ProfilePage() {
     if (!window.confirm(t("profile.delete_confirm"))) {
       return;
     }
-    const token = getSessionToken();
-    if (!token) {
-      return;
-    }
     setDeleting(true);
     setDeleteError(null);
     setReauthRequired(false);
     try {
-      await deleteSelf(token);
-      clearSessionToken();
+      await deleteSelf();
+      queryClient.clear();
       navigate("/login", { replace: true });
     } catch (err) {
       if (isReauthRequiredError(err)) {

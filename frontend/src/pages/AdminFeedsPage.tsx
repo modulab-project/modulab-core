@@ -27,7 +27,6 @@ import {
   type OPMLEntry,
   type ApiError,
 } from "../lib/api";
-import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
 import { isAdminRole } from "../lib/roles";
@@ -76,10 +75,8 @@ export default function AdminFeedsPage() {
   }, [session, navigate]);
 
   function load() {
-    const token = getSessionToken();
-    if (!token) return;
     setFetching(true);
-    adminListFeeds(token)
+    adminListFeeds()
       .then((f) => {
         setFeeds(f ?? []);
         setError(null);
@@ -89,20 +86,17 @@ export default function AdminFeedsPage() {
   }
 
   function loadSettings() {
-    const token = getSessionToken();
-    if (!token) return;
-    adminGetNewsSettings(token)
+    adminGetNewsSettings()
       .then(setSettings)
       .catch(() => {});
   }
 
   async function handleSettingChange(patch: Partial<AdminNewsSettings>) {
-    const token = getSessionToken();
-    if (!token || settingsSaving) return;
+    if (settingsSaving) return;
     setSettingsSaving(true);
     setSettingsError(null);
     try {
-      const updated = await adminUpdateNewsSettings(token, patch);
+      const updated = await adminUpdateNewsSettings(patch);
       setSettings(updated);
     } catch {
       setSettingsError(t("admin.feeds.settings_save_error"));
@@ -123,10 +117,8 @@ export default function AdminFeedsPage() {
 
   async function handleDelete(feed: Feed) {
     if (!confirm(t("admin.feeds.delete_confirm", { label: feed.label }))) return;
-    const token = getSessionToken();
-    if (!token) return;
     try {
-      await adminDeleteFeed(token, feed.id);
+      await adminDeleteFeed(feed.id);
       setFeeds((prev) => prev.filter((f) => f.id !== feed.id));
     } catch (e: unknown) {
       setError((e as ApiError).message ?? t("admin.feeds.delete_error"));
@@ -137,14 +129,12 @@ export default function AdminFeedsPage() {
   async function handleOPMLFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    const token = getSessionToken();
-    if (!token) return;
     setParsing(true);
     setParseError(null);
     setImportResults(null);
     setImportError(null);
     try {
-      const entries = await adminParseOPML(token, file);
+      const entries = await adminParseOPML(file);
       setOpmlEntries(entries);
     } catch (err: unknown) {
       setParseError((err as ApiError).message ?? t("admin.feeds.import_error"));
@@ -157,13 +147,11 @@ export default function AdminFeedsPage() {
 
   // Step 2: import the user-selected feeds from the modal.
   async function handleImportSelected(selected: OPMLEntry[]) {
-    const token = getSessionToken();
-    if (!token) return;
     setOpmlEntries(null);
     setImportResults(null);
     setImportError(null);
     try {
-      const results = await adminImportFeeds(token, selected);
+      const results = await adminImportFeeds(selected);
       setImportResults(results);
       // Reload feed list to show newly imported feeds.
       load();
@@ -174,14 +162,12 @@ export default function AdminFeedsPage() {
 
   // Step 1: open language picker (fetch available languages from backend).
   async function handleCatalogOpen() {
-    const token = getSessionToken();
-    if (!token) return;
     setCatalogError(null);
     setCatalogEntries(null);
     setImportResults(null);
     setImportError(null);
     try {
-      const { languages } = await adminFetchCatalogLanguages(token);
+      const { languages } = await adminFetchCatalogLanguages();
       setCatalogLangs(languages);
       setCatalogStep("lang_pick");
     } catch (err: unknown) {
@@ -191,13 +177,11 @@ export default function AdminFeedsPage() {
 
   // Step 2: user picks a language → backend fetches + checks feeds.
   async function handleCatalogLangSelect(lang: string) {
-    const token = getSessionToken();
-    if (!token) return;
     setCatalogStep("checking");
     setCatalogCheckingLang(lang);
     setCatalogError(null);
     try {
-      const entries = await adminFetchCatalogByLang(token, lang);
+      const entries = await adminFetchCatalogByLang(lang);
       setCatalogEntries(entries);
       setCatalogStep("select");
     } catch (err: unknown) {
@@ -208,14 +192,12 @@ export default function AdminFeedsPage() {
 
   // Step 3: import selected feeds.
   async function handleCatalogImportSelected(selected: OPMLEntry[]) {
-    const token = getSessionToken();
-    if (!token) return;
     setCatalogStep(null);
     setCatalogEntries(null);
     setImportResults(null);
     setImportError(null);
     try {
-      const results = await adminImportFeeds(token, selected);
+      const results = await adminImportFeeds(selected);
       setImportResults(results);
       load();
     } catch (err: unknown) {
@@ -810,12 +792,10 @@ function FeedModal({
 
   async function handleCheck() {
     if (!url.trim()) return;
-    const token = getSessionToken();
-    if (!token) return;
     setChecking(true);
     setCheckResult(null);
     try {
-      const result = await adminCheckFeed(token, url.trim());
+      const result = await adminCheckFeed(url.trim());
       setCheckResult(result);
     } catch {
       setCheckResult({ reachable: false, article_count: 0, has_images: false, error: t("admin.feeds.modal.check_error") });
@@ -826,16 +806,14 @@ function FeedModal({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const token = getSessionToken();
-    if (!token) return;
     setSaving(true);
     setError(null);
     try {
       if (feed) {
-        await adminUpdateFeed(token, feed.id, { url: url.trim(), label: label.trim() });
+        await adminUpdateFeed(feed.id, { url: url.trim(), label: label.trim() });
         onSaved({ ...feed, url: url.trim(), label: label.trim() });
       } else {
-        const created = await adminCreateFeed(token, { url: url.trim(), label: label.trim() });
+        const created = await adminCreateFeed({ url: url.trim(), label: label.trim() });
         onSaved(created);
       }
     } catch (e: unknown) {

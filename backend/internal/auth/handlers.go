@@ -80,11 +80,14 @@ func (d Deps) frontendCallbackURL() string {
 
 // redirectToFrontend sends the browser to target with fragment encoded
 // after "#", never as a query string: a URL fragment is never transmitted
-// to any server - not Core's access log, not an intermediate proxy - which
-// is what makes it an acceptable place to carry a one-time bearer token.
-// The SPA reads window.location.hash on load and then clears it from
-// history immediately, so the token does not linger in browser history
-// either.
+// to any server - not Core's access log, not an intermediate proxy. Used
+// to be how the one-time bearer token itself reached the SPA; now that the
+// token travels as an httpOnly Set-Cookie header on this same response
+// instead (see setSessionCookie), the fragment only ever carries
+// email/role/error - still worth keeping off a query string on general
+// principle, but no longer a secret-transport concern. The SPA reads
+// window.location.hash on load and then clears it from history
+// immediately.
 func redirectToFrontend(w http.ResponseWriter, r *http.Request, target string, fragment url.Values) {
 	http.Redirect(w, r, target+"#"+fragment.Encode(), http.StatusFound)
 }
@@ -170,11 +173,13 @@ func LoginHandler(d Deps) http.HandlerFunc {
 // d.frontendCallbackURL(), never a JSON body: this handler is only ever
 // reached via the IdP's own browser redirect, so there is no API caller
 // to return JSON to, only a browser tab to send somewhere useful. On
-// success the bearer token, email, and (possibly gate-2-overridden) role
-// are carried in the URL fragment (see redirectToFrontend's doc comment
-// for why a fragment and not a query string); on failure a
-// machine-readable error code is sent the same way so the SPA can show a
-// message without parsing a plaintext HTTP error body. The SPA route
+// success the session token is set as an httpOnly cookie on this same
+// response (see setSessionCookie) - the SPA never sees the raw token -
+// while email and the (possibly gate-2-overridden) role are carried in the
+// URL fragment (see redirectToFrontend's doc comment) purely so the SPA
+// can decide where to navigate next without an extra round-trip; on
+// failure a machine-readable error code is sent the same way so the SPA
+// can show a message without parsing a plaintext HTTP error body. The SPA route
 // handling this path is responsible for spec section 6.5 step 6's
 // specific UX: if role is not "super-admin" during initial setup, show
 // the "not a member of {prefix}super_admin" message and offer to retry
@@ -369,8 +374,14 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 			}
 		}
 
+		// The session cookie is set directly on this redirect response,
+		// never carried in the URL fragment the way the bearer token used
+		// to be (see setSessionCookie's doc comment) - httpOnly means the
+		// SPA never needs to see the raw token at all, only email/role for
+		// its immediate "where do I send the browser next" decision.
+		setSessionCookie(w, token)
+
 		redirectToFrontend(w, r, target, url.Values{
-			"token": {token},
 			"email": {claims.Email},
 			"role":  {sessionRole},
 		})
@@ -396,13 +407,13 @@ type MeResponse struct {
 	AccountSettingsURL string `json:"account_settings_url,omitempty"`
 }
 
-// MeHandler returns the session bound to the request's Bearer token, plus
+// MeHandler returns the session bound to the request's session cookie, plus
 // AccountSettingsURL (see MeResponse).
 func MeHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token := bearerToken(r)
+		token := sessionToken(r)
 		if token == "" {
-			http.Error(w, "missing bearer token", http.StatusUnauthorized)
+			http.Error(w, "missing session cookie", http.StatusUnauthorized)
 			return
 		}
 
@@ -413,16 +424,13 @@ func MeHandler(d Deps) http.HandlerFunc {
 			return
 		}
 		if !ok {
-			// TEMP DIAGNOSTIC (remove once the iOS Safari swipe-logout root
-			// cause is confirmed - see frontend/src/lib/useSession.ts's
-			// matching "[auth-diag]" logs): only the token's first 8 chars
-			// are logged, never the full bearer token, so this can't be
-			// replayed from the log itself.
-			tokenPrefix := token
-			if len(tokenPrefix) > 8 {
-				tokenPrefix = tokenPrefix[:8]
-			}
-			log.Printf("auth-diag: /v1/auth/me rejected token=%s... remote=%s ua=%q", tokenPrefix, r.RemoteAddr, r.UserAgent())
+			// Used to carry a TEMP DIAGNOSTIC log here for an iOS Safari
+			// swipe-logout bug tied to sessionStorage's per-tab, bfcache-
+			// fragile nature (see frontend/src/lib/useSession.ts's matching
+			// removed "[auth-diag]" logs). The session cookie this now reads
+			// from is httpOnly and not page-scoped storage at all, so that
+			// failure class doesn't apply here anymore - removed rather than
+			// carried forward.
 			http.Error(w, "invalid or expired session", http.StatusUnauthorized)
 			return
 		}
@@ -456,9 +464,9 @@ func MeHandler(d Deps) http.HandlerFunc {
 // confirmation, not an alert the recipient needs to act on.
 func DeleteSelfHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token := bearerToken(r)
+		token := sessionToken(r)
 		if token == "" {
-			http.Error(w, "missing bearer token", http.StatusUnauthorized)
+			http.Error(w, "missing session cookie", http.StatusUnauthorized)
 			return
 		}
 
@@ -552,9 +560,9 @@ type UserPrefsResponse struct {
 // needs GCM encryption.
 func UserPrefsHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token := bearerToken(r)
+		token := sessionToken(r)
 		if token == "" {
-			http.Error(w, "missing bearer token", http.StatusUnauthorized)
+			http.Error(w, "missing session cookie", http.StatusUnauthorized)
 			return
 		}
 		ctx := r.Context()
@@ -634,9 +642,9 @@ func ExportSelfHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		token := bearerToken(r)
+		token := sessionToken(r)
 		if token == "" {
-			http.Error(w, "missing bearer token", http.StatusUnauthorized)
+			http.Error(w, "missing session cookie", http.StatusUnauthorized)
 			return
 		}
 		ctx := r.Context()
@@ -783,9 +791,9 @@ func ExportSelfHandler(d Deps) http.HandlerFunc {
 func LogoutHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		token := bearerToken(r)
+		token := sessionToken(r)
 		if token == "" {
-			http.Error(w, "missing bearer token", http.StatusUnauthorized)
+			http.Error(w, "missing session cookie", http.StatusUnauthorized)
 			return
 		}
 
@@ -808,6 +816,13 @@ func LogoutHandler(d Deps) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		// The token itself is gone from Valkey above - this makes sure the
+		// browser stops sending it too, on every tab sharing this cookie
+		// (see setSessionCookie's doc comment on why one cookie now covers
+		// every tab), rather than continuing to present an already-dead
+		// token until the cookie's own Max-Age lapses on its original
+		// schedule.
+		clearSessionCookie(w)
 
 		// Best-effort, same tradeoff as every other audit.Log call in this
 		// package: the logout itself already succeeded above - a failed or
@@ -835,6 +850,79 @@ func bearerToken(r *http.Request) string {
 		return strings.TrimPrefix(h, prefix)
 	}
 	return ""
+}
+
+// sessionCookieName is the httpOnly cookie the browser holds the caller's
+// full session bearer token in - see setSessionCookie's doc comment for why
+// this replaced the earlier "Bearer token in sessionStorage" transport.
+// Deliberately NOT reused for module-scoped tokens (auth.BearerToken /
+// bearerToken above stay header-only, see moduletoken.go) - a module's own
+// UI bundle must keep attaching its own narrower token explicitly, never
+// inherit whatever this cookie happens to hold.
+const sessionCookieName = "modulab_session"
+
+// sessionToken reads the caller's full session bearer token from its
+// httpOnly cookie. This is the one and only place that does so - every
+// session-consuming handler in this package (MeHandler, LogoutHandler,
+// DeleteSelfHandler, UserPrefsHandler, ExportSelfHandler,
+// RequireActiveSession, requireAdmin, moduletoken.go's exported
+// BearerToken) calls this instead of bearerToken(r) above, which remains
+// header-only and is reserved for module-scoped tokens.
+func sessionToken(r *http.Request) string {
+	c, err := r.Cookie(sessionCookieName)
+	if err != nil {
+		return ""
+	}
+	return c.Value
+}
+
+// setSessionCookie writes token to the browser as an httpOnly, Secure,
+// SameSite=Lax cookie with the same lifetime as the session itself
+// (SessionTTL) - called once, by CallbackHandler, right after CreateSession
+// mints the token.
+//
+// httpOnly means JavaScript cannot read this cookie at all, not even from
+// same-origin code - unlike the previous sessionStorage-held bearer token,
+// an XSS payload running in the page can no longer exfiltrate it. The
+// cookie is also automatically sent by the browser for every same-origin
+// request from every tab, not just the one that logged in - which is what
+// actually fixes the "one row per open tab" active-sessions clutter this
+// change was originally scoped to solve: a second tab now reuses the
+// existing cookie instead of running its own OIDC round-trip and minting a
+// second, independent Valkey session.
+//
+// SameSite=Lax (not Strict) so the cookie is still sent on the top-level
+// GET redirect the IdP itself performs to land the browser back on
+// CallbackHandler - Strict would drop it on that cross-site navigation and
+// break login. Secure is unconditional (no dev-mode exception): the
+// project's own test environment always runs behind TLS, so there is no
+// plain-HTTP deployment target this needs to accommodate.
+func setSessionCookie(w http.ResponseWriter, token string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    token,
+		Path:     "/",
+		MaxAge:   int(SessionTTL / time.Second),
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+// clearSessionCookie is setSessionCookie's inverse - called by LogoutHandler
+// right after DeleteSession, so the browser actually discards the cookie
+// instead of continuing to send an already-revoked token on every
+// subsequent request until it naturally expires.
+func clearSessionCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+	})
 }
 
 // clientIP extracts the originating client address for the session's

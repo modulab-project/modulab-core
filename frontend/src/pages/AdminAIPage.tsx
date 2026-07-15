@@ -12,7 +12,6 @@ import {
   type AIProvider,
   type AIBalanceResult,
 } from "../lib/api";
-import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
 import { isAdminRole } from "../lib/roles";
@@ -44,9 +43,7 @@ export default function AdminAIPage() {
   const [balances, setBalances] = useState<Record<string, AIBalanceResult & { loading?: boolean }>>({});
 
   const refresh = useCallback(() => {
-    const token = getSessionToken();
-    if (!token) return;
-    adminListAIProviders(token)
+    adminListAIProviders()
       .then((p) => { setProviders(p); setError(null); })
       .catch(() => setError(t("admin.ai.load_error")));
   }, [t]);
@@ -67,12 +64,10 @@ export default function AdminAIPage() {
   const customProviders = (providers ?? []).filter((p) => p.type === "openai_compat");
 
   async function handleClearKey(id: string) {
-    const token = getSessionToken();
-    if (!token) return;
     setBusy(true);
     setError(null);
     try {
-      await adminClearAIProviderKey(token, id);
+      await adminClearAIProviderKey(id);
       refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : t("admin.ai.clear_key_error"));
@@ -83,12 +78,10 @@ export default function AdminAIPage() {
 
   async function handleDelete(p: AIProvider) {
     if (!window.confirm(t("admin.ai.delete_confirm", { name: p.name }))) return;
-    const token = getSessionToken();
-    if (!token) return;
     setBusy(true);
     setError(null);
     try {
-      await adminDeleteAIProvider(token, p.id);
+      await adminDeleteAIProvider(p.id);
       refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : t("admin.ai.delete_error"));
@@ -98,11 +91,9 @@ export default function AdminAIPage() {
   }
 
   async function handleFetchBalance(id: string) {
-    const token = getSessionToken();
-    if (!token) return;
     setBalances((prev) => ({ ...prev, [id]: { supported: true, loading: true } }));
     try {
-      const result = await adminFetchAIProviderBalance(token, id);
+      const result = await adminFetchAIProviderBalance(id);
       setBalances((prev) => ({ ...prev, [id]: result }));
     } catch (e) {
       setBalances((prev) => ({
@@ -113,11 +104,9 @@ export default function AdminAIPage() {
   }
 
   async function handleToggleEnabled(p: AIProvider) {
-    const token = getSessionToken();
-    if (!token) return;
     setBusy(true);
     try {
-      await adminPatchAIProvider(token, p.id, { enabled: !p.enabled });
+      await adminPatchAIProvider(p.id, { enabled: !p.enabled });
       refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : t("admin.ai.update_error"));
@@ -384,19 +373,17 @@ function EditBuiltinModal({
   const canLoadModels = provider.has_admin_key || key.trim() !== "";
 
   async function handleLoadModels() {
-    const token = getSessionToken();
-    if (!token) return;
     setLoadingModels(true);
     setModelsError(null);
     // If the user typed a new key, save it first so the backend can use it to
     // fetch the model list, then reload so has_admin_key becomes true.
     if (key.trim() && !provider.has_admin_key) {
       try {
-        await adminPatchAIProvider(token, provider.id, {
+        await adminPatchAIProvider(provider.id, {
           default_model: model.trim(),
           admin_key: key.trim(),
         }).catch(async () => {
-          await adminCreateAIProvider(token, {
+          await adminCreateAIProvider({
             id: provider.id,
             type: provider.type,
             name: provider.name,
@@ -413,7 +400,7 @@ function EditBuiltinModal({
       }
     }
     try {
-      const list = await adminFetchAIProviderModels(token, provider.id);
+      const list = await adminFetchAIProviderModels(provider.id);
       setModels(list);
       // If the current model is not in the list, snap to the first entry so
       // the select and the state stay in sync.
@@ -430,11 +417,9 @@ function EditBuiltinModal({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!model.trim()) return;
-    const token = getSessionToken();
-    if (!token) return;
     setBusy(true);
     try {
-      const patch: Parameters<typeof adminPatchAIProvider>[2] = {
+      const patch: Parameters<typeof adminPatchAIProvider>[1] = {
         default_model: model.trim(),
       };
       if (key.trim()) patch.admin_key = key.trim();
@@ -442,9 +427,9 @@ function EditBuiltinModal({
       // Rows are seeded on startup, so PATCH should always work.
       // Fall back to CREATE if the row somehow doesn't exist yet.
       try {
-        await adminPatchAIProvider(token, provider.id, patch);
+        await adminPatchAIProvider(provider.id, patch);
       } catch {
-        await adminCreateAIProvider(token, {
+        await adminCreateAIProvider({
           id: provider.id,
           type: provider.type,
           name: provider.name,
@@ -573,12 +558,10 @@ function CustomProviderModal({
   // The provider must already be saved (existing != null) to use this.
   async function handleLoadModels() {
     if (!existing) return;
-    const token = getSessionToken();
-    if (!token) return;
     setLoadingModels(true);
     setModelsError(null);
     try {
-      const list = await adminFetchAIProviderModels(token, existing.id);
+      const list = await adminFetchAIProviderModels(existing.id);
       setModels(list);
     } catch (e) {
       setModelsError(e instanceof Error ? e.message : t("admin.ai.modal.fetch_models_error"));
@@ -590,22 +573,20 @@ function CustomProviderModal({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim() || !baseURL.trim() || !model.trim()) return;
-    const token = getSessionToken();
-    if (!token) return;
     setBusy(true);
     try {
       if (existing) {
-        const patch: Parameters<typeof adminPatchAIProvider>[2] = {
+        const patch: Parameters<typeof adminPatchAIProvider>[1] = {
           name: name.trim(),
           base_url: baseURL.trim(),
           default_model: model.trim(),
           user_can_override: userCanOverride,
         };
         if (apiKey.trim()) patch.admin_key = apiKey.trim();
-        await adminPatchAIProvider(token, existing.id, patch);
+        await adminPatchAIProvider(existing.id, patch);
       } else {
         const providerId = id.trim() || name.trim().toLowerCase().replace(/\s+/g, "-");
-        await adminCreateAIProvider(token, {
+        await adminCreateAIProvider({
           id: providerId,
           type: "openai_compat",
           name: name.trim(),

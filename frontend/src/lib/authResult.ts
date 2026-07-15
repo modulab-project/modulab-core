@@ -1,7 +1,10 @@
 // Mirrors what backend/internal/auth/handlers.go's CallbackHandler puts in
-// the URL fragment - keep these two in sync.
+// the URL fragment - keep these two in sync. No token field: the session
+// token is set directly as an httpOnly Set-Cookie header on the same
+// redirect response (see setSessionCookie), never exposed to this SPA at
+// all - the fragment only ever carries what the SPA needs to decide where
+// to navigate next.
 export interface AuthResult {
-  token?: string;
   email?: string;
   role?: string;
   error?: string;

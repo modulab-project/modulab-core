@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "rea
 import { useNavigate, Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import { adminGetLimitsSettings, adminPatchLimitsSettings, type LimitsSettings } from "../lib/api";
-import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
 
@@ -107,9 +106,7 @@ export default function AdminSystemLimitsPage() {
     if (session.role !== "super-admin") { navigate("/", { replace: true }); return; }
     if (hasFetched.current) return;
     hasFetched.current = true;
-    const token = getSessionToken();
-    if (!token) return;
-    adminGetLimitsSettings(token)
+    adminGetLimitsSettings()
       .then((s) => {
         setSettings(s);
         setInputs(Object.fromEntries(FIELDS.map((f) => [f.key, String(s[f.key])])));
@@ -126,8 +123,7 @@ export default function AdminSystemLimitsPage() {
 
   async function handleSave(e: FormEvent) {
     e.preventDefault();
-    const token = getSessionToken();
-    if (!token || saving) return;
+    if (saving) return;
 
     const parsed: Partial<LimitsSettings> = {};
     for (const f of FIELDS) {
@@ -150,7 +146,7 @@ export default function AdminSystemLimitsPage() {
     setSaving(true);
     setMsg(null);
     try {
-      const result = await adminPatchLimitsSettings(token, parsed as LimitsSettings);
+      const result = await adminPatchLimitsSettings(parsed as LimitsSettings);
       setSettings(result);
       setInputs(Object.fromEntries(FIELDS.map((f) => [f.key, String(result[f.key])])));
       setSaved(true);

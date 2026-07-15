@@ -6,7 +6,6 @@ import {
   smtpStatus as fetchSmtpStatus,
   adminListSearchProviders,
 } from "../lib/api";
-import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
 
@@ -32,13 +31,11 @@ export default function AdminSystemPage() {
     if (hasFetched.current) return;
     hasFetched.current = true;
 
-    const token = getSessionToken();
-    if (!token) return;
 
     Promise.all([
-      getSystemStatus(token),
-      fetchSmtpStatus(token),
-      adminListSearchProviders(token),
+      getSystemStatus(),
+      fetchSmtpStatus(),
+      adminListSearchProviders(),
     ])
       .then(([sys, smtp, providers]) => {
         setOidcConfigured(sys.oidc.configured);

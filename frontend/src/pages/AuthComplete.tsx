@@ -2,7 +2,6 @@ import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { getHealth } from "../lib/api";
-import { storeSessionToken } from "../lib/session";
 import { AUTH_RESULT_STORAGE_KEY, type AuthResult } from "../lib/authResult";
 
 // This page is the single landing spot for the redirect CallbackHandler
@@ -10,8 +9,12 @@ import { AUTH_RESULT_STORAGE_KEY, type AuthResult } from "../lib/authResult";
 // redirectToFrontend's doc comment in handlers.go for why the result is in
 // the URL fragment, not a query string or JSON body). It reads the
 // fragment once, stashes the result in sessionStorage, strips the fragment
-// from the address bar so the bearer token does not linger in browser
-// history, and then decides where to send the browser next.
+// from the address bar, and then decides where to send the browser next.
+// The session token itself never appears here at all - it arrived as an
+// httpOnly Set-Cookie header on this same redirect response (see
+// setSessionCookie in handlers.go), so there is nothing for this page to
+// persist or protect; the browser already has it and will attach it to
+// every subsequent same-origin request on its own.
 //
 // Two genuinely different logins land here, distinguished by whether the
 // Setup Wizard has completed yet (one /healthz call, not anything baked
@@ -23,9 +26,8 @@ import { AUTH_RESULT_STORAGE_KEY, type AuthResult } from "../lib/authResult";
 //     behavior from before /login, /pending and / existed.
 //   - Already complete: this is an ordinary end-user login. The stashed
 //     result is only used for a failure (Login.tsx reads it to show the
-//     error); on success the token is persisted via storeSessionToken so
-//     subsequent visits in this tab stay signed in, and the browser goes
-//     straight to /pending or / based on role - no detour through /setup.
+//     error); on success the browser goes straight to /pending or / based
+//     on role - no detour through /setup.
 export default function AuthComplete() {
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -51,17 +53,12 @@ export default function AuthComplete() {
       : window.location.hash;
     const params = new URLSearchParams(hash);
     const result: AuthResult = {
-      token: params.get("token") ?? undefined,
       email: params.get("email") ?? undefined,
       role: params.get("role") ?? undefined,
       error: params.get("error") ?? undefined,
     };
     sessionStorage.setItem(AUTH_RESULT_STORAGE_KEY, JSON.stringify(result));
     window.history.replaceState(null, "", window.location.pathname);
-
-    if (result.token) {
-      storeSessionToken(result.token);
-    }
 
     getHealth()
       .then((health) => {

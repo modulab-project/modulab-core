@@ -14,7 +14,6 @@ import {
   unpinModule,
   type InstalledModule,
 } from "../lib/api";
-import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
 import { isAdminRole } from "../lib/roles";
@@ -51,9 +50,7 @@ export default function ModulesPage() {
   } = useQuery({
     queryKey: MODULES_QUERY_KEY,
     queryFn: async () => {
-      const token = getSessionToken();
-      if (!token) throw new Error("no session token");
-      return (await listInstalledModules(token)) ?? [];
+      return (await listInstalledModules()) ?? [];
     },
     enabled: !loading && isAdmin,
   });
@@ -64,12 +61,10 @@ export default function ModulesPage() {
   }
 
   async function handleCheckUpdates() {
-    const token = getSessionToken();
-    if (!token) return;
     setCheckingUpdates(true);
     setUpdatesMsg(null);
     try {
-      const res = await checkModuleUpdates(token);
+      const res = await checkModuleUpdates();
       if (res.count === 0) {
         setUpdatesMsg(t("modules.no_updates"));
       } else {
@@ -85,11 +80,9 @@ export default function ModulesPage() {
   }
 
   async function handleUpdate(name: string) {
-    const token = getSessionToken();
-    if (!token) return;
     setBusyName(name);
     try {
-      const updated = await updateModule(token, name);
+      const updated = await updateModule(name);
       setModules((prev) => prev.map((m) => (m.name === name ? updated : m)));
     } catch (e) {
       alert(`${t("modules.update_error")}: ${(e as Error).message}`);
@@ -99,11 +92,9 @@ export default function ModulesPage() {
   }
 
   async function handleRestart(name: string) {
-    const token = getSessionToken();
-    if (!token) return;
     setBusyName(name);
     try {
-      const updated = await restartModule(token, name);
+      const updated = await restartModule(name);
       setModules((prev) => prev.map((m) => (m.name === name ? updated : m)));
     } catch (e) {
       alert(`${t("modules.restart_error")}: ${(e as Error).message}`);
@@ -118,11 +109,9 @@ export default function ModulesPage() {
       return;
     }
     if (!confirm(t("modules.uninstall_confirm", { name }))) return;
-    const token = getSessionToken();
-    if (!token) return;
     setBusyName(name);
     try {
-      await uninstallModule(token, name);
+      await uninstallModule(name);
       setModules((prev) => prev.filter((m) => m.name !== name));
     } catch (e) {
       alert(`${t("modules.uninstall_error")}: ${(e as Error).message}`);
@@ -132,13 +121,11 @@ export default function ModulesPage() {
   }
 
   async function handleTogglePin(name: string, currentlyPinned: boolean) {
-    const token = getSessionToken();
-    if (!token) return;
     setBusyName(name);
     try {
       const res = currentlyPinned
-        ? await unpinModule(token, name)
-        : await pinModule(token, name);
+        ? await unpinModule(name)
+        : await pinModule(name);
       setModules((prev) =>
         prev.map((m) => (m.name === name ? { ...m, pinned: res.pinned } : m)),
       );

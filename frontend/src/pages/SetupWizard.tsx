@@ -13,7 +13,6 @@ import {
 } from "../lib/api";
 import { authErrorKey } from "../lib/authErrors";
 import { consumeAuthResult } from "../lib/authResult";
-import { getSessionToken } from "../lib/session";
 import { AuthButton, AuthField, AuthSecondaryButton, AuthShell } from "../components/AuthShell";
 
 // Persisted in sessionStorage, not React state alone, because the
@@ -394,9 +393,10 @@ function StepSuperAdminLogin({
 
 // --- Step 5: SMTP (optional, skippable, with test-send) --------------------
 
-// Unlike every earlier step, this one authenticates with the session
-// token from step 4's super-admin login (getSessionToken()), not the
-// bootstrap token - see the top-of-file comment for why. It calls the same
+// Unlike every earlier step, this one authenticates with the httpOnly
+// session cookie step 4's super-admin login set (see
+// backend/internal/auth/handlers.go's setSessionCookie), not the bootstrap
+// token - see the top-of-file comment for why. It calls the same
 // configureSmtp() the standalone /admin/system/smtp page uses, so anything
 // saved or skipped here is just as visible and editable there afterwards.
 // The test-send button calls POST /v1/admin/smtp/test with the current form
@@ -418,14 +418,6 @@ function StepSMTP({ onDone }: { onDone: () => void }) {
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    const token = getSessionToken();
-    if (!token) {
-      // Should not happen - step 4 always persists one before advancing
-      // here - but skip ahead rather than get the operator stuck on a
-      // step that cannot possibly succeed without one.
-      onDone();
-      return;
-    }
     const parsedPort = parseInt(port, 10);
     if (!host.trim() || !fromAddress.trim() || Number.isNaN(parsedPort) || parsedPort <= 0) {
       setError(t("setup.step5.validation_error"));
@@ -434,7 +426,7 @@ function StepSMTP({ onDone }: { onDone: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      await configureSmtp(token, {
+      await configureSmtp({
         host: host.trim(),
         port: parsedPort,
         username: username.trim(),
@@ -452,8 +444,6 @@ function StepSMTP({ onDone }: { onDone: () => void }) {
 
   async function sendTest(e: FormEvent) {
     e.preventDefault();
-    const token = getSessionToken();
-    if (!token) return;
     const parsedPort = parseInt(port, 10);
     if (!host.trim() || !fromAddress.trim() || Number.isNaN(parsedPort) || parsedPort <= 0) {
       setTestResult({ ok: false, message: t("setup.step5.validation_error") });
@@ -466,7 +456,7 @@ function StepSMTP({ onDone }: { onDone: () => void }) {
     setTestBusy(true);
     setTestResult(null);
     try {
-      await testSmtp(token, {
+      await testSmtp({
         host: host.trim(),
         port: parsedPort,
         username: username.trim(),
@@ -613,9 +603,10 @@ function StepComplete({ bootstrapToken }: { bootstrapToken: string }) {
   );
 }
 
-// The super-admin login in step 4 already persisted a session token (see
-// AuthComplete.tsx's storeSessionToken call), so there is no need to send
-// them through /login again - straight to / works immediately.
+// The super-admin login in step 4 already set the session cookie (see
+// backend/internal/auth/handlers.go's setSessionCookie, applied on
+// CallbackHandler's redirect), so there is no need to send them through
+// /login again - straight to / works immediately.
 function StepCompleteDone() {
   const { t } = useTranslation();
   const navigate = useNavigate();

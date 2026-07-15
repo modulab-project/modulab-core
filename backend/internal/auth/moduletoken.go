@@ -149,25 +149,34 @@ func RequireModuleToken(d Deps, module string, w http.ResponseWriter, r *http.Re
 // module the token was scoped to - never anything cross-module or
 // privileged. Reported by the user 2026-07-13.
 func RequireSessionOrModuleToken(d Deps, module string, w http.ResponseWriter, r *http.Request) (Session, bool) {
-	token := bearerToken(r)
-	if token == "" {
-		http.Error(w, "missing bearer token", http.StatusUnauthorized)
-		return Session{}, false
-	}
-
-	// Try as a full session first - the common case for Core's own pages.
-	if sess, ok, err := ValidateSession(r.Context(), d, token); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return Session{}, false
-	} else if ok {
-		if sess.Role == RolePending || sess.Locked {
-			http.Error(w, "forbidden", http.StatusForbidden)
+	// Try a full session first - the common case for Core's own pages
+	// (ModulePage.tsx's initial metadata fetch, before a module token even
+	// exists yet). Full sessions travel via the httpOnly cookie now, not
+	// the Authorization header - see setSessionCookie's doc comment.
+	if token := sessionToken(r); token != "" {
+		sess, ok, err := ValidateSession(r.Context(), d, token)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return Session{}, false
 		}
-		return sess, true
+		if ok {
+			if sess.Role == RolePending || sess.Locked {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return Session{}, false
+			}
+			return sess, true
+		}
 	}
 
-	// Fall back to a module-scoped token minted for exactly `module`.
+	// Fall back to a module-scoped token minted for exactly `module` -
+	// what a module's own already-loaded UI bundle presents (e.g. its info
+	// card calling this same route), always via the Authorization header,
+	// never the session cookie (see moduletoken.go's package doc comment).
+	token := bearerToken(r)
+	if token == "" {
+		http.Error(w, "missing session cookie or bearer token", http.StatusUnauthorized)
+		return Session{}, false
+	}
 	sess, ok, err := ValidateModuleToken(r.Context(), d, token, module)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -184,10 +193,14 @@ func RequireSessionOrModuleToken(d Deps, module string, w http.ResponseWriter, r
 	return sess, true
 }
 
-// BearerToken exposes the package-private bearerToken() to other packages
+// BearerToken exposes the package-private sessionToken() to other packages
 // (modules.ModuleTokenHandler needs the caller's raw session token to pass
 // to CreateModuleToken, not just the validated Session RequireActiveSession
-// returns).
+// returns). Name kept as-is despite reading a cookie now, not a header -
+// modules.ModuleTokenHandler's call site (auth.BearerToken(r)) needed no
+// change when the underlying transport moved from Authorization header to
+// httpOnly cookie, and a rename would just be extra churn for no behavior
+// difference.
 func BearerToken(r *http.Request) string {
-	return bearerToken(r)
+	return sessionToken(r)
 }

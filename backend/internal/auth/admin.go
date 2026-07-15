@@ -111,9 +111,9 @@ func logAudit(ctx context.Context, d Deps, p audit.LogParams) {
 // whose role just isn't high enough) and returns ok = false; callers must
 // return immediately without writing anything further.
 func requireAdmin(d Deps, w http.ResponseWriter, r *http.Request) (Session, bool) {
-	token := bearerToken(r)
+	token := sessionToken(r)
 	if token == "" {
-		http.Error(w, "missing bearer token", http.StatusUnauthorized)
+		http.Error(w, "missing session cookie", http.StatusUnauthorized)
 		return Session{}, false
 	}
 	sess, ok, err := ValidateSession(r.Context(), d, token)
@@ -215,17 +215,7 @@ func guardAgainstLastSuperAdmin(ctx context.Context, d Deps, targetSubject strin
 // failed due to a Valkey hiccup, since Locked is only set to true on a
 // session that was never revoked).
 func RequireActiveSession(d Deps, w http.ResponseWriter, r *http.Request) (Session, bool) {
-	return requireActiveSessionWithToken(d, w, r, bearerToken(r))
-}
-
-// RequireActiveSessionAllowQueryToken is RequireActiveSession but also
-// accepts the session token via ?t= query parameter (BearerTokenAllowQuery)
-// when no Authorization header is present. Restricted to the two routes
-// that browsers load via <img src>/<script src> — see
-// BearerTokenAllowQuery's doc comment for why every other endpoint must not
-// use this.
-func RequireActiveSessionAllowQueryToken(d Deps, w http.ResponseWriter, r *http.Request) (Session, bool) {
-	return requireActiveSessionWithToken(d, w, r, BearerTokenAllowQuery(r))
+	return requireActiveSessionWithToken(d, w, r, sessionToken(r))
 }
 
 func requireActiveSessionWithToken(d Deps, w http.ResponseWriter, r *http.Request, token string) (Session, bool) {

@@ -19,7 +19,7 @@ import {
   type InstalledModule,
   type Session,
 } from "../lib/api";
-import { clearSessionToken, getSessionToken } from "../lib/session";
+import { queryClient } from "../lib/queryClient";
 import { useNotificationEvents, type ServerEvent } from "../lib/useEvents";
 import { useNow } from "../lib/useNow";
 import { isAdminRole } from "../lib/roles";
@@ -210,9 +210,7 @@ export function AppShell({
   // round-trip. Re-runs via refreshModuleUpdateCount when the notification
   // panel is opened so the count is always fresh when the admin looks at it.
   const refreshModuleUpdateCount = useCallback(() => {
-    const token = getSessionToken();
-    if (!token) return;
-    listInstalledModules(token)
+    listInstalledModules()
       .then((list) => {
         const all = list ?? [];
         setActiveModules(all.filter((m) => m.status === "active"));
@@ -232,9 +230,7 @@ export function AppShell({
   // fetch leaves the render at its "light"/browser-language defaults until
   // the next successful fetch (e.g. next reload) picks up the real values.
   useEffect(() => {
-    const token = getSessionToken();
-    if (!token) return;
-    getUserPrefs(token)
+    getUserPrefs()
       .then((prefs) => {
         if (prefs.ui_language && !i18n.language.startsWith(prefs.ui_language)) {
           i18n.changeLanguage(prefs.ui_language);
@@ -248,15 +244,21 @@ export function AppShell({
   }, [session.user_id]); // re-run if a different user logs in within the same tab
 
   async function handleLogout() {
-    const token = getSessionToken();
-    clearSessionToken();
-    if (token) {
-      try {
-        await logoutRequest(token);
-      } catch {
-        // Already invalid server-side - the local sign-out still succeeds.
-      }
+    try {
+      await logoutRequest();
+    } catch {
+      // Already invalid server-side - the local sign-out still succeeds.
     }
+    // ModuLab is designed to run as a shared, always-on browser homepage
+    // (see Home.tsx's top-of-file comment) - the TanStack Query cache is a
+    // single instance for the tab's whole lifetime and survives the SPA
+    // navigate("/login") below (no full page reload), so without this it
+    // would otherwise keep serving the previous person's cached
+    // feed/module/store data for a few seconds after the next person logs
+    // in on the same tab. Used to live in lib/session.ts's
+    // clearSessionToken(), which no longer exists now that there is no
+    // locally-held token to clear - only this cache-reset concern remains.
+    queryClient.clear();
     navigate("/login", { replace: true });
   }
 
@@ -298,11 +300,7 @@ export function AppShell({
     if (!isAdmin) {
       return;
     }
-    const token = getSessionToken();
-    if (!token) {
-      return;
-    }
-    listUsers(token)
+    listUsers()
       .then((users) => setPendingCount(users.filter((u) => !u.approved).length))
       .catch(() => {
         // Left at whatever it was before - a failed refresh should not
@@ -325,7 +323,7 @@ export function AppShell({
   // open connection for symmetry/future events rather than anything it
   // currently uses.
   const { toasts, push } = useToasts();
-  useNotificationEvents(getSessionToken(), (event: ServerEvent) => {
+  useNotificationEvents(true, (event: ServerEvent) => {
     if (event.type === "user.pending" && isAdmin) {
       const data = (event.data ?? {}) as { email?: string; name?: string };
       const who = data.name?.trim() || data.email || t("shell.notifications_panel.someone_fallback");
@@ -940,10 +938,7 @@ function ProfilePanelContent({
                 // a failed save leaves the in-browser change intact for this
                 // tab, but it will not survive a reload since there is no
                 // longer a local cache of it.
-                const token = getSessionToken();
-                if (token) {
-                  updateUserPrefs(token, { theme: opt.value }).catch(() => {});
-                }
+                updateUserPrefs({ theme: opt.value }).catch(() => {});
               }}
               className={`flex h-6 w-8 items-center justify-center rounded-full transition-colors ${
                 theme === opt.value
@@ -967,10 +962,7 @@ function ProfilePanelContent({
             i18n.changeLanguage(lang);
             // Persist to DB so the preference survives across devices.
             // Best-effort: a failed save leaves the in-browser change intact.
-            const token = getSessionToken();
-            if (token) {
-              updateUserPrefs(token, { ui_language: lang }).catch(() => {});
-            }
+            updateUserPrefs({ ui_language: lang }).catch(() => {});
           }}
           className="rounded-md border border-gray-300 bg-white px-2 py-0.5 text-xs font-medium text-gray-700 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
         >
@@ -1327,9 +1319,7 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
 
   // Load available providers on mount and restore the user's last selection.
   useEffect(() => {
-    const token = getSessionToken();
-    if (!token) return;
-    listAIProviders(token)
+    listAIProviders()
       .then(({ providers: list, preferred_provider_id }) => {
         const available = list.filter((p) => p.available);
         setProviders(available);
@@ -1359,8 +1349,6 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
 
   async function handleSend() {
     if (!input.trim() || streaming || !selectedProvider) return;
-    const token = getSessionToken();
-    if (!token) return;
 
     // Sending a message is a deliberate action - resume following the
     // conversation even if the user had scrolled up to reread something
@@ -1381,7 +1369,6 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
 
     try {
       await streamAIChat(
-        token,
         selectedProvider.id,
         "", // model is determined server-side based on key type
         newMessages,
@@ -1463,8 +1450,7 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
                       onClick={() => {
                         setSelectedProvider(p);
                         setModelPickerOpen(false);
-                        const token = getSessionToken();
-                        if (token) setAIPreferredProvider(token, p.id).catch(() => {});
+                        setAIPreferredProvider(p.id).catch(() => {});
                       }}
                       className={`flex w-full flex-col px-3 py-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-800 ${
                         p.id === selectedProvider?.id ? "text-teal-600 dark:text-teal-400" : "text-gray-700 dark:text-gray-300"

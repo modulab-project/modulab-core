@@ -31,7 +31,6 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import i18n from "../lib/i18n";
-import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { fetchModuleToken, moduleApiUrl, type InstalledModule } from "../lib/api";
 import { AppShell } from "../components/AppShell";
@@ -110,8 +109,6 @@ export default function ModulePage() {
   // cascade into a full bundle re-import mid-interaction.
   useEffect(() => {
     if (!session || !moduleName) return;
-    const token = getSessionToken();
-    if (!token) return;
 
     // Reset every piece of per-module state up front. ModulePage is NOT
     // remounted when navigating from one module to another via the SPA
@@ -158,9 +155,8 @@ export default function ModulePage() {
       if (refreshing) return;
       refreshing = true;
       try {
-        const sessionToken = getSessionToken();
-        if (cancelled || !sessionToken) return;
-        const mt = await fetchModuleToken(sessionToken, name);
+        if (cancelled) return;
+        const mt = await fetchModuleToken(name);
         if (cancelled) return;
         moduleTokenRef.current = mt.token;
         tokenExpiresAtRef.current = Date.now() + mt.expires_in * 1000;
@@ -200,7 +196,7 @@ export default function ModulePage() {
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     fetch(`/v1/modules/${encodeURIComponent(moduleName)}`, {
-      headers: { Authorization: `Bearer ${token}` },
+      credentials: "include",
     })
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -214,7 +210,7 @@ export default function ModulePage() {
           return;
         }
         currentModuleName = m.name;
-        const mt = await fetchModuleToken(token, m.name);
+        const mt = await fetchModuleToken(m.name);
         if (cancelled) return;
         moduleTokenRef.current = mt.token;
         tokenExpiresAtRef.current = Date.now() + mt.expires_in * 1000;
@@ -238,7 +234,6 @@ export default function ModulePage() {
   useEffect(() => {
     if (!mod || mod.status !== "active" || !moduleTokenReady) return;
     const token = moduleTokenRef.current;
-    if (!token) return;
 
     const ns = `mod_${mod.name}`;
     const lng = i18n.language?.slice(0, 2) ?? "en"; // "en-US" → "en"

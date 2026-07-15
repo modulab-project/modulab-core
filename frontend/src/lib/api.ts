@@ -29,6 +29,14 @@ async function request<T>(
   const { bootstrapToken, headers, ...rest } = options;
   const res = await fetch(`${API_BASE_URL}${path}`, {
     ...rest,
+    // Every session-authenticated endpoint now relies on the browser
+    // sending the httpOnly modulab_session cookie automatically (see
+    // backend/internal/auth/handlers.go's setSessionCookie) instead of a
+    // caller-supplied Authorization header - `credentials: "include"` is
+    // what makes the browser actually attach it, same-origin or not
+    // (needed even same-origin once VITE_API_BASE_URL points at a
+    // different origin for some deployments).
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...(bootstrapToken ? { [BOOTSTRAP_HEADER]: bootstrapToken } : {}),
@@ -165,33 +173,34 @@ export interface Session {
   locked?: boolean;
 }
 
-function bearerHeaders(token: string): HeadersInit {
-  return { Authorization: `Bearer ${token}` };
-}
-
 // GET /v1/auth/me - the one endpoint every page that needs to know "who is
 // this and what role do they have" calls, whether that's to render a
-// dashboard or just to decide whether to bounce to /pending or /login.
-export function getMe(token: string): Promise<Session> {
-  return request<Session>("/v1/auth/me", { headers: bearerHeaders(token) });
+// dashboard or just to decide whether to bounce to /pending or /login. No
+// token parameter: the browser attaches the httpOnly modulab_session cookie
+// automatically (see request()'s credentials: "include").
+export function getMe(): Promise<Session> {
+  return request<Session>("/v1/auth/me");
 }
 
 // eventsUrl builds the GET /v1/events URL (backend/internal/auth/
-// events.go) for token. Not a fetch()-based call like everything else in
-// this file - the caller opens this directly as `new EventSource(...)`
-// (see lib/useEvents.ts) - which is also why token travels as a query
-// parameter instead of going through bearerHeaders() below: EventSource
-// cannot set custom request headers at all.
-export function eventsUrl(token: string): string {
-  return `${API_BASE_URL}/v1/events?token=${encodeURIComponent(token)}`;
+// events.go). Not a fetch()-based call like everything else in this file -
+// the caller opens this directly as `new EventSource(...)` (see
+// lib/useEvents.ts). No token/query parameter needed: EventSource sends
+// cookies automatically for a same-origin URL, same as any other
+// browser-initiated request - this used to need a ?token=... query
+// parameter instead, back when the session lived in a header-only bearer
+// token EventSource had no way to attach.
+export function eventsUrl(): string {
+  return `${API_BASE_URL}/v1/events`;
 }
 
-// POST /v1/auth/logout - invalidates the token server-side immediately.
-// Callers should clear the locally stored token (lib/session.ts) regardless
-// of whether this call succeeds; a token that is already invalid (expired,
-// already logged out elsewhere) still needs to fail closed on the client.
-export function logoutRequest(token: string): Promise<void> {
-  return request<void>("/v1/auth/logout", { method: "POST", headers: bearerHeaders(token) });
+// POST /v1/auth/logout - invalidates the token server-side immediately and
+// clears the modulab_session cookie (see backend's LogoutHandler). No
+// token parameter to pass or locally-stored token to clear afterward - the
+// cookie is httpOnly, so there is nothing for the frontend to hold in the
+// first place.
+export function logoutRequest(): Promise<void> {
+  return request<void>("/v1/auth/logout", { method: "POST" });
 }
 
 // DELETE /v1/auth/me - lets the signed-in user remove their own account
@@ -199,12 +208,9 @@ export function logoutRequest(token: string): Promise<void> {
 // admin-only and explicitly refuses to act on the caller's own account -
 // see backend/internal/auth/admin.go's guardAgainstSelfOrLastSuperAdmin).
 // The backend still refuses this for the last remaining super-admin (400,
-// surfaced here as an ApiError with that message in .message) - someone
-// has to be left who can manage the instance. Callers should clear the
-// locally stored token (lib/session.ts) and navigate away on success, same
-// as logoutRequest above.
-export function deleteSelf(token: string): Promise<void> {
-  return request<void>("/v1/auth/me", { method: "DELETE", headers: bearerHeaders(token) });
+// surfaced here as an ApiError with that message in .message).
+export function deleteSelf(): Promise<void> {
+  return request<void>("/v1/auth/me", { method: "DELETE" });
 }
 
 // Mirrors backend/internal/auth.UserResponse's JSON shape exactly. One
@@ -227,17 +233,16 @@ export interface AdminUser {
 // GET /v1/admin/users - every user, org-admin/super-admin only (enforced
 // server-side by requireAdmin in backend/internal/auth/admin.go; a
 // non-admin caller gets a 403, surfaced here as an ApiError).
-export function listUsers(token: string): Promise<AdminUser[]> {
-  return request<AdminUser[]>("/v1/admin/users", { headers: bearerHeaders(token) });
+export function listUsers(): Promise<AdminUser[]> {
+  return request<AdminUser[]>("/v1/admin/users");
 }
 
 // POST /v1/admin/users/{subject}/approve - flips that user's approved flag
 // to true. Takes effect on their *next* login, not retroactively - see
 // ApproveUserHandler's doc comment in admin.go for why.
-export function approveUser(token: string, subject: string): Promise<void> {
+export function approveUser(subject: string): Promise<void> {
   return request<void>(`/v1/admin/users/${encodeURIComponent(subject)}/approve`, {
     method: "POST",
-    headers: bearerHeaders(token),
   });
 }
 
@@ -245,20 +250,18 @@ export function approveUser(token: string, subject: string): Promise<void> {
 // access without forgetting who they are. The backend refuses this for
 // your own account or the last remaining super-admin (400) - surfaced here
 // as an ApiError with that message in .message.
-export function lockUser(token: string, subject: string): Promise<void> {
+export function lockUser(subject: string): Promise<void> {
   return request<void>(`/v1/admin/users/${encodeURIComponent(subject)}/lock`, {
     method: "POST",
-    headers: bearerHeaders(token),
   });
 }
 
 // POST /v1/admin/users/{subject}/unlock - restores access for a locked
 // user. No self/last-super-admin restriction (unlocking can't strand the
 // instance the way locking or deleting could).
-export function unlockUser(token: string, subject: string): Promise<void> {
+export function unlockUser(subject: string): Promise<void> {
   return request<void>(`/v1/admin/users/${encodeURIComponent(subject)}/unlock`, {
     method: "POST",
-    headers: bearerHeaders(token),
   });
 }
 
@@ -266,10 +269,9 @@ export function unlockUser(token: string, subject: string): Promise<void> {
 // self/last-super-admin guard as lockUser. If this person logs in again
 // later, they are JIT-provisioned as a brand-new pending user, exactly as
 // if they had never logged in before.
-export function deleteUser(token: string, subject: string): Promise<void> {
+export function deleteUser(subject: string): Promise<void> {
   return request<void>(`/v1/admin/users/${encodeURIComponent(subject)}`, {
     method: "DELETE",
-    headers: bearerHeaders(token),
   });
 }
 
@@ -309,16 +311,15 @@ export interface SMTPConfigRequest {
 // GET /v1/admin/smtp/status - super-admin only (enforced server-side by
 // auth.RequireSuperAdminMiddleware; an org-admin or below gets a 403,
 // surfaced here as an ApiError).
-export function smtpStatus(token: string): Promise<SMTPStatus> {
-  return request<SMTPStatus>("/v1/admin/smtp/status", { headers: bearerHeaders(token) });
+export function smtpStatus(): Promise<SMTPStatus> {
+  return request<SMTPStatus>("/v1/admin/smtp/status");
 }
 
 // POST /v1/admin/smtp/configure - super-admin only, same gate as
 // smtpStatus above.
-export function configureSmtp(token: string, body: SMTPConfigRequest): Promise<SMTPStatus> {
+export function configureSmtp(body: SMTPConfigRequest): Promise<SMTPStatus> {
   return request<SMTPStatus>("/v1/admin/smtp/configure", {
     method: "POST",
-    headers: bearerHeaders(token),
     body: JSON.stringify(body),
   });
 }
@@ -329,8 +330,8 @@ export function configureSmtp(token: string, body: SMTPConfigRequest): Promise<S
 // from configureSmtp with empty fields: that would still write an empty
 // host/from_address and get rejected as invalid, this actually removes
 // the underlying settings rows.
-export function deleteSmtpConfig(token: string): Promise<void> {
-  return request<void>("/v1/admin/smtp", { method: "DELETE", headers: bearerHeaders(token) });
+export function deleteSmtpConfig(): Promise<void> {
+  return request<void>("/v1/admin/smtp", { method: "DELETE" });
 }
 
 // Body of POST /v1/admin/smtp/test — same fields as SMTPConfigRequest plus
@@ -343,10 +344,9 @@ export interface SMTPTestRequest extends SMTPConfigRequest {
 // POST /v1/admin/smtp/test — super-admin only. Sends a single test message
 // using the supplied configuration. Returns {ok: true} on success; throws
 // ApiError (502) if the SMTP connection or delivery failed.
-export function testSmtp(token: string, body: SMTPTestRequest): Promise<{ ok: boolean }> {
+export function testSmtp(body: SMTPTestRequest): Promise<{ ok: boolean }> {
   return request<{ ok: boolean }>("/v1/admin/smtp/test", {
     method: "POST",
-    headers: bearerHeaders(token),
     body: JSON.stringify(body),
   });
 }
@@ -393,12 +393,12 @@ export interface OPMLEntry {
 
 // POST /v1/admin/feeds/opml-parse — parses an OPML file and returns the
 // list of feeds it contains (with already_exists flag) WITHOUT importing.
-export async function adminParseOPML(token: string, file: File): Promise<OPMLEntry[]> {
+export async function adminParseOPML(file: File): Promise<OPMLEntry[]> {
   const form = new FormData();
   form.append("file", file);
   const res = await fetch(`${API_BASE_URL}/v1/admin/feeds/opml-parse`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
+    credentials: "include",
     body: form,
   });
   if (!res.ok) {
@@ -409,13 +409,9 @@ export async function adminParseOPML(token: string, file: File): Promise<OPMLEnt
 }
 
 // POST /v1/admin/feeds/import — imports a user-selected list of feeds (JSON body).
-export function adminImportFeeds(
-  token: string,
-  feeds: OPMLEntry[],
-): Promise<FeedImportResult[]> {
+export function adminImportFeeds(feeds: OPMLEntry[]): Promise<FeedImportResult[]> {
   return request<FeedImportResult[]>("/v1/admin/feeds/import", {
     method: "POST",
-    headers: bearerHeaders(token),
     body: JSON.stringify({ feeds }),
   });
 }
@@ -423,16 +419,12 @@ export function adminImportFeeds(
 // GET /v1/admin/feeds/catalog — without lang: returns {languages: string[]}.
 // With ?lang=DE: returns []OPMLEntry with reachable + already_exists populated
 // (reachability check runs server-side, takes a few seconds).
-export function adminFetchCatalogLanguages(token: string): Promise<{ languages: string[] }> {
-  return request<{ languages: string[] }>("/v1/admin/feeds/catalog", {
-    headers: bearerHeaders(token),
-  });
+export function adminFetchCatalogLanguages(): Promise<{ languages: string[] }> {
+  return request<{ languages: string[] }>("/v1/admin/feeds/catalog");
 }
 
-export function adminFetchCatalogByLang(token: string, lang: string): Promise<OPMLEntry[]> {
-  return request<OPMLEntry[]>(`/v1/admin/feeds/catalog?lang=${encodeURIComponent(lang)}`, {
-    headers: bearerHeaders(token),
-  });
+export function adminFetchCatalogByLang(lang: string): Promise<OPMLEntry[]> {
+  return request<OPMLEntry[]>(`/v1/admin/feeds/catalog?lang=${encodeURIComponent(lang)}`);
 }
 
 export interface FeedCheckResult {
@@ -443,69 +435,57 @@ export interface FeedCheckResult {
 }
 
 // POST /v1/admin/feeds/check — checks reachability and image support without saving.
-export function adminCheckFeed(token: string, url: string): Promise<FeedCheckResult> {
+export function adminCheckFeed(url: string): Promise<FeedCheckResult> {
   return request<FeedCheckResult>("/v1/admin/feeds/check", {
     method: "POST",
-    headers: bearerHeaders(token),
     body: JSON.stringify({ url }),
   });
 }
 
-export function adminListFeeds(token: string): Promise<Feed[]> {
-  return request<Feed[]>("/v1/admin/feeds", { headers: bearerHeaders(token) });
+export function adminListFeeds(): Promise<Feed[]> {
+  return request<Feed[]>("/v1/admin/feeds");
 }
 
 // POST /v1/admin/feeds
-export function adminCreateFeed(token: string, body: { url: string; label: string }): Promise<Feed> {
+export function adminCreateFeed(body: { url: string; label: string }): Promise<Feed> {
   return request<Feed>("/v1/admin/feeds", {
     method: "POST",
-    headers: bearerHeaders(token),
     body: JSON.stringify(body),
   });
 }
 
 // PATCH /v1/admin/feeds/{id}
 export function adminUpdateFeed(
-  token: string,
   id: number,
   body: { url: string; label: string },
 ): Promise<void> {
   return request<void>(`/v1/admin/feeds/${id}`, {
     method: "PATCH",
-    headers: bearerHeaders(token),
     body: JSON.stringify(body),
   });
 }
 
 // DELETE /v1/admin/feeds/{id}
-export function adminDeleteFeed(token: string, id: number): Promise<void> {
-  return request<void>(`/v1/admin/feeds/${id}`, {
-    method: "DELETE",
-    headers: bearerHeaders(token),
-  });
+export function adminDeleteFeed(id: number): Promise<void> {
+  return request<void>(`/v1/admin/feeds/${id}`, { method: "DELETE" });
 }
 
 // GET /v1/feeds — all approved users; returns feeds with enabled flag.
-export function listFeeds(token: string): Promise<Feed[]> {
-  return request<Feed[]>("/v1/feeds", { headers: bearerHeaders(token) });
+export function listFeeds(): Promise<Feed[]> {
+  return request<Feed[]>("/v1/feeds");
 }
 
 // PATCH /v1/feeds/{id}/subscription
-export function setFeedSubscription(
-  token: string,
-  id: number,
-  enabled: boolean,
-): Promise<void> {
+export function setFeedSubscription(id: number, enabled: boolean): Promise<void> {
   return request<void>(`/v1/feeds/${id}/subscription`, {
     method: "PATCH",
-    headers: bearerHeaders(token),
     body: JSON.stringify({ enabled }),
   });
 }
 
 // GET /v1/news — aggregated articles from user's enabled feeds.
-export function getNews(token: string): Promise<NewsArticle[]> {
-  return request<NewsArticle[]>("/v1/news", { headers: bearerHeaders(token) });
+export function getNews(): Promise<NewsArticle[]> {
+  return request<NewsArticle[]>("/v1/news");
 }
 
 // Admin-controlled display config returned by GET /v1/news/config.
@@ -515,8 +495,8 @@ export interface NewsConfig {
 }
 
 // GET /v1/news/config — returns global display settings for authenticated users.
-export function getNewsConfig(token: string): Promise<NewsConfig> {
-  return request<NewsConfig>("/v1/news/config", { headers: bearerHeaders(token) });
+export function getNewsConfig(): Promise<NewsConfig> {
+  return request<NewsConfig>("/v1/news/config");
 }
 
 // Admin news settings (GET/PATCH /v1/admin/news/settings).
@@ -527,20 +507,16 @@ export interface AdminNewsSettings {
 }
 
 // GET /v1/admin/news/settings
-export function adminGetNewsSettings(token: string): Promise<AdminNewsSettings> {
-  return request<AdminNewsSettings>("/v1/admin/news/settings", {
-    headers: bearerHeaders(token),
-  });
+export function adminGetNewsSettings(): Promise<AdminNewsSettings> {
+  return request<AdminNewsSettings>("/v1/admin/news/settings");
 }
 
 // PATCH /v1/admin/news/settings — partial update.
 export function adminUpdateNewsSettings(
-  token: string,
   body: Partial<AdminNewsSettings>,
 ): Promise<AdminNewsSettings> {
   return request<AdminNewsSettings>("/v1/admin/news/settings", {
     method: "PATCH",
-    headers: bearerHeaders(token),
     body: JSON.stringify(body),
   });
 }
@@ -639,10 +615,8 @@ export interface SearchProvider {
 }
 
 // GET /v1/admin/search/providers — super-admin only.
-export function adminListSearchProviders(token: string): Promise<SearchProvider[]> {
-  return request<SearchProvider[]>("/v1/admin/search/providers", {
-    headers: bearerHeaders(token),
-  });
+export function adminListSearchProviders(): Promise<SearchProvider[]> {
+  return request<SearchProvider[]>("/v1/admin/search/providers");
 }
 
 // PATCH /v1/admin/search/providers/{id} — super-admin only. Only send
@@ -650,7 +624,6 @@ export function adminListSearchProviders(token: string): Promise<SearchProvider[
 // sending "") leaves the stored key untouched, matching UpdateSearchProvider's
 // COALESCE-on-conflict behavior on the backend.
 export function adminPatchSearchProvider(
-  token: string,
   id: string,
   patch: Partial<{
     base_url: string;
@@ -664,17 +637,15 @@ export function adminPatchSearchProvider(
 ): Promise<SearchProvider> {
   return request<SearchProvider>(`/v1/admin/search/providers/${encodeURIComponent(id)}`, {
     method: "PATCH",
-    headers: bearerHeaders(token),
     body: JSON.stringify(patch),
   });
 }
 
 // DELETE /v1/admin/search/providers/{id}/key — super-admin only. Clears the
 // admin key without touching the rest of the provider row.
-export function adminClearSearchProviderKey(token: string, id: string): Promise<void> {
+export function adminClearSearchProviderKey(id: string): Promise<void> {
   return request<void>(`/v1/admin/search/providers/${encodeURIComponent(id)}/key`, {
     method: "DELETE",
-    headers: bearerHeaders(token),
   });
 }
 
@@ -687,17 +658,14 @@ export interface SearchSettings {
 }
 
 // GET /v1/admin/search/settings — super-admin only.
-export function adminGetSearchSettings(token: string): Promise<SearchSettings> {
-  return request<SearchSettings>("/v1/admin/search/settings", {
-    headers: bearerHeaders(token),
-  });
+export function adminGetSearchSettings(): Promise<SearchSettings> {
+  return request<SearchSettings>("/v1/admin/search/settings");
 }
 
 // PATCH /v1/admin/search/settings — super-admin only.
-export function adminPatchSearchSettings(token: string, settings: SearchSettings): Promise<SearchSettings> {
+export function adminPatchSearchSettings(settings: SearchSettings): Promise<SearchSettings> {
   return request<SearchSettings>("/v1/admin/search/settings", {
     method: "PATCH",
-    headers: bearerHeaders(token),
     body: JSON.stringify(settings),
   });
 }
@@ -716,27 +684,23 @@ export interface UserSearchProvider {
 }
 
 // GET /v1/search/providers — any approved session.
-export function listSearchProvidersForUser(token: string): Promise<UserSearchProvider[]> {
-  return request<UserSearchProvider[]>("/v1/search/providers", {
-    headers: bearerHeaders(token),
-  });
+export function listSearchProvidersForUser(): Promise<UserSearchProvider[]> {
+  return request<UserSearchProvider[]>("/v1/search/providers");
 }
 
 // PUT /v1/user/search/keys/{id} — any approved session. Only allowed for
 // providers with can_override = true (e.g. Serper, not SearXNG).
-export function setUserSearchKey(token: string, providerId: string, key: string): Promise<void> {
+export function setUserSearchKey(providerId: string, key: string): Promise<void> {
   return request<void>(`/v1/user/search/keys/${encodeURIComponent(providerId)}`, {
     method: "PUT",
-    headers: bearerHeaders(token),
     body: JSON.stringify({ key }),
   });
 }
 
 // DELETE /v1/user/search/keys/{id} — any approved session.
-export function deleteUserSearchKey(token: string, providerId: string): Promise<void> {
+export function deleteUserSearchKey(providerId: string): Promise<void> {
   return request<void>(`/v1/user/search/keys/${encodeURIComponent(providerId)}`, {
     method: "DELETE",
-    headers: bearerHeaders(token),
   });
 }
 
@@ -759,17 +723,13 @@ export type SearchTimeRange = "" | "day" | "week" | "month" | "year";
 // GET /v1/search/web?q=<query>&category=<category>&time_range=<range>
 // Any approved session. Returns 503 when SearXNG is not configured.
 export function searchWeb(
-  token: string,
   query: string,
   category: SearchCategory = "general",
   timeRange: SearchTimeRange = "",
 ): Promise<WebResult[]> {
   const params = new URLSearchParams({ q: query, category });
   if (timeRange) params.set("time_range", timeRange);
-  return request<WebResult[]>(
-    `/v1/search/web?${params.toString()}`,
-    { headers: bearerHeaders(token) },
-  );
+  return request<WebResult[]>(`/v1/search/web?${params.toString()}`);
 }
 
 // --- Search preferences (per-user) ----------------------------------------
@@ -783,20 +743,14 @@ export interface SearchPrefs {
 }
 
 // GET /v1/user/search-prefs — any approved session.
-export function getSearchPrefs(token: string): Promise<SearchPrefs> {
-  return request<SearchPrefs>("/v1/user/search-prefs", {
-    headers: bearerHeaders(token),
-  });
+export function getSearchPrefs(): Promise<SearchPrefs> {
+  return request<SearchPrefs>("/v1/user/search-prefs");
 }
 
 // POST /v1/user/search-prefs — any approved session.
-export function updateSearchPrefs(
-  token: string,
-  body: Partial<SearchPrefs>,
-): Promise<SearchPrefs> {
+export function updateSearchPrefs(body: Partial<SearchPrefs>): Promise<SearchPrefs> {
   return request<SearchPrefs>("/v1/user/search-prefs", {
     method: "POST",
-    headers: bearerHeaders(token),
     body: JSON.stringify(body),
   });
 }
@@ -832,37 +786,30 @@ export interface AIUserProvider {
 }
 
 // GET /v1/admin/ai/providers — super-admin only.
-export function adminListAIProviders(token: string): Promise<AIProvider[]> {
-  return request<AIProvider[]>("/v1/admin/ai/providers", {
-    headers: bearerHeaders(token),
-  });
+export function adminListAIProviders(): Promise<AIProvider[]> {
+  return request<AIProvider[]>("/v1/admin/ai/providers");
 }
 
 // POST /v1/admin/ai/providers — super-admin only.
-export function adminCreateAIProvider(
-  token: string,
-  body: {
-    id: string;
-    type: string;
-    name: string;
-    base_url?: string;
-    admin_key?: string;
-    default_model: string;
-    user_can_override: boolean;
-    enabled: boolean;
-    sort_order: number;
-  },
-): Promise<AIProvider> {
+export function adminCreateAIProvider(body: {
+  id: string;
+  type: string;
+  name: string;
+  base_url?: string;
+  admin_key?: string;
+  default_model: string;
+  user_can_override: boolean;
+  enabled: boolean;
+  sort_order: number;
+}): Promise<AIProvider> {
   return request<AIProvider>("/v1/admin/ai/providers", {
     method: "POST",
-    headers: bearerHeaders(token),
     body: JSON.stringify(body),
   });
 }
 
 // PATCH /v1/admin/ai/providers/{id} — super-admin only.
 export function adminPatchAIProvider(
-  token: string,
   id: string,
   body: Partial<{
     name: string;
@@ -876,32 +823,28 @@ export function adminPatchAIProvider(
 ): Promise<AIProvider> {
   return request<AIProvider>(`/v1/admin/ai/providers/${encodeURIComponent(id)}`, {
     method: "PATCH",
-    headers: bearerHeaders(token),
     body: JSON.stringify(body),
   });
 }
 
 // DELETE /v1/admin/ai/providers/{id} — super-admin only.
-export function adminDeleteAIProvider(token: string, id: string): Promise<void> {
+export function adminDeleteAIProvider(id: string): Promise<void> {
   return request<void>(`/v1/admin/ai/providers/${encodeURIComponent(id)}`, {
     method: "DELETE",
-    headers: bearerHeaders(token),
   });
 }
 
 // DELETE /v1/admin/ai/providers/{id}/key — clears admin key only.
-export function adminClearAIProviderKey(token: string, id: string): Promise<void> {
+export function adminClearAIProviderKey(id: string): Promise<void> {
   return request<void>(`/v1/admin/ai/providers/${encodeURIComponent(id)}/key`, {
     method: "DELETE",
-    headers: bearerHeaders(token),
   });
 }
 
 // GET /v1/admin/ai/providers/{id}/models — fetches available models from the provider API.
-export async function adminFetchAIProviderModels(token: string, id: string): Promise<string[]> {
+export async function adminFetchAIProviderModels(id: string): Promise<string[]> {
   const result = await request<{ models: string[] }>(
     `/v1/admin/ai/providers/${encodeURIComponent(id)}/models`,
-    { headers: bearerHeaders(token) },
   );
   return result.models ?? [];
 }
@@ -913,11 +856,8 @@ export interface AIBalanceResult {
   error?: string;
 }
 
-export async function adminFetchAIProviderBalance(token: string, id: string): Promise<AIBalanceResult> {
-  return request<AIBalanceResult>(
-    `/v1/admin/ai/providers/${encodeURIComponent(id)}/balance`,
-    { headers: bearerHeaders(token) },
-  );
+export async function adminFetchAIProviderBalance(id: string): Promise<AIBalanceResult> {
+  return request<AIBalanceResult>(`/v1/admin/ai/providers/${encodeURIComponent(id)}/balance`);
 }
 
 // LimitsSettings mirrors backend/internal/adminapi/limits.go's
@@ -950,20 +890,17 @@ export interface LimitsSettings {
 }
 
 // GET /v1/admin/system/limits — super-admin only.
-export function adminGetLimitsSettings(token: string): Promise<LimitsSettings> {
-  return request<LimitsSettings>("/v1/admin/system/limits", {
-    headers: bearerHeaders(token),
-  });
+export function adminGetLimitsSettings(): Promise<LimitsSettings> {
+  return request<LimitsSettings>("/v1/admin/system/limits");
 }
 
 // PATCH /v1/admin/system/limits — super-admin only. Always sends the full
 // object (unlike adminPatchAISettings' Partial<>) since the backend
 // validates and rewrites every field on each PATCH — see
 // AdminLimitsHandler's doc comment.
-export function adminPatchLimitsSettings(token: string, settings: LimitsSettings): Promise<LimitsSettings> {
+export function adminPatchLimitsSettings(settings: LimitsSettings): Promise<LimitsSettings> {
   return request<LimitsSettings>("/v1/admin/system/limits", {
     method: "PATCH",
-    headers: bearerHeaders(token),
     body: JSON.stringify(settings),
   });
 }
@@ -974,52 +911,45 @@ export interface AIUserProvidersResponse {
 }
 
 // GET /v1/ai/providers — any approved session.
-export function listAIProviders(token: string): Promise<AIUserProvidersResponse> {
-  return request<AIUserProvidersResponse>("/v1/ai/providers", {
-    headers: bearerHeaders(token),
-  });
+export function listAIProviders(): Promise<AIUserProvidersResponse> {
+  return request<AIUserProvidersResponse>("/v1/ai/providers");
 }
 
 // PATCH /v1/ai/preference — persist the user's preferred provider cross-device.
-export function setAIPreferredProvider(token: string, providerId: string): Promise<void> {
+export function setAIPreferredProvider(providerId: string): Promise<void> {
   return request<void>("/v1/ai/preference", {
     method: "PATCH",
-    headers: bearerHeaders(token),
     body: JSON.stringify({ provider_id: providerId }),
   });
 }
 
 // PUT /v1/ai/keys/{id} — set own API key for a provider.
-export function setAIUserKey(token: string, providerId: string, key: string): Promise<void> {
+export function setAIUserKey(providerId: string, key: string): Promise<void> {
   return request<void>(`/v1/ai/keys/${encodeURIComponent(providerId)}`, {
     method: "PUT",
-    headers: bearerHeaders(token),
     body: JSON.stringify({ key }),
   });
 }
 
 // DELETE /v1/ai/keys/{id} — remove own API key (fall back to admin key).
-export function deleteAIUserKey(token: string, providerId: string): Promise<void> {
+export function deleteAIUserKey(providerId: string): Promise<void> {
   return request<void>(`/v1/ai/keys/${encodeURIComponent(providerId)}`, {
     method: "DELETE",
-    headers: bearerHeaders(token),
   });
 }
 
 // PATCH /v1/ai/keys/{id}/model — save preferred model for own key.
-export function setAIUserPreferredModel(token: string, providerId: string, model: string): Promise<void> {
+export function setAIUserPreferredModel(providerId: string, model: string): Promise<void> {
   return request<void>(`/v1/ai/keys/${encodeURIComponent(providerId)}/model`, {
     method: "PATCH",
-    headers: bearerHeaders(token),
     body: JSON.stringify({ model }),
   });
 }
 
 // GET /v1/ai/keys/{id}/models — fetch available models using the user's own key.
-export async function fetchUserAIProviderModels(token: string, providerId: string): Promise<string[]> {
+export async function fetchUserAIProviderModels(providerId: string): Promise<string[]> {
   const result = await request<{ models: string[] }>(
     `/v1/ai/keys/${encodeURIComponent(providerId)}/models`,
-    { headers: bearerHeaders(token) },
   );
   return result.models ?? [];
 }
@@ -1033,8 +963,9 @@ export interface ChatMessage {
 // streamAIChat opens a POST /v1/ai/chat SSE stream and calls onDelta for each
 // text chunk received. Returns a Promise that resolves when [DONE] is received
 // or rejects on error. The caller is responsible for aborting via the signal.
+// No token parameter: raw fetch() with credentials: "include" so the
+// browser attaches the modulab_session cookie, same as request() above.
 export function streamAIChat(
-  token: string,
   providerId: string,
   model: string,
   messages: ChatMessage[],
@@ -1043,9 +974,9 @@ export function streamAIChat(
 ): Promise<void> {
   return fetch(`${API_BASE_URL}/v1/ai/chat`, {
     method: "POST",
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({ provider_id: providerId, model, messages }),
     signal,
@@ -1093,10 +1024,8 @@ export interface SystemStatus {
 }
 
 // GET /v1/admin/system — OIDC config, group prefix (read-only).
-export function getSystemStatus(token: string): Promise<SystemStatus> {
-  return request<SystemStatus>("/v1/admin/system", {
-    headers: bearerHeaders(token),
-  });
+export function getSystemStatus(): Promise<SystemStatus> {
+  return request<SystemStatus>("/v1/admin/system");
 }
 
 // ---- Admin system info (read-only diagnostics page) ---------------------------
@@ -1175,19 +1104,16 @@ export interface SystemInfo {
 
 // GET /v1/admin/system/info — version/uptime, dependency reachability, and
 // countdowns until the next background module-update check / registry sync.
-export function getSystemInfo(token: string): Promise<SystemInfo> {
-  return request<SystemInfo>("/v1/admin/system/info", {
-    headers: bearerHeaders(token),
-  });
+export function getSystemInfo(): Promise<SystemInfo> {
+  return request<SystemInfo>("/v1/admin/system/info");
 }
 
 // DELETE /v1/admin/sessions/{id} — ends exactly one active session (System
 // Info page's per-row "end session" button). id is ActiveSession.id (a
 // one-way hash), never the session's bearer token itself.
-export function revokeSession(token: string, id: string): Promise<void> {
+export function revokeSession(id: string): Promise<void> {
   return request<void>(`/v1/admin/sessions/${encodeURIComponent(id)}`, {
     method: "DELETE",
-    headers: bearerHeaders(token),
   });
 }
 
@@ -1196,32 +1122,28 @@ export function revokeSession(token: string, id: string): Promise<void> {
 // SystemInfoRateLimit.key, the raw Valkey key ("ratelimit:<label>:<id>"),
 // sent in the request body since it contains characters not safe for a path
 // segment (colons).
-export function resetRateLimit(token: string, key: string): Promise<void> {
+export function resetRateLimit(key: string): Promise<void> {
   return request<void>("/v1/admin/system/rate-limits", {
     method: "DELETE",
-    headers: bearerHeaders(token),
     body: JSON.stringify({ key }),
   });
 }
 
 // PATCH /v1/admin/oidc — update OIDC configuration. client_secret is optional;
 // omit or pass "" to keep the existing secret.
-export function updateOIDC(
-  token: string,
-  body: { issuer_url: string; client_id: string; client_secret?: string },
-): Promise<OIDCStatus> {
+export function updateOIDC(body: {
+  issuer_url: string;
+  client_id: string;
+  client_secret?: string;
+}): Promise<OIDCStatus> {
   return request<OIDCStatus>("/v1/admin/oidc", {
     method: "PATCH",
-    headers: bearerHeaders(token),
     body: JSON.stringify(body),
   });
 }
 
-export function deleteOIDCConfig(token: string): Promise<OIDCStatus> {
-  return request<OIDCStatus>("/v1/admin/oidc", {
-    method: "DELETE",
-    headers: bearerHeaders(token),
-  });
+export function deleteOIDCConfig(): Promise<OIDCStatus> {
+  return request<OIDCStatus>("/v1/admin/oidc", { method: "DELETE" });
 }
 
 // ---- Audit log ----------------------------------------------------------------
@@ -1246,18 +1168,17 @@ export interface AuditEntry {
 
 // GET /v1/audit-log — paginated, newest first.
 // event_type: filter to one event type; before: cursor (id < before); limit: page size.
-export function getAuditLog(
-  token: string,
-  opts?: { event_type?: string; before?: number; limit?: number },
-): Promise<AuditEntry[]> {
+export function getAuditLog(opts?: {
+  event_type?: string;
+  before?: number;
+  limit?: number;
+}): Promise<AuditEntry[]> {
   const params = new URLSearchParams();
   if (opts?.event_type) params.set("event_type", opts.event_type);
   if (opts?.before) params.set("before", String(opts.before));
   if (opts?.limit) params.set("limit", String(opts.limit));
   const qs = params.toString();
-  return request<AuditEntry[]>(`/v1/audit-log${qs ? `?${qs}` : ""}`, {
-    headers: bearerHeaders(token),
-  });
+  return request<AuditEntry[]>(`/v1/audit-log${qs ? `?${qs}` : ""}`);
 }
 
 export interface AuditVerifyResult {
@@ -1269,10 +1190,8 @@ export interface AuditVerifyResult {
 // GET /v1/audit-log/verify — walks the whole HMAC hash chain server-side and
 // reports whether it's intact. On-demand only (not called on page load) -
 // see the handler's doc comment for why.
-export function verifyAuditLog(token: string): Promise<AuditVerifyResult> {
-  return request<AuditVerifyResult>("/v1/audit-log/verify", {
-    headers: bearerHeaders(token),
-  });
+export function verifyAuditLog(): Promise<AuditVerifyResult> {
+  return request<AuditVerifyResult>("/v1/audit-log/verify");
 }
 
 // ---- User preferences -------------------------------------------------------
@@ -1284,20 +1203,17 @@ export interface UserPrefs {
 
 // GET /v1/user/preferences — returns the calling user's stored UI language
 // and theme preferences.
-export function getUserPrefs(token: string): Promise<UserPrefs> {
-  return request<UserPrefs>("/v1/user/preferences", {
-    headers: bearerHeaders(token),
-  });
+export function getUserPrefs(): Promise<UserPrefs> {
+  return request<UserPrefs>("/v1/user/preferences");
 }
 
 // PATCH /v1/user/preferences — saves a partial set of preferences (e.g. just
 // { theme: "dark" }). Only the keys present in `prefs` are sent, so the
 // backend only touches the fields it received — see UserPrefsHandler's PATCH
 // branch for why that matters (pointer fields, partial-update safe).
-export function updateUserPrefs(token: string, prefs: Partial<UserPrefs>): Promise<void> {
+export function updateUserPrefs(prefs: Partial<UserPrefs>): Promise<void> {
   return request<void>("/v1/user/preferences", {
     method: "PATCH",
-    headers: bearerHeaders(token),
     body: JSON.stringify(prefs),
   });
 }
@@ -1367,64 +1283,46 @@ export interface ModuleUpdateInfo {
 }
 
 // GET /v1/store — any active session; optional ?source= and ?category= filters.
-export function listStore(
-  token: string,
-  source?: string,
-  category?: string,
-): Promise<StoreListResponse> {
+export function listStore(source?: string, category?: string): Promise<StoreListResponse> {
   const params = new URLSearchParams();
   if (source) params.set("source", source);
   if (category) params.set("category", category);
   const qs = params.toString();
-  return request<StoreListResponse>(`/v1/store${qs ? `?${qs}` : ""}`, {
-    headers: bearerHeaders(token),
-  });
+  return request<StoreListResponse>(`/v1/store${qs ? `?${qs}` : ""}`);
 }
 
 // POST /v1/store/sync — org-admin/super-admin only; triggers registry refresh.
-export function syncStore(token: string): Promise<{ ok: boolean; error?: string }> {
-  return request<{ ok: boolean; error?: string }>("/v1/store/sync", {
-    method: "POST",
-    headers: bearerHeaders(token),
-  });
+export function syncStore(): Promise<{ ok: boolean; error?: string }> {
+  return request<{ ok: boolean; error?: string }>("/v1/store/sync", { method: "POST" });
 }
 
 // GET /v1/modules — any active session.
-export function listInstalledModules(token: string): Promise<InstalledModule[]> {
-  return request<InstalledModule[]>("/v1/modules", { headers: bearerHeaders(token) });
+export function listInstalledModules(): Promise<InstalledModule[]> {
+  return request<InstalledModule[]>("/v1/modules");
 }
 
 // GET /v1/modules/updates — org-admin/super-admin only; runs a fresh update check.
-export function checkModuleUpdates(
-  token: string,
-): Promise<{ updates: ModuleUpdateInfo[]; count: number }> {
-  return request<{ updates: ModuleUpdateInfo[]; count: number }>("/v1/modules/updates", {
-    headers: bearerHeaders(token),
-  });
+export function checkModuleUpdates(): Promise<{ updates: ModuleUpdateInfo[]; count: number }> {
+  return request<{ updates: ModuleUpdateInfo[]; count: number }>("/v1/modules/updates");
 }
 
 // POST /v1/modules/install — org-admin/super-admin only.
-export function installModule(token: string, name: string): Promise<InstalledModule> {
+export function installModule(name: string): Promise<InstalledModule> {
   return request<InstalledModule>("/v1/modules/install", {
     method: "POST",
-    headers: bearerHeaders(token),
     body: JSON.stringify({ name }),
   });
 }
 
 // DELETE /v1/modules/{name} — org-admin/super-admin only.
-export function uninstallModule(token: string, name: string): Promise<void> {
-  return request<void>(`/v1/modules/${encodeURIComponent(name)}`, {
-    method: "DELETE",
-    headers: bearerHeaders(token),
-  });
+export function uninstallModule(name: string): Promise<void> {
+  return request<void>(`/v1/modules/${encodeURIComponent(name)}`, { method: "DELETE" });
 }
 
 // POST /v1/modules/{name}/update — org-admin/super-admin only.
-export function updateModule(token: string, name: string): Promise<InstalledModule> {
+export function updateModule(name: string): Promise<InstalledModule> {
   return request<InstalledModule>(`/v1/modules/${encodeURIComponent(name)}/update`, {
     method: "POST",
-    headers: bearerHeaders(token),
   });
 }
 
@@ -1435,30 +1333,24 @@ export function updateModule(token: string, name: string): Promise<InstalledModu
 // available update to trigger updateModule with - previously the only way
 // back to "active" for a module already on its latest release was a manual
 // DB update.
-export function restartModule(token: string, name: string): Promise<InstalledModule> {
+export function restartModule(name: string): Promise<InstalledModule> {
   return request<InstalledModule>(`/v1/modules/${encodeURIComponent(name)}/restart`, {
     method: "POST",
-    headers: bearerHeaders(token),
   });
 }
 
 // POST /v1/modules/{name}/pin — org-admin/super-admin only.
-export function pinModule(token: string, name: string): Promise<{ name: string; pinned: boolean }> {
-  return request<{ name: string; pinned: boolean }>(
-    `/v1/modules/${encodeURIComponent(name)}/pin`,
-    { method: "POST", headers: bearerHeaders(token) },
-  );
+export function pinModule(name: string): Promise<{ name: string; pinned: boolean }> {
+  return request<{ name: string; pinned: boolean }>(`/v1/modules/${encodeURIComponent(name)}/pin`, {
+    method: "POST",
+  });
 }
 
 // DELETE /v1/modules/{name}/pin — org-admin/super-admin only.
-export function unpinModule(
-  token: string,
-  name: string,
-): Promise<{ name: string; pinned: boolean }> {
-  return request<{ name: string; pinned: boolean }>(
-    `/v1/modules/${encodeURIComponent(name)}/pin`,
-    { method: "DELETE", headers: bearerHeaders(token) },
-  );
+export function unpinModule(name: string): Promise<{ name: string; pinned: boolean }> {
+  return request<{ name: string; pinned: boolean }>(`/v1/modules/${encodeURIComponent(name)}/pin`, {
+    method: "DELETE",
+  });
 }
 
 // ---- DSGVO / data export ----------------------------------------------------
@@ -1478,20 +1370,26 @@ export interface ModuleTokenResponse {
   expires_in: number;
 }
 
-// fetchModuleToken exchanges the caller's full session token for a
-// short-lived, module-scoped token (backend/internal/auth/moduletoken.go) -
+// fetchModuleToken mints a short-lived, module-scoped token
+// (backend/internal/auth/moduletoken.go) for the caller's own session -
 // call this once a module is confirmed active, then hand the returned
-// token (never the full session token) to the module's own UI bundle via
-// ModuleComponentProps.token. Requires the caller's real session token,
-// unlike every other moduleApi* function above which take whatever token
-// ModulePage.tsx is currently using (module-scoped once available).
-export function fetchModuleToken(token: string, moduleName: string): Promise<ModuleTokenResponse> {
-  return request<ModuleTokenResponse>(`/v1/modules/${encodeURIComponent(moduleName)}/token`, {
-    headers: bearerHeaders(token),
-  });
+// token (never the full session) to the module's own UI bundle via
+// ModuleComponentProps.token. No session token parameter needed here: the
+// caller's session is identified by its httpOnly cookie, same as every
+// other request() call in this file - only the module-scoped token this
+// returns is ever handed to JS/module code (see moduleApiFetch below).
+export function fetchModuleToken(moduleName: string): Promise<ModuleTokenResponse> {
+  return request<ModuleTokenResponse>(`/v1/modules/${encodeURIComponent(moduleName)}/token`);
 }
 
-// moduleApiFetch sends an authenticated request to a module's Deno API.
+// moduleApiFetch sends an authenticated request to a module's Deno API,
+// using the module-scoped token (NOT the caller's session, which stays in
+// the httpOnly cookie and is never exposed to module code) - see
+// moduletoken.go's package doc comment for why modules only ever get this
+// narrower credential. Unlike every session-authenticated function above,
+// this one still takes an explicit token parameter and attaches it via
+// Authorization header, matching exactly how each installed module's own
+// UI bundle (recipes/unifi-network/my-place's App.tsx `useApi`) does it.
 export async function moduleApiFetch<T = unknown>(
   token: string,
   moduleName: string,
@@ -1517,9 +1415,10 @@ export async function moduleApiFetch<T = unknown>(
 
 // GET /v1/auth/me/export — triggers a JSON file download of all personal data.
 // Returns the raw Response so the caller can blob it and create an object URL.
-export async function exportMyData(token: string): Promise<Blob> {
+export async function exportMyData(): Promise<Blob> {
   const res = await fetch(`${API_BASE_URL}/v1/auth/me/export`, {
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
   });
   if (!res.ok) {
     const text = await res.text();

@@ -49,11 +49,9 @@ function moduleIcon(mod: InstalledModule): string {
 type AddMode = "url" | "module";
 
 function AddTileModal({
-  token,
   onClose,
   onAdded,
 }: {
-  token: string;
   onClose: () => void;
   onAdded: (tile: Tile) => void;
 }) {
@@ -76,9 +74,9 @@ function AddTileModal({
 
   // Load modules when switching to module mode.
   const { data: modules = [], isLoading: modulesLoading } = useQuery({
-    queryKey: [...ACTIVE_MODULES_QUERY_KEY, token],
+    queryKey: ACTIVE_MODULES_QUERY_KEY,
     queryFn: async () => {
-      const mods = await listInstalledModules(token);
+      const mods = await listInstalledModules();
       return mods.filter((m) => m.status === "active");
     },
     enabled: mode === "module",
@@ -112,7 +110,7 @@ function AddTileModal({
     }
 
     try {
-      const newTile = await createUserQuickLink(token, body);
+      const newTile = await createUserQuickLink(body);
       onAdded(newTile);
       onClose();
     } catch (err) {
@@ -436,10 +434,8 @@ function TileCard({
 
 export function QuickLinksGrid({
   initialTiles,
-  token,
 }: {
   initialTiles: Tile[];
-  token: string;
 }) {
   const { t } = useTranslation();
   const [tiles, setTiles] = useState<Tile[]>(initialTiles);
@@ -454,9 +450,9 @@ export function QuickLinksGrid({
   // share one cache entry instead of racing two differently-shaped fetches
   // under the same key.
   const { data: installedModules = [] } = useQuery({
-    queryKey: [...ACTIVE_MODULES_QUERY_KEY, token],
+    queryKey: ACTIVE_MODULES_QUERY_KEY,
     queryFn: async () => {
-      const mods = await listInstalledModules(token);
+      const mods = await listInstalledModules();
       return mods.filter((m) => m.status === "active");
     },
   });
@@ -476,21 +472,18 @@ export function QuickLinksGrid({
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   // Persist order to backend (fire-and-forget; optimistic UI).
-  const persistOrder = useCallback(
-    (ordered: Tile[]) => {
-      const refs = ordered.map((t) => ({ type: t.type, id: t.id }));
-      setReorderError(false);
-      saveOrder(token, refs).catch(() => {
-        // The grid already reflects the new visual order optimistically -
-        // but if the server never got it, the next page load silently
-        // reverts to the old order with no explanation. Surfaced instead
-        // of swallowed so the user knows to retry rather than assuming the
-        // reorder just worked.
-        setReorderError(true);
-      });
-    },
-    [token]
-  );
+  const persistOrder = useCallback((ordered: Tile[]) => {
+    const refs = ordered.map((t) => ({ type: t.type, id: t.id }));
+    setReorderError(false);
+    saveOrder(refs).catch(() => {
+      // The grid already reflects the new visual order optimistically -
+      // but if the server never got it, the next page load silently
+      // reverts to the old order with no explanation. Surfaced instead
+      // of swallowed so the user knows to retry rather than assuming the
+      // reorder just worked.
+      setReorderError(true);
+    });
+  }, []);
 
   function handleDragStart(idx: number) {
     dragSrcIdx.current = idx;
@@ -523,7 +516,7 @@ export function QuickLinksGrid({
   async function handleDelete(tile: Tile) {
     setDeleteError(false);
     try {
-      await deleteUserQuickLink(token, tile.id);
+      await deleteUserQuickLink(tile.id);
       setTiles((prev) => prev.filter((t) => t.id !== tile.id));
     } catch {
       // Tile remains visible - surfaced so the user knows the click
@@ -585,7 +578,6 @@ export function QuickLinksGrid({
 
       {showAdd && (
         <AddTileModal
-          token={token}
           onClose={() => setShowAdd(false)}
           onAdded={handleTileAdded}
         />

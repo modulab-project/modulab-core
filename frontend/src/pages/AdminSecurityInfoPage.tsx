@@ -20,8 +20,8 @@ import {
   type SystemInfo,
   type SystemInfoRateLimit,
 } from "../lib/api";
-import { clearSessionToken, getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
+import { queryClient } from "../lib/queryClient";
 import { AppShell } from "../components/AppShell";
 
 export default function AdminSecurityInfoPage() {
@@ -42,9 +42,7 @@ export default function AdminSecurityInfoPage() {
     if (hasFetched.current) return;
     hasFetched.current = true;
 
-    const token = getSessionToken();
-    if (!token) return;
-    getSystemInfo(token)
+    getSystemInfo()
       .then(setInfo)
       .catch(() => setError(t("admin.security_info.load_error")));
   }, [session, navigate, t]);
@@ -62,21 +60,21 @@ export default function AdminSecurityInfoPage() {
     if (!window.confirm(t(confirmKey, { name: target.name || target.email || target.role }))) {
       return;
     }
-    const token = getSessionToken();
-    if (!token) return;
     setRevokeError(null);
     setRevokingIds((prev) => new Set(prev).add(target.id));
-    revokeSession(token, target.id)
+    revokeSession(target.id)
       .then(() => {
-        // Ending your OWN session (found 2026-07-05): the bearer token this
-        // very tab is using was just revoked server-side, but until now
-        // nothing told the tab that — it kept the token around and looked
-        // fully logged in until the next API call happened to 401. Since
-        // this action can only ever be the admin's own doing (confirmed via
-        // the confirm-dialog above), clear the token and leave for /login
-        // immediately instead of waiting for that to happen.
+        // Ending your OWN session (found 2026-07-05): the session cookie
+        // every tab of this browser shares was just revoked server-side,
+        // but until now nothing told this tab that — it kept looking fully
+        // logged in until the next API call happened to 401. Since this
+        // action can only ever be the admin's own doing (confirmed via the
+        // confirm-dialog above), clear the query cache and leave for
+        // /login immediately instead of waiting for that to happen. Note
+        // this now also signs out every other tab of the same browser -
+        // see RevokeSessionByID's doc comment in session.go for why.
         if (target.current) {
-          clearSessionToken();
+          queryClient.clear();
           navigate("/login", { replace: true });
           return;
         }
@@ -103,11 +101,9 @@ export default function AdminSecurityInfoPage() {
   const [resetError, setResetError] = useState<string | null>(null);
 
   function handleResetRateLimit(target: SystemInfoRateLimit) {
-    const token = getSessionToken();
-    if (!token) return;
     setResetError(null);
     setResettingKeys((prev) => new Set(prev).add(target.key));
-    resetRateLimit(token, target.key)
+    resetRateLimit(target.key)
       .then(() => {
         setInfo((prev) =>
           prev

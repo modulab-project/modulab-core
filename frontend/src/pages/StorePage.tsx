@@ -13,7 +13,6 @@ import {
   type StoreEntry,
   type InstalledModule,
 } from "../lib/api";
-import { getSessionToken } from "../lib/session";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
 import { Logo } from "../components/AuthShell";
@@ -62,11 +61,9 @@ export default function StorePage() {
   } = useQuery({
     queryKey: STORE_QUERY_KEY,
     queryFn: async (): Promise<StoreData> => {
-      const token = getSessionToken();
-      if (!token) throw new Error("no session token");
       const [storeResp, installedList] = await Promise.all([
-        listStore(token),
-        listInstalledModules(token),
+        listStore(),
+        listInstalledModules(),
       ]);
       const installed = new Map<string, InstalledModule>();
       for (const m of installedList ?? []) installed.set(m.name, m);
@@ -84,12 +81,10 @@ export default function StorePage() {
   const error = hasLoadError ? t("store.load_error") : null;
 
   async function handleSync() {
-    const token = getSessionToken();
-    if (!token) return;
     setSyncing(true);
     setSyncMsg(null);
     try {
-      const res = await syncStore(token);
+      const res = await syncStore();
       setSyncMsg(res.ok ? t("store.sync_ok") : t("store.sync_partial"));
       queryClient.invalidateQueries({ queryKey: STORE_QUERY_KEY });
     } catch {
@@ -100,11 +95,9 @@ export default function StorePage() {
   }
 
   async function handleInstall(name: string) {
-    const token = getSessionToken();
-    if (!token) return;
     setBusyName(name);
     try {
-      const mod = await installModule(token, name);
+      const mod = await installModule(name);
       queryClient.setQueryData<StoreData>(STORE_QUERY_KEY, (prev) =>
         prev ? { ...prev, installed: new Map(prev.installed).set(name, mod) } : prev,
       );

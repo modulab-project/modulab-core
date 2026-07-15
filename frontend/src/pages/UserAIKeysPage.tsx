@@ -10,7 +10,6 @@ import {
   fetchUserAIProviderModels,
   type AIUserProvider,
 } from "../lib/api";
-import { getSessionToken } from "../lib/session";
 
 // /user/ai-keys — lets users manage their own AI provider API keys and, when
 // using their own key, choose which model to use. Users using the admin key
@@ -25,9 +24,7 @@ export default function UserAIKeysPage() {
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
-    const token = getSessionToken();
-    if (!token) return;
-    listAIProviders(token)
+    listAIProviders()
       .then(({ providers }) => { setProviders(providers); setError(null); })
       .catch(() => setError(t("user.ai.load_error")));
   }, [t]);
@@ -41,12 +38,10 @@ export default function UserAIKeysPage() {
 
   async function handleSaveKey(providerId: string) {
     if (!keyInput.trim()) return;
-    const token = getSessionToken();
-    if (!token) return;
     setBusy(true);
     setError(null);
     try {
-      await setAIUserKey(token, providerId, keyInput.trim());
+      await setAIUserKey(providerId, keyInput.trim());
       setEditingKeyId(null);
       setKeyInput("");
       refresh();
@@ -58,12 +53,10 @@ export default function UserAIKeysPage() {
   }
 
   async function handleRemove(providerId: string) {
-    const token = getSessionToken();
-    if (!token) return;
     setBusy(true);
     setError(null);
     try {
-      await deleteAIUserKey(token, providerId);
+      await deleteAIUserKey(providerId);
       refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : t("user.ai.remove_key_error"));
@@ -225,12 +218,10 @@ function ModelSelector({
   const current = provider.preferred_model || provider.default_model;
 
   async function handleLoad() {
-    const token = getSessionToken();
-    if (!token) return;
     setLoading(true);
     onError(null);
     try {
-      const list = await fetchUserAIProviderModels(token, provider.id);
+      const list = await fetchUserAIProviderModels(provider.id);
       setModels(list);
     } catch (e) {
       onError(e instanceof Error ? e.message : t("user.ai.fetch_models_error"));
@@ -240,12 +231,10 @@ function ModelSelector({
   }
 
   async function handleSelect(model: string) {
-    const token = getSessionToken();
-    if (!token) return;
     setSaving(true);
     onError(null);
     try {
-      await setAIUserPreferredModel(token, provider.id, model);
+      await setAIUserPreferredModel(provider.id, model);
       onChanged();
     } catch (e) {
       onError(e instanceof Error ? e.message : t("user.ai.save_model_error"));

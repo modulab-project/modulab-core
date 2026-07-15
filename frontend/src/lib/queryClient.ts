@@ -5,11 +5,14 @@ import { QueryClient } from "@tanstack/react-query";
 // query's own consumer re-mounts (e.g. re-opening a settings panel), while
 // still refetching in the background on window refocus.
 //
-// Lives in its own module (not inline in main.tsx) specifically so
-// session.ts's clearSessionToken() can import and clear it directly - see
-// that function's comment for why this matters: ModuLab is designed to run
-// as a shared, always-on browser homepage (Home.tsx's top-of-file comment),
-// so this tab's cache can outlive any one person's session.
+// Lives in its own module (not inline in main.tsx) specifically so every
+// logout/session-invalidation call site (AppShell.tsx's handleLogout,
+// Pending.tsx, ProfilePage.tsx's self-delete, AdminSecurityInfoPage.tsx's
+// "end my own session") can import and clear it directly - ModuLab is
+// designed to run as a shared, always-on browser homepage (Home.tsx's
+// top-of-file comment), so this tab's cache can outlive any one person's
+// session and must be reset explicitly rather than relying on a page
+// reload.
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {

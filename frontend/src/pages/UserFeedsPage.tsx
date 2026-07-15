@@ -4,7 +4,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "../components/AppShell";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { listFeeds, setFeedSubscription, type Feed } from "../lib/api";
-import { getSessionToken } from "../lib/session";
 import { USER_FEEDS_QUERY_KEY } from "../lib/queryKeys";
 
 // /user/feeds — lets every approved user manage their feed subscriptions.
@@ -23,17 +22,12 @@ export default function UserFeedsPage() {
     isError: loadError,
   } = useQuery({
     queryKey: USER_FEEDS_QUERY_KEY,
-    queryFn: async () => {
-      const token = getSessionToken();
-      if (!token) throw new Error("no session token");
-      return (await listFeeds(token)) ?? [];
-    },
+    queryFn: async () => (await listFeeds()) ?? [],
     enabled: !loading && !!session,
   });
 
   async function handleToggle(feed: Feed) {
-    const token = getSessionToken();
-    if (!token || toggling !== null) return;
+    if (toggling !== null) return;
     const next = !feed.enabled;
     setToggling(feed.id);
     setToggleError(false);
@@ -41,7 +35,7 @@ export default function UserFeedsPage() {
       (prev ?? []).map((f) => (f.id === feed.id ? { ...f, enabled: next } : f)),
     );
     try {
-      await setFeedSubscription(token, feed.id, next);
+      await setFeedSubscription(feed.id, next);
     } catch {
       // Revert the optimistic toggle, and say so - a toggle that visibly
       // flips back is confusing without an explanation.
