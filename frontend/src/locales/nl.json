@@ -13,7 +13,8 @@
   "login": {
     "title": "Inloggen bij ModuLab",
     "subtitle": "Toegang tot ModuLab via uw SSO-aanmelding.",
-    "button": "Inloggen met SSO"
+    "button": "Inloggen met SSO",
+    "waiting_other_tab": "Bezig met aanmelden in een ander tabblad…"
   },
   "pending": {
     "title_locked": "Uw account is geblokkeerd",

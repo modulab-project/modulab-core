@@ -13,7 +13,8 @@
   "login": {
     "title": "Se connecter à ModuLab",
     "subtitle": "Accédez à ModuLab en toute sécurité avec votre connexion SSO.",
-    "button": "Se connecter avec SSO"
+    "button": "Se connecter avec SSO",
+    "waiting_other_tab": "Connexion en cours depuis un autre onglet…"
   },
   "pending": {
     "title_locked": "Votre compte a été verrouillé",

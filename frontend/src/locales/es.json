@@ -13,7 +13,8 @@
   "login": {
     "title": "Iniciar sesión en ModuLab",
     "subtitle": "Acceda a ModuLab de forma segura con su inicio de sesión SSO.",
-    "button": "Iniciar sesión con SSO"
+    "button": "Iniciar sesión con SSO",
+    "waiting_other_tab": "Iniciando sesión desde otra pestaña…"
   },
   "pending": {
     "title_locked": "Su cuenta ha sido bloqueada",

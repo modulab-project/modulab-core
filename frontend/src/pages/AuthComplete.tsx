@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { getHealth } from "../lib/api";
 import { AUTH_RESULT_STORAGE_KEY, type AuthResult } from "../lib/authResult";
+import { releaseLoginLock } from "../lib/loginLock";
 
 // This page is the single landing spot for the redirect CallbackHandler
 // sends the browser to once the OIDC round-trip with the IdP is done (see
@@ -47,6 +48,15 @@ export default function AuthComplete() {
       return;
     }
     handled.current = true;
+
+    // This tab's OIDC round-trip is over now - success or failure, it
+    // acquired the login lock in Login.tsx (or SetupWizard.tsx's retry
+    // button) right before navigating away, and nothing else will release
+    // it otherwise. Releasing it here, before the health/role branching
+    // below, lets any other tab that was waiting on it (see Login.tsx's
+    // onLoginLockChange handler) re-check its own session immediately
+    // instead of sitting on the lock's full TTL.
+    releaseLoginLock();
 
     const hash = window.location.hash.startsWith("#")
       ? window.location.hash.slice(1)

@@ -13,7 +13,8 @@
   "login": {
     "title": "Bei ModuLab anmelden",
     "subtitle": "Melde dich sicher mit deinem SSO-Login an.",
-    "button": "Mit SSO anmelden"
+    "button": "Mit SSO anmelden",
+    "waiting_other_tab": "Anmeldung läuft in einem anderen Tab …"
   },
   "pending": {
     "title_locked": "Dein Konto wurde gesperrt",

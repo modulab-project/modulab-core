@@ -13,7 +13,8 @@
   "login": {
     "title": "Sign in to ModuLab",
     "subtitle": "Access ModuLab securely using your SSO login.",
-    "button": "Log in with SSO"
+    "button": "Log in with SSO",
+    "waiting_other_tab": "Signing in from another tab…"
   },
   "pending": {
     "title_locked": "Your account has been locked",

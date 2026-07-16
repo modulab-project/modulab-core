@@ -4,9 +4,10 @@ import { useTranslation } from "react-i18next";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell, Avatar } from "../components/AppShell";
 import { AuthButton } from "../components/AuthShell";
-import { deleteSelf, exportMyData, loginRedirectUrl } from "../lib/api";
+import { deleteSelf, exportMyData } from "../lib/api";
 import { isReauthRequiredError } from "../lib/authErrors";
 import { queryClient } from "../lib/queryClient";
+import { useLoginRedirect } from "../lib/useLoginRedirect";
 
 // "/profile" route, linked from the profile panel AppShell renders on every
 // page (header avatar -> "View profile"). Core has no UI of its own for
@@ -38,6 +39,12 @@ export default function ProfilePage() {
   // goes through the same requireRecentLogin gate (admin.go/handlers.go).
   const [reauthRequired, setReauthRequired] = useState(false);
   const [exporting, setExporting] = useState(false);
+  // Same cross-tab lock as AdminUsersPage.tsx's identical flag - see
+  // lib/useLoginRedirect.ts.
+  const { waiting: reauthWaiting, startLogin } = useLoginRedirect(() => {
+    setReauthRequired(false);
+    setDeleteError(null);
+  });
   const [exportError, setExportError] = useState<string | null>(null);
 
   if (loading || !session) {
@@ -180,9 +187,14 @@ export default function ProfilePage() {
               {reauthRequired && (
                 <>
                   {" "}
-                  <a href={loginRedirectUrl()} className="font-medium underline">
-                    {t("profile.reauth_login_link")}
-                  </a>
+                  <button
+                    type="button"
+                    onClick={startLogin}
+                    disabled={reauthWaiting}
+                    className="font-medium underline disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {reauthWaiting ? t("login.waiting_other_tab") : t("profile.reauth_login_link")}
+                  </button>
                 </>
               )}
             </p>

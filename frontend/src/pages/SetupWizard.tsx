@@ -8,11 +8,11 @@ import {
   configureSmtp,
   testSmtp,
   completeSetup,
-  loginRedirectUrl,
   getHealth,
 } from "../lib/api";
 import { authErrorKey } from "../lib/authErrors";
 import { consumeAuthResult } from "../lib/authResult";
+import { useLoginRedirect } from "../lib/useLoginRedirect";
 import { AuthButton, AuthField, AuthSecondaryButton, AuthShell } from "../components/AuthShell";
 
 // Persisted in sessionStorage, not React state alone, because the
@@ -60,6 +60,18 @@ export default function SetupWizard() {
   );
   const [loginRole, setLoginRole] = useState<string | null>(null);
   const [loginError, setLoginError] = useState<string | null>(null);
+  // Same cross-tab lock as Login.tsx/AdminUsersPage.tsx/ProfilePage.tsx -
+  // see lib/useLoginRedirect.ts. If another tab already completed this
+  // step's OIDC login (e.g. the wizard was accidentally opened twice),
+  // reuse its resolved role instead of running a second round-trip: step 5
+  // on success, or the "not a super-admin" message step 4 already shows
+  // for the ordinary (single-tab) failure case.
+  const { waiting: loginWaiting, startLogin } = useLoginRedirect((session) => {
+    setLoginRole(session.role);
+    if (session.role === "super-admin") {
+      goTo(5);
+    }
+  });
 
   // null = still checking. The wizard's own step state (loaded from
   // sessionStorage above) has no idea the backend's bootstrap-token gate
@@ -155,10 +167,11 @@ export default function SetupWizard() {
         <StepSuperAdminLogin
           role={loginRole}
           error={loginError ? t(loginError) : null}
+          waiting={loginWaiting}
           onRetry={() => {
             setLoginError(null);
             setLoginRole(null);
-            window.location.href = loginRedirectUrl();
+            startLogin();
           }}
         />
       )}
@@ -365,10 +378,16 @@ function StepGroupPrefix({
 function StepSuperAdminLogin({
   role,
   error,
+  waiting,
   onRetry,
 }: {
   role: string | null;
   error: string | null;
+  // True while another tab already holds the login lock (see
+  // lib/useLoginRedirect.ts) - i.e. someone already started this exact
+  // step's OIDC login elsewhere. Disables the button rather than letting a
+  // second click fire a second, redundant round-trip.
+  waiting: boolean;
   onRetry: () => void;
 }) {
   const { t } = useTranslation();
@@ -384,8 +403,8 @@ function StepSuperAdminLogin({
           {t("setup.step4.not_super_admin")}
         </p>
       )}
-      <AuthButton onClick={onRetry} type="button" className="w-full">
-        {t("setup.step4.login_button")}
+      <AuthButton onClick={onRetry} type="button" disabled={waiting} className="w-full">
+        {waiting ? t("login.waiting_other_tab") : t("setup.step4.login_button")}
       </AuthButton>
     </div>
   );

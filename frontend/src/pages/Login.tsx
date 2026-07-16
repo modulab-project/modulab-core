@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { loginRedirectUrl } from "../lib/api";
+import { useNavigate } from "react-router";
 import { authErrorKey } from "../lib/authErrors";
 import { consumeAuthResult } from "../lib/authResult";
+import { useLoginRedirect } from "../lib/useLoginRedirect";
 import { AuthButton, AuthShell } from "../components/AuthShell";
 
 // Spec section 6.4's "/login" route ("OIDC Login-Screen", Public access).
@@ -18,18 +19,20 @@ import { AuthButton, AuthShell } from "../components/AuthShell";
 // rather than silently dropped.
 export default function Login() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
+  // See lib/useLoginRedirect.ts: coordinates via a cross-tab localStorage
+  // lock so opening this page in more than one tab at once can't fire two
+  // independent OIDC round-trips (each minting its own Valkey session - the
+  // "several active sessions for one browser" issue found on the System
+  // Info page, 2026-07-16). If another tab is already mid-login, `waiting`
+  // is true and this tab jumps straight to "/" the moment that other
+  // login succeeds, without ever bothering the IdP itself.
+  const { waiting, startLogin } = useLoginRedirect(() => navigate("/", { replace: true }));
 
   useEffect(() => {
     const result = consumeAuthResult();
     if (result?.error) {
-      // Runs exactly once on mount ([] deps) to read a one-shot stashed
-      // result from an external store (see consumeAuthResult - it consumes/
-      // clears the entry, so this can never re-fire or cascade). Not a
-      // candidate for the render-time "adjusting state" pattern used
-      // elsewhere: there is no prop/state to compare against, just a
-      // mount-time read of an external system, which is exactly what
-      // effects are for.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setError(authErrorKey(result.error));
     }
@@ -42,14 +45,8 @@ export default function Login() {
       centerText
     >
       {error && <p className="mb-4 text-center text-sm text-red-600 dark:text-red-400">{t(error)}</p>}
-      <AuthButton
-        type="button"
-        onClick={() => {
-          window.location.href = loginRedirectUrl();
-        }}
-        className="w-full"
-      >
-        {t("login.button")}
+      <AuthButton type="button" onClick={startLogin} disabled={waiting} className="w-full">
+        {waiting ? t("login.waiting_other_tab") : t("login.button")}
       </AuthButton>
     </AuthShell>
   );

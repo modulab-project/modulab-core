@@ -5,12 +5,12 @@ import {
   approveUser,
   deleteUser,
   listUsers,
-  loginRedirectUrl,
   lockUser,
   unlockUser,
   type AdminUser,
 } from "../lib/api";
 import { useAuthenticatedSession } from "../lib/useSession";
+import { useLoginRedirect } from "../lib/useLoginRedirect";
 import { AppShell } from "../components/AppShell";
 import { isAdminRole } from "../lib/roles";
 import { isReauthRequiredError } from "../lib/authErrors";
@@ -49,6 +49,15 @@ export default function AdminUsersPage() {
   // link rather than folded into the generic `error` text.
   const [reauthRequired, setReauthRequired] = useState(false);
   const [busySubject, setBusySubject] = useState<string | null>(null);
+  // Same cross-tab lock as Login.tsx - see lib/useLoginRedirect.ts. If
+  // another tab is already re-authenticating (or already finished, and the
+  // browser's session cookie is fresh again), this tab shouldn't also send
+  // itself through a second OIDC round-trip; it just clears the banner once
+  // the shared cookie is valid again, and the admin retries their action.
+  const { waiting: reauthWaiting, startLogin } = useLoginRedirect(() => {
+    setReauthRequired(false);
+    setError(null);
+  });
 
   const refresh = useCallback(() => {
     listUsers()
@@ -124,9 +133,14 @@ export default function AdminUsersPage() {
             {reauthRequired && (
               <>
                 {" "}
-                <a href={loginRedirectUrl()} className="font-medium underline">
-                  {t("admin.users.reauth_login_link")}
-                </a>
+                <button
+                  type="button"
+                  onClick={startLogin}
+                  disabled={reauthWaiting}
+                  className="font-medium underline disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {reauthWaiting ? t("login.waiting_other_tab") : t("admin.users.reauth_login_link")}
+                </button>
               </>
             )}
           </p>
