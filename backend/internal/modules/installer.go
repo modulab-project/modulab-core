@@ -346,11 +346,15 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 	if mf.Name != entry.Name {
 		return fmt.Errorf("modules: install %q: manifest name mismatch (got %q)", entry.Name, mf.Name)
 	}
-	if mf.Tier < 1 || mf.Tier > 3 {
-		return fmt.Errorf("modules: install %q: invalid tier %d (must be 1–3)", entry.Name, mf.Tier)
+	if err := validateManifestTier(mf); err != nil {
+		return fmt.Errorf("modules: install %q: %w", entry.Name, err)
 	}
 	if mf.Scope == "" {
-		mf.Scope = "org" // sensible default
+		// "cross-location" (not "org") - must match installed_modules'
+		// CHECK (scope IN ('per-location', 'cross-location')) in db.go, or
+		// every install with an unset scope fails at the DB insert below.
+		// Broadest fallback for a module that doesn't declare a scope.
+		mf.Scope = "cross-location"
 	}
 
 	manifestJSON, err := json.Marshal(mf)
@@ -571,6 +575,40 @@ func extractZIPEntry(f *zip.File, target string) (int64, error) {
 	}()
 
 	return io.Copy(out, rc)
+}
+
+// validateManifestTier cross-checks mf.Tier against the fields that actually
+// imply Tier 2/3 capability. Shared by Install and Update so a tier-changing
+// module update is held to the exact same rules as a first install - before
+// this existed, Update skipped tier validation entirely (found 2026-07-16).
+//
+// Rules, per Pflichtenheft §4.1:
+//   - Tier 1 (config-driven, no worker): must not declare handler/jobs/
+//     egress_allowlist - those are Tier 2/3-only concepts.
+//   - Tier 2/3 (has a Deno worker): must declare a handler, or Workers.Start
+//     would be called with an empty entrypoint path.
+//   - Tier 2 (no egress per spec): must not declare egress_allowlist - only
+//     Tier 3 ("TypeScript + Egress") is allowed outbound network access.
+//   - tls_skip_verify is only meaningful alongside a non-empty
+//     egress_allowlist; true with no egress hosts is almost certainly an
+//     author mistake and is rejected rather than silently ignored.
+func validateManifestTier(mf Manifest) error {
+	if mf.Tier < 1 || mf.Tier > 3 {
+		return fmt.Errorf("invalid tier %d (must be 1–3)", mf.Tier)
+	}
+	if mf.Tier == 1 && (mf.Handler != "" || len(mf.Jobs) > 0 || len(mf.EgressAllowlist) > 0) {
+		return fmt.Errorf("tier 1 must not declare handler/jobs/egress_allowlist")
+	}
+	if mf.Tier >= 2 && mf.Handler == "" {
+		return fmt.Errorf("tier %d requires a handler", mf.Tier)
+	}
+	if mf.Tier == 2 && len(mf.EgressAllowlist) > 0 {
+		return fmt.Errorf("tier 2 must not declare egress_allowlist (use tier 3)")
+	}
+	if mf.TLSSkipVerify && len(mf.EgressAllowlist) == 0 {
+		return fmt.Errorf("tls_skip_verify requires a non-empty egress_allowlist")
+	}
+	return nil
 }
 
 // parseManifest reads and parses manifest.yaml from path.

@@ -305,10 +305,17 @@ function TierBadge({ tier }: { tier: number }) {
     2: "bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-300",
     3: "bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300",
   };
+  // Out-of-range tier (e.g. stale data, manual DB edit) used to silently
+  // fall back to colors[1] while still printing the real (wrong) number in
+  // the label - a badge could read "Tier 5" in the same gray as a normal
+  // Tier 1, masking exactly the kind of bad data an admin would want to
+  // notice (found 2026-07-16). This is the one deliberate exception to the
+  // "no amber/red on tier badges" rule above: an invalid tier is a genuine
+  // data error, not a normal tier value, so it should read as one.
+  const cls =
+    colors[tier] ?? "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300";
   return (
-    <span
-      className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${colors[tier] ?? colors[1]}`}
-    >
+    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${cls}`}>
       {t("common.tier", { tier })}
     </span>
   );

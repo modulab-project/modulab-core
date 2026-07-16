@@ -1043,7 +1043,10 @@ export interface SystemInfoModule {
   status: string;
   source: string;
   pinned: boolean;
-  tier: number;
+  // 1 | 2 | 3 (not plain number) so an out-of-range tier from the API is a
+  // type error at the call site instead of silently flowing into TierBadge's
+  // colors[tier] ?? colors[1] fallback (see ModulesPage.tsx's TierBadge).
+  tier: 1 | 2 | 3;
   // cosign_verified (added 2026-07-05): whether the Cosign signature check
   // actually passed for the currently-installed version - false for
   // "direct" installs (no registry signature to check at all) and for any
@@ -1258,7 +1261,8 @@ export interface StoreListResponse {
 export interface InstalledModule {
   name: string;
   version: string;
-  tier: number;
+  // 1 | 2 | 3 (not plain number) - see SystemInfoModule.tier's comment above.
+  tier: 1 | 2 | 3;
   scope: string;
   source: string;
   release_url: string;

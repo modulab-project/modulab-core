@@ -173,6 +173,13 @@ func Update(ctx context.Context, d Deps, entry store.Entry) error {
 	if mf.Name != entry.Name {
 		return fmt.Errorf("modules: update %q: manifest name mismatch (got %q)", entry.Name, mf.Name)
 	}
+	// Same tier/handler/jobs/egress cross-validation as a first install (see
+	// validateManifestTier's doc comment) - an update used to skip this
+	// entirely, so a manifest could change tier (or add egress_allowlist to
+	// a tier-2 module, etc.) with no check at all (found 2026-07-16).
+	if err := validateManifestTier(mf); err != nil {
+		return fmt.Errorf("modules: update %q: %w", entry.Name, err)
+	}
 
 	manifestJSON, err := json.Marshal(mf)
 	if err != nil {
@@ -250,7 +257,7 @@ func Update(ctx context.Context, d Deps, entry store.Entry) error {
 	}
 
 	// ── 10. Update DB row ─────────────────────────────────────────────────
-	if err := d.updateInstalledModuleRecord(ctx, entry.Name, mf.Version, gotHex, zipURL, manifestJSON, cosignVerified, entry.LogoURL); err != nil {
+	if err := d.updateInstalledModuleRecord(ctx, entry.Name, mf.Version, mf.Tier, gotHex, zipURL, manifestJSON, cosignVerified, entry.LogoURL); err != nil {
 		return fmt.Errorf("modules: update %q: db update: %w", entry.Name, err)
 	}
 	if _, err := d.DB.UpdateModuleStatus(ctx, entry.Name, db.ModuleStatusActive); err != nil {
@@ -336,7 +343,7 @@ func cacheCurrentZIP(ctx context.Context, pool *db.Pool, releaseURL, path string
 	return downloadFile(dlCtx, releaseURL, path, maxBytes)
 }
 
-// updateInstalledModuleRecord patches the version, sha256, release_url,
+// updateInstalledModuleRecord patches the version, tier, sha256, release_url,
 // manifest, cosign_verified, and logo_url columns on the installed_modules
 // row. There is no single DB helper for this combination, so we exec the
 // UPDATE directly. cosignVerified is this update's own Cosign result (added
@@ -345,7 +352,15 @@ func cacheCurrentZIP(ctx context.Context, pool *db.Pool, releaseURL, path string
 // actually run against. logoURL is re-synced from the registry on every
 // update (not just at first install) so a module that gains, changes, or
 // loses a logo after install picks that up on its next update.
-func (d Deps) updateInstalledModuleRecord(ctx context.Context, name, version, sha256, releaseURL string, manifest []byte, cosignVerified bool, logoURL string) error {
+//
+// tier (added 2026-07-16) must be written here for the same reason: every
+// tier-gating check in the codebase (worker restart in handlers.go, the job
+// scheduler in jobs.go, the boot-time worker-restore loop in main.go, the
+// frontend's TierBadge) reads the standalone tier column, not manifest.tier.
+// Before this, a manifest that changed tier during an update left the column
+// permanently frozen at the tier from first install - Update() validates the
+// new tier via validateManifestTier above, so it is safe to persist here.
+func (d Deps) updateInstalledModuleRecord(ctx context.Context, name, version string, tier int, sha256, releaseURL string, manifest []byte, cosignVerified bool, logoURL string) error {
 	var logoURLArg any
 	if logoURL != "" {
 		logoURLArg = logoURL
@@ -353,14 +368,15 @@ func (d Deps) updateInstalledModuleRecord(ctx context.Context, name, version, sh
 	_, err := d.DB.Exec(ctx, `
 		UPDATE installed_modules
 		SET version         = $2,
-		    sha256          = $3,
-		    release_url     = $4,
-		    manifest        = $5,
-		    cosign_verified = $6,
-		    logo_url        = $7,
-		    updated_at      = $8
+		    tier            = $3,
+		    sha256          = $4,
+		    release_url     = $5,
+		    manifest        = $6,
+		    cosign_verified = $7,
+		    logo_url        = $8,
+		    updated_at      = $9
 		WHERE name = $1
-	`, name, version, sha256, releaseURL, manifest, cosignVerified, logoURLArg, time.Now())
+	`, name, version, tier, sha256, releaseURL, manifest, cosignVerified, logoURLArg, time.Now())
 	if err != nil {
 		return fmt.Errorf("db: update installed_module record %q: %w", name, err)
 	}

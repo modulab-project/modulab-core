@@ -290,6 +290,15 @@ func UpdateModuleHandler(d Deps, storeDeps store.Deps, authDeps auth.Deps) http.
 		runtimeEgressHosts, hadRuntimeHosts := d.Workers.CurrentModuleEgressHosts(name)
 
 		// Restart the Deno worker so it picks up the new handler code.
+		//
+		// row is re-fetched AFTER Update() returns, so row.Tier now reflects
+		// the NEW manifest's tier (Update's updateInstalledModuleRecord
+		// persists it - see that function's doc comment; before 2026-07-16 it
+		// didn't, so a tier-changing update left this gate checking the
+		// stale pre-update tier forever). Stop() above always runs
+		// unconditionally, so a tier>=2 → tier==1 downgrade correctly ends
+		// up with no worker restarted below; a tier==1 → tier>=2 upgrade
+		// correctly starts one where none ran before.
 		_ = d.Workers.Stop(name)
 		row, _, _ := d.DB.GetInstalledModule(r.Context(), name)
 		if row.Tier >= 2 {
