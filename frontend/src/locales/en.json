@@ -893,7 +893,8 @@
     "filter": {
       "all": "All",
       "official": "Official",
-      "community": "Community"
+      "community": "Community",
+      "custom": "Custom"
     },
     "search_placeholder": "Search modules…",
     "category_all": "All categories",
@@ -903,7 +904,29 @@
       "network": "Network"
     },
     "no_results": "No modules match your search.",
-    "install_error": "Installation failed"
+    "install_error": "Installation failed",
+    "custom": {
+      "manage": "Custom sources",
+      "title": "Custom module sources",
+      "subtitle": "Add your own GitHub repositories as module sources, alongside the official and community registries.",
+      "empty": "No custom sources added yet.",
+      "warning": "Custom sources are not reviewed by ModuLab. Only add repositories you trust — installed code runs with the same permissions as any other module.",
+      "repo_url": "GitHub repository URL",
+      "name": "Display name (optional)",
+      "pubkey": "Cosign public key (optional)",
+      "pubkey_hint": "Paste the repo maintainer's Cosign public key (PEM) to enable signature verification. Leave empty to install unsigned/unverified.",
+      "token": "GitHub access token (optional)",
+      "token_hint": "Only needed for private repositories. Classic and fine-grained tokens are both supported — grant read access to contents and releases. Stored encrypted, never shown again.",
+      "add": "Add source",
+      "adding": "Adding…",
+      "add_error": "Could not add source",
+      "remove": "Remove source",
+      "private": "Private repository (token on file)",
+      "signed": "signable",
+      "signed_hint": "This custom source has a public key on file — its release signature can be verified.",
+      "unverified": "unverified",
+      "unverified_hint": "This custom source has no public key on file — it installs without signature verification."
+    }
   },
   "modules": {
     "title": "Installed Modules",

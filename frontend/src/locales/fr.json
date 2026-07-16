@@ -893,7 +893,8 @@
     "filter": {
       "all": "Tous",
       "official": "Officiel",
-      "community": "Communauté"
+      "community": "Communauté",
+      "custom": "Personnalisées"
     },
     "search_placeholder": "Rechercher des modules…",
     "category_all": "Toutes les catégories",
@@ -903,7 +904,29 @@
       "network": "Réseau"
     },
     "no_results": "Aucun module ne correspond à votre recherche.",
-    "install_error": "Échec de l'installation"
+    "install_error": "Échec de l'installation",
+    "custom": {
+      "manage": "Sources personnalisées",
+      "title": "Sources de modules personnalisées",
+      "subtitle": "Ajoutez vos propres dépôts GitHub comme source de modules, en plus des registres officiel et communautaire.",
+      "empty": "Aucune source personnalisée ajoutée pour le moment.",
+      "warning": "Les sources personnalisées ne sont pas vérifiées par ModuLab. N'ajoutez que des dépôts auxquels vous faites confiance — le code installé s'exécute avec les mêmes droits que n'importe quel autre module.",
+      "repo_url": "URL du dépôt GitHub",
+      "name": "Nom affiché (optionnel)",
+      "pubkey": "Clé publique Cosign (optionnel)",
+      "pubkey_hint": "Collez la clé publique Cosign (PEM) du mainteneur du dépôt pour activer la vérification de signature. Laissez vide pour une installation non signée/non vérifiée.",
+      "token": "Jeton d'accès GitHub (optionnel)",
+      "token_hint": "Nécessaire uniquement pour les dépôts privés. Les jetons classiques et à granularité fine sont pris en charge — un accès en lecture au contenu et aux versions suffit. Stocké chiffré, jamais réaffiché.",
+      "add": "Ajouter la source",
+      "adding": "Ajout…",
+      "add_error": "Impossible d'ajouter la source",
+      "remove": "Supprimer la source",
+      "private": "Dépôt privé (jeton enregistré)",
+      "signed": "vérifiable",
+      "signed_hint": "Cette source personnalisée dispose d'une clé publique — la signature de la version peut être vérifiée.",
+      "unverified": "non vérifiée",
+      "unverified_hint": "Cette source personnalisée n'a pas de clé publique — elle s'installe sans vérification de signature."
+    }
   },
   "modules": {
     "title": "Modules installés",

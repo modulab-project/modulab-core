@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/modulab-project/modulab-core/backend/internal/db"
@@ -79,37 +80,44 @@ func RunSync(ctx context.Context, d Deps, onSynced onSyncedFunc) {
 }
 
 // TriggerSync performs a one-off manual sync. Called by POST /v1/store/sync.
-// Returns an error summary if either source failed; partial results are still
+// Returns an error summary if any source failed; partial results are still
 // persisted so the cache reflects whatever was reachable. onSynced still
 // runs even on a partial/full failure — see onSyncedFunc's doc comment.
 func TriggerSync(ctx context.Context, d Deps, onSynced onSyncedFunc) error {
-	offErr, comErr := syncBoth(ctx, d)
+	customErrs, offErr, comErr := syncAll(ctx, d)
 	if onSynced != nil {
 		onSynced(ctx)
 	}
-	if offErr != nil && comErr != nil {
-		return fmt.Errorf("official: %v; community: %v", offErr, comErr)
-	}
+	var parts []string
 	if offErr != nil {
-		return fmt.Errorf("official registry sync failed: %w", offErr)
+		parts = append(parts, fmt.Sprintf("official: %v", offErr))
 	}
 	if comErr != nil {
-		return fmt.Errorf("community registry sync failed: %w", comErr)
+		parts = append(parts, fmt.Sprintf("community: %v", comErr))
 	}
-	return nil
+	for name, err := range customErrs {
+		parts = append(parts, fmt.Sprintf("custom (%s): %v", name, err))
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s", strings.Join(parts, "; "))
 }
 
 // runSync is the internal sync driver. Errors are logged but never fatal —
 // the hourly goroutine must keep running regardless of transient GitHub outages.
 func runSync(ctx context.Context, d Deps, onSynced onSyncedFunc) {
-	offErr, comErr := syncBoth(ctx, d)
+	customErrs, offErr, comErr := syncAll(ctx, d)
 	if offErr != nil {
 		log.Printf("store: sync: official registry: %v", offErr)
 	}
 	if comErr != nil {
 		log.Printf("store: sync: community registry: %v", comErr)
 	}
-	if offErr == nil && comErr == nil {
+	for name, err := range customErrs {
+		log.Printf("store: sync: custom source %q: %v", name, err)
+	}
+	if offErr == nil && comErr == nil && len(customErrs) == 0 {
 		log.Printf("store: sync: completed successfully")
 	}
 	if onSynced != nil {
@@ -117,11 +125,14 @@ func runSync(ctx context.Context, d Deps, onSynced onSyncedFunc) {
 	}
 }
 
-// syncBoth fetches and persists entries from both sources. Each source is
-// independent: a failure on one does not prevent the other from being updated.
-// After upserting, stale entries that no longer appear in either registry are
-// pruned from the DB so deleted modules don't linger in the store UI.
-func syncBoth(ctx context.Context, d Deps) (offErr, comErr error) {
+// syncAll fetches and persists entries from every source: official,
+// community, and every admin-added custom_sources row. Each source is
+// independent: a failure on one does not prevent the others from being
+// updated. After upserting, stale entries that no longer appear in any
+// source are pruned from the DB so deleted modules don't linger in the store
+// UI. customErrs maps a custom source's repo_url to its fetch error, for
+// sources that failed - a nil/empty map means all custom sources synced fine.
+func syncAll(ctx context.Context, d Deps) (customErrs map[string]error, offErr, comErr error) {
 	seen := make(map[string]bool)
 
 	// ── Official ────────────────────────────────────────────────────────────
@@ -147,7 +158,7 @@ func syncBoth(ctx context.Context, d Deps) (offErr, comErr error) {
 			// Community entries don't carry a version in the index — fetch it
 			// from the GitHub Releases API so the store can show "v1.2.0".
 			if e.LatestVersion == "" {
-				version, err := FetchLatestRelease(ctx, d.Pool, e.SourceRepo)
+				version, err := FetchLatestRelease(ctx, d.Pool, e.SourceRepo, "")
 				if err != nil {
 					log.Printf("store: sync: latest release for %q: %v", e.Name, err)
 				} else {
@@ -162,16 +173,41 @@ func syncBoth(ctx context.Context, d Deps) (offErr, comErr error) {
 		}
 	}
 
+	// ── Custom (admin-added) ────────────────────────────────────────────────
+	customSources, err := d.Pool.ListCustomSources(ctx)
+	if err != nil {
+		log.Printf("store: sync: list custom_sources: %v", err)
+	}
+	for _, cs := range customSources {
+		entry, err := FetchCustomRepo(ctx, d.Pool, cs.RepoURL, cs.PubKey, cs.Token)
+		if err != nil {
+			if customErrs == nil {
+				customErrs = make(map[string]error)
+			}
+			customErrs[cs.RepoURL] = err
+			continue
+		}
+		if err := UpsertEntry(ctx, d.Pool, entry); err != nil {
+			log.Printf("store: sync: upsert custom %q: %v", entry.Name, err)
+		} else {
+			seen[entry.Name] = true
+		}
+	}
+
 	// ── Prune stale entries ─────────────────────────────────────────────────
-	// Only prune when at least one source succeeded — if both failed we have
-	// no reliable "current" list and must not wipe the cache.
-	if offErr == nil || comErr == nil {
+	// Only prune when at least one source succeeded — if everything failed we
+	// have no reliable "current" list and must not wipe the cache. "Succeeded"
+	// for custom sources means at least one of them is in seen (an admin with
+	// zero custom sources configured trivially satisfies this - there was
+	// nothing to fail).
+	anySucceeded := offErr == nil || comErr == nil || len(customErrs) < len(customSources)
+	if anySucceeded {
 		if err := pruneStaleEntries(ctx, d, seen); err != nil {
 			log.Printf("store: sync: prune stale entries: %v", err)
 		}
 	}
 
-	return offErr, comErr
+	return customErrs, offErr, comErr
 }
 
 // pruneStaleEntries deletes registry rows whose names are not in the seen set.

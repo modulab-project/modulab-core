@@ -142,7 +142,7 @@ func FetchOfficialRegistry(ctx context.Context, pool *db.Pool) ([]Entry, error) 
 	// Append a Unix timestamp to bypass raw.githubusercontent.com's CDN cache,
 	// which can serve stale content for up to 5 minutes after a file is updated.
 	cacheBust := officialRegistryURL + "?_=" + strconv.FormatInt(time.Now().Unix(), 10)
-	data, err := httpGet(ctx, cacheBust)
+	data, err := httpGet(ctx, cacheBust, "")
 	if err != nil {
 		return nil, fmt.Errorf("store: fetch official registry: %w", err)
 	}
@@ -187,7 +187,7 @@ func FetchCommunityRegistry(ctx context.Context, pool *db.Pool) ([]Entry, error)
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	data, err := httpGet(ctx, communityRepoRootURL)
+	data, err := httpGet(ctx, communityRepoRootURL, "")
 	if err != nil {
 		return nil, fmt.Errorf("store: fetch community index: %w", err)
 	}
@@ -204,7 +204,7 @@ func FetchCommunityRegistry(ctx context.Context, pool *db.Pool) ([]Entry, error)
 		}
 
 		manifestURL := fmt.Sprintf(communityManifestRawURLFmt, item.Name)
-		manifestData, err := httpGet(ctx, manifestURL)
+		manifestData, err := httpGet(ctx, manifestURL, "")
 		if err != nil {
 			// Best-effort: skip unreadable entries, don't abort the whole sync.
 			log.Printf("store: community: fetch manifest for %q: %v", item.Name, err)
@@ -245,10 +245,123 @@ func FetchCommunityRegistry(ctx context.Context, pool *db.Pool) ([]Entry, error)
 	return out, nil
 }
 
+// customModuleReleaseAsset is the fixed asset filename every custom-source
+// module's GitHub Release must attach, mirroring the "bare filename,
+// reconstructed from source_repo + tag" convention installer.go's Install/
+// Update already support (previously unused in practice - official and
+// community entries both happen to carry a full ReleaseAsset URL instead).
+// Documented convention for custom-source module authors: tag the release
+// with the version (e.g. "v1.2.0") and attach module.zip (+ optionally
+// module.zip.sha256 and module.zip.sig, same as every other module).
+const customModuleReleaseAsset = "module.zip"
+
+// customManifestBranches are the branch names tried, in order, when fetching
+// a custom source repo's manifest.yaml - unlike modulab-community (a fixed,
+// known-main-branch monorepo), an arbitrary third-party repo may default to
+// either.
+var customManifestBranches = []string{"main", "master"}
+
+// customManifest is the subset of a custom source repo's own manifest.yaml
+// (the same file the module ships inside its own module.zip - see
+// modules.Manifest) this package needs for the store listing. Unlike
+// communityManifest, it carries the module's own Name (a custom source has
+// no curated index to take it from) and none of the community-only indexing
+// fields (source_repo/release_url) - a custom source's release is located
+// purely by convention (source_repo + tag + customModuleReleaseAsset).
+type customManifest struct {
+	Name        string            `yaml:"name"`
+	Version     string            `yaml:"version"`
+	Category    string            `yaml:"category"`
+	Description map[string]string `yaml:"description"`
+	DisplayName map[string]string `yaml:"display_name"`
+	Logo        string            `yaml:"logo"`
+}
+
+// FetchCustomRepo fetches a single admin-added custom module source: reads
+// manifest.yaml from the repo root (trying main, then master), and the
+// latest release tag via the GitHub Releases API (same call as
+// FetchLatestRelease). pubKeyPEM is passed through unchanged onto the
+// resulting Entry.CosignPubKey - it comes from custom_sources.pubkey
+// (admin-entered at add-time, see db.CreateCustomSource), never fetched from
+// the repo itself. token is an optional GitHub PAT for a private repo (see
+// db.CustomSourceRow.Token) - pass "" for a public one; NOT put onto the
+// returned Entry (module_registry, which Entry maps to, is never expected to
+// hold credentials - see its "no PII, no credentials" table comment in
+// db.go). Install/Update re-resolve the token fresh from custom_sources via
+// db.Pool.GetCustomSourceByRepoURL instead of reading it off the Entry.
+//
+// Returns an error if the repo has no manifest.yaml on any tried branch, or
+// the manifest is missing name/version - callers (store.syncAll) log and skip
+// on error rather than aborting the whole sync, same as
+// FetchCommunityRegistry's per-directory errors.
+func FetchCustomRepo(ctx context.Context, pool *db.Pool, repoURL, pubKeyPEM, token string) (Entry, error) {
+	timeout := time.Duration(GithubAPITimeoutSeconds(ctx, pool)) * time.Second
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	repoPath := strings.TrimSuffix(strings.TrimPrefix(repoURL, "https://github.com/"), "/")
+	if repoPath == "" || strings.Contains(repoPath, "://") {
+		return Entry{}, fmt.Errorf("store: custom source: invalid repo url %q", repoURL)
+	}
+
+	var m customManifest
+	var fetchErr error
+	found := false
+	for _, branch := range customManifestBranches {
+		manifestURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/manifest.yaml", repoPath, branch)
+		data, err := httpGet(ctx, manifestURL, token)
+		if err != nil {
+			fetchErr = err
+			continue
+		}
+		if err := yaml.Unmarshal(data, &m); err != nil {
+			return Entry{}, fmt.Errorf("store: custom source: parse manifest.yaml for %q: %w", repoURL, err)
+		}
+		found = true
+		if m.Logo != "" {
+			m.Logo = fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s", repoPath, branch, m.Logo)
+		}
+		break
+	}
+	if !found {
+		return Entry{}, fmt.Errorf("store: custom source: fetch manifest.yaml for %q: %w", repoURL, fetchErr)
+	}
+	if m.Name == "" || m.Version == "" {
+		return Entry{}, fmt.Errorf("store: custom source: %q manifest.yaml missing name or version", repoURL)
+	}
+
+	version, err := FetchLatestRelease(ctx, pool, repoURL, token)
+	if err != nil {
+		return Entry{}, fmt.Errorf("store: custom source: latest release for %q: %w", repoURL, err)
+	}
+	if version == "" {
+		// No releases published yet - not an error, just nothing installable
+		// yet. LatestVersion stays "" and the frontend/installer treat that
+		// the same as any other not-yet-released module.
+		version = ""
+	}
+
+	return Entry{
+		Name:          m.Name,
+		Source:        "custom",
+		SourceRepo:    repoURL,
+		ReleaseAsset:  customModuleReleaseAsset,
+		Category:      m.Category,
+		LatestVersion: version,
+		Description:   m.Description,
+		DisplayName:   m.DisplayName,
+		LogoURL:       m.Logo,
+		CosignPubKey:  pubKeyPEM,
+	}, nil
+}
+
 // FetchLatestRelease calls the GitHub Releases API for sourceRepo and returns
 // the tag name of the latest release, or ("", nil) when the repo has no
-// releases yet. Used by the daily update-check for community modules.
-func FetchLatestRelease(ctx context.Context, pool *db.Pool, sourceRepo string) (string, error) {
+// releases yet. Used by the daily update-check for community modules and by
+// FetchCustomRepo for custom sources. token is an optional GitHub PAT
+// (fine-grained or classic) for a private repo - pass "" for a public one
+// (official/community, or a custom source added without a token).
+func FetchLatestRelease(ctx context.Context, pool *db.Pool, sourceRepo, token string) (string, error) {
 	timeout := time.Duration(GithubAPITimeoutSeconds(ctx, pool)) * time.Second
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -261,7 +374,7 @@ func FetchLatestRelease(ctx context.Context, pool *db.Pool, sourceRepo string) (
 	}
 
 	url := "https://api.github.com/repos/" + repoPath + "/releases/latest"
-	data, err := httpGet(ctx, url)
+	data, err := httpGet(ctx, url, token)
 	if err != nil {
 		// 404 = no releases yet → not an error, just no version known.
 		return "", nil
@@ -276,8 +389,12 @@ func FetchLatestRelease(ctx context.Context, pool *db.Pool, sourceRepo string) (
 
 // httpGet performs a GET request and returns the body. Returns an error for
 // any non-2xx status. Uses the standard http.DefaultClient with the provided
-// context for timeout control.
-func httpGet(ctx context.Context, url string) ([]byte, error) {
+// context for timeout control. token is an optional GitHub PAT - when
+// non-empty, sent as an Authorization header so private repos (custom
+// sources only - official/community are always public) resolve instead of
+// 404ing. GitHub accepts this same header on both api.github.com and
+// raw.githubusercontent.com.
+func httpGet(ctx context.Context, url, token string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -285,6 +402,9 @@ func httpGet(ctx context.Context, url string) ([]byte, error) {
 	// Identify ourselves so GitHub doesn't rate-limit us as a generic client.
 	req.Header.Set("User-Agent", "modulab-core/1 (https://github.com/modulab-project/modulab-core)")
 	req.Header.Set("Accept", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

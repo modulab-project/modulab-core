@@ -2362,6 +2362,79 @@ func (p *Pool) EnsureModuleStoreSchema(ctx context.Context) error {
 		return fmt.Errorf("db: ensure module_registry: %w", err)
 	}
 
+	// source CHECK originally only allowed 'official'/'community'. Custom
+	// module sources (admin-added arbitrary GitHub repos, see custom_sources
+	// below) need a third value. Postgres names an inline, unnamed CHECK
+	// constraint "<table>_<column>_check" by default - drop-then-recreate
+	// under that conventional name is idempotent and safe to run on every
+	// boot (a fresh install's CREATE TABLE above already omits this value on
+	// purpose, so this ALTER is what actually admits 'custom').
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE module_registry DROP CONSTRAINT IF EXISTS module_registry_source_check
+	`); err != nil {
+		return fmt.Errorf("db: drop module_registry_source_check: %w", err)
+	}
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE module_registry ADD CONSTRAINT module_registry_source_check
+		    CHECK (source IN ('official', 'community', 'custom'))
+	`); err != nil {
+		return fmt.Errorf("db: ensure module_registry_source_check: %w", err)
+	}
+
+	// cosign_pubkey: the Cosign public key (PEM text) to verify a custom
+	// source's release against, copied in from custom_sources.pubkey at sync
+	// time (store.FetchCustomRepo). Empty for official/community entries,
+	// which always verify against the embedded officialPublicKey (see
+	// modules.VerifyCosign) - a public key is not sensitive data by
+	// definition (it exists to be shared), so unlike custom_sources.repo_url/
+	// name below, this column is intentionally left unencrypted.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE module_registry ADD COLUMN IF NOT EXISTS cosign_pubkey TEXT
+	`); err != nil {
+		return fmt.Errorf("db: ensure module_registry.cosign_pubkey: %w", err)
+	}
+
+	// ── custom_sources ─────────────────────────────────────────────────────
+	// Admin-added third-party module sources (HACS-style "custom repositories"),
+	// on top of the built-in official/community registries. Each row is one
+	// GitHub repo an admin has explicitly chosen to trust; store.RunSync polls
+	// it the same way it polls official/community, producing module_registry
+	// rows with source='custom'.
+	//
+	// repo_url_enc/name_enc are GCM-encrypted (URLs/names are PII-adjacent
+	// per spec section 2.4's classification - see
+	// feedback-encrypt-at-implementation-time). pubkey is the admin's manually
+	// entered Cosign public key (PEM text, optional) - not encrypted, see the
+	// cosign_pubkey column comment above for why. token_enc is an optional
+	// GitHub personal access token (fine-grained or classic) for private
+	// repos - a real credential, always GCM-encrypted, and unlike pubkey
+	// NEVER echoed back to the frontend once saved (see
+	// store.CustomSourceResponse's has_token bool instead of the raw value).
+	// added_by stores the OIDC subject (users.id), not an email/name, so it
+	// needs no encryption of its own - same pattern as
+	// admin_quick_links.created_by.
+	if _, err := p.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS custom_sources (
+		    id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+		    repo_url_enc TEXT        NOT NULL,
+		    name_enc     TEXT        NOT NULL,
+		    pubkey       TEXT        NOT NULL DEFAULT '',
+		    token_enc    TEXT        NOT NULL DEFAULT '',
+		    added_by     TEXT        NOT NULL DEFAULT '',
+		    added_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+		)
+	`); err != nil {
+		return fmt.Errorf("db: ensure custom_sources: %w", err)
+	}
+
+	// token_enc: added after the table's initial release, same backfill
+	// pattern as module_registry's incremental columns above.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE custom_sources ADD COLUMN IF NOT EXISTS token_enc TEXT NOT NULL DEFAULT ''
+	`); err != nil {
+		return fmt.Errorf("db: ensure custom_sources.token_enc: %w", err)
+	}
+
 	// cosign_sig_url: added after the table's initial release. ADD COLUMN IF
 	// NOT EXISTS so this is a no-op on fresh installs (already in the CREATE
 	// TABLE above) and safely backfills existing installations on next boot.
@@ -2453,6 +2526,122 @@ func (p *Pool) EnsureModuleStoreSchema(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// ---- Custom Module Sources ---------------------------------------------------
+
+// CustomSourceRow is one row of custom_sources, decrypted and ready for
+// internal use. Token is the decrypted GitHub PAT (empty for a public repo
+// source) - callers exposing this over the API must NOT put it in a
+// response; see store.CustomSourceResponse's has_token bool instead.
+type CustomSourceRow struct {
+	ID      string
+	RepoURL string
+	Name    string
+	PubKey  string
+	Token   string
+	AddedBy string
+	AddedAt time.Time
+}
+
+// CreateCustomSource inserts a new custom module source. repoURL, name, and
+// token are encrypted at rest (see custom_sources' table comment); pubKeyPEM
+// is stored as plaintext (see the cosign_pubkey column comment). Both
+// pubKeyPEM and token may be empty - an empty token means a public repo, an
+// empty pubKeyPEM falls back to unsigned/unverified installs (see
+// modules.VerifyCosign).
+func (p *Pool) CreateCustomSource(ctx context.Context, repoURL, name, pubKeyPEM, token, addedBy string) (CustomSourceRow, error) {
+	encURL, err := crypto.Encrypt(p.masterKey, repoURL)
+	if err != nil {
+		return CustomSourceRow{}, fmt.Errorf("db: encrypt custom source repo_url: %w", err)
+	}
+	encName, err := crypto.Encrypt(p.masterKey, name)
+	if err != nil {
+		return CustomSourceRow{}, fmt.Errorf("db: encrypt custom source name: %w", err)
+	}
+	encToken, err := crypto.EncryptIfNotEmpty(p.masterKey, token)
+	if err != nil {
+		return CustomSourceRow{}, fmt.Errorf("db: encrypt custom source token: %w", err)
+	}
+	r := CustomSourceRow{RepoURL: repoURL, Name: name, PubKey: pubKeyPEM, Token: token, AddedBy: addedBy}
+	err = p.QueryRow(ctx, `
+		INSERT INTO custom_sources (repo_url_enc, name_enc, pubkey, token_enc, added_by)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, added_at
+	`, encURL, encName, pubKeyPEM, encToken, addedBy).Scan(&r.ID, &r.AddedAt)
+	if err != nil {
+		return CustomSourceRow{}, fmt.Errorf("db: create custom_source: %w", err)
+	}
+	return r, nil
+}
+
+// ListCustomSources returns all custom sources, oldest first, decrypted
+// (including Token - see CustomSourceRow's doc comment on why callers must
+// be careful not to leak it back out over the API).
+func (p *Pool) ListCustomSources(ctx context.Context) ([]CustomSourceRow, error) {
+	rows, err := p.Query(ctx, `
+		SELECT id, repo_url_enc, name_enc, pubkey, token_enc, added_by, added_at
+		FROM custom_sources
+		ORDER BY added_at ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("db: list custom_sources: %w", err)
+	}
+	defer rows.Close()
+
+	var out []CustomSourceRow
+	for rows.Next() {
+		var r CustomSourceRow
+		if err := rows.Scan(&r.ID, &r.RepoURL, &r.Name, &r.PubKey, &r.Token, &r.AddedBy, &r.AddedAt); err != nil {
+			return nil, fmt.Errorf("db: scan custom_source: %w", err)
+		}
+		var decErr error
+		if r.RepoURL, decErr = crypto.DecryptIfNotEmpty(p.masterKey, r.RepoURL); decErr != nil {
+			return nil, fmt.Errorf("db: decrypt custom_source repo_url %q: %w", r.ID, decErr)
+		}
+		if r.Name, decErr = crypto.DecryptIfNotEmpty(p.masterKey, r.Name); decErr != nil {
+			return nil, fmt.Errorf("db: decrypt custom_source name %q: %w", r.ID, decErr)
+		}
+		if r.Token, decErr = crypto.DecryptIfNotEmpty(p.masterKey, r.Token); decErr != nil {
+			return nil, fmt.Errorf("db: decrypt custom_source token %q: %w", r.ID, decErr)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// GetCustomSourceByRepoURL finds a custom source by its (plaintext) repo
+// URL. repo_url_enc can't be queried directly (GCM ciphertext is
+// non-deterministic per encryption, see crypto.Encrypt's random nonce), so
+// this decrypts-and-scans via ListCustomSources - fine at this table's scale
+// (an admin homelab has a handful of custom sources, not thousands). Used at
+// install/update time (modules.Install/Update) to resolve a private repo's
+// token fresh from the DB, since Entry/module_registry deliberately never
+// carry the token (see CustomSourceRow's doc comment).
+func (p *Pool) GetCustomSourceByRepoURL(ctx context.Context, repoURL string) (CustomSourceRow, bool, error) {
+	rows, err := p.ListCustomSources(ctx)
+	if err != nil {
+		return CustomSourceRow{}, false, err
+	}
+	for _, r := range rows {
+		if r.RepoURL == repoURL {
+			return r, true, nil
+		}
+	}
+	return CustomSourceRow{}, false, nil
+}
+
+// DeleteCustomSource removes a custom source by id. Does not remove the
+// module_registry rows it produced - store's next sync prunes those the
+// normal "no longer seen" way (see store.pruneStaleEntries), unless the
+// module is currently installed, in which case its registry metadata is kept
+// exactly like any other pruned-but-installed module.
+func (p *Pool) DeleteCustomSource(ctx context.Context, id string) (bool, error) {
+	tag, err := p.Exec(ctx, `DELETE FROM custom_sources WHERE id = $1`, id)
+	if err != nil {
+		return false, fmt.Errorf("db: delete custom_source %q: %w", id, err)
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 // ---- Installed Modules CRUD -------------------------------------------------

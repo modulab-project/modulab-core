@@ -154,6 +154,13 @@ const (
 	EventQuickLinkDeleted = "quicklink.deleted"
 	// Manual Module Store registry sync trigger, internal/store.
 	EventStoreSyncTriggered = "store.sync_triggered"
+	// Custom module source management (org-admin/super-admin), internal/store.
+	// Details includes the repo URL so a later audit review can see exactly
+	// which third-party source was trusted/removed and when - unlike most
+	// audited resources, custom_sources has no separate "list" UI of its own
+	// history once a row is deleted, so this is the only record that survives.
+	EventCustomSourceAdded   = "store.custom_source_added"
+	EventCustomSourceRemoved = "store.custom_source_removed"
 	// A per-client rate limit (login/callback/ai-chat/global/chat, see
 	// cmd/core/main.go's rateLimitMiddleware) was exceeded. ActorID is
 	// whatever the limiter bucketed by: the client IP for login/callback/

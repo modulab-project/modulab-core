@@ -558,6 +558,15 @@ func main() {
 	mux.HandleFunc("GET /v1/store", store.ListHandler(storeDeps, authDeps))
 	mux.HandleFunc("GET /v1/store/{name}", store.DetailHandler(storeDeps, authDeps))
 
+	// Custom module source management (admin brainstorm 2026-07-16): lets an
+	// org-admin/super-admin add arbitrary GitHub repos as a third Store
+	// source alongside official/community, HACS-style. Admin-only for both
+	// read and write - unlike GET /v1/store above, the source list itself
+	// (repo URLs, who added them) is not exposed to plain active sessions.
+	mux.HandleFunc("GET /v1/admin/store/custom-sources", store.ListCustomSourcesHandler(storeDeps, authDeps))
+	mux.HandleFunc("POST /v1/admin/store/custom-sources", store.AddCustomSourceHandler(storeDeps, authDeps))
+	mux.HandleFunc("DELETE /v1/admin/store/custom-sources/{id}", store.DeleteCustomSourceHandler(storeDeps, authDeps))
+
 	// Module management endpoints (spec section 4.6–4.9).
 	// List/detail: any active session. Install/uninstall/update/pin: org-admin+.
 	// Note: GET /v1/modules/updates is registered before GET /v1/modules/{name}
@@ -1571,7 +1580,7 @@ func systemInfoHandler(pool *db.Pool, valkeyClient *valkey.Client, cfg config.Co
 		// module's source_repo. version.Version has no leading "v" (see that
 		// constant's doc comment); GitHub release tags conventionally do, so
 		// both sides are normalized before comparing.
-		if latest, err := store.FetchLatestRelease(ctx, pool, "https://github.com/modulab-project/modulab-core"); err == nil && latest != "" {
+		if latest, err := store.FetchLatestRelease(ctx, pool, "https://github.com/modulab-project/modulab-core", ""); err == nil && latest != "" {
 			normalized := strings.TrimPrefix(strings.TrimSpace(latest), "v")
 			resp.LatestCoreVersion = normalized
 			resp.CoreUpdateAvailable = normalized != version.Version

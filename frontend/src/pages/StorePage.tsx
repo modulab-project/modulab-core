@@ -1,7 +1,7 @@
 // Module Store browse page (/admin/modules/store).
 // Admin-only. Shows all known modules from the registry cache (official + community).
 // Only org-admin/super-admin can access, install, or sync.
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -10,8 +10,12 @@ import {
   listInstalledModules,
   installModule,
   syncStore,
+  listCustomSources,
+  addCustomSource,
+  deleteCustomSource,
   type StoreEntry,
   type InstalledModule,
+  type CustomSource,
 } from "../lib/api";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
@@ -19,9 +23,10 @@ import { Logo } from "../components/AuthShell";
 import { isAdminRole } from "../lib/roles";
 import { safeHref } from "../lib/url";
 
-type SourceFilter = "all" | "official" | "community";
+type SourceFilter = "all" | "official" | "community" | "custom";
 
 const STORE_QUERY_KEY = ["module-store"] as const;
+const CUSTOM_SOURCES_QUERY_KEY = ["module-store", "custom-sources"] as const;
 
 interface StoreData {
   entries: StoreEntry[];
@@ -41,6 +46,7 @@ export default function StorePage() {
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [busyName, setBusyName] = useState<string | null>(null);
+  const [showCustomDialog, setShowCustomDialog] = useState(false);
 
   const isAdmin = !!session && isAdminRole(session.role);
 
@@ -79,6 +85,12 @@ export default function StorePage() {
   const installed = data?.installed ?? new Map<string, InstalledModule>();
   const lastSynced = data?.lastSynced ?? null;
   const error = hasLoadError ? t("store.load_error") : null;
+
+  const { data: customSources } = useQuery({
+    queryKey: CUSTOM_SOURCES_QUERY_KEY,
+    queryFn: listCustomSources,
+    enabled: !loading && isAdmin,
+  });
 
   async function handleSync() {
     setSyncing(true);
@@ -155,17 +167,38 @@ export default function StorePage() {
             )}
           </div>
           {isAdmin && (
-            <button
-              type="button"
-              onClick={handleSync}
-              disabled={syncing}
-              className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:hover:bg-gray-900"
-            >
-              <i className={`ti ti-refresh text-[14px] ${syncing ? "animate-spin" : ""}`} />
-              {syncing ? t("store.syncing") : t("store.sync")}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowCustomDialog(true)}
+                className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-900"
+              >
+                <i className="ti ti-plus text-[14px]" />
+                {t("store.custom.manage")}
+              </button>
+              <button
+                type="button"
+                onClick={handleSync}
+                disabled={syncing}
+                className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:hover:bg-gray-900"
+              >
+                <i className={`ti ti-refresh text-[14px] ${syncing ? "animate-spin" : ""}`} />
+                {syncing ? t("store.syncing") : t("store.sync")}
+              </button>
+            </div>
           )}
         </div>
+
+        {showCustomDialog && (
+          <CustomSourcesDialog
+            sources={customSources ?? []}
+            onClose={() => setShowCustomDialog(false)}
+            onChanged={() => {
+              queryClient.invalidateQueries({ queryKey: CUSTOM_SOURCES_QUERY_KEY });
+              queryClient.invalidateQueries({ queryKey: STORE_QUERY_KEY });
+            }}
+          />
+        )}
 
         {syncMsg && (
           <div className="mb-4 rounded-lg border border-teal-200 bg-teal-50 px-4 py-2 text-sm text-teal-700 dark:border-teal-800 dark:bg-teal-950 dark:text-teal-300">
@@ -188,7 +221,7 @@ export default function StorePage() {
 
         {/* Source filter tabs */}
         <div className="mb-3 flex gap-1 rounded-xl bg-gray-100 p-1 dark:bg-gray-900">
-          {(["all", "official", "community"] as SourceFilter[]).map((f) => (
+          {(["all", "official", "community", "custom"] as SourceFilter[]).map((f) => (
             <button
               key={f}
               type="button"
@@ -276,6 +309,7 @@ export default function StorePage() {
                       </span>
                     )}
                     <SourceBadge source={entry.source} />
+                    {entry.source === "custom" && <UnverifiedBadge hasPubKey={!!entry.cosign_pubkey} />}
                     {entry.category && <CategoryBadge category={entry.category} />}
                   </div>
 
@@ -364,16 +398,235 @@ function ModuleLogo({ url, name }: { url?: string; name: string }) {
 
 function SourceBadge({ source }: { source: string }) {
   const isOfficial = source === "official";
+  const isCustom = source === "custom";
   return (
     <span
       className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
         isOfficial
           ? "bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-300"
-          : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+          : isCustom
+            ? "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
+            : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
       }`}
     >
       {source}
     </span>
+  );
+}
+
+// Shown on every "custom" entry — this source was never reviewed by ModuLab,
+// unlike official/community. hasPubKey just means the admin entered a
+// signing key when adding the source (so installer.go CAN verify it); the
+// actual pass/fail is only known after install, see
+// installed_modules.cosign_verified.
+function UnverifiedBadge({ hasPubKey }: { hasPubKey: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <span
+      title={t(hasPubKey ? "store.custom.signed_hint" : "store.custom.unverified_hint")}
+      className="flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-medium text-red-700 dark:bg-red-950 dark:text-red-300"
+    >
+      <i className={`ti ${hasPubKey ? "ti-shield-check" : "ti-shield-exclamation"} text-[11px]`} />
+      {t(hasPubKey ? "store.custom.signed" : "store.custom.unverified")}
+    </span>
+  );
+}
+
+// Admin dialog: manage custom module sources (list existing, add new, delete).
+// Kept as a plain centered overlay (no portal/library) - matches the rest of
+// the admin UI's lightweight inline-dialog pattern.
+function CustomSourcesDialog({
+  sources,
+  onClose,
+  onChanged,
+}: {
+  sources: CustomSource[];
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const { t } = useTranslation();
+  const [repoUrl, setRepoUrl] = useState("");
+  const [name, setName] = useState("");
+  const [pubkey, setPubkey] = useState("");
+  const [token, setToken] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  async function handleAdd(e: FormEvent) {
+    e.preventDefault();
+    setFormError(null);
+    setSaving(true);
+    try {
+      await addCustomSource(repoUrl.trim(), name.trim(), pubkey.trim(), token.trim());
+      setRepoUrl("");
+      setName("");
+      setPubkey("");
+      setToken("");
+      onChanged();
+    } catch (err) {
+      setFormError((err as Error).message || t("store.custom.add_error"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(id: string) {
+    setDeletingId(id);
+    try {
+      await deleteCustomSource(id);
+      onChanged();
+    } catch {
+      // Best-effort - the dialog stays open so the admin can retry.
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 dark:bg-gray-900">
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-base font-semibold">{t("store.custom.title")}</h2>
+            <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+              {t("store.custom.subtitle")}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+          >
+            <i className="ti ti-x text-[16px]" />
+          </button>
+        </div>
+
+        {/* Existing sources */}
+        {sources.length > 0 && (
+          <div className="mb-4 flex flex-col gap-2">
+            {sources.map((s) => (
+              <div
+                key={s.id}
+                className="flex items-center justify-between gap-2 rounded-xl border border-gray-200 px-3 py-2 dark:border-gray-800"
+              >
+                <div className="min-w-0">
+                  <p className="flex items-center gap-1.5 truncate text-sm font-medium">
+                    {s.name}
+                    {s.has_token && (
+                      <i
+                        className="ti ti-lock text-[12px] text-gray-400"
+                        title={t("store.custom.private")}
+                      />
+                    )}
+                  </p>
+                  <p className="truncate text-xs text-gray-500 dark:text-gray-400">{s.repo_url}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleDelete(s.id)}
+                  disabled={deletingId === s.id}
+                  className="flex-none rounded-lg p-1.5 text-red-500 hover:bg-red-50 disabled:opacity-50 dark:hover:bg-red-950"
+                  title={t("store.custom.remove")}
+                >
+                  <i className={`ti ${deletingId === s.id ? "ti-loader-2 animate-spin" : "ti-trash"} text-[15px]`} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        {sources.length === 0 && (
+          <p className="mb-4 text-xs text-gray-400 dark:text-gray-500">{t("store.custom.empty")}</p>
+        )}
+
+        {/* Warning */}
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+          <i className="ti ti-alert-triangle mr-1 text-[13px]" />
+          {t("store.custom.warning")}
+        </div>
+
+        {/* Add form */}
+        <form onSubmit={handleAdd} className="flex flex-col gap-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
+              {t("store.custom.repo_url")}
+            </label>
+            <input
+              type="text"
+              required
+              value={repoUrl}
+              onChange={(e) => setRepoUrl(e.target.value)}
+              placeholder="https://github.com/owner/repo"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-950"
+              style={{ fontSize: 16 }}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
+              {t("store.custom.name")}
+            </label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="owner/repo"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-950"
+              style={{ fontSize: 16 }}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
+              {t("store.custom.pubkey")}
+            </label>
+            <textarea
+              value={pubkey}
+              onChange={(e) => setPubkey(e.target.value)}
+              placeholder="-----BEGIN PUBLIC KEY-----…"
+              rows={3}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-xs outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-950"
+              style={{ fontSize: 16 }}
+            />
+            <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500">
+              {t("store.custom.pubkey_hint")}
+            </p>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
+              {t("store.custom.token")}
+            </label>
+            <input
+              type="password"
+              autoComplete="off"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              placeholder="ghp_… / github_pat_…"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-xs outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-950"
+              style={{ fontSize: 16 }}
+            />
+            <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500">
+              {t("store.custom.token_hint")}
+            </p>
+          </div>
+
+          {formError && <p className="text-xs text-red-600 dark:text-red-400">{formError}</p>}
+
+          <button
+            type="submit"
+            disabled={saving}
+            className="flex items-center justify-center gap-1.5 rounded-lg bg-teal-600 px-3 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
+          >
+            {saving ? (
+              <>
+                <i className="ti ti-loader-2 animate-spin text-[14px]" />
+                {t("store.custom.adding")}
+              </>
+            ) : (
+              t("store.custom.add")
+            )}
+          </button>
+        </form>
+      </div>
+    </div>
   );
 }
 

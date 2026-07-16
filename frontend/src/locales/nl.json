@@ -893,7 +893,8 @@
     "filter": {
       "all": "Alle",
       "official": "Officieel",
-      "community": "Community"
+      "community": "Community",
+      "custom": "Eigen"
     },
     "search_placeholder": "Modules zoeken…",
     "category_all": "Alle categorieën",
@@ -903,7 +904,29 @@
       "network": "Netwerk"
     },
     "no_results": "Geen modules gevonden.",
-    "install_error": "Installatie mislukt"
+    "install_error": "Installatie mislukt",
+    "custom": {
+      "manage": "Eigen bronnen",
+      "title": "Eigen modulebronnen",
+      "subtitle": "Voeg je eigen GitHub-repositories toe als modulebron, naast het officiële register en de community.",
+      "empty": "Nog geen eigen bronnen toegevoegd.",
+      "warning": "Eigen bronnen worden niet door ModuLab gecontroleerd. Voeg alleen repositories toe die je vertrouwt — geïnstalleerde code draait met dezelfde rechten als elke andere module.",
+      "repo_url": "GitHub-repository-URL",
+      "name": "Weergavenaam (optioneel)",
+      "pubkey": "Cosign publieke sleutel (optioneel)",
+      "pubkey_hint": "Plak de Cosign publieke sleutel (PEM) van de repo-maintainer om handtekeningverificatie in te schakelen. Laat leeg voor een ongesigneerde/niet-geverifieerde installatie.",
+      "token": "GitHub-toegangstoken (optioneel)",
+      "token_hint": "Alleen nodig voor privérepositories. Zowel classic als fine-grained tokens worden ondersteund — leestoegang tot inhoud en releases volstaat. Wordt versleuteld opgeslagen en nooit meer getoond.",
+      "add": "Bron toevoegen",
+      "adding": "Toevoegen…",
+      "add_error": "Bron kon niet worden toegevoegd",
+      "remove": "Bron verwijderen",
+      "private": "Privérepository (token opgeslagen)",
+      "signed": "verifieerbaar",
+      "signed_hint": "Voor deze eigen bron is een publieke sleutel opgeslagen — de release-handtekening kan worden geverifieerd.",
+      "unverified": "niet geverifieerd",
+      "unverified_hint": "Voor deze eigen bron is geen publieke sleutel opgeslagen — installatie zonder handtekeningverificatie."
+    }
   },
   "modules": {
     "title": "Geïnstalleerde modules",

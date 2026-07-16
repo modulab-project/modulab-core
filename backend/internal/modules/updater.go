@@ -58,8 +58,12 @@ func Update(ctx context.Context, d Deps, entry store.Entry) error {
 	if err := os.MkdirAll(cacheDir, 0o750); err != nil {
 		return fmt.Errorf("modules: update %q: create rollback cache dir: %w", entry.Name, err)
 	}
+	// Resolved once, fresh from custom_sources - see resolveCustomSourceToken's
+	// doc comment (installer.go) for why this is never carried on entry itself.
+	token := resolveCustomSourceToken(ctx, d.DB, entry.Source, entry.SourceRepo, entry.Name, "update")
+
 	cachedZip := filepath.Join(cacheDir, entry.Name+"-"+row.Version+".zip")
-	if err := cacheCurrentZIP(ctx, d.DB, row.ReleaseURL, cachedZip, maxZIPBytes); err != nil {
+	if err := cacheCurrentZIP(ctx, d.DB, row.ReleaseURL, cachedZip, maxZIPBytes, token); err != nil {
 		// Not fatal — we'll proceed without rollback capability and log a warning.
 		log.Printf("modules: update %q: warning: could not cache rollback zip: %v", entry.Name, err)
 		cachedZip = ""
@@ -102,8 +106,8 @@ func Update(ctx context.Context, d Deps, entry store.Entry) error {
 	dlCtx, dlCancel := context.WithTimeout(ctx, installDownloadTimeout)
 	defer dlCancel()
 
-	go func() { zipCh <- dlResult{downloadFile(dlCtx, zipURL, zipPath, maxZIPBytes)} }()
-	go func() { hashCh <- dlResult{downloadFile(dlCtx, sha256URL, sha256Path, maxSHA256FileBytes)} }()
+	go func() { zipCh <- dlResult{downloadFile(dlCtx, zipURL, zipPath, maxZIPBytes, token)} }()
+	go func() { hashCh <- dlResult{downloadFile(dlCtx, sha256URL, sha256Path, maxSHA256FileBytes, token)} }()
 
 	if r := <-zipCh; r.err != nil {
 		return fmt.Errorf("modules: update %q: download zip: %w", entry.Name, r.err)
@@ -132,18 +136,20 @@ func Update(ctx context.Context, d Deps, entry store.Entry) error {
 	// discarded, same gap as the install path had.
 	cosignVerified := false
 	if entry.CosignSigURL != "" {
-		if err := downloadFile(dlCtx, entry.CosignSigURL, sigPath, maxSigFileBytes); err != nil {
+		if err := downloadFile(dlCtx, entry.CosignSigURL, sigPath, maxSigFileBytes, token); err != nil {
 			return fmt.Errorf("modules: update %q: download cosign bundle: %w", entry.Name, err)
 		}
-		ok, err := VerifyCosign(zipPath, sigPath, d.CosignBin)
+		ok, err := VerifyCosign(zipPath, sigPath, entry.CosignPubKey, d.CosignBin)
 		if err != nil {
 			return fmt.Errorf("modules: update %q: cosign verify: %w", entry.Name, err)
 		}
 		cosignVerified = ok
 	} else if entry.Source != "official" {
-		// Community: best-effort with conventional .sig path
-		if dlErr := downloadFile(dlCtx, sigURL, sigPath, maxSigFileBytes); dlErr == nil {
-			ok, err := VerifyCosign(zipPath, sigPath, d.CosignBin)
+		// Community/custom: best-effort with conventional .sig path.
+		// entry.CosignPubKey is only set for source="custom" (admin-entered
+		// key) - see installer.go's Install for the matching comment.
+		if dlErr := downloadFile(dlCtx, sigURL, sigPath, maxSigFileBytes, token); dlErr == nil {
+			ok, err := VerifyCosign(zipPath, sigPath, entry.CosignPubKey, d.CosignBin)
 			if err == nil {
 				cosignVerified = ok
 			} else {
@@ -336,11 +342,12 @@ func (d Deps) rollback(ctx context.Context, name, cachedZip string, origErr erro
 // cacheCurrentZIP re-downloads the currently installed module ZIP and saves it
 // to path. Used as a rollback snapshot before an update begins. maxBytes is
 // the caller-resolved max_module_zip_bytes value (see MaxModuleZIPBytes).
-func cacheCurrentZIP(ctx context.Context, pool *db.Pool, releaseURL, path string, maxBytes int64) error {
+// token is the same custom-source PAT resolved once by the caller (Update).
+func cacheCurrentZIP(ctx context.Context, pool *db.Pool, releaseURL, path string, maxBytes int64, token string) error {
 	installDownloadTimeout := time.Duration(InstallDownloadTimeoutSeconds(ctx, pool)) * time.Second
 	dlCtx, cancel := context.WithTimeout(ctx, installDownloadTimeout)
 	defer cancel()
-	return downloadFile(dlCtx, releaseURL, path, maxBytes)
+	return downloadFile(dlCtx, releaseURL, path, maxBytes, token)
 }
 
 // updateInstalledModuleRecord patches the version, tier, sha256, release_url,

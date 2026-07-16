@@ -238,6 +238,15 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 	sha256URL := zipURL + ".sha256"
 	sigURL := zipURL + ".sig"
 
+	// A private custom source needs its GitHub PAT on every download below.
+	// Resolved fresh from custom_sources here rather than carried on entry -
+	// module_registry (what entry is cached from) never stores credentials,
+	// see db.CustomSourceRow's doc comment. "" for official/community and for
+	// a custom source added without a token (public repo) - downloadFile
+	// treats an empty token as "no Authorization header", same as before this
+	// existed.
+	token := resolveCustomSourceToken(ctx, d.DB, entry.Source, entry.SourceRepo, entry.Name, "install")
+
 	// ── 3. Download ZIP + SHA256 in parallel ──────────────────────────────
 	tmpDir, err := os.MkdirTemp("", "modulab-install-"+entry.Name+"-*")
 	if err != nil {
@@ -261,8 +270,8 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 	dlCtx, dlCancel := context.WithTimeout(ctx, installDownloadTimeout)
 	defer dlCancel()
 
-	go func() { zipCh <- dlResult{downloadFile(dlCtx, zipURL, zipPath, maxZIPBytes)} }()
-	go func() { hashCh <- dlResult{downloadFile(dlCtx, sha256URL, sha256Path, maxSHA256FileBytes)} }()
+	go func() { zipCh <- dlResult{downloadFile(dlCtx, zipURL, zipPath, maxZIPBytes, token)} }()
+	go func() { hashCh <- dlResult{downloadFile(dlCtx, sha256URL, sha256Path, maxSHA256FileBytes, token)} }()
 
 	if r := <-zipCh; r.err != nil {
 		return fmt.Errorf("modules: install %q: download zip: %w", entry.Name, r.err)
@@ -293,19 +302,23 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 	cosignSkipped := false
 	if entry.CosignSigURL != "" {
 		// Bundle URL explicitly provided — download and verify.
-		if err := downloadFile(dlCtx, entry.CosignSigURL, sigPath, maxSigFileBytes); err != nil {
+		if err := downloadFile(dlCtx, entry.CosignSigURL, sigPath, maxSigFileBytes, token); err != nil {
 			return fmt.Errorf("modules: install %q: download cosign bundle: %w", entry.Name, err)
 		}
-		ok, err := VerifyCosign(zipPath, sigPath, d.CosignBin)
+		ok, err := VerifyCosign(zipPath, sigPath, entry.CosignPubKey, d.CosignBin)
 		if err != nil {
 			return fmt.Errorf("modules: install %q: cosign verify: %w", entry.Name, err)
 		}
 		cosignVerified = ok
 	} else if entry.Source != "official" {
-		// Community modules without explicit sig URL: try the conventional .sig
-		// path as a best-effort, proceed even if absent.
-		if dlErr := downloadFile(dlCtx, sigURL, sigPath, maxSigFileBytes); dlErr == nil {
-			ok, err := VerifyCosign(zipPath, sigPath, d.CosignBin)
+		// Community/custom modules without explicit sig URL: try the
+		// conventional .sig path as a best-effort, proceed even if absent.
+		// entry.CosignPubKey is only ever non-empty for source="custom" (the
+		// admin-entered key for that repo); empty for community, which falls
+		// back to the embedded official key inside VerifyCosign and - as
+		// expected - will not verify against it, ending up cosignSkipped.
+		if dlErr := downloadFile(dlCtx, sigURL, sigPath, maxSigFileBytes, token); dlErr == nil {
+			ok, err := VerifyCosign(zipPath, sigPath, entry.CosignPubKey, d.CosignBin)
 			if err == nil {
 				cosignVerified = ok
 			} else {
@@ -442,14 +455,41 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+// resolveCustomSourceToken looks up the GitHub PAT for a private custom
+// source, or "" for anything else (official, community, or a custom source
+// added without a token). Errors are logged and swallowed, not returned -
+// worst case a private repo's download 404s downstream with a clear error,
+// same failure mode as a token that was simply never configured; this must
+// never abort an install/update over a lookup hiccup.
+func resolveCustomSourceToken(ctx context.Context, pool *db.Pool, source, sourceRepo, name, action string) string {
+	if source != "custom" {
+		return ""
+	}
+	row, found, err := pool.GetCustomSourceByRepoURL(ctx, sourceRepo)
+	if err != nil {
+		log.Printf("modules: %s %q: resolve custom source token: %v", action, name, err)
+		return ""
+	}
+	if !found {
+		return ""
+	}
+	return row.Token
+}
+
 // downloadFile fetches url and writes the body to path. Returns an error if
-// the response is not 2xx or the body exceeds maxBytes.
-func downloadFile(ctx context.Context, url, path string, maxBytes int64) error {
+// the response is not 2xx or the body exceeds maxBytes. token is an optional
+// GitHub PAT (see resolveCustomSourceToken) - sent as an Authorization
+// header when non-empty, so a private custom source's release assets
+// resolve instead of 404ing exactly like the public-source case.
+func downloadFile(ctx context.Context, url, path string, maxBytes int64, token string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("User-Agent", "modulab-core/1 (https://github.com/modulab-project/modulab-core)")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

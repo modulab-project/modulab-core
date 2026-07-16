@@ -73,31 +73,44 @@ func VerifySHA256(zipPath, expectedHex string) (string, error) {
 	return got, nil
 }
 
-// VerifyCosign verifies the Cosign blob signature of zipPath against the
-// embedded official public key. bundlePath is the local path to the downloaded
-// Sigstore bundle file (JSON, produced by `cosign sign-blob --bundle`).
-// cosignBin is the path to the cosign binary (use CosignBinaryDefault
-// when empty).
+// VerifyCosign verifies the Cosign blob signature of zipPath against
+// pubKeyPEM. bundlePath is the local path to the downloaded Sigstore bundle
+// file (JSON, produced by `cosign sign-blob --bundle`). cosignBin is the path
+// to the cosign binary (use CosignBinaryDefault when empty).
+//
+// pubKeyPEM may be empty, in which case the embedded official public key is
+// used - this is the case for every official/community entry (store.Entry.
+// CosignPubKey is only ever set for source="custom", where the admin
+// manually entered the repo's own key when adding the source - deliberate
+// choice over auto-reading a cosign.pub from the repo, to avoid
+// trust-on-first-use). Passing a custom repo's own key here is what lets a
+// self-signed custom module verify as ✅ instead of always falling through
+// to the unsigned/unverified path.
 //
 // Returns:
 //   - (true, nil)          — signature verified OK
-//   - (false, ErrNoPublicKey) — embedded key is still the placeholder
+//   - (false, ErrNoPublicKey) — resolved key has no PEM header (embedded
+//     placeholder, or an admin saved a malformed custom key)
 //   - (false, err)         — signature check failed or cosign not found
 //
 // For official modules this must return (true, nil) before installation proceeds.
-// Community modules may choose to call this and present a ✅/⚠️ badge based on
-// the result rather than blocking installation.
-func VerifyCosign(zipPath, bundlePath, cosignBin string) (bool, error) {
+// Community and custom modules may choose to call this and present a ✅/⚠️
+// badge based on the result rather than blocking installation.
+func VerifyCosign(zipPath, bundlePath, pubKeyPEM, cosignBin string) (bool, error) {
 	if cosignBin == "" {
 		cosignBin = CosignBinaryDefault
 	}
+	if pubKeyPEM == "" {
+		pubKeyPEM = officialPublicKey
+	}
 
-	// Guard: refuse to verify if the embedded key is still the placeholder.
-	if !strings.Contains(officialPublicKey, "-----BEGIN PUBLIC KEY-----") {
+	// Guard: refuse to verify if the resolved key has no PEM header (embedded
+	// placeholder, or a malformed custom-source key).
+	if !strings.Contains(pubKeyPEM, "-----BEGIN PUBLIC KEY-----") {
 		return false, ErrNoPublicKey
 	}
 
-	// Write the embedded public key to a temp file so cosign can read it.
+	// Write the resolved public key to a temp file so cosign can read it.
 	keyFile, err := os.CreateTemp("", "modulab-cosign-pubkey-*.pem")
 	if err != nil {
 		return false, fmt.Errorf("modules: cosign: create temp key file: %w", err)
@@ -115,7 +128,7 @@ func VerifyCosign(zipPath, bundlePath, cosignBin string) (bool, error) {
 		}
 	}()
 
-	if _, err := keyFile.WriteString(officialPublicKey); err != nil {
+	if _, err := keyFile.WriteString(pubKeyPEM); err != nil {
 		return false, fmt.Errorf("modules: cosign: write key: %w", err)
 	}
 	// Closed explicitly (rather than relying on the deferred close above)

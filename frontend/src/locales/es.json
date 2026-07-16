@@ -893,7 +893,8 @@
     "filter": {
       "all": "Todos",
       "official": "Oficial",
-      "community": "Comunidad"
+      "community": "Comunidad",
+      "custom": "Propias"
     },
     "search_placeholder": "Buscar módulos…",
     "category_all": "Todas las categorías",
@@ -903,7 +904,29 @@
       "network": "Red"
     },
     "no_results": "Ningún módulo coincide con la búsqueda.",
-    "install_error": "Error al instalar"
+    "install_error": "Error al instalar",
+    "custom": {
+      "manage": "Fuentes propias",
+      "title": "Fuentes de módulos propias",
+      "subtitle": "Añada sus propios repositorios de GitHub como fuente de módulos, junto al registro oficial y de la comunidad.",
+      "empty": "Aún no se han añadido fuentes propias.",
+      "warning": "Las fuentes propias no son revisadas por ModuLab. Añada solo repositorios de confianza — el código instalado se ejecuta con los mismos permisos que cualquier otro módulo.",
+      "repo_url": "URL del repositorio de GitHub",
+      "name": "Nombre a mostrar (opcional)",
+      "pubkey": "Clave pública de Cosign (opcional)",
+      "pubkey_hint": "Pegue la clave pública de Cosign (PEM) del mantenedor del repositorio para habilitar la verificación de firma. Déjelo vacío para instalar sin firmar/verificar.",
+      "token": "Token de acceso de GitHub (opcional)",
+      "token_hint": "Solo necesario para repositorios privados. Se admiten tokens clásicos y de grano fino — con acceso de lectura a contenidos y versiones basta. Se guarda cifrado y no se vuelve a mostrar.",
+      "add": "Añadir fuente",
+      "adding": "Añadiendo…",
+      "add_error": "No se pudo añadir la fuente",
+      "remove": "Eliminar fuente",
+      "private": "Repositorio privado (token guardado)",
+      "signed": "verificable",
+      "signed_hint": "Esta fuente propia tiene una clave pública guardada — su firma de versión puede verificarse.",
+      "unverified": "sin verificar",
+      "unverified_hint": "Esta fuente propia no tiene una clave pública guardada — se instala sin verificación de firma."
+    }
   },
   "modules": {
     "title": "Módulos instalados",

@@ -29,12 +29,20 @@ type Deps struct {
 // Entry is one row of the module_registry table, ready for the API response.
 type Entry struct {
 	Name         string `json:"name"`
-	Source       string `json:"source"` // "official" | "community"
+	Source       string `json:"source"` // "official" | "community" | "custom"
 	SourceRepo   string `json:"source_repo"`
 	ReleaseAsset string `json:"release_asset"`
 	// CosignSigURL is the URL of the Cosign signature file. Empty string means
 	// no signature is available and Cosign verification should be skipped.
-	CosignSigURL  string `json:"cosign_sig_url,omitempty"`
+	CosignSigURL string `json:"cosign_sig_url,omitempty"`
+	// CosignPubKey is the Cosign public key (PEM text) to verify this entry's
+	// signature against. Only ever set for source="custom" - the admin
+	// manually enters it when adding the custom source (see
+	// db.CreateCustomSource; deliberately NOT auto-read from the repo itself,
+	// to avoid trust-on-first-use - a repo compromise that swaps its key
+	// can't silently take over verification). Empty for official/community,
+	// which always verify against the embedded key in modules.VerifyCosign.
+	CosignPubKey  string `json:"cosign_pubkey,omitempty"`
 	Category      string `json:"category"`
 	LatestVersion string `json:"latest_version,omitempty"`
 	// Description is a map of language code → short blurb, taken from the
@@ -92,13 +100,14 @@ func UpsertEntry(ctx context.Context, pool *db.Pool, e Entry) error {
 	}
 	_, err := pool.Exec(ctx, `
 		INSERT INTO module_registry
-		    (name, source, source_repo, release_asset, cosign_sig_url, category, latest_version, description, display_name, logo_url, browse_url, manifest_cache, synced_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now())
+		    (name, source, source_repo, release_asset, cosign_sig_url, cosign_pubkey, category, latest_version, description, display_name, logo_url, browse_url, manifest_cache, synced_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now())
 		ON CONFLICT (name) DO UPDATE SET
 		    source         = EXCLUDED.source,
 		    source_repo    = EXCLUDED.source_repo,
 		    release_asset  = EXCLUDED.release_asset,
 		    cosign_sig_url = EXCLUDED.cosign_sig_url,
+		    cosign_pubkey  = EXCLUDED.cosign_pubkey,
 		    category       = EXCLUDED.category,
 		    latest_version = EXCLUDED.latest_version,
 		    description    = EXCLUDED.description,
@@ -107,7 +116,7 @@ func UpsertEntry(ctx context.Context, pool *db.Pool, e Entry) error {
 		    browse_url     = EXCLUDED.browse_url,
 		    manifest_cache = EXCLUDED.manifest_cache,
 		    synced_at      = now()
-	`, e.Name, e.Source, e.SourceRepo, e.ReleaseAsset, nullableString(e.CosignSigURL), e.Category,
+	`, e.Name, e.Source, e.SourceRepo, e.ReleaseAsset, nullableString(e.CosignSigURL), nullableString(e.CosignPubKey), e.Category,
 		nullableString(e.LatestVersion), description, displayName, nullableString(e.LogoURL),
 		nullableString(e.BrowseURL), manifest)
 	if err != nil {
@@ -121,7 +130,7 @@ func UpsertEntry(ctx context.Context, pool *db.Pool, e Entry) error {
 // category ("" for all).
 func ListEntries(ctx context.Context, pool *db.Pool, source, category string) ([]Entry, error) {
 	query := `
-		SELECT name, source, source_repo, release_asset, COALESCE(cosign_sig_url, ''), category,
+		SELECT name, source, source_repo, release_asset, COALESCE(cosign_sig_url, ''), COALESCE(cosign_pubkey, ''), category,
 		       COALESCE(latest_version, ''), description, display_name, COALESCE(logo_url, ''),
 		       COALESCE(browse_url, ''), manifest_cache, synced_at
 		FROM module_registry
@@ -139,7 +148,7 @@ func ListEntries(ctx context.Context, pool *db.Pool, source, category string) ([
 	for rows.Next() {
 		var e Entry
 		var manifest, description, displayName []byte
-		if err := rows.Scan(&e.Name, &e.Source, &e.SourceRepo, &e.ReleaseAsset, &e.CosignSigURL,
+		if err := rows.Scan(&e.Name, &e.Source, &e.SourceRepo, &e.ReleaseAsset, &e.CosignSigURL, &e.CosignPubKey,
 			&e.Category, &e.LatestVersion, &description, &displayName, &e.LogoURL, &e.BrowseURL,
 			&manifest, &e.SyncedAt); err != nil {
 			return nil, fmt.Errorf("store: scan entry: %w", err)
@@ -166,12 +175,12 @@ func GetEntry(ctx context.Context, pool *db.Pool, name string) (Entry, bool, err
 	var e Entry
 	var manifest, description, displayName []byte
 	err := pool.QueryRow(ctx, `
-		SELECT name, source, source_repo, release_asset, COALESCE(cosign_sig_url, ''), category,
+		SELECT name, source, source_repo, release_asset, COALESCE(cosign_sig_url, ''), COALESCE(cosign_pubkey, ''), category,
 		       COALESCE(latest_version, ''), description, display_name, COALESCE(logo_url, ''),
 		       COALESCE(browse_url, ''), manifest_cache, synced_at
 		FROM module_registry
 		WHERE name = $1
-	`, name).Scan(&e.Name, &e.Source, &e.SourceRepo, &e.ReleaseAsset, &e.CosignSigURL,
+	`, name).Scan(&e.Name, &e.Source, &e.SourceRepo, &e.ReleaseAsset, &e.CosignSigURL, &e.CosignPubKey,
 		&e.Category, &e.LatestVersion, &description, &displayName, &e.LogoURL, &e.BrowseURL,
 		&manifest, &e.SyncedAt)
 	if err != nil {
@@ -204,6 +213,50 @@ func LastSyncedAt(ctx context.Context, pool *db.Pool) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("store: last synced at: %w", err)
 	}
 	return t, nil
+}
+
+// DeleteEntriesBySourceRepo removes module_registry rows for a given
+// source_repo (source='custom' only - official/community never call this),
+// skipping any that are currently installed so their metadata stays
+// available (same "keep if installed" rule as pruneStaleEntries in sync.go).
+// Called right after an admin deletes a custom_sources row, so the Store list
+// reflects the removal immediately instead of waiting for the next sync.
+func DeleteEntriesBySourceRepo(ctx context.Context, pool *db.Pool, sourceRepo string) error {
+	rows, err := pool.Query(ctx, `
+		SELECT name FROM module_registry WHERE source = 'custom' AND source_repo = $1
+	`, sourceRepo)
+	if err != nil {
+		return fmt.Errorf("store: list entries for source_repo %q: %w", sourceRepo, err)
+	}
+	var names []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			rows.Close()
+			return fmt.Errorf("store: scan entry name: %w", err)
+		}
+		names = append(names, n)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for _, name := range names {
+		var installed bool
+		if err := pool.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM installed_modules WHERE name = $1)`, name,
+		).Scan(&installed); err != nil {
+			return fmt.Errorf("store: check installed %q: %w", name, err)
+		}
+		if installed {
+			continue
+		}
+		if _, err := pool.Exec(ctx, `DELETE FROM module_registry WHERE name = $1`, name); err != nil {
+			return fmt.Errorf("store: delete entry %q: %w", name, err)
+		}
+	}
+	return nil
 }
 
 // nullableString returns nil when s is empty so Postgres stores NULL instead

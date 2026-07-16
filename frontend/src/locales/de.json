@@ -893,7 +893,8 @@
     "filter": {
       "all": "Alle",
       "official": "Offiziell",
-      "community": "Community"
+      "community": "Community",
+      "custom": "Eigene"
     },
     "search_placeholder": "Module durchsuchen…",
     "category_all": "Alle Kategorien",
@@ -903,7 +904,29 @@
       "network": "Netzwerk"
     },
     "no_results": "Keine Module gefunden.",
-    "install_error": "Installation fehlgeschlagen"
+    "install_error": "Installation fehlgeschlagen",
+    "custom": {
+      "manage": "Eigene Quellen",
+      "title": "Eigene Modul-Quellen",
+      "subtitle": "Eigene GitHub-Repositories als Modul-Quelle hinzufügen, zusätzlich zum offiziellen Verzeichnis und der Community.",
+      "empty": "Noch keine eigenen Quellen hinzugefügt.",
+      "warning": "Eigene Quellen werden nicht von ModuLab geprüft. Nur Repositories hinzufügen, denen du vertraust – installierter Code läuft mit denselben Rechten wie jedes andere Modul.",
+      "repo_url": "GitHub-Repository-URL",
+      "name": "Anzeigename (optional)",
+      "pubkey": "Cosign Public Key (optional)",
+      "pubkey_hint": "Den Cosign Public Key (PEM) des Repo-Maintainers einfügen, um die Signaturprüfung zu aktivieren. Leer lassen für unsignierte/unverifizierte Installation.",
+      "token": "GitHub Access Token (optional)",
+      "token_hint": "Nur für private Repositories nötig. Classic- und Fine-grained-Token werden beide unterstützt – Lesezugriff auf Contents und Releases genügt. Wird verschlüsselt gespeichert und nie wieder angezeigt.",
+      "add": "Quelle hinzufügen",
+      "adding": "Wird hinzugefügt…",
+      "add_error": "Quelle konnte nicht hinzugefügt werden",
+      "remove": "Quelle entfernen",
+      "private": "Privates Repository (Token hinterlegt)",
+      "signed": "signierbar",
+      "signed_hint": "Für diese eigene Quelle ist ein Public Key hinterlegt – die Release-Signatur kann geprüft werden.",
+      "unverified": "unverifiziert",
+      "unverified_hint": "Für diese eigene Quelle ist kein Public Key hinterlegt – Installation ohne Signaturprüfung."
+    }
   },
   "modules": {
     "title": "Installierte Module",

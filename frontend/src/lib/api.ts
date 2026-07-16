@@ -1226,7 +1226,7 @@ export function updateUserPrefs(prefs: Partial<UserPrefs>): Promise<void> {
 // Mirrors store.Entry in backend/internal/store/registry.go.
 export interface StoreEntry {
   name: string;
-  source: "official" | "community";
+  source: "official" | "community" | "custom";
   source_repo: string;
   release_asset: string;
   category: string;
@@ -1247,6 +1247,12 @@ export interface StoreEntry {
   // module's own subdirectory in the monorepo; absent for community
   // modules, where source_repo itself is already the right link.
   browse_url?: string;
+  // Only ever set for source="custom" - the admin-entered Cosign public key
+  // for that repo (see AddCustomSourceHandler). Presence here just means
+  // "this source can verify"; the actual pass/fail is only known after
+  // install (installed_modules.cosign_verified) - see StorePage.tsx's
+  // UnverifiedBadge for how this is surfaced pre-install.
+  cosign_pubkey?: string;
   manifest?: Record<string, unknown>;
   synced_at: string;
 }
@@ -1298,6 +1304,53 @@ export function listStore(source?: string, category?: string): Promise<StoreList
 // POST /v1/store/sync — org-admin/super-admin only; triggers registry refresh.
 export function syncStore(): Promise<{ ok: boolean; error?: string }> {
   return request<{ ok: boolean; error?: string }>("/v1/store/sync", { method: "POST" });
+}
+
+// ---- Custom Module Sources ---------------------------------------------------
+// Admin-only "HACS-style" custom repositories on top of official/community —
+// mirrors store.CustomSourceResponse in backend/internal/store/custom_sources_handlers.go.
+
+export interface CustomSource {
+  id: string;
+  repo_url: string;
+  name: string;
+  // PEM text, or empty when the source was added without a signing key (the
+  // resulting module installs as unsigned/unverified — see StorePage.tsx's
+  // unverified badge).
+  pubkey?: string;
+  // Whether a GitHub PAT is on file for this source (for a private repo) —
+  // the token itself is never sent back once saved, see
+  // store.CustomSourceResponse's has_token on the backend.
+  has_token: boolean;
+  added_by: string;
+  added_at: string;
+}
+
+// GET /v1/admin/store/custom-sources — org-admin/super-admin only.
+export function listCustomSources(): Promise<CustomSource[]> {
+  return request<CustomSource[]>("/v1/admin/store/custom-sources");
+}
+
+// POST /v1/admin/store/custom-sources — org-admin/super-admin only.
+// pubkey and token are both optional; leave pubkey empty for an
+// unsigned/unverified custom source, and token empty for a public repo.
+export function addCustomSource(
+  repoUrl: string,
+  name: string,
+  pubkey: string,
+  token: string,
+): Promise<CustomSource> {
+  return request<CustomSource>("/v1/admin/store/custom-sources", {
+    method: "POST",
+    body: JSON.stringify({ repo_url: repoUrl, name, pubkey, token }),
+  });
+}
+
+// DELETE /v1/admin/store/custom-sources/{id} — org-admin/super-admin only.
+export function deleteCustomSource(id: string): Promise<void> {
+  return request<void>(`/v1/admin/store/custom-sources/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
 }
 
 // GET /v1/modules — any active session.
