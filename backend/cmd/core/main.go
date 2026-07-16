@@ -570,7 +570,7 @@ func main() {
 	// deno_conn_pool_size is only read here, at startup - see
 	// modules.ConnPoolSize's doc comment for why a running worker's pool
 	// can't be resized without restarting it.
-	workerPool := modules.NewWorkerPool(cfg.ModuleDataDir, dbURL, modules.ConnPoolSize(ctx, pool))
+	workerPool := modules.NewWorkerPool(cfg.ModuleDataDir, dbURL, cfg.ModulePIIKey, modules.ConnPoolSize(ctx, pool))
 	defer workerPool.StopAll()
 
 	// A worker that crashes on its own (as opposed to Stop/StopAll or a

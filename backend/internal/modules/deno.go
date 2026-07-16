@@ -32,6 +32,16 @@ import (
 type WorkerPool struct {
 	dataDir string // /var/lib/modulab/modules — used to resolve socket paths
 	dbURL   string // postgres:// URL passed to Deno workers for DB access
+
+	// piiKey is MODULAB_MODULE_PII_KEY (config.Config.ModulePIIKey), passed
+	// in once at construction time rather than read from os.Getenv inside
+	// startLocked. Keeping it here means the value that reaches a worker's
+	// environment is always the one config.Load already validated (hex,
+	// exactly 32 bytes) at Core startup - a malformed value now fails fast
+	// with a clear error instead of silently reaching a module worker later.
+	// May be empty (unset in .env) if no installed module needs PII
+	// encryption; see WorkerPool.piiKey's use in startLocked.
+	piiKey string
 	// dbHost is the host:port parsed out of dbURL once at construction time.
 	// Every worker's --allow-net always includes this, on top of whatever
 	// the module's own manifest egress_allowlist grants: the DB connection
@@ -107,12 +117,14 @@ func (p *WorkerPool) SetCrashHandler(fn func(name string)) {
 // NewWorkerPool creates an empty WorkerPool. Call Start for each installed
 // Tier 2/3 module at startup. dbURL is the PostgreSQL connection string that
 // will be passed to each Deno worker so modules can query the database.
-// connPoolSize is the resolved deno_conn_pool_size setting (see
-// ConnPoolSize) to use for every worker this pool starts — resolved once by
-// the caller (main.go, which has the DB pool at hand during startup) rather
-// than looked up here, since WorkerPool itself has no *db.Pool reference.
-// Values below 1 fall back to defaultConnPoolSize.
-func NewWorkerPool(dataDir, dbURL string, connPoolSize int) *WorkerPool {
+// piiKey is config.Config.ModulePIIKey (MODULAB_MODULE_PII_KEY), already
+// validated by config.Load; may be empty. connPoolSize is the resolved
+// deno_conn_pool_size setting (see ConnPoolSize) to use for every worker
+// this pool starts — resolved once by the caller (main.go, which has the DB
+// pool at hand during startup) rather than looked up here, since WorkerPool
+// itself has no *db.Pool reference. Values below 1 fall back to
+// defaultConnPoolSize.
+func NewWorkerPool(dataDir, dbURL, piiKey string, connPoolSize int) *WorkerPool {
 	dbHost := ""
 	if u, err := url.Parse(dbURL); err == nil {
 		dbHost = u.Host // includes port, e.g. "postgres:5432" — exactly what --allow-net expects
@@ -125,6 +137,7 @@ func NewWorkerPool(dataDir, dbURL string, connPoolSize int) *WorkerPool {
 	return &WorkerPool{
 		dataDir:      dataDir,
 		dbURL:        dbURL,
+		piiKey:       piiKey,
 		dbHost:       dbHost,
 		connPoolSize: connPoolSize,
 		dnsResolver:  "127.0.0.11:53", // Docker's embedded DNS resolver — see field doc comment
@@ -215,6 +228,7 @@ func (p *WorkerPool) startLocked(name, entrypoint string, opts WorkerOptions) er
 		entrypoint: entrypoint,
 		sockPath:   sockPath,
 		dbURL:      dbURL,
+		piiKey:     p.piiKey,
 		// moduleRoot is {dataDir}/{name} — the common parent of both the
 		// handler code (moduleRoot/handlers/...) and the worker's Unix
 		// socket (moduleRoot/worker.sock, see sockPath above). Used as the
@@ -620,6 +634,10 @@ type denoWorker struct {
 	entrypoint string
 	sockPath   string
 	dbURL      string
+	// piiKey is copied from the owning WorkerPool at construction time (see
+	// startLocked) - the already-validated MODULAB_MODULE_PII_KEY value, or
+	// "" if unset. See WorkerPool.piiKey's doc comment.
+	piiKey string
 	// moduleRoot is {dataDir}/{name} — the --allow-read/--allow-write scope.
 	// Covers both the handler code under moduleRoot/handlers/... and the
 	// worker's own Unix socket at moduleRoot/worker.sock.
@@ -878,7 +896,7 @@ func (w *denoWorker) start() error {
 	//                 failed at Deno.listen with "NotCapable: Requires net
 	//                 access to \"unix:.../worker.sock\"" regardless of
 	//                 whether the module had any egress hosts at all.
-	//   --allow-env   limited to MODULAB_DB_URL/MODULAB_ENCRYPTION_KEY (what
+	//   --allow-env   limited to MODULAB_DB_URL/MODULAB_MODULE_PII_KEY (what
 	//                 a module could plausibly need) plus a "PG*" prefix
 	//                 wildcard. The PG* grant isn't for the module's own
 	//                 code — it's because npm:postgres (the DB client
@@ -907,7 +925,7 @@ func (w *denoWorker) start() error {
 		"--no-prompt",
 		"--allow-read=" + w.moduleRoot,
 		"--allow-write=" + w.moduleRoot,
-		"--allow-env=MODULAB_DB_URL,MODULAB_ENCRYPTION_KEY,PG*",
+		"--allow-env=MODULAB_DB_URL,MODULAB_MODULE_PII_KEY,PG*",
 	}
 	netGrants := append([]string{"unix:" + w.sockPath}, w.egressHosts...)
 	args = append(args, "--allow-net="+strings.Join(netGrants, ","))
@@ -936,8 +954,8 @@ func (w *denoWorker) start() error {
 	// grant were widened by mistake, since it was never in w.cmd.Env to
 	// begin with.
 	moduleEnv := []string{"MODULAB_DB_URL=" + w.dbURL}
-	if encKey := os.Getenv("MODULAB_ENCRYPTION_KEY"); encKey != "" {
-		moduleEnv = append(moduleEnv, "MODULAB_ENCRYPTION_KEY="+encKey)
+	if w.piiKey != "" {
+		moduleEnv = append(moduleEnv, "MODULAB_MODULE_PII_KEY="+w.piiKey)
 	}
 	w.cmd.Env = moduleEnv
 	w.cmd.Stdout = &prefixWriter{prefix: "[" + w.name + "] ", w: os.Stdout}

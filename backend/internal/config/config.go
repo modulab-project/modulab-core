@@ -27,6 +27,24 @@ type Config struct {
 	MasterKey         string
 	BootstrapTokenTTL string
 
+	// ModulePIIKey (MODULAB_MODULE_PII_KEY) is the AES-256 key (64 hex chars,
+	// 32 raw bytes) handed to Deno module workers so module code can encrypt
+	// its own PII fields at rest, independent of MasterKey. Deliberately a
+	// separate key from MasterKey, not a reuse of it: modules run in a
+	// sandboxed subprocess with a much larger, third-party-code attack
+	// surface than Core itself, so a compromised module should only ever be
+	// able to expose the PII it encrypted, never the key protecting Core's
+	// own OIDC secret/session data. See internal/modules/deno.go for where
+	// this is passed into a worker's environment.
+	//
+	// Unlike MasterKey, this is optional: Core itself never encrypts
+	// anything with it, so a homelab instance with no PII-handling modules
+	// installed can leave it unset. If set, it is validated with the same
+	// hex/32-byte rule as MasterKey - a malformed value fails Core's startup
+	// immediately rather than surfacing later as a cryptic error inside a
+	// module worker.
+	ModulePIIKey string
+
 	DBHost     string
 	DBPort     string
 	DBName     string
@@ -109,8 +127,14 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	modulePIIKey := os.Getenv("MODULAB_MODULE_PII_KEY")
+	if err := validateModulePIIKey(modulePIIKey); err != nil {
+		return Config{}, err
+	}
+
 	cfg := Config{
 		MasterKey:         masterKey,
+		ModulePIIKey:      modulePIIKey,
 		BootstrapTokenTTL: getEnvDefault("MODULAB_BOOTSTRAP_TOKEN_TTL", "24h"),
 
 		DBHost:     getEnvDefault("MODULAB_DB_HOST", "localhost"),
@@ -161,6 +185,29 @@ func validateMasterKey(key string) error {
 	}
 	if len(raw) != 32 {
 		return fmt.Errorf("config: MODULAB_MASTER_KEY must decode to 32 bytes (64 hex characters), got %d bytes", len(raw))
+	}
+	return nil
+}
+
+// validateModulePIIKey mirrors validateMasterKey's hex/32-byte check, but
+// treats an empty value as valid (nil error) rather than fatal: unlike
+// MasterKey, Core has no unconditional need for this key at startup - only
+// installed modules that actually encrypt PII do, and a homelab instance may
+// run none. A value that is present but malformed still fails startup
+// outright, for the same reason validateMasterKey does: better a clear
+// startup error pointing at MODULAB_MODULE_PII_KEY than a module worker
+// silently receiving a garbage key and failing to decrypt its own data
+// later.
+func validateModulePIIKey(key string) error {
+	if key == "" {
+		return nil
+	}
+	raw, err := hex.DecodeString(key)
+	if err != nil {
+		return fmt.Errorf("config: MODULAB_MODULE_PII_KEY must be a hex string: %w", err)
+	}
+	if len(raw) != 32 {
+		return fmt.Errorf("config: MODULAB_MODULE_PII_KEY must decode to 32 bytes (64 hex characters), got %d bytes", len(raw))
 	}
 	return nil
 }
