@@ -712,6 +712,49 @@ const db = {
   },
 };
 
+// ── PII encryption key setup ─────────────────────────────────────────────────
+//
+// Reads MODULAB_MODULE_PII_KEY exactly once, here, in Core's own bootstrap
+// script - never in module code. The resulting CryptoKey objects are handed
+// to every handler/job call explicitly (piiCrypto.key / piiCrypto.hashKey
+// below), the same way db already is - NOT via globalThis or any other
+// ambient/implicit channel, so a module's dependency on this value is always
+// visible in its own function signatures.
+//
+// Why centralize this at all: before this (2026-07-16), every module read
+// Deno.env.get("MODULAB_ENCRYPTION_KEY") directly, which meant renaming that
+// one env var (to MODULAB_MODULE_PII_KEY, for clarity against
+// MODULAB_MASTER_KEY - see config.go's ModulePIIKey doc comment) required
+// updating and re-releasing all three installed modules, and broke
+// unifi-network in production for a few minutes until a --allow-env alias
+// papered over it. Centralizing key retrieval here means a future rename or
+// rotation is a one-line change in this file, with zero module changes or
+// releases required - module code never sees an env var name at all anymore.
+//
+// piiCrypto.key / piiCrypto.hashKey are null if MODULAB_MODULE_PII_KEY is
+// unset or malformed - module code must treat that the same as "not
+// configured" (matches the existing getEncKey() -> null contract every
+// module already had before this change).
+interface PiiCrypto {
+  key: CryptoKey | null;
+  hashKey: CryptoKey | null;
+}
+async function loadPiiCrypto(): Promise<PiiCrypto> {
+  const hexKey = Deno.env.get("MODULAB_MODULE_PII_KEY") ?? "";
+  if (hexKey.length !== 64) return { key: null, hashKey: null };
+  const raw = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) raw[i] = parseInt(hexKey.slice(i * 2, i * 2 + 2), 16);
+  const key = await crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+  // HMAC-SHA256 key for modules that need a deterministic blind index (e.g.
+  // unifi-network's mac_hash) alongside probabilistic AES-GCM encryption.
+  // Same raw key material reused for both - see unifi-network/handlers/
+  // crypto.ts's doc comment for why a second, separate key was judged not
+  // worth the added key-management overhead.
+  const hashKey = await crypto.subtle.importKey("raw", raw, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return { key, hashKey };
+}
+const piiCrypto: PiiCrypto = await loadPiiCrypto();
+
 // Job handlers this module declares in manifest.yaml's jobs: list, keyed by
 // job name. Populated by Go (see denoWorker.start) as a JSON object literal
 // mapping job name -> absolute path to the job's .ts entrypoint. Empty ({})
@@ -721,7 +764,7 @@ const db = {
 // per job; a job that needs network access relies on the same egress hosts
 // the HTTP handler was granted).
 const jobEntrypoints: Record<string, string> = %s;
-const jobHandlers: Record<string, (ctx: { db: typeof db }) => Promise<unknown>> = {};
+const jobHandlers: Record<string, (ctx: { db: typeof db; crypto: PiiCrypto }) => Promise<unknown>> = {};
 for (const [jobName, path] of Object.entries(jobEntrypoints)) {
   const mod = await import(path);
   jobHandlers[jobName] = mod.default;
@@ -797,7 +840,7 @@ async function handleConn(conn: Deno.Conn) {
             if (!jobFn) {
               resp = { status: 404, body: { error: "unknown job: " + req.job } };
             } else {
-              const result = await jobFn({ db });
+              const result = await jobFn({ db, crypto: piiCrypto });
               let notifications: unknown;
               let body: unknown = result;
               if (result && typeof result === "object" && "__notifications" in result) {
@@ -813,7 +856,7 @@ async function handleConn(conn: Deno.Conn) {
               };
             }
           } else {
-            resp = await handler({ ...req, db });
+            resp = await handler({ ...req, db, crypto: piiCrypto });
           }
         } catch (e) {
           resp = { status: 500, body: { error: String(e) } };
@@ -925,17 +968,18 @@ func (w *denoWorker) start() error {
 		"--no-prompt",
 		"--allow-read=" + w.moduleRoot,
 		"--allow-write=" + w.moduleRoot,
-		// MODULAB_ENCRYPTION_KEY is kept here too, alongside the new
-		// MODULAB_MODULE_PII_KEY, as a transitional back-compat alias:
-		// existing module code (e.g. unifi-network) reads
-		// Deno.env.get("MODULAB_ENCRYPTION_KEY") by that literal name, since
-		// the env var name is part of Core's contract with module code, not
-		// just internal Go naming. Renaming only the Go side without this
-		// alias broke every installed module that reads the key (NotCapable
-		// on MODULAB_ENCRYPTION_KEY), confirmed 2026-07-16. Remove this
-		// alias once all installed modules read MODULAB_MODULE_PII_KEY
-		// instead.
-		"--allow-env=MODULAB_DB_URL,MODULAB_MODULE_PII_KEY,MODULAB_ENCRYPTION_KEY,PG*",
+		// MODULAB_MODULE_PII_KEY is granted here for the bootstrap script's
+		// own loadPiiCrypto() call, further down in this file - NOT for
+		// module code, which no longer reads any env var for this key at
+		// all as of 2026-07-16 (it receives already-built CryptoKey objects
+		// via req.crypto/ctx.crypto instead, see loadPiiCrypto's doc
+		// comment). An earlier version of this change renamed only the Go
+		// side while module code still read Deno.env.get("MODULAB_ENCRYPTION_KEY")
+		// by that literal name directly, which broke every installed module
+		// (NotCapable) until a --allow-env alias papered over it; moving key
+		// retrieval into the bootstrap script entirely (module code never
+		// touches Deno.env for this) is what let that alias be removed again.
+		"--allow-env=MODULAB_DB_URL,MODULAB_MODULE_PII_KEY,PG*",
 	}
 	netGrants := append([]string{"unix:" + w.sockPath}, w.egressHosts...)
 	args = append(args, "--allow-net="+strings.Join(netGrants, ","))
@@ -965,11 +1009,13 @@ func (w *denoWorker) start() error {
 	// begin with.
 	moduleEnv := []string{"MODULAB_DB_URL=" + w.dbURL}
 	if w.piiKey != "" {
+		// Read only by this file's own loadPiiCrypto() inside the bootstrap
+		// script - module code no longer reads any env var for this key
+		// (see loadPiiCrypto's doc comment). Kept as a real env var (rather
+		// than e.g. passing it as a bootstrap script argument) simply
+		// because that's the existing, already-sandboxed channel
+		// (--allow-env) for getting a secret into the worker process.
 		moduleEnv = append(moduleEnv, "MODULAB_MODULE_PII_KEY="+w.piiKey)
-		// Transitional alias - see the --allow-env comment above. Same
-		// value under the old name so modules not yet updated to the new
-		// name keep working.
-		moduleEnv = append(moduleEnv, "MODULAB_ENCRYPTION_KEY="+w.piiKey)
 	}
 	w.cmd.Env = moduleEnv
 	w.cmd.Stdout = &prefixWriter{prefix: "[" + w.name + "] ", w: os.Stdout}
