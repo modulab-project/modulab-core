@@ -179,7 +179,10 @@ func syncAll(ctx context.Context, d Deps) (customErrs map[string]error, offErr, 
 		log.Printf("store: sync: list custom_sources: %v", err)
 	}
 	for _, cs := range customSources {
-		entry, err := FetchCustomRepo(ctx, d.Pool, cs.RepoURL, cs.PubKey, cs.Token)
+		// entries: 1 for a single-module repo, N for a monorepo (see
+		// FetchCustomRepo's doc comment) - all share this source's repo_url
+		// and pubkey.
+		entries, err := FetchCustomRepo(ctx, d.Pool, cs.RepoURL, cs.PubKey, cs.Token)
 		if err != nil {
 			if customErrs == nil {
 				customErrs = make(map[string]error)
@@ -187,10 +190,12 @@ func syncAll(ctx context.Context, d Deps) (customErrs map[string]error, offErr, 
 			customErrs[cs.RepoURL] = err
 			continue
 		}
-		if err := UpsertEntry(ctx, d.Pool, entry); err != nil {
-			log.Printf("store: sync: upsert custom %q: %v", entry.Name, err)
-		} else {
-			seen[entry.Name] = true
+		for _, entry := range entries {
+			if err := UpsertEntry(ctx, d.Pool, entry); err != nil {
+				log.Printf("store: sync: upsert custom %q: %v", entry.Name, err)
+			} else {
+				seen[entry.Name] = true
+			}
 		}
 	}
 

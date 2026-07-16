@@ -261,6 +261,12 @@ const customModuleReleaseAsset = "module.zip"
 // either.
 var customManifestBranches = []string{"main", "master"}
 
+// customContentsRootURLFmt is the GitHub Contents API URL for a repo's root
+// listing (%s = "owner/repo") - used to detect a monorepo layout (see
+// fetchCustomMonorepo) the same way FetchCommunityRegistry lists
+// modulab-community's own root.
+const customContentsRootURLFmt = "https://api.github.com/repos/%s/contents/"
+
 // customManifest is the subset of a custom source repo's own manifest.yaml
 // (the same file the module ships inside its own module.zip - see
 // modules.Manifest) this package needs for the store listing. Unlike
@@ -277,82 +283,169 @@ type customManifest struct {
 	Logo        string            `yaml:"logo"`
 }
 
-// FetchCustomRepo fetches a single admin-added custom module source: reads
-// manifest.yaml from the repo root (trying main, then master), and the
-// latest release tag via the GitHub Releases API (same call as
-// FetchLatestRelease). pubKeyPEM is passed through unchanged onto the
-// resulting Entry.CosignPubKey - it comes from custom_sources.pubkey
-// (admin-entered at add-time, see db.CreateCustomSource), never fetched from
-// the repo itself. token is an optional GitHub PAT for a private repo (see
+// FetchCustomRepo fetches a single admin-added custom module source and
+// returns every module it contains. Two layouts are supported, tried in
+// order:
+//
+//  1. Single module: manifest.yaml directly at the repo root (trying main,
+//     then master). The whole repo is one module, releases are tagged
+//     however the author likes, and FetchLatestRelease's normal
+//     .../releases/latest call resolves the version - unchanged from the
+//     original single-module-only behavior.
+//  2. Monorepo: no manifest.yaml at the root, so the repo root is listed via
+//     the GitHub Contents API and every subdirectory containing its own
+//     manifest.yaml becomes a separate Entry - same layout modulab-community
+//     itself uses (see FetchCommunityRegistry). Because all modules in this
+//     case share one release list, each module's releases must be tagged
+//     "<subdirectory>-v..." to disambiguate (mirrors the official
+//     modulab-modules monorepo's own "recipes-v0.1.0" convention - see
+//     installer.go's zipURL comment) - resolved by
+//     FetchLatestReleaseForPrefix instead of the plain "latest release" call.
+//
+// pubKeyPEM is passed through unchanged onto every resulting Entry's
+// CosignPubKey - it comes from custom_sources.pubkey (admin-entered at
+// add-time, see db.CreateCustomSource), never fetched from the repo itself,
+// and applies to every module in the repo alike (one key per source, not
+// per module). token is an optional GitHub PAT for a private repo (see
 // db.CustomSourceRow.Token) - pass "" for a public one; NOT put onto the
-// returned Entry (module_registry, which Entry maps to, is never expected to
-// hold credentials - see its "no PII, no credentials" table comment in
+// returned Entries (module_registry, which Entry maps to, is never expected
+// to hold credentials - see its "no PII, no credentials" table comment in
 // db.go). Install/Update re-resolve the token fresh from custom_sources via
 // db.Pool.GetCustomSourceByRepoURL instead of reading it off the Entry.
 //
-// Returns an error if the repo has no manifest.yaml on any tried branch, or
-// the manifest is missing name/version - callers (store.syncAll) log and skip
-// on error rather than aborting the whole sync, same as
-// FetchCommunityRegistry's per-directory errors.
-func FetchCustomRepo(ctx context.Context, pool *db.Pool, repoURL, pubKeyPEM, token string) (Entry, error) {
+// Returns an error only when neither layout produced anything installable -
+// callers (store.syncAll) log and skip the whole source on error rather than
+// aborting the sync, same as FetchCommunityRegistry's per-directory errors;
+// a single bad subdirectory within an otherwise-valid monorepo is instead
+// just skipped (see fetchCustomMonorepo).
+func FetchCustomRepo(ctx context.Context, pool *db.Pool, repoURL, pubKeyPEM, token string) ([]Entry, error) {
 	timeout := time.Duration(GithubAPITimeoutSeconds(ctx, pool)) * time.Second
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	repoPath := strings.TrimSuffix(strings.TrimPrefix(repoURL, "https://github.com/"), "/")
 	if repoPath == "" || strings.Contains(repoPath, "://") {
-		return Entry{}, fmt.Errorf("store: custom source: invalid repo url %q", repoURL)
+		return nil, fmt.Errorf("store: custom source: invalid repo url %q", repoURL)
+	}
+
+	// ── 1. Single module: manifest.yaml at the repo root ──────────────────
+	m, rootErr := fetchCustomManifestAt(ctx, repoPath, "", token)
+	if rootErr == nil {
+		version, verr := FetchLatestRelease(ctx, pool, repoURL, token)
+		if verr != nil {
+			return nil, fmt.Errorf("store: custom source: latest release for %q: %w", repoURL, verr)
+		}
+		return []Entry{buildCustomEntry(m, repoURL, customModuleReleaseAsset, version, pubKeyPEM)}, nil
+	}
+
+	// ── 2. Monorepo: no root manifest.yaml, scan subdirectories ───────────
+	entries, scanErr := fetchCustomMonorepo(ctx, pool, repoURL, repoPath, pubKeyPEM, token)
+	if scanErr != nil {
+		return nil, fmt.Errorf("store: custom source: no manifest.yaml at repo root (%v) and monorepo scan failed for %q: %w", rootErr, repoURL, scanErr)
+	}
+	if len(entries) == 0 {
+		return nil, fmt.Errorf("store: custom source: no manifest.yaml found at repo root or in any subdirectory for %q (root: %v)", repoURL, rootErr)
+	}
+	return entries, nil
+}
+
+// fetchCustomManifestAt fetches and parses manifest.yaml at subPath within
+// repoPath ("owner/repo"), trying every branch in customManifestBranches.
+// subPath "" means the repo root (single-module layout); a subdirectory name
+// means the monorepo layout (see FetchCustomRepo). Resolves Logo to an
+// absolute raw.githubusercontent.com URL on the branch that worked. Returns
+// an error if no branch has the file, or if it parses but is missing
+// name/version - both are treated identically by callers (skip this
+// path/module, don't abort the whole source).
+func fetchCustomManifestAt(ctx context.Context, repoPath, subPath, token string) (customManifest, error) {
+	manifestRelPath := "manifest.yaml"
+	if subPath != "" {
+		manifestRelPath = subPath + "/manifest.yaml"
 	}
 
 	var m customManifest
 	var fetchErr error
-	found := false
 	for _, branch := range customManifestBranches {
-		manifestURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/manifest.yaml", repoPath, branch)
+		manifestURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s", repoPath, branch, manifestRelPath)
 		data, err := httpGet(ctx, manifestURL, token)
 		if err != nil {
 			fetchErr = err
 			continue
 		}
 		if err := yaml.Unmarshal(data, &m); err != nil {
-			return Entry{}, fmt.Errorf("store: custom source: parse manifest.yaml for %q: %w", repoURL, err)
+			return customManifest{}, fmt.Errorf("parse %q: %w", manifestRelPath, err)
 		}
-		found = true
+		if m.Name == "" || m.Version == "" {
+			return customManifest{}, fmt.Errorf("%q missing name or version", manifestRelPath)
+		}
 		if m.Logo != "" {
-			m.Logo = fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s", repoPath, branch, m.Logo)
+			logoRelPath := m.Logo
+			if subPath != "" {
+				logoRelPath = subPath + "/" + m.Logo
+			}
+			m.Logo = fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s", repoPath, branch, logoRelPath)
 		}
-		break
+		return m, nil
 	}
-	if !found {
-		return Entry{}, fmt.Errorf("store: custom source: fetch manifest.yaml for %q: %w", repoURL, fetchErr)
-	}
-	if m.Name == "" || m.Version == "" {
-		return Entry{}, fmt.Errorf("store: custom source: %q manifest.yaml missing name or version", repoURL)
-	}
+	return customManifest{}, fmt.Errorf("fetch %q: %w", manifestRelPath, fetchErr)
+}
 
-	version, err := FetchLatestRelease(ctx, pool, repoURL, token)
+// fetchCustomMonorepo lists repoPath's root via the GitHub Contents API and
+// treats every subdirectory with its own manifest.yaml as a separate module,
+// same layout modulab-community itself uses (FetchCommunityRegistry). A
+// subdirectory without a valid manifest.yaml is silently skipped - it might
+// just be docs/, .github/, a shared lib, or similar, not every directory in
+// a repo is a module. Each module's version comes from
+// FetchLatestReleaseForPrefix, not FetchLatestRelease, since all modules in
+// a monorepo share one release list - see FetchCustomRepo's doc comment for
+// the "<subdirectory>-v..." tag convention this requires.
+func fetchCustomMonorepo(ctx context.Context, pool *db.Pool, repoURL, repoPath, pubKeyPEM, token string) ([]Entry, error) {
+	rootURL := fmt.Sprintf(customContentsRootURLFmt, repoPath)
+	data, err := httpGet(ctx, rootURL, token)
 	if err != nil {
-		return Entry{}, fmt.Errorf("store: custom source: latest release for %q: %w", repoURL, err)
+		return nil, fmt.Errorf("list repo root: %w", err)
 	}
-	if version == "" {
-		// No releases published yet - not an error, just nothing installable
-		// yet. LatestVersion stays "" and the frontend/installer treat that
-		// the same as any other not-yet-released module.
-		version = ""
+	var items []communityRepoItem
+	if err := json.Unmarshal(data, &items); err != nil {
+		return nil, fmt.Errorf("parse repo root listing: %w", err)
 	}
 
+	var out []Entry
+	for _, item := range items {
+		if item.Type != "dir" || strings.HasPrefix(item.Name, ".") {
+			continue
+		}
+		m, err := fetchCustomManifestAt(ctx, repoPath, item.Name, token)
+		if err != nil {
+			// Not a module directory - skip silently, see doc comment above.
+			continue
+		}
+		version, err := FetchLatestReleaseForPrefix(ctx, pool, repoURL, item.Name, token)
+		if err != nil {
+			log.Printf("store: custom source: %q: latest release for %q: %v", repoURL, item.Name, err)
+			continue
+		}
+		out = append(out, buildCustomEntry(m, repoURL, customModuleReleaseAsset, version, pubKeyPEM))
+	}
+	return out, nil
+}
+
+// buildCustomEntry assembles a store.Entry for a custom-source module from
+// its parsed manifest.yaml, shared by both the single-module and monorepo
+// paths in FetchCustomRepo.
+func buildCustomEntry(m customManifest, repoURL, releaseAsset, version, pubKeyPEM string) Entry {
 	return Entry{
 		Name:          m.Name,
 		Source:        "custom",
 		SourceRepo:    repoURL,
-		ReleaseAsset:  customModuleReleaseAsset,
+		ReleaseAsset:  releaseAsset,
 		Category:      m.Category,
 		LatestVersion: version,
 		Description:   m.Description,
 		DisplayName:   m.DisplayName,
 		LogoURL:       m.Logo,
 		CosignPubKey:  pubKeyPEM,
-	}, nil
+	}
 }
 
 // FetchLatestRelease calls the GitHub Releases API for sourceRepo and returns
@@ -385,6 +478,50 @@ func FetchLatestRelease(ctx context.Context, pool *db.Pool, sourceRepo, token st
 		return "", fmt.Errorf("store: parse latest release for %q: %w", sourceRepo, err)
 	}
 	return rel.TagName, nil
+}
+
+// FetchLatestReleaseForPrefix calls the GitHub Releases *list* API (not
+// /releases/latest) and returns the newest release whose tag starts with
+// "<prefix>-", or ("", nil) if none match. Used for a custom monorepo (see
+// FetchCustomRepo/fetchCustomMonorepo) where multiple modules share one
+// release list and disambiguate by tagging their releases
+// "<module-subdirectory>-v1.2.0" - the same convention the official
+// modulab-modules monorepo already uses for its own releases (e.g.
+// "recipes-v0.1.0", see installer.go's zipURL comment). Only the first page
+// (GitHub's default: 30 releases, newest first) is considered - more than
+// that between two syncs of the same monorepo is not a case worth paginating
+// for at this project's scale.
+func FetchLatestReleaseForPrefix(ctx context.Context, pool *db.Pool, sourceRepo, prefix, token string) (string, error) {
+	timeout := time.Duration(GithubAPITimeoutSeconds(ctx, pool)) * time.Second
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	repoPath := strings.TrimPrefix(sourceRepo, "https://github.com/")
+	repoPath = strings.TrimSuffix(repoPath, "/")
+	if repoPath == "" {
+		return "", fmt.Errorf("store: invalid source_repo %q", sourceRepo)
+	}
+
+	url := "https://api.github.com/repos/" + repoPath + "/releases"
+	data, err := httpGet(ctx, url, token)
+	if err != nil {
+		// No releases at all, or repo/API unreachable - not an error, just
+		// nothing installable for this module yet.
+		return "", nil
+	}
+
+	var rels []githubRelease
+	if err := json.Unmarshal(data, &rels); err != nil {
+		return "", fmt.Errorf("store: parse releases for %q: %w", sourceRepo, err)
+	}
+
+	want := prefix + "-"
+	for _, r := range rels {
+		if strings.HasPrefix(r.TagName, want) {
+			return r.TagName, nil
+		}
+	}
+	return "", nil
 }
 
 // httpGet performs a GET request and returns the body. Returns an error for

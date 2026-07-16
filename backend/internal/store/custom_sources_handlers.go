@@ -147,11 +147,16 @@ func AddCustomSourceHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 		})
 
 		// Best-effort immediate fetch - errors are logged, not fatal to the
-		// request (see doc comment above).
-		if entry, err := FetchCustomRepo(r.Context(), d.Pool, row.RepoURL, row.PubKey, row.Token); err != nil {
+		// request (see doc comment above). entries: 1 for a single-module
+		// repo, N for a monorepo (see FetchCustomRepo's doc comment).
+		if entries, err := FetchCustomRepo(r.Context(), d.Pool, row.RepoURL, row.PubKey, row.Token); err != nil {
 			log.Printf("store: custom source %q: initial fetch failed: %v", row.RepoURL, err)
-		} else if err := UpsertEntry(r.Context(), d.Pool, entry); err != nil {
-			log.Printf("store: custom source %q: upsert entry: %v", row.RepoURL, err)
+		} else {
+			for _, entry := range entries {
+				if err := UpsertEntry(r.Context(), d.Pool, entry); err != nil {
+					log.Printf("store: custom source %q: upsert entry %q: %v", row.RepoURL, entry.Name, err)
+				}
+			}
 		}
 
 		writeJSON(w, http.StatusCreated, toCustomSourceResponse(row))
