@@ -925,7 +925,17 @@ func (w *denoWorker) start() error {
 		"--no-prompt",
 		"--allow-read=" + w.moduleRoot,
 		"--allow-write=" + w.moduleRoot,
-		"--allow-env=MODULAB_DB_URL,MODULAB_MODULE_PII_KEY,PG*",
+		// MODULAB_ENCRYPTION_KEY is kept here too, alongside the new
+		// MODULAB_MODULE_PII_KEY, as a transitional back-compat alias:
+		// existing module code (e.g. unifi-network) reads
+		// Deno.env.get("MODULAB_ENCRYPTION_KEY") by that literal name, since
+		// the env var name is part of Core's contract with module code, not
+		// just internal Go naming. Renaming only the Go side without this
+		// alias broke every installed module that reads the key (NotCapable
+		// on MODULAB_ENCRYPTION_KEY), confirmed 2026-07-16. Remove this
+		// alias once all installed modules read MODULAB_MODULE_PII_KEY
+		// instead.
+		"--allow-env=MODULAB_DB_URL,MODULAB_MODULE_PII_KEY,MODULAB_ENCRYPTION_KEY,PG*",
 	}
 	netGrants := append([]string{"unix:" + w.sockPath}, w.egressHosts...)
 	args = append(args, "--allow-net="+strings.Join(netGrants, ","))
@@ -956,6 +966,10 @@ func (w *denoWorker) start() error {
 	moduleEnv := []string{"MODULAB_DB_URL=" + w.dbURL}
 	if w.piiKey != "" {
 		moduleEnv = append(moduleEnv, "MODULAB_MODULE_PII_KEY="+w.piiKey)
+		// Transitional alias - see the --allow-env comment above. Same
+		// value under the old name so modules not yet updated to the new
+		// name keep working.
+		moduleEnv = append(moduleEnv, "MODULAB_ENCRYPTION_KEY="+w.piiKey)
 	}
 	w.cmd.Env = moduleEnv
 	w.cmd.Stdout = &prefixWriter{prefix: "[" + w.name + "] ", w: os.Stdout}
