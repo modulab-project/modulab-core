@@ -383,10 +383,13 @@ export default function AdminAuditPage() {
           </button>
         </div>
 
-        {/* Filter bar. Stacks to a single column on phones, wraps to 2
-            columns on tablets, and lays out inline on desktop - all inputs
-            use text-base (16px) to avoid iOS Safari's auto-zoom-on-focus. */}
-        <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        {/* Filter bar, split into two rows so neither gets cramped: event
+            type + actor (the two dropdowns) on top, date range + search
+            (the three free-form inputs, which need more breathing room)
+            below. Each row stacks to a single column on phones and widens
+            on tablet/desktop. All inputs use text-base (16px) to avoid iOS
+            Safari's auto-zoom-on-focus. */}
+        <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
           <div>
             <label className="sr-only" htmlFor="audit-filter-event-type">
               {t("admin.audit.filter_label")}
@@ -428,7 +431,9 @@ export default function AdminAuditPage() {
               ))}
             </select>
           </div>
+        </div>
 
+        <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
           <div className="flex gap-2">
             <div className="flex-1">
               <label className="sr-only" htmlFor="audit-filter-since">
@@ -458,7 +463,7 @@ export default function AdminAuditPage() {
             </div>
           </div>
 
-          <div className="relative">
+          <div className="relative sm:col-span-2">
             <label className="sr-only" htmlFor="audit-filter-search">
               {t("admin.audit.filter_search_placeholder")}
             </label>
