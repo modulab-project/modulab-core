@@ -986,6 +986,17 @@
     "no_ui_bundle": "Este módulo no tiene un bundle frontend. La API está disponible directamente.",
     "no_default_export": "El bundle del módulo no tiene una exportación predeterminada.",
     "fetch_error": "No se pudo cargar este módulo ({{message}}).",
-    "api_base": "Base de la API"
+    "api_base": "Base de la API",
+    "crud": {
+      "add": "Añadir",
+      "edit": "Editar",
+      "delete": "Eliminar",
+      "save": "Guardar",
+      "cancel": "Cancelar",
+      "empty": "Todavía no hay entradas.",
+      "confirm_delete": "¿Eliminar esta entrada?",
+      "field_required": "«{{field}}» es obligatorio.",
+      "no_manifest": "No se pudo leer la configuración de este módulo."
+    }
   }
 }

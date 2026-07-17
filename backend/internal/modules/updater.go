@@ -262,6 +262,16 @@ func Update(ctx context.Context, d Deps, entry store.Entry) error {
 			fmt.Errorf("migrations: %w", err))
 	}
 
+	// ── 9b. Tier 1: cross-check crud against the migrated table ───────────
+	// Same reasoning as Install's step 10b - an update can change crud.fields
+	// and/or ship new migrations; catch a mismatch here rather than at the
+	// first API call after the update. See docs/tier1-crud-plan.md.
+	if mf.Tier == 1 {
+		if err := validateCrudTable(ctx, d, entry.Name, mf.Crud); err != nil {
+			return d.rollback(ctx, entry.Name, cachedZip, err)
+		}
+	}
+
 	// ── 10. Update DB row ─────────────────────────────────────────────────
 	if err := d.updateInstalledModuleRecord(ctx, entry.Name, mf.Version, mf.Tier, gotHex, zipURL, manifestJSON, cosignVerified, entry.LogoURL); err != nil {
 		return fmt.Errorf("modules: update %q: db update: %w", entry.Name, err)

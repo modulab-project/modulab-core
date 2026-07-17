@@ -986,6 +986,17 @@
     "no_ui_bundle": "This module has no frontend bundle. The API is available directly.",
     "no_default_export": "The module bundle has no default export.",
     "fetch_error": "Could not load this module ({{message}}).",
-    "api_base": "API base"
+    "api_base": "API base",
+    "crud": {
+      "add": "Add",
+      "edit": "Edit",
+      "delete": "Delete",
+      "save": "Save",
+      "cancel": "Cancel",
+      "empty": "No entries yet.",
+      "confirm_delete": "Delete this entry?",
+      "field_required": "\"{{field}}\" is required.",
+      "no_manifest": "This module's configuration could not be read."
+    }
   }
 }

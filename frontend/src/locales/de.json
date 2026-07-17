@@ -986,6 +986,17 @@
     "no_ui_bundle": "Dieses Modul hat kein eigenes Frontend. Die API ist direkt erreichbar.",
     "no_default_export": "Das Modul-Bundle hat keinen Standard-Export.",
     "fetch_error": "Modul konnte nicht geladen werden ({{message}}).",
-    "api_base": "API-Basis"
+    "api_base": "API-Basis",
+    "crud": {
+      "add": "Hinzufügen",
+      "edit": "Bearbeiten",
+      "delete": "Löschen",
+      "save": "Speichern",
+      "cancel": "Abbrechen",
+      "empty": "Noch keine Einträge.",
+      "confirm_delete": "Diesen Eintrag löschen?",
+      "field_required": "„{{field}}“ ist erforderlich.",
+      "no_manifest": "Die Konfiguration dieses Moduls konnte nicht gelesen werden."
+    }
   }
 }

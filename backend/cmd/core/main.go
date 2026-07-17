@@ -610,6 +610,7 @@ func main() {
 		CosignBin: cfg.CosignBinaryPath,
 		Workers:   workerPool,
 		Valkey:    valkeyClient,
+		PIIKey:    cfg.ModulePIIKey,
 	}
 
 	// onStoreSynced runs a module-update check immediately after every

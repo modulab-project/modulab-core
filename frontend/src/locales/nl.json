@@ -986,6 +986,17 @@
     "no_ui_bundle": "Deze module heeft geen frontend-bundle. De API is direct beschikbaar.",
     "no_default_export": "De module-bundle heeft geen standaardexport.",
     "fetch_error": "Deze module kon niet worden geladen ({{message}}).",
-    "api_base": "API-basis"
+    "api_base": "API-basis",
+    "crud": {
+      "add": "Toevoegen",
+      "edit": "Bewerken",
+      "delete": "Verwijderen",
+      "save": "Opslaan",
+      "cancel": "Annuleren",
+      "empty": "Nog geen items.",
+      "confirm_delete": "Dit item verwijderen?",
+      "field_required": "\"{{field}}\" is verplicht.",
+      "no_manifest": "De configuratie van deze module kon niet worden gelezen."
+    }
   }
 }

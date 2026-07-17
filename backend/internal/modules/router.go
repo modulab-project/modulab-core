@@ -169,6 +169,15 @@ func ModuleProxyHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 			return
 		}
 
+		// ── Tier 1: generic CRUD, no Deno worker at all ─────────────────────
+		// See crud.go / docs/tier1-crud-plan.md. Everything below this point
+		// (file uploads, WorkerAuth, Dispatch, egress reload, notifications,
+		// audit events) is Tier 2/3-only - a Tier 1 module has none of that.
+		if row.Tier == 1 {
+			ServeCrudRequest(w, r, d, moduleName, row.Manifest, sess)
+			return
+		}
+
 		// ── Build WorkerAuth from session ──────────────────────────────────
 		workerAuth := WorkerAuth{
 			UserID:    sess.UserID,

@@ -36,6 +36,16 @@ type Deps struct {
 	// RunUpdateCheckOnce publishes), so existing callers that construct
 	// Deps without it (if any) keep working.
 	Valkey *valkey.Client
+	// PIIKey is MODULAB_MODULE_PII_KEY (config.Config.ModulePIIKey), the same
+	// raw key already shared with every Tier 2/3 Deno worker (see
+	// WorkerPool.piiKey in deno.go). The Tier 1 generic CRUD handler
+	// (crud.go) uses it directly via crypto.Encrypt/Decrypt for
+	// crud.fields[].encrypted columns - no per-module derivation, see
+	// docs/tier1-crud-plan.md for why that's unnecessary (crypto.Encrypt
+	// already uses a random nonce per call). May be empty if unset, same as
+	// WorkerPool.piiKey - encrypted fields simply cannot be used until it's
+	// configured.
+	PIIKey string
 }
 
 // Manifest is the parsed content of manifest.yaml inside a module ZIP.
@@ -121,6 +131,10 @@ type Manifest struct {
 	// module's own DB state every time, so it can never go stale the way a
 	// Core-side cache of "last known hosts" could.
 	EgressHostsHandler string `yaml:"egress_hosts_handler" json:"egress_hosts_handler,omitempty"`
+	// Crud is Tier 1 only: the config-driven CRUD definition Core generates
+	// a REST API (and fallback UI) from — see crud.go. Required for Tier 1,
+	// forbidden for Tier 2/3 (validateManifestTier enforces both).
+	Crud *ManifestCrud `yaml:"crud" json:"crud,omitempty"`
 }
 
 // ManifestJob describes one scheduled job entry under a module's jobs: list.
@@ -133,6 +147,43 @@ type ManifestJob struct {
 	Schedule string `yaml:"schedule" json:"schedule"`
 	Handler  string `yaml:"handler"  json:"handler"`
 	CatchUp  bool   `yaml:"catch_up" json:"catch_up,omitempty"`
+}
+
+// ManifestCrud is a Tier 1 module's config-driven CRUD definition.
+type ManifestCrud struct {
+	// Table is the table name within the module's own module_{name} schema.
+	// Must satisfy safeIdentRe (see moduleIdentifiers) since it is
+	// interpolated into SQL identifiers - validated by validateCrudTable at
+	// install/update time, not here.
+	Table string `yaml:"table" json:"table"`
+	// Fields are the author-declared, user-facing columns. Core also manages
+	// a fixed set of implicit columns not listed here - id, created_at,
+	// updated_at, and (when OwnerScoped) created_by - see crud.go's
+	// implicitCrudColumns.
+	Fields []ManifestCrudField `yaml:"fields" json:"fields"`
+	// OwnerScoped, when true, restricts every row to the user who created
+	// it: list/get/update/delete all filter or reject on created_by =
+	// the caller's own user ID, with no exception - not even for admins.
+	// When false (default), every user with access to the module can read
+	// and write every row (shared data).
+	OwnerScoped bool `yaml:"owner_scoped" json:"owner_scoped,omitempty"`
+}
+
+// ManifestCrudField is one field of a Tier 1 module's crud.fields list.
+type ManifestCrudField struct {
+	Name string `yaml:"name" json:"name"`
+	// Type is one of the crudFieldTypes below (see crud.go) - validated by
+	// validateCrudTable against the real column type at install/update time.
+	Type string `yaml:"type" json:"type"`
+	// Required marks the field mandatory on create - enforced by the
+	// generic CRUD handler (crud.go), not by a DB NOT NULL constraint alone,
+	// so a missing field gets a clear 400 instead of a raw SQL error.
+	Required bool `yaml:"required" json:"required,omitempty"`
+	// Encrypted, when true, stores this field's value AES-256-GCM encrypted
+	// at rest (crypto.Encrypt, MODULAB_MODULE_PII_KEY) and transparently
+	// decrypts it on read. Cannot be filtered/searched server-side - see
+	// crud.go's doc comment.
+	Encrypted bool `yaml:"encrypted" json:"encrypted,omitempty"`
 }
 
 const (
@@ -394,6 +445,19 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 		return fmt.Errorf("modules: install %q: migrations: %w", entry.Name, err)
 	}
 
+	// ── 10b. Tier 1: cross-check crud against the migrated table ──────────
+	// Must run after migrations (10) so the table actually exists, and
+	// before marking active (12) so a mismatch between crud.fields and the
+	// author's own migrations/*.sql blocks the install with a clear error
+	// instead of surfacing as an opaque SQL error on the first API call.
+	// See docs/tier1-crud-plan.md.
+	if mf.Tier == 1 {
+		if err := validateCrudTable(ctx, d, mf.Name, mf.Crud); err != nil {
+			_, _ = d.DB.UpdateModuleStatus(ctx, entry.Name, db.ModuleStatusFailed)
+			return fmt.Errorf("modules: install %q: %w", entry.Name, err)
+		}
+	}
+
 	// ── 11. Deno worker registration ──────────────────────────────────────
 	// EgressAllowlist comes straight from the manifest the module author
 	// shipped — this is the only source of --allow-net hosts for the
@@ -627,12 +691,26 @@ func extractZIPEntry(f *zip.File, target string) (int64, error) {
 //     egress hosts at runtime (unifi-network). true with neither source of
 //     hosts is almost certainly an author mistake and is rejected rather
 //     than silently ignored.
+//   - Tier 1 must declare a crud block (table + at least one field), or the
+//     module installs with no functionality and no clear error explaining
+//     why - see docs/tier1-crud-plan.md.
 func validateManifestTier(mf Manifest) error {
 	if mf.Tier < 1 || mf.Tier > 3 {
 		return fmt.Errorf("invalid tier %d (must be 1–3)", mf.Tier)
 	}
 	if mf.Tier == 1 && (mf.Handler != "" || len(mf.Jobs) > 0 || len(mf.EgressAllowlist) > 0) {
 		return fmt.Errorf("tier 1 must not declare handler/jobs/egress_allowlist")
+	}
+	if mf.Tier == 1 && (mf.Crud == nil || mf.Crud.Table == "" || len(mf.Crud.Fields) == 0) {
+		return fmt.Errorf("tier 1 requires a crud block with a table and at least one field")
+	}
+	if mf.Tier == 1 {
+		if err := validateCrudFields(mf.Crud); err != nil {
+			return err
+		}
+	}
+	if mf.Tier >= 2 && mf.Crud != nil {
+		return fmt.Errorf("tier %d must not declare crud (tier 1 only)", mf.Tier)
 	}
 	if mf.Tier >= 2 && mf.Handler == "" {
 		return fmt.Errorf("tier %d requires a handler", mf.Tier)

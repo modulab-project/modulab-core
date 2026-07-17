@@ -1,7 +1,9 @@
-// ModulePage renders the UI for any installed Tier 2/3 module.
-// The module's React component (built as ui/bundle.js) is loaded dynamically
-// and mounted inside an AppShell so it gets the same header/navigation as
-// the rest of ModuLab.
+// ModulePage renders the UI for any installed module.
+// For Tier 2/3, the module's React component (built as ui/bundle.js) is
+// loaded dynamically and mounted inside an AppShell so it gets the same
+// header/navigation as the rest of ModuLab. For Tier 1 (config-driven CRUD,
+// no author-written UI at all - see crud.go), Core's own built-in
+// CrudModuleView is rendered instead; no bundle fetch happens for those.
 //
 // Communication between the host and the module component:
 //   - A short-lived, module-scoped token (auth/moduletoken.go) — NOT the
@@ -34,6 +36,7 @@ import i18n from "../lib/i18n";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { fetchModuleToken, moduleApiUrl, type InstalledModule } from "../lib/api";
 import { AppShell } from "../components/AppShell";
+import { CrudModuleView } from "../components/CrudModuleView";
 
 // Refresh the module-scoped token (auth/moduletoken.go, ModuleTokenTTL =
 // 20 min) this long before it actually expires, so a module page left open
@@ -281,10 +284,14 @@ export default function ModulePage() {
   // the "no frontend" fallback permanently for that window, only recovering on
   // a manual page reload — this makes the same window resolve on its own.
   useEffect(() => {
-    if (!mod || mod.status !== "active") {
+    if (!mod || mod.status !== "active" || mod.tier === 1) {
       // Not a shared-server-state fetch TanStack Query would fit well (see
       // the file-level migration note below) - this early-return guard just
       // sets a boolean once per `mod` change, no cascading/looping risk.
+      // Tier 1 modules never ship a ui/bundle.js at all (see crud.go /
+      // CrudModuleView) - skip the fetch+retry loop entirely instead of
+      // burning MAX_ATTEMPTS retries against a bundle route that will never
+      // exist for them.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setBundleLoading(false);
       return;
@@ -429,11 +436,15 @@ export default function ModulePage() {
           </div>
         )}
 
-        {!fetching && !bundleLoading && !loadError && moduleMatchesRoute && ModuleComponent && (
+        {!fetching && !bundleLoading && !loadError && moduleMatchesRoute && mod?.tier === 1 && (
+          <CrudModuleView mod={mod} token={token} />
+        )}
+
+        {!fetching && !bundleLoading && !loadError && moduleMatchesRoute && mod?.tier !== 1 && ModuleComponent && (
           <ModuleComponent moduleName={moduleName} apiBase={apiBase} token={token} initialQuery={searchParams} />
         )}
 
-        {!fetching && !bundleLoading && !loadError && moduleMatchesRoute && !ModuleComponent && mod && (
+        {!fetching && !bundleLoading && !loadError && moduleMatchesRoute && mod?.tier !== 1 && !ModuleComponent && mod && (
           <ModuleFallback mod={mod} apiBase={apiBase} token={token} />
         )}
       </div>
