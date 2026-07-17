@@ -37,6 +37,19 @@ const inputClass =
 
 export function CrudModuleView({ mod, token }: { mod: InstalledModule; token: string }) {
   const { t } = useTranslation();
+  // Module-shipped locales (locales/{lng}.json in the module's own repo) are
+  // already loaded into i18next under this namespace by ModulePage.tsx's
+  // locale-load effect, the same mechanism tier 2/3 bundles use for their
+  // own UI strings - no tier gate there, so this works for tier 1 too.
+  // Optional per-field key "field_{name}" (e.g. "field_title"); falls back
+  // to the raw, capitalized field name when the module ships no such key
+  // (or no locales/ at all).
+  const { t: tMod } = useTranslation(`mod_${mod.name}`);
+  const fieldLabel = (name: string) => {
+    const key = `field_${name}`;
+    const translated = tMod(key);
+    return translated === key ? name : translated;
+  };
   const manifest = mod.manifest as { crud?: CrudManifest } | null;
   const crud = manifest?.crud;
 
@@ -124,7 +137,7 @@ export function CrudModuleView({ mod, token }: { mod: InstalledModule; token: st
         }
         if (raw === "" || raw === undefined) {
           if (f.required) {
-            throw new Error(t("module_page.crud.field_required", { field: f.name }));
+            throw new Error(t("module_page.crud.field_required", { field: fieldLabel(f.name) }));
           }
           continue; // omit: server keeps existing value on PATCH, skips on POST
         }
@@ -197,7 +210,7 @@ export function CrudModuleView({ mod, token }: { mod: InstalledModule; token: st
               <tr className="text-left text-gray-500 dark:text-gray-400">
                 {crud.fields.map((f) => (
                   <th key={f.name} className="whitespace-nowrap px-4 py-2 font-medium capitalize">
-                    {f.name}
+                    {fieldLabel(f.name)}
                   </th>
                 ))}
                 <th className="px-4 py-2" />
@@ -242,7 +255,7 @@ export function CrudModuleView({ mod, token }: { mod: InstalledModule; token: st
               {crud.fields.map((f) => (
                 <label key={f.name} className="block text-sm">
                   <span className="mb-1 block font-medium capitalize text-gray-700 dark:text-gray-300">
-                    {f.name}
+                    {fieldLabel(f.name)}
                     {f.required && <span className="text-red-500"> *</span>}
                   </span>
                   <CrudFieldInput

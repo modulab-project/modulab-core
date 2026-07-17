@@ -27,10 +27,10 @@ import (
 // was extracted. If the directory does not exist or is empty, the function
 // returns nil (many modules may have no migrations).
 //
-// The module name must satisfy the module naming convention (modulab-mod-*
-// or admin-whitelisted), which the installer already verified before calling
-// us. We sanitise it again here because the schema name goes directly into
-// SQL identifiers.
+// moduleName comes from the manifest (already checked non-empty by
+// parseManifest and matched against the registry entry by Install/Update).
+// We sanitise it again here regardless, because the schema name goes
+// directly into SQL identifiers.
 func runModuleMigrations(ctx context.Context, d Deps, moduleName, migrationsDir string) error {
 	schemaName, roleName, err := moduleIdentifiers(moduleName)
 	if err != nil {
