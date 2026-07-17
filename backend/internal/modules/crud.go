@@ -243,6 +243,35 @@ func crudSelectColumns(crud *ManifestCrud) []string {
 	return cols
 }
 
+// crudColumnIsUUID reports whether column name is uuid-typed - the implicit
+// id column always is, a declared field is if its manifest type is "uuid".
+func crudColumnIsUUID(crud *ManifestCrud, name string) bool {
+	if name == idColumn {
+		return true
+	}
+	for _, f := range crud.Fields {
+		if f.Name == name && f.Type == "uuid" {
+			return true
+		}
+	}
+	return false
+}
+
+// quotedCrudSelectColumn returns the column reference to use in a SELECT/
+// RETURNING list. uuid-typed columns are cast to text and re-aliased back to
+// their own name: pgx's default "any" scan target for uuid decodes to
+// [16]byte, and encoding/json only base64-encodes []byte slices, not fixed-
+// size [16]byte arrays - it marshals those as a plain JSON array of 16
+// numbers instead of a UUID string, which then breaks on the way back in
+// (e.g. the frontend template-stringifying that array into a URL path
+// produces something like ".../notes/199,216,197,...", not a valid uuid).
+func quotedCrudSelectColumn(crud *ManifestCrud, name string) string {
+	if crudColumnIsUUID(crud, name) {
+		return quoteIdent(name) + "::text AS " + quoteIdent(name)
+	}
+	return quoteIdent(name)
+}
+
 func listCrudRows(w http.ResponseWriter, r *http.Request, d Deps, schemaName string, crud *ManifestCrud, sess auth.Session) {
 	pageSize := defaultCrudPageSize
 	if v := r.URL.Query().Get("page_size"); v != "" {
@@ -264,7 +293,7 @@ func listCrudRows(w http.ResponseWriter, r *http.Request, d Deps, schemaName str
 	cols := crudSelectColumns(crud)
 	quotedCols := make([]string, len(cols))
 	for i, c := range cols {
-		quotedCols[i] = quoteIdent(c)
+		quotedCols[i] = quotedCrudSelectColumn(crud, c)
 	}
 
 	query := fmt.Sprintf("SELECT %s FROM %s.%s", strings.Join(quotedCols, ", "), quoteIdent(schemaName), quoteIdent(crud.Table))
@@ -347,7 +376,7 @@ func createCrudRow(w http.ResponseWriter, r *http.Request, d Deps, schemaName st
 	returnCols := crudSelectColumns(crud)
 	quotedReturnCols := make([]string, len(returnCols))
 	for i, c := range returnCols {
-		quotedReturnCols[i] = quoteIdent(c)
+		quotedReturnCols[i] = quotedCrudSelectColumn(crud, c)
 	}
 
 	query := fmt.Sprintf("INSERT INTO %s.%s (%s) VALUES (%s) RETURNING %s",
