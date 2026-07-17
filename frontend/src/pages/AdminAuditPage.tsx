@@ -98,6 +98,17 @@ const STORE_SYNC_TYPE = "store.sync_triggered";
 // as one *interaction*, not one exact timestamp.
 const GROUP_WINDOW_MS = 10_000;
 
+// Two extra caps on top of GROUP_WINDOW_MS, both needed because that window
+// is measured between *consecutive* entries, not from the group's start - a
+// steady trickle of same-type/same-actor entries each <10s apart would
+// otherwise chain into one arbitrarily large, arbitrarily long-lived group
+// (seen in practice: an 11-entry bulk session revoke is a real, useful
+// group; a group spanning unrelated activity across many minutes is not).
+// MAX_GROUP_SPAN_MS bounds total group duration from the first entry;
+// MAX_GROUP_SIZE bounds entry count outright.
+const MAX_GROUP_SPAN_MS = 60_000;
+const MAX_GROUP_SIZE = 25;
+
 // How long to wait after the admin stops typing in the search box before
 // actually querying the server - avoids firing a request per keystroke.
 const SEARCH_DEBOUNCE_MS = 400;
@@ -109,16 +120,38 @@ function groupEntries(list: AuditEntry[]): EntryGroup[] {
   for (const e of list) {
     const last = groups[groups.length - 1];
     const lastEntry = last?.entries[last.entries.length - 1];
-    const withinWindow =
-      lastEntry &&
-      Math.abs(new Date(lastEntry.created_at).getTime() - new Date(e.created_at).getTime()) <= GROUP_WINDOW_MS;
-    if (last && lastEntry.event_type === e.event_type && lastEntry.actor_id === e.actor_id && withinWindow) {
+    const firstEntry = last?.entries[0];
+    const eTime = new Date(e.created_at).getTime();
+    const withinWindow = lastEntry && Math.abs(new Date(lastEntry.created_at).getTime() - eTime) <= GROUP_WINDOW_MS;
+    const withinSpan = firstEntry && Math.abs(new Date(firstEntry.created_at).getTime() - eTime) <= MAX_GROUP_SPAN_MS;
+    const underSize = last && last.entries.length < MAX_GROUP_SIZE;
+    if (
+      last &&
+      lastEntry.event_type === e.event_type &&
+      lastEntry.actor_id === e.actor_id &&
+      withinWindow &&
+      withinSpan &&
+      underSize
+    ) {
       last.entries.push(e);
     } else {
       groups.push({ key: String(e.id), entries: [e] });
     }
   }
   return groups;
+}
+
+// Unique, human-readable target labels across a group's entries, used in
+// the summary row/card so grouping a burst of "module updated" events
+// doesn't just drop which modules were touched. Falls back to a bare count
+// once there are too many distinct targets to list usefully.
+function summarizeTargets(entries: AuditEntry[], t: (key: string, opts?: { count: number }) => string): string {
+  const labels = Array.from(
+    new Set(entries.map((e) => e.target_name || e.target_email || e.target_id).filter((v): v is string => Boolean(v))),
+  );
+  if (labels.length === 0) return "—";
+  if (labels.length <= 3) return labels.join(", ");
+  return t("admin.audit.group_target_count", { count: labels.length });
 }
 
 // Translates a raw event_type ("user.approved", "config.ai_provider.key_cleared",
@@ -579,13 +612,18 @@ export default function AdminAuditPage() {
                           <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
                             {first.actor_name || first.actor_email || first.actor_id}
                           </td>
-                          <td colSpan={2} className="px-4 py-3 text-teal-600 dark:text-teal-400">
-                            <span className="mr-1.5 inline-block rounded-full bg-teal-100 px-1.5 py-0.5 text-xs font-medium text-teal-700 dark:bg-teal-900/40 dark:text-teal-300">
-                              ×{g.entries.length}
+                          <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
+                            {summarizeTargets(g.entries, t)}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="inline-flex items-center gap-1.5 text-teal-600 dark:text-teal-400">
+                              <span className="rounded-full bg-teal-100 px-1.5 py-0.5 text-xs font-medium text-teal-700 dark:bg-teal-900/40 dark:text-teal-300">
+                                ×{g.entries.length}
+                              </span>
+                              <span className="underline decoration-dotted underline-offset-2">
+                                {expanded ? t("admin.audit.group_collapse") : t("admin.audit.group_expand")}
+                              </span>
                             </span>
-                            {expanded
-                              ? t("admin.audit.group_collapse")
-                              : t("admin.audit.group_expand", { count: g.entries.length })}
                           </td>
                         </tr>
                         {expanded && g.entries.map((e) => <EntryRow key={e.id} e={e} zebra={zebra} muted />)}
@@ -617,13 +655,16 @@ export default function AdminAuditPage() {
                           {new Date(first.created_at).toLocaleString()}
                         </span>
                       </div>
+                      <div className="mb-1 truncate text-xs text-gray-500 dark:text-gray-400">
+                        {t("admin.audit.col_target")}: {summarizeTargets(g.entries, t)}
+                      </div>
                       <div className="flex items-center gap-1.5 text-sm text-teal-700 dark:text-teal-300">
                         <span className="rounded-full bg-teal-100 px-1.5 py-0.5 text-xs font-medium text-teal-700 dark:bg-teal-900/40 dark:text-teal-300">
                           ×{g.entries.length}
                         </span>
-                        {expanded
-                          ? t("admin.audit.group_collapse")
-                          : t("admin.audit.group_expand", { count: g.entries.length })}
+                        <span className="underline decoration-dotted underline-offset-2">
+                          {expanded ? t("admin.audit.group_collapse") : t("admin.audit.group_expand")}
+                        </span>
                       </div>
                     </button>
                     {expanded && (
