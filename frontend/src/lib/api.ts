@@ -1292,7 +1292,6 @@ export interface InstalledModule {
   version: string;
   // 1 | 2 | 3 (not plain number) - see SystemInfoModule.tier's comment above.
   tier: 1 | 2 | 3;
-  scope: string;
   source: string;
   release_url: string;
   sha256: string;

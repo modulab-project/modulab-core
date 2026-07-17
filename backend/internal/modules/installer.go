@@ -44,7 +44,6 @@ type Manifest struct {
 	Name    string `yaml:"name"         json:"name"`
 	Version string `yaml:"version"      json:"version"`
 	Tier    int    `yaml:"tier"         json:"tier"`
-	Scope   string `yaml:"scope"        json:"scope"`
 	// Description is a map of language code → short blurb, e.g.
 	// {"en": "...", "de": "..."} - same shape as DisplayName below, so the
 	// frontend resolves it with the identical lng-with-"en"-fallback lookup
@@ -362,13 +361,6 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 	if err := validateManifestTier(mf); err != nil {
 		return fmt.Errorf("modules: install %q: %w", entry.Name, err)
 	}
-	if mf.Scope == "" {
-		// "cross-location" (not "org") - must match installed_modules'
-		// CHECK (scope IN ('per-location', 'cross-location')) in db.go, or
-		// every install with an unset scope fails at the DB insert below.
-		// Broadest fallback for a module that doesn't declare a scope.
-		mf.Scope = "cross-location"
-	}
 
 	manifestJSON, err := json.Marshal(mf)
 	if err != nil {
@@ -378,7 +370,7 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 	// ── 8. DB insert (status = installing) ────────────────────────────────
 	// From this point on, any error must attempt to clean up the DB row.
 	if err := d.DB.InsertInstalledModule(ctx,
-		mf.Name, mf.Version, mf.Tier, mf.Scope,
+		mf.Name, mf.Version, mf.Tier,
 		entry.Source, zipURL, gotHex, manifestJSON, cosignVerified, entry.LogoURL,
 	); err != nil {
 		return fmt.Errorf("modules: install %q: db insert: %w", entry.Name, err)
@@ -629,9 +621,12 @@ func extractZIPEntry(f *zip.File, target string) (int64, error) {
 //     would be called with an empty entrypoint path.
 //   - Tier 2 (no egress per spec): must not declare egress_allowlist - only
 //     Tier 3 ("TypeScript + Egress") is allowed outbound network access.
-//   - tls_skip_verify is only meaningful alongside a non-empty
-//     egress_allowlist; true with no egress hosts is almost certainly an
-//     author mistake and is rejected rather than silently ignored.
+//   - tls_skip_verify is only meaningful alongside hosts the worker will
+//     actually contact - either a non-empty egress_allowlist, or
+//     dynamic_egress + egress_hosts_handler for modules that compute their
+//     egress hosts at runtime (unifi-network). true with neither source of
+//     hosts is almost certainly an author mistake and is rejected rather
+//     than silently ignored.
 func validateManifestTier(mf Manifest) error {
 	if mf.Tier < 1 || mf.Tier > 3 {
 		return fmt.Errorf("invalid tier %d (must be 1–3)", mf.Tier)
@@ -645,8 +640,15 @@ func validateManifestTier(mf Manifest) error {
 	if mf.Tier == 2 && len(mf.EgressAllowlist) > 0 {
 		return fmt.Errorf("tier 2 must not declare egress_allowlist (use tier 3)")
 	}
-	if mf.TLSSkipVerify && len(mf.EgressAllowlist) == 0 {
-		return fmt.Errorf("tls_skip_verify requires a non-empty egress_allowlist")
+	// tls_skip_verify is scoped to whatever hosts the worker actually gets
+	// --allow-net for - that's normally EgressAllowlist, but a module can
+	// opt into dynamic_egress + egress_hosts_handler instead (unifi-network)
+	// to compute its egress hosts at runtime from its own DB rather than a
+	// static manifest list. Both are valid sources of "hosts this worker
+	// will contact"; only reject tls_skip_verify when NEITHER is present,
+	// since that combination has no hosts to scope it to at all.
+	if mf.TLSSkipVerify && len(mf.EgressAllowlist) == 0 && (!mf.DynamicEgress || mf.EgressHostsHandler == "") {
+		return fmt.Errorf("tls_skip_verify requires a non-empty egress_allowlist or dynamic_egress with an egress_hosts_handler")
 	}
 	return nil
 }

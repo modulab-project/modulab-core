@@ -68,17 +68,16 @@ func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
 			name TEXT PRIMARY KEY,
 			version TEXT NOT NULL,
 			tier SMALLINT NOT NULL CHECK (tier IN (1, 2, 3)),
-			scope TEXT NOT NULL CHECK (scope IN ('per-location', 'cross-location')),
 			status TEXT NOT NULL DEFAULT 'installing' CHECK (status IN ('installing', 'active', 'degraded', 'failed', 'isolated')),
 			installed_at TIMESTAMPTZ NOT NULL DEFAULT now()
 		)
 	`); err != nil {
 		return fmt.Errorf("db: ensure installed_modules: %w", err)
 	}
-	// status had no CHECK constraint at all before this (unlike tier/scope
-	// right above it in the same table) despite the ModuleStatus* constants
-	// below implying one always existed - CREATE TABLE IF NOT EXISTS above
-	// is a no-op against any database that already has this table, so an
+	// status had no CHECK constraint at all before this (unlike tier right
+	// above it in the same table) despite the ModuleStatus* constants below
+	// implying one always existed - CREATE TABLE IF NOT EXISTS above is a
+	// no-op against any database that already has this table, so an
 	// existing deployment needs this added separately. Postgres has no
 	// ADD CONSTRAINT IF NOT EXISTS, hence the pg_constraint check (same
 	// pattern as EnsureAuditSchema's trigger check below).
@@ -96,6 +95,17 @@ func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
 		END $$
 	`); err != nil {
 		return fmt.Errorf("db: ensure installed_modules.status check: %w", err)
+	}
+
+	// scope (per-location/cross-location) was part of an early multi-location
+	// design that was dropped before v1 shipped - multi-location support is
+	// not being built. DROP COLUMN IF EXISTS also removes the inline CHECK
+	// constraint that was defined on it, and is a no-op on a fresh database
+	// that never had the column (CREATE TABLE above already omits it).
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE installed_modules DROP COLUMN IF EXISTS scope
+	`); err != nil {
+		return fmt.Errorf("db: drop installed_modules.scope: %w", err)
 	}
 
 	if _, err := p.Exec(ctx, `
@@ -2660,7 +2670,6 @@ type InstalledModuleRow struct {
 	Name             string          `json:"name"`
 	Version          string          `json:"version"`
 	Tier             int             `json:"tier"`
-	Scope            string          `json:"scope"`
 	Source           string          `json:"source"`
 	ReleaseURL       string          `json:"release_url"`
 	SHA256           string          `json:"sha256"`
@@ -2685,16 +2694,16 @@ type InstalledModuleRow struct {
 // logoURL is carried over from the store.Entry the module was installed
 // from (empty string if the module has no logo) - see the logo_url column
 // comment in EnsureCoreSchema for why this is persisted at all.
-func (p *Pool) InsertInstalledModule(ctx context.Context, name, version string, tier int, scope, source, releaseURL, sha256 string, manifest []byte, cosignVerified bool, logoURL string) error {
+func (p *Pool) InsertInstalledModule(ctx context.Context, name, version string, tier int, source, releaseURL, sha256 string, manifest []byte, cosignVerified bool, logoURL string) error {
 	var logoURLArg any
 	if logoURL != "" {
 		logoURLArg = logoURL
 	}
 	_, err := p.Exec(ctx, `
 		INSERT INTO installed_modules
-		    (name, version, tier, scope, source, release_url, sha256, manifest, status, cosign_verified, logo_url, installed_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'installing', $9, $10, now(), now())
-	`, name, version, tier, scope, source, releaseURL, sha256, manifest, cosignVerified, logoURLArg)
+		    (name, version, tier, source, release_url, sha256, manifest, status, cosign_verified, logo_url, installed_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, 'installing', $8, $9, now(), now())
+	`, name, version, tier, source, releaseURL, sha256, manifest, cosignVerified, logoURLArg)
 	if err != nil {
 		return fmt.Errorf("db: insert installed_module %q: %w", name, err)
 	}
@@ -2717,12 +2726,12 @@ func (p *Pool) UpdateModuleStatus(ctx context.Context, name, status string) (boo
 func (p *Pool) GetInstalledModule(ctx context.Context, name string) (InstalledModuleRow, bool, error) {
 	var r InstalledModuleRow
 	err := p.QueryRow(ctx, `
-		SELECT name, version, tier, scope, source, release_url, sha256, manifest,
+		SELECT name, version, tier, source, release_url, sha256, manifest,
 		       status, pinned, cosign_verified, cached_zip_path, available_version, last_update_check,
 		       logo_url, installed_at, updated_at
 		FROM installed_modules WHERE name = $1
 	`, name).Scan(
-		&r.Name, &r.Version, &r.Tier, &r.Scope, &r.Source, &r.ReleaseURL, &r.SHA256, &r.Manifest,
+		&r.Name, &r.Version, &r.Tier, &r.Source, &r.ReleaseURL, &r.SHA256, &r.Manifest,
 		&r.Status, &r.Pinned, &r.CosignVerified, &r.CachedZipPath, &r.AvailableVersion, &r.LastUpdateCheck,
 		&r.LogoURL, &r.InstalledAt, &r.UpdatedAt,
 	)
@@ -2738,7 +2747,7 @@ func (p *Pool) GetInstalledModule(ctx context.Context, name string) (InstalledMo
 // ListInstalledModules returns all installed module rows, ordered by name.
 func (p *Pool) ListInstalledModules(ctx context.Context) ([]InstalledModuleRow, error) {
 	rows, err := p.Query(ctx, `
-		SELECT name, version, tier, scope, source, release_url, sha256, manifest,
+		SELECT name, version, tier, source, release_url, sha256, manifest,
 		       status, pinned, cosign_verified, cached_zip_path, available_version, last_update_check,
 		       logo_url, installed_at, updated_at
 		FROM installed_modules ORDER BY name ASC
@@ -2752,7 +2761,7 @@ func (p *Pool) ListInstalledModules(ctx context.Context) ([]InstalledModuleRow, 
 	for rows.Next() {
 		var r InstalledModuleRow
 		if err := rows.Scan(
-			&r.Name, &r.Version, &r.Tier, &r.Scope, &r.Source, &r.ReleaseURL, &r.SHA256, &r.Manifest,
+			&r.Name, &r.Version, &r.Tier, &r.Source, &r.ReleaseURL, &r.SHA256, &r.Manifest,
 			&r.Status, &r.Pinned, &r.CosignVerified, &r.CachedZipPath, &r.AvailableVersion, &r.LastUpdateCheck,
 			&r.LogoURL,
 			&r.InstalledAt, &r.UpdatedAt,
