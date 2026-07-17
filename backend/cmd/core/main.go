@@ -442,6 +442,7 @@ func main() {
 	mux.Handle("DELETE /v1/admin/oidc", superAdminOnly(adminapi.OIDCDeleteHandler(pool, cfg.MasterKey)))
 	mux.Handle("GET /v1/audit-log", superAdminOnly(adminapi.AuditLogHandler(pool, cfg.MasterKey)))
 	mux.Handle("GET /v1/audit-log/verify", superAdminOnly(adminapi.AuditVerifyHandler(pool, cfg.MasterKey)))
+	mux.Handle("GET /v1/audit-log/actors", superAdminOnly(adminapi.AuditActorsHandler(pool)))
 	// Cross-cutting operational limits (upload/body size caps, rate limits,
 	// Deno worker pool size) - see adminapi.AdminLimitsHandler's package doc
 	// comment for why these were consolidated into one endpoint.

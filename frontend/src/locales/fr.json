@@ -485,6 +485,25 @@
       "hidden_sync_count": "{{count}} synchronisations masquées",
       "group_expand": "Afficher {{count}} de plus",
       "group_collapse": "Réduire les entrées",
+      "filter_actor_label": "Filtrer par acteur",
+      "filter_actor_all": "Tous les acteurs",
+      "filter_since_label": "Date de début",
+      "filter_until_label": "Date de fin",
+      "filter_search_placeholder": "Rechercher dans les détails, l'acteur, la cible…",
+      "reset_filters": "Réinitialiser les filtres",
+      "categories": {
+        "auth": "Authentification & sessions",
+        "user": "Gestion des utilisateurs",
+        "config": "Configuration système",
+        "ai": "IA",
+        "search": "Recherche",
+        "setup": "Configuration initiale",
+        "module": "Modules",
+        "feed": "Flux d'actualités",
+        "quicklink": "Liens rapides",
+        "store": "Store de modules",
+        "rate_limit": "Limitation de débit"
+      },
       "event_types": {
         "auth_login": "Connexion",
         "auth_logout": "Déconnexion",
@@ -530,6 +549,8 @@
         "quicklink_updated": "Lien rapide modifié",
         "quicklink_deleted": "Lien rapide supprimé",
         "store_sync_triggered": "Store de modules synchronisé",
+        "store_custom_source_added": "Source de modules personnalisée ajoutée",
+        "store_custom_source_removed": "Source de modules personnalisée supprimée",
         "rate_limit_exceeded": "Limite de débit dépassée"
       }
     },

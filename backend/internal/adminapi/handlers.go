@@ -4,6 +4,7 @@
 //	GET  /v1/admin/system          — OIDC, group prefix (read-only)
 //	PATCH /v1/admin/oidc           — update OIDC configuration
 //	GET  /v1/audit-log             — paginated, filtered audit log
+//	GET  /v1/audit-log/actors      — distinct actors for the audit log's filter dropdown
 //
 // All three require a super-admin session (enforced by the
 // auth.RequireSuperAdminMiddleware wrapper that main.go applies to each
@@ -23,6 +24,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
@@ -218,6 +220,11 @@ func OIDCDeleteHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 // AuditLogHandler serves GET /v1/audit-log with optional query parameters:
 //
 //	event_type  — filter to entries of exactly this event type
+//	actor_id    — filter to entries by exactly this actor (see audit.ListActors)
+//	since       — filter to entries on/after this date (YYYY-MM-DD, local server date)
+//	until       — filter to entries on/before this date (YYYY-MM-DD, inclusive)
+//	search      — case-insensitive substring match across all decrypted text
+//	              fields (see audit.List's doc comment on how this is scanned)
 //	before      — cursor: return entries with id < before (newest-first paging)
 //	limit       — max entries per page (1-200, default 50)
 func AuditLogHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
@@ -242,8 +249,28 @@ func AuditLogHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 			}
 		}
 
+		// since/until come from a plain <input type="date"> on the frontend
+		// (YYYY-MM-DD, no timezone) - parsed as UTC dates. until is bumped to
+		// the last instant of that day so "until 2026-07-16" includes
+		// everything logged on the 16th, not just up to midnight.
+		var since, until time.Time
+		if s := q.Get("since"); s != "" {
+			if t, err := time.Parse("2006-01-02", s); err == nil {
+				since = t
+			}
+		}
+		if s := q.Get("until"); s != "" {
+			if t, err := time.Parse("2006-01-02", s); err == nil {
+				until = t.Add(24*time.Hour - time.Nanosecond)
+			}
+		}
+
 		entries, err := audit.List(ctx, pool, masterKey, audit.ListParams{
 			EventType: q.Get("event_type"),
+			ActorID:   q.Get("actor_id"),
+			Since:     since,
+			Until:     until,
+			Search:    q.Get("search"),
 			Before:    before,
 			Limit:     limit,
 		})
@@ -255,6 +282,26 @@ func AuditLogHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 			entries = []audit.Entry{}
 		}
 		writeJSON(w, http.StatusOK, entries)
+	}
+}
+
+// ---- GET /v1/audit-log/actors ---------------------------------------------------
+
+// AuditActorsHandler serves GET /v1/audit-log/actors: every distinct actor
+// that has ever produced an audit entry, for the audit page's actor filter
+// dropdown. Cheap at homelab scale (DISTINCT over an indexed column), no
+// pagination needed.
+func AuditActorsHandler(pool *db.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		actors, err := audit.ListActors(r.Context(), pool)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if actors == nil {
+			actors = []audit.ActorOption{}
+		}
+		writeJSON(w, http.StatusOK, actors)
 	}
 }
 

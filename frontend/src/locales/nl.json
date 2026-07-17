@@ -485,6 +485,25 @@
       "hidden_sync_count": "{{count}} sync-items verborgen",
       "group_expand": "{{count}} meer weergeven",
       "group_collapse": "Items samenvouwen",
+      "filter_actor_label": "Filteren op acteur",
+      "filter_actor_all": "Alle actoren",
+      "filter_since_label": "Vanaf datum",
+      "filter_until_label": "Tot datum",
+      "filter_search_placeholder": "Zoeken in details, acteur, doel…",
+      "reset_filters": "Filters wissen",
+      "categories": {
+        "auth": "Aanmelding & sessies",
+        "user": "Gebruikersbeheer",
+        "config": "Systeemconfiguratie",
+        "ai": "AI",
+        "search": "Zoeken",
+        "setup": "Eerste installatie",
+        "module": "Modules",
+        "feed": "Nieuwsfeeds",
+        "quicklink": "Snelkoppelingen",
+        "store": "Modulewinkel",
+        "rate_limit": "Snelheidslimiet"
+      },
       "event_types": {
         "auth_login": "Aanmelding",
         "auth_logout": "Afmelding",
@@ -530,6 +549,8 @@
         "quicklink_updated": "Snelkoppeling gewijzigd",
         "quicklink_deleted": "Snelkoppeling verwijderd",
         "store_sync_triggered": "Modulewinkel gesynchroniseerd",
+        "store_custom_source_added": "Aangepaste modulebron toegevoegd",
+        "store_custom_source_removed": "Aangepaste modulebron verwijderd",
         "rate_limit_exceeded": "Snelheidslimiet overschreden"
       }
     },

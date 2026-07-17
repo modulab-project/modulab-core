@@ -485,6 +485,25 @@
       "hidden_sync_count": "{{count}} Sync-Einträge ausgeblendet",
       "group_expand": "{{count}} weitere anzeigen",
       "group_collapse": "Einzeleinträge ausblenden",
+      "filter_actor_label": "Nach Akteur filtern",
+      "filter_actor_all": "Alle Akteure",
+      "filter_since_label": "Startdatum",
+      "filter_until_label": "Enddatum",
+      "filter_search_placeholder": "Suche in Details, Akteur, Ziel …",
+      "reset_filters": "Filter zurücksetzen",
+      "categories": {
+        "auth": "Anmeldung & Sitzungen",
+        "user": "Benutzerverwaltung",
+        "config": "Systemkonfiguration",
+        "ai": "KI",
+        "search": "Suche",
+        "setup": "Ersteinrichtung",
+        "module": "Module",
+        "feed": "News-Feeds",
+        "quicklink": "Schnellzugriffe",
+        "store": "Modul-Store",
+        "rate_limit": "Rate-Limiting"
+      },
       "event_types": {
         "auth_login": "Anmeldung",
         "auth_logout": "Abmeldung",
@@ -530,6 +549,8 @@
         "quicklink_updated": "Schnellzugriff geändert",
         "quicklink_deleted": "Schnellzugriff gelöscht",
         "store_sync_triggered": "Modul-Store synchronisiert",
+        "store_custom_source_added": "Eigene Modulquelle hinzugefügt",
+        "store_custom_source_removed": "Eigene Modulquelle entfernt",
         "rate_limit_exceeded": "Rate-Limit überschritten"
       }
     },

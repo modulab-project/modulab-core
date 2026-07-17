@@ -1170,18 +1170,41 @@ export interface AuditEntry {
 }
 
 // GET /v1/audit-log — paginated, newest first.
-// event_type: filter to one event type; before: cursor (id < before); limit: page size.
+// event_type: filter to one event type; actor_id: filter to one actor (see
+// getAuditActors); since/until: YYYY-MM-DD date range (both inclusive);
+// search: case-insensitive substring match across all decrypted text fields
+// (see backend AuditLogHandler's doc comment for how this is scanned);
+// before: cursor (id < before); limit: page size.
 export function getAuditLog(opts?: {
   event_type?: string;
+  actor_id?: string;
+  since?: string;
+  until?: string;
+  search?: string;
   before?: number;
   limit?: number;
 }): Promise<AuditEntry[]> {
   const params = new URLSearchParams();
   if (opts?.event_type) params.set("event_type", opts.event_type);
+  if (opts?.actor_id) params.set("actor_id", opts.actor_id);
+  if (opts?.since) params.set("since", opts.since);
+  if (opts?.until) params.set("until", opts.until);
+  if (opts?.search) params.set("search", opts.search);
   if (opts?.before) params.set("before", String(opts.before));
   if (opts?.limit) params.set("limit", String(opts.limit));
   const qs = params.toString();
   return request<AuditEntry[]>(`/v1/audit-log${qs ? `?${qs}` : ""}`);
+}
+
+export interface AuditActor {
+  id: string;
+  name?: string; // "" / absent if this actor never matched a users row (e.g. an IP-keyed rate-limit entry) or no longer does
+}
+
+// GET /v1/audit-log/actors — every distinct actor that has produced an audit
+// entry, for the audit page's actor filter dropdown.
+export function getAuditActors(): Promise<AuditActor[]> {
+  return request<AuditActor[]>("/v1/audit-log/actors");
 }
 
 export interface AuditVerifyResult {

@@ -24,6 +24,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -257,28 +258,107 @@ func Log(ctx context.Context, pool *db.Pool, masterKey string, p LogParams) erro
 	return nil
 }
 
-// ListParams controls which rows List returns.
+// ListParams controls which rows List returns. All filters are ANDed
+// together; zero values mean "no restriction" on that dimension.
 type ListParams struct {
-	EventType string // filter by event_type prefix, "" means all
-	Limit     int    // max rows, default 50 if 0
-	Before    int64  // cursor: return rows with id < Before, 0 means newest first
+	EventType string    // filter by exact event_type, "" means all
+	ActorID   string    // filter by exact actor_id (OIDC sub or IP), "" means all
+	Since     time.Time // created_at >= Since, zero value means no lower bound
+	Until     time.Time // created_at <= Until, zero value means no upper bound
+	// Search is a case-insensitive substring match against every decrypted
+	// text field (event_type, actor/target id, name, email, details JSON).
+	// Because those fields are encrypted at rest (see the package doc
+	// comment), this cannot be pushed into the SQL WHERE clause - List runs
+	// it as a Go-side scan-and-filter loop instead. See the Search-mode
+	// branch below for the scan cap this implies.
+	Search string
+	Limit  int   // max rows returned, default 50 if 0, capped at 200
+	Before int64 // cursor: only consider rows with id < Before, 0 means newest first
 }
 
-// List returns audit log entries newest-first, decrypting PII fields.
+// searchScanBatch is how many rows List fetches per round-trip while
+// scanning for a Search match. searchScanCap is the hard ceiling on total
+// rows examined for a single List call in Search mode - a safety valve, not
+// a expected limit: ModuLab is a homelab-scale deployment (see Verify's doc
+// comment on the same assumption), so an audit_log with more than this many
+// rows between two matches is not a realistic case today. If that ever
+// changes, this needs a real search index instead of decrypt-and-scan.
+const (
+	searchScanBatch = 500
+	searchScanCap   = 20_000
+)
+
+// List returns audit log entries newest-first, decrypting PII fields and
+// applying every non-zero field of p. Without Search set, this is a single
+// SQL round-trip. With Search set, it transparently scans batches (in the
+// same id-descending order) until Limit matches are found, the table is
+// exhausted, or searchScanCap rows have been examined - so the returned
+// slice always represents a contiguous, gap-free window even though the
+// admin only sees the ones that matched.
 func List(ctx context.Context, pool *db.Pool, masterKey string, p ListParams) ([]Entry, error) {
 	limit := p.Limit
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
 
-	var (
-		rows pgx.Rows
-		err  error
-	)
+	needle := strings.ToLower(strings.TrimSpace(p.Search))
+	if needle == "" {
+		return queryPage(ctx, pool, masterKey, p, limit, p.Before)
+	}
 
-	// Build the query depending on filters. Pool embeds *pgxpool.Pool whose
-	// Query method returns (pgx.Rows, error).
-	//
+	var results []Entry
+	cursor := p.Before
+	scanned := 0
+	for scanned < searchScanCap {
+		batch, err := queryPage(ctx, pool, masterKey, p, searchScanBatch, cursor)
+		if err != nil {
+			return nil, err
+		}
+		if len(batch) == 0 {
+			break
+		}
+		scanned += len(batch)
+		for _, e := range batch {
+			if entryMatches(e, needle) {
+				results = append(results, e)
+				if len(results) >= limit {
+					// Stop mid-batch: results[len-1] is also the last row
+					// we examined, so its ID is a valid cursor for the next
+					// page - rows after it in this batch are simply
+					// deferred to that next call, not skipped.
+					return results, nil
+				}
+			}
+		}
+		cursor = batch[len(batch)-1].ID
+		if len(batch) < searchScanBatch {
+			break // reached the actual end of the table
+		}
+	}
+	return results, nil
+}
+
+// entryMatches reports whether needle (already lowercased) occurs in any of
+// entry e's human-readable text fields.
+func entryMatches(e Entry, needle string) bool {
+	fields := [...]string{
+		e.EventType, e.ActorID, e.ActorEmail, e.ActorName,
+		e.TargetID, e.TargetEmail, e.TargetName, e.Details,
+	}
+	for _, f := range fields {
+		if f != "" && strings.Contains(strings.ToLower(f), needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// queryPage runs one SQL round-trip: build a WHERE clause from whichever of
+// p.EventType/ActorID/Since/Until are set, plus the id < before cursor, and
+// decrypt every returned row. Used directly by List for the non-Search case,
+// and repeatedly (with the narrower searchScanBatch limit) by List's
+// Search-mode scan loop.
+func queryPage(ctx context.Context, pool *db.Pool, masterKey string, p ListParams, limit int, before int64) ([]Entry, error) {
 	// LEFT JOIN users twice (once per subject column) to resolve ActorName/
 	// TargetName (added 2026-07-05) - LEFT, not INNER, because actor_id/
 	// target_id may be a bare IP (rate-limit entries), "" (no target), or a
@@ -287,51 +367,47 @@ func List(ctx context.Context, pool *db.Pool, masterKey string, p ListParams) ([
 	// COALESCE(..., '') turns the LEFT JOIN's possible NULL into an empty
 	// string so Scan can read straight into a plain string, no
 	// sql.NullString needed.
-	switch {
-	case p.EventType != "" && p.Before > 0:
-		rows, err = pool.Query(ctx, `
-			SELECT a.id, a.created_at, a.event_type, a.actor_id, a.actor_email_enc,
-			       a.target_id, a.target_email_enc, a.details_enc, a.prev_hash, a.hash,
-			       COALESCE(au.name, ''), COALESCE(tu.name, '')
-			FROM audit_log a
-			LEFT JOIN users au ON au.id = a.actor_id
-			LEFT JOIN users tu ON tu.id = a.target_id
-			WHERE a.event_type = $1 AND a.id < $2
-			ORDER BY a.id DESC LIMIT $3
-		`, p.EventType, p.Before, limit)
-	case p.EventType != "":
-		rows, err = pool.Query(ctx, `
-			SELECT a.id, a.created_at, a.event_type, a.actor_id, a.actor_email_enc,
-			       a.target_id, a.target_email_enc, a.details_enc, a.prev_hash, a.hash,
-			       COALESCE(au.name, ''), COALESCE(tu.name, '')
-			FROM audit_log a
-			LEFT JOIN users au ON au.id = a.actor_id
-			LEFT JOIN users tu ON tu.id = a.target_id
-			WHERE a.event_type = $1
-			ORDER BY a.id DESC LIMIT $2
-		`, p.EventType, limit)
-	case p.Before > 0:
-		rows, err = pool.Query(ctx, `
-			SELECT a.id, a.created_at, a.event_type, a.actor_id, a.actor_email_enc,
-			       a.target_id, a.target_email_enc, a.details_enc, a.prev_hash, a.hash,
-			       COALESCE(au.name, ''), COALESCE(tu.name, '')
-			FROM audit_log a
-			LEFT JOIN users au ON au.id = a.actor_id
-			LEFT JOIN users tu ON tu.id = a.target_id
-			WHERE a.id < $1
-			ORDER BY a.id DESC LIMIT $2
-		`, p.Before, limit)
-	default:
-		rows, err = pool.Query(ctx, `
-			SELECT a.id, a.created_at, a.event_type, a.actor_id, a.actor_email_enc,
-			       a.target_id, a.target_email_enc, a.details_enc, a.prev_hash, a.hash,
-			       COALESCE(au.name, ''), COALESCE(tu.name, '')
-			FROM audit_log a
-			LEFT JOIN users au ON au.id = a.actor_id
-			LEFT JOIN users tu ON tu.id = a.target_id
-			ORDER BY a.id DESC LIMIT $1
-		`, limit)
+	var (
+		conds []string
+		args  []any
+	)
+	addCond := func(cond string, val any) {
+		args = append(args, val)
+		conds = append(conds, fmt.Sprintf(cond, len(args)))
 	}
+	if p.EventType != "" {
+		addCond("a.event_type = $%d", p.EventType)
+	}
+	if p.ActorID != "" {
+		addCond("a.actor_id = $%d", p.ActorID)
+	}
+	if !p.Since.IsZero() {
+		addCond("a.created_at >= $%d", p.Since)
+	}
+	if !p.Until.IsZero() {
+		addCond("a.created_at <= $%d", p.Until)
+	}
+	if before > 0 {
+		addCond("a.id < $%d", before)
+	}
+	where := ""
+	if len(conds) > 0 {
+		where = "WHERE " + strings.Join(conds, " AND ")
+	}
+	args = append(args, limit)
+
+	query := fmt.Sprintf(`
+		SELECT a.id, a.created_at, a.event_type, a.actor_id, a.actor_email_enc,
+		       a.target_id, a.target_email_enc, a.details_enc, a.prev_hash, a.hash,
+		       COALESCE(au.name, ''), COALESCE(tu.name, '')
+		FROM audit_log a
+		LEFT JOIN users au ON au.id = a.actor_id
+		LEFT JOIN users tu ON tu.id = a.target_id
+		%s
+		ORDER BY a.id DESC LIMIT $%d
+	`, where, len(args))
+
+	rows, err := pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("audit: query: %w", err)
 	}
@@ -383,6 +459,48 @@ func List(ctx context.Context, pool *db.Pool, masterKey string, p ListParams) ([
 		entries = append(entries, e)
 	}
 	return entries, nil
+}
+
+// ActorOption is one entry in the actor filter dropdown: a distinct
+// actor_id that has ever appeared in the audit log, plus its resolved name
+// where available.
+type ActorOption struct {
+	ID string `json:"id"`
+	// Name is "" when actor_id never matched a users row (an IP-keyed
+	// rate-limit entry) or no longer does (the account was since deleted) -
+	// callers should fall back to displaying the raw ID in that case.
+	Name string `json:"name,omitempty"`
+}
+
+// ListActors returns every distinct actor_id seen in the audit log, newest
+// activity first is not tracked here - ordered by name (named actors first,
+// alphabetically) then by ID, so the filter dropdown groups real accounts
+// together ahead of bare IPs/subs from rate-limit entries.
+func ListActors(ctx context.Context, pool *db.Pool) ([]ActorOption, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT DISTINCT a.actor_id, COALESCE(u.name, '') AS name
+		FROM audit_log a
+		LEFT JOIN users u ON u.id = a.actor_id
+		WHERE a.actor_id <> ''
+		ORDER BY (name = '') ASC, name ASC, a.actor_id ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("audit: list actors: %w", err)
+	}
+	defer rows.Close()
+
+	var actors []ActorOption
+	for rows.Next() {
+		var a ActorOption
+		if err := rows.Scan(&a.ID, &a.Name); err != nil {
+			return nil, fmt.Errorf("audit: list actors scan: %w", err)
+		}
+		actors = append(actors, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("audit: list actors rows: %w", err)
+	}
+	return actors, nil
 }
 
 // latestHash returns the hash of the most recent audit_log entry, or ""
