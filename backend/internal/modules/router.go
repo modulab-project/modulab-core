@@ -1,7 +1,9 @@
 package modules
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -121,8 +123,12 @@ func MaxUploadBodyBytes(ctx context.Context, pool *db.Pool) int64 {
 // never has to touch tokens or cookies.
 //
 // File uploads (multipart/form-data with a "file" field) are intercepted here:
-// the file is written to the module's storage directory and the path is passed
-// to the Deno handler as Body.file_path instead of raw bytes.
+// the file is written to the module's storage directory, and the Deno handler
+// receives both a stable relative path (Body.file_path, for persisting a
+// portable DB reference) and the same content base64-encoded (Body.file_base64
+// + Body.file_mime_type, 2026-07-18 addition - see saveUploadedFile/
+// uploadedFile below) for modules that need to forward the upload somewhere
+// else server-side without ever touching the filesystem themselves.
 func ModuleProxyHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// ── Resolve module name from path ─────────────────────────────────
@@ -204,12 +210,32 @@ func ModuleProxyHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 				http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
 				return
 			}
-			savedPath, err := saveUploadedFile(r, d.DataDir, moduleName, uploadLimit)
+			saved, err := saveUploadedFile(r, d.DataDir, moduleName, uploadLimit)
 			if err != nil {
 				http.Error(w, "file upload failed: "+err.Error(), http.StatusBadRequest)
 				return
 			}
-			bodyJSON, _ = json.Marshal(map[string]string{"file_path": savedPath})
+			// file_base64/file_mime_type (2026-07-18, added for pantry's
+			// receipt-scan feature): every module upload used to hand the
+			// Deno worker only a relative file_path, on the assumption that
+			// nothing ever needs the actual bytes server-side - recipes/
+			// unifi-network only ever pass that path back out to the browser,
+			// which re-fetches it from ModuleStorageHandler itself. That
+			// assumption breaks for a module that needs to forward the
+			// uploaded content somewhere else server-side (e.g. to an AI
+			// vision API) - the Deno worker has no portable way to know its
+			// own moduleRoot/dataDir (never passed in as an env var, and
+			// hardcoding it defeats the whole point of saveUploadedFile
+			// returning a relative, environment-independent path in the
+			// first place, see that function's doc comment). Since Core
+			// already has the bytes in hand right here, it's cheapest to
+			// just include them - existing modules that only read
+			// body.file_path are unaffected by the additive fields.
+			bodyJSON, _ = json.Marshal(map[string]string{
+				"file_path":      saved.relPath,
+				"file_base64":    base64.StdEncoding.EncodeToString(saved.bytes),
+				"file_mime_type": saved.mimeType,
+			})
 		} else {
 			raw, _ := io.ReadAll(io.LimitReader(r.Body, 10<<20))
 			if len(raw) > 0 {
@@ -296,17 +322,30 @@ var allowedImageTypes = map[string]bool{
 	"image/avif": true,
 }
 
+// uploadedFile is saveUploadedFile's result: everything the caller needs to
+// both persist a reference to the file (relPath, unchanged behavior) and, as
+// of 2026-07-18, hand the raw content to the module's own Deno handler
+// without that handler ever needing filesystem access or to know its own
+// absolute storage location (see the ModuleProxyHandler call site's comment).
+type uploadedFile struct {
+	relPath  string // e.g. "uploads/{filename}" - stable, portable, unchanged from before
+	bytes    []byte // full file content, already validated as an allowed image type
+	mimeType string // sniffed content type, e.g. "image/jpeg" - stripped of any ";charset=..." parameters
+}
+
 // saveUploadedFile extracts the "file" field from a multipart upload, validates
 // that it is an image, and saves it to {dataDir}/{moduleName}/storage/uploads/.
-// Returns a stable relative path ("uploads/{filename}") — never an absolute
-// path — so that the value stored in the DB is portable across environments
-// (local dev, Docker, different data dir mounts).
+// The returned relPath ("uploads/{filename}") is never an absolute path, so
+// that the value stored in the DB is portable across environments (local dev,
+// Docker, different data dir mounts) - the returned bytes/mimeType are for the
+// caller to forward to the module's handler in the same request, not for any
+// portability-sensitive persistence.
 //
 // limit is the caller-resolved max_upload_body_bytes value (see
 // MaxUploadBodyBytes) — resolved once by the caller rather than looked up
 // again here so the Content-Length pre-check and the actual read enforce
 // the exact same number. 0 means unlimited.
-func saveUploadedFile(r *http.Request, dataDir, moduleName string, limit int64) (string, error) {
+func saveUploadedFile(r *http.Request, dataDir, moduleName string, limit int64) (uploadedFile, error) {
 	parseMemory := limit
 	if limit <= 0 {
 		parseMemory = unlimitedUploadParseMemory
@@ -314,12 +353,12 @@ func saveUploadedFile(r *http.Request, dataDir, moduleName string, limit int64) 
 		r.Body = http.MaxBytesReader(nil, r.Body, limit)
 	}
 	if err := r.ParseMultipartForm(parseMemory); err != nil {
-		return "", fmt.Errorf("parse multipart: %w", err)
+		return uploadedFile{}, fmt.Errorf("parse multipart: %w", err)
 	}
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		return "", fmt.Errorf("form file: %w", err)
+		return uploadedFile{}, fmt.Errorf("form file: %w", err)
 	}
 	defer func() {
 		if err := file.Close(); err != nil {
@@ -331,16 +370,16 @@ func saveUploadedFile(r *http.Request, dataDir, moduleName string, limit int64) 
 	buf := make([]byte, 512)
 	n, _ := file.Read(buf)
 	detectedType := http.DetectContentType(buf[:n])
-	// Seek back to start so the full file is written.
+	// Seek back to start so the full file is read/written from the beginning.
 	if seeker, ok := file.(io.Seeker); ok {
 		if _, err := seeker.Seek(0, io.SeekStart); err != nil {
-			return "", fmt.Errorf("seek file: %w", err)
+			return uploadedFile{}, fmt.Errorf("seek file: %w", err)
 		}
 	}
 	// Strip parameters (e.g. "image/jpeg; charset=...") before lookup.
 	mediaType, _, _ := mime.ParseMediaType(detectedType)
 	if !allowedImageTypes[mediaType] {
-		return "", fmt.Errorf("only image files are allowed (got %s)", detectedType)
+		return uploadedFile{}, fmt.Errorf("only image files are allowed (got %s)", detectedType)
 	}
 
 	// Sanitise filename — keep only the base name, no path traversal.
@@ -354,18 +393,18 @@ func saveUploadedFile(r *http.Request, dataDir, moduleName string, limit int64) 
 	// own file_path validation).
 	safeName := filepath.Base(header.Filename)
 	if safeName == "." || safeName == ".." || safeName == "/" {
-		return "", fmt.Errorf("invalid filename")
+		return uploadedFile{}, fmt.Errorf("invalid filename")
 	}
 
 	uploadDir := filepath.Join(dataDir, moduleName, "storage", "uploads")
 	if err := os.MkdirAll(uploadDir, 0o750); err != nil {
-		return "", fmt.Errorf("create upload dir: %w", err)
+		return uploadedFile{}, fmt.Errorf("create upload dir: %w", err)
 	}
 
 	dst := filepath.Join(uploadDir, safeName)
 	out, err := os.Create(dst)
 	if err != nil {
-		return "", fmt.Errorf("create file: %w", err)
+		return uploadedFile{}, fmt.Errorf("create file: %w", err)
 	}
 	defer func() {
 		if err := out.Close(); err != nil {
@@ -373,13 +412,19 @@ func saveUploadedFile(r *http.Request, dataDir, moduleName string, limit int64) 
 		}
 	}()
 
-	if _, err := io.Copy(out, file); err != nil {
-		return "", fmt.Errorf("write file: %w", err)
+	// TeeReader so the file is written to disk and buffered into memory in
+	// one pass, instead of writing it and then re-reading it back off disk -
+	// the content is already fully in the kernel's page cache/multipart
+	// buffer at this point, so holding one copy in memory here is not a
+	// meaningfully different cost than what ParseMultipartForm already did.
+	var content bytes.Buffer
+	if _, err := io.Copy(out, io.TeeReader(file, &content)); err != nil {
+		return uploadedFile{}, fmt.Errorf("write file: %w", err)
 	}
 
 	// Return a relative path so the DB value is portable across environments.
 	// The storage handler reconstructs the absolute path from DataDir at serve time.
-	return "uploads/" + safeName, nil
+	return uploadedFile{relPath: "uploads/" + safeName, bytes: content.Bytes(), mimeType: mediaType}, nil
 }
 
 // ModuleLocaleHandler serves a module's locale file from its installed
