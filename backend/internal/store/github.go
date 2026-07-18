@@ -390,6 +390,45 @@ func fetchCustomManifestAt(ctx context.Context, repoPath, subPath, token string)
 	return customManifest{}, fmt.Errorf("fetch %q: %w", manifestRelPath, fetchErr)
 }
 
+// fetchCustomRegistryJSON tries to fetch and parse a registry.json at the
+// root of a custom source repo, trying every branch in
+// customManifestBranches. Same on-the-wire shape as the official registry.json
+// (officialEntry) - reused as-is rather than duplicated, since
+// scripts/check-build-and-push.sh (the modulab-modules-private counterpart
+// to build-module.sh) already writes exactly this shape.
+//
+// Returns (nil, nil) - not an error - when no branch has the file, or it
+// parses as an empty array: both mean "this custom source doesn't maintain
+// its own registry.json", the normal case for a source added before this
+// existed, or one that only ever holds a single module and never bothered.
+// Callers fall back to the module.zip-by-convention scan in that case.
+func fetchCustomRegistryJSON(ctx context.Context, repoPath, token string) ([]officialEntry, error) {
+	var lastErr error
+	for _, branch := range customManifestBranches {
+		url := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/registry.json", repoPath, branch)
+		data, err := httpGet(ctx, url, token)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		var raw []officialEntry
+		if err := json.Unmarshal(data, &raw); err != nil {
+			return nil, fmt.Errorf("parse registry.json on branch %q: %w", branch, err)
+		}
+		return raw, nil
+	}
+	if lastErr != nil {
+		// Every branch 404ed (or similar) - not a real error, just "no
+		// registry.json here". A genuine transport/auth failure would look
+		// identical over this API, but the manifest-scan fallback below
+		// re-hits the same repo/token immediately after and will surface a
+		// clearer error itself if something's actually wrong (bad token,
+		// repo doesn't exist, etc.) rather than this function guessing.
+		return nil, nil
+	}
+	return nil, nil
+}
+
 // fetchCustomMonorepo lists repoPath's root via the GitHub Contents API and
 // treats every subdirectory with its own manifest.yaml as a separate module,
 // same layout modulab-community itself uses (FetchCommunityRegistry). A
@@ -399,7 +438,42 @@ func fetchCustomManifestAt(ctx context.Context, repoPath, subPath, token string)
 // FetchLatestReleaseForPrefix, not FetchLatestRelease, since all modules in
 // a monorepo share one release list - see FetchCustomRepo's doc comment for
 // the "<subdirectory>-v..." tag convention this requires.
+//
+// Before any of that: tries fetchCustomRegistryJSON first. A repo that
+// maintains its own registry.json (like modulab-modules-private's
+// scripts/check-build-and-push.sh does) gets its Entries built directly from
+// it - explicit release_url/cosign_sig_url per module, exactly like official/
+// community sources - instead of Core guessing a fixed "module.zip" asset
+// name per release. This was a real gap found 2026-07-18: a private monorepo
+// with several modules had no way to give each release its own readable,
+// versioned asset filename, only the single hardcoded "module.zip" - fine
+// for a single-module custom source, awkward for a monorepo of several. The
+// module.zip-by-convention scan remains the fallback for sources without a
+// registry.json, so existing custom sources keep working unchanged.
 func fetchCustomMonorepo(ctx context.Context, pool *db.Pool, repoURL, repoPath, pubKeyPEM, token string) ([]Entry, error) {
+	if raw, err := fetchCustomRegistryJSON(ctx, repoPath, token); err != nil {
+		log.Printf("store: custom source: %q: registry.json found but failed to parse, falling back to module.zip convention: %v", repoURL, err)
+	} else if len(raw) > 0 {
+		out := make([]Entry, 0, len(raw))
+		for _, r := range raw {
+			out = append(out, Entry{
+				Name:          r.Name,
+				Source:        "custom",
+				SourceRepo:    officialSourceRepo(r.ReleaseURL),
+				ReleaseAsset:  r.ReleaseURL,
+				CosignSigURL:  r.CosignSigURL,
+				CosignPubKey:  pubKeyPEM,
+				Category:      r.Category,
+				LatestVersion: r.Version,
+				Description:   r.Description,
+				DisplayName:   r.DisplayName,
+				LogoURL:       r.LogoURL,
+				BrowseURL:     r.BrowseURL,
+			})
+		}
+		return out, nil
+	}
+
 	rootURL := fmt.Sprintf(customContentsRootURLFmt, repoPath)
 	data, err := httpGet(ctx, rootURL, token)
 	if err != nil {
