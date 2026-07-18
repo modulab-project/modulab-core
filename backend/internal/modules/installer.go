@@ -532,12 +532,103 @@ func resolveCustomSourceToken(ctx context.Context, pool *db.Pool, source, source
 	return row.Token
 }
 
+// githubReleaseDownloadPrefix marks a URL as GitHub's plain
+// "releases/download" scheme (as opposed to an already-resolved
+// api.github.com asset URL, or some third-party host a future source type
+// might use) - see resolveGithubAssetURL's doc comment for why that
+// distinction matters.
+const githubReleaseDownloadPrefix = "https://github.com/"
+
+// resolveGithubAssetURL turns a plain
+// "https://github.com/OWNER/REPO/releases/download/TAG/FILE" URL into the
+// api.github.com asset-id URL GitHub actually honors a PAT Authorization
+// header on for a PRIVATE repo.
+//
+// Found 2026-07-18 installing the first real private custom-source module
+// (payback-coupons): the plain releases/download URL is meant for an
+// unauthenticated browser redirect flow. Sending it a Bearer token does not
+// authenticate a private repo's request - GitHub returns 404 regardless of
+// the token, indistinguishable from "the asset genuinely doesn't exist".
+// This never surfaced before because official/community sources are always
+// public repos, where the plain URL works with no auth at all. The
+// documented API path for a private repo's release asset is: GET
+// /repos/{owner}/{repo}/releases/tags/{tag} to find the asset's own "url"
+// field (already an api.github.com/.../releases/assets/{id} URL), then GET
+// that URL with Accept: application/octet-stream - which is what
+// downloadFile does once this function hands it the resolved URL.
+func resolveGithubAssetURL(ctx context.Context, rawURL, token string) (string, error) {
+	rest := strings.TrimPrefix(rawURL, githubReleaseDownloadPrefix)
+	parts := strings.SplitN(rest, "/releases/download/", 2)
+	if len(parts) != 2 {
+		return "", fmt.Errorf("not a releases/download URL: %s", rawURL)
+	}
+	ownerRepo := parts[0]
+	tagAndFile := strings.SplitN(parts[1], "/", 2)
+	if len(tagAndFile) != 2 {
+		return "", fmt.Errorf("could not split tag/filename out of: %s", rawURL)
+	}
+	tag, filename := tagAndFile[0], tagAndFile[1]
+
+	apiURL := "https://api.github.com/repos/" + ownerRepo + "/releases/tags/" + tag
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "modulab-core/1 (https://github.com/modulab-project/modulab-core)")
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("modules: resolveGithubAssetURL: close response body: %v", err)
+		}
+	}()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("HTTP %d resolving release %q for %s", resp.StatusCode, tag, ownerRepo)
+	}
+
+	var release struct {
+		Assets []struct {
+			Name string `json:"name"`
+			URL  string `json:"url"`
+		} `json:"assets"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return "", fmt.Errorf("decode release %q: %w", tag, err)
+	}
+	for _, a := range release.Assets {
+		if a.Name == filename {
+			return a.URL, nil
+		}
+	}
+	return "", fmt.Errorf("asset %q not found in release %q", filename, tag)
+}
+
 // downloadFile fetches url and writes the body to path. Returns an error if
 // the response is not 2xx or the body exceeds maxBytes. token is an optional
 // GitHub PAT (see resolveCustomSourceToken) - sent as an Authorization
 // header when non-empty, so a private custom source's release assets
 // resolve instead of 404ing exactly like the public-source case.
+//
+// When token is set and url is a plain github.com releases/download URL,
+// resolves it to the api.github.com asset URL first (resolveGithubAssetURL)
+// - required for private repos, harmless to redo for a public one, so this
+// isn't conditioned on the repo actually being private.
 func downloadFile(ctx context.Context, url, path string, maxBytes int64, token string) error {
+	acceptOctetStream := false
+	if token != "" && strings.HasPrefix(url, githubReleaseDownloadPrefix) && strings.Contains(url, "/releases/download/") {
+		resolved, err := resolveGithubAssetURL(ctx, url, token)
+		if err != nil {
+			return fmt.Errorf("resolve private release asset: %w", err)
+		}
+		url = resolved
+		acceptOctetStream = true
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -545,6 +636,9 @@ func downloadFile(ctx context.Context, url, path string, maxBytes int64, token s
 	req.Header.Set("User-Agent", "modulab-core/1 (https://github.com/modulab-project/modulab-core)")
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	if acceptOctetStream {
+		req.Header.Set("Accept", "application/octet-stream")
 	}
 
 	resp, err := http.DefaultClient.Do(req)
