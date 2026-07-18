@@ -313,13 +313,23 @@ func ModuleProxyHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	}
 }
 
-// allowedImageTypes lists the MIME types accepted for module image uploads.
+// allowedImageTypes lists the MIME types accepted for module uploads via
+// this same generic multipart proxy - despite the name, not image-only
+// anymore: application/pdf was added 2026-07-19 for pantry's receipt scan
+// (a module forwards a scanned document to a vision/document-capable AI
+// provider, not just a photo). Kept as one shared allowlist rather than a
+// per-module one since every module upload goes through this single
+// ModuleProxyHandler code path; a module that specifically needs an actual
+// image (e.g. pantry's own item-photo upload, POST /items/:id/image) is
+// still free to reject a non-image mimeType itself once it receives
+// file_mime_type, same as any other request validation it already does.
 var allowedImageTypes = map[string]bool{
-	"image/jpeg": true,
-	"image/png":  true,
-	"image/webp": true,
-	"image/gif":  true,
-	"image/avif": true,
+	"image/jpeg":      true,
+	"image/png":       true,
+	"image/webp":      true,
+	"image/gif":       true,
+	"image/avif":      true,
+	"application/pdf": true,
 }
 
 // uploadedFile is saveUploadedFile's result: everything the caller needs to
@@ -379,7 +389,7 @@ func saveUploadedFile(r *http.Request, dataDir, moduleName string, limit int64) 
 	// Strip parameters (e.g. "image/jpeg; charset=...") before lookup.
 	mediaType, _, _ := mime.ParseMediaType(detectedType)
 	if !allowedImageTypes[mediaType] {
-		return uploadedFile{}, fmt.Errorf("only image files are allowed (got %s)", detectedType)
+		return uploadedFile{}, fmt.Errorf("only image or PDF files are allowed (got %s)", detectedType)
 	}
 
 	// Sanitise filename — keep only the base name, no path traversal.
