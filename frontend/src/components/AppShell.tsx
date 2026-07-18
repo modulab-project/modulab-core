@@ -159,9 +159,15 @@ function useInstallPrompt() {
 export function AppShell({
   session,
   children,
+  hideChrome = false,
 }: {
   session: Session;
   children: ReactNode;
+  // Lets a module's own fullscreen view (e.g. a single coupon/recipe detail
+  // card) hide Core's header/footer entirely, so nothing but the module's
+  // content shows on screen. Generic — any module can request it via
+  // ModuleComponentProps.setChromeHidden, not specific to one module.
+  hideChrome?: boolean;
 }) {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
@@ -410,21 +416,33 @@ export function AppShell({
 
   return (
     <div className="flex h-screen flex-col bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100">
-      <Header
-        session={session}
-        isAdmin={isAdmin}
-        pendingCount={pendingCount}
-        moduleUpdateCount={moduleUpdateCount}
-        unreadModuleNotifications={unreadModuleNotifications}
-        openPanel={openPanel}
-        onTogglePanel={togglePanel}
-        chatOpen={chatOpen}
-        onToggleChat={() => setChatOpen((v) => !v)}
-      />
+      {!hideChrome && (
+        <Header
+          session={session}
+          isAdmin={isAdmin}
+          pendingCount={pendingCount}
+          moduleUpdateCount={moduleUpdateCount}
+          unreadModuleNotifications={unreadModuleNotifications}
+          openPanel={openPanel}
+          onTogglePanel={togglePanel}
+          chatOpen={chatOpen}
+          onToggleChat={() => setChatOpen((v) => !v)}
+        />
+      )}
 
-      <main className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-6">{children}</main>
+      <main
+        className={
+          hideChrome
+            ? "flex-1 min-h-0 overflow-y-auto"
+            : "flex-1 min-h-0 overflow-y-auto px-3 sm:px-6"
+        }
+      >
+        {children}
+      </main>
 
-      <FooterBar isAdmin={isAdmin} health={health} onTogglePanel={togglePanel} />
+      {!hideChrome && (
+        <FooterBar isAdmin={isAdmin} health={health} onTogglePanel={togglePanel} />
+      )}
       <ToastStack toasts={toasts} />
 
       {chatOpen && (

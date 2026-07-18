@@ -58,6 +58,14 @@ export interface ModuleComponentProps {
   // ignore this prop; it is optional, generic, and not unifi-network-
   // specific, so any module can use the same mechanism.
   initialQuery?: URLSearchParams;
+  // Lets a module hide Core's own header/footer chrome while it shows a
+  // fullscreen detail view of its own (e.g. payback-coupons' single-coupon
+  // card) — nothing else should be visible on screen while that view is
+  // open. Generic and optional; a module that never needs a fullscreen view
+  // can ignore this prop entirely. ModulePage resets this back to false
+  // whenever the route switches to a different module, so a module can't
+  // leave Core's chrome hidden after navigating away.
+  setChromeHidden?: (hidden: boolean) => void;
 }
 
 export default function ModulePage() {
@@ -103,6 +111,13 @@ export default function ModulePage() {
   const tokenExpiresAtRef = useRef<number>(0);
   const [moduleTokenReady, setModuleTokenReady] = useState(false);
   const [moduleToken, setModuleToken] = useState<string | null>(null);
+  // Whether the currently mounted module's own fullscreen view has asked
+  // Core to hide its header/footer (see ModuleComponentProps.setChromeHidden
+  // above). Reset to false in the metadata effect's per-module reset below,
+  // same as every other per-module piece of state — otherwise leaving a
+  // module while its fullscreen view is open would carry the hidden chrome
+  // over to the next module.
+  const [chromeHidden, setChromeHidden] = useState(false);
 
   // Fetch module metadata, then (once confirmed active) mint a module-scoped
   // token and schedule its refresh.
@@ -138,6 +153,7 @@ export default function ModulePage() {
     setBundleLoading(true);
     setModuleTokenReady(false);
     setModuleToken(null);
+    setChromeHidden(false);
     /* eslint-enable react-hooks/set-state-in-effect */
     moduleTokenRef.current = null;
     tokenExpiresAtRef.current = 0;
@@ -405,13 +421,22 @@ export default function ModulePage() {
   const apiBase = moduleApiUrl(mod?.name ?? moduleName);
 
   return (
-    <AppShell session={session}>
+    <AppShell session={session} hideChrome={chromeHidden}>
       {/* flex h-full lets a module opt into filling the remaining viewport height
           (e.g. my-places' map view); overflow-y-auto keeps today's behavior for
           modules whose content is naturally taller than the available space —
           this div scrolls internally instead of the whole page, so the AppShell
-          header/footer stay pinned either way. */}
-      <div className="mx-auto flex h-full max-w-5xl flex-col overflow-y-auto py-6 px-2">
+          header/footer stay pinned either way. When a module has hidden the
+          chrome for its own fullscreen view, drop the max-width/padding too —
+          otherwise the "fullscreen" view would still float in a padded,
+          centered column instead of using the whole screen. */}
+      <div
+        className={
+          chromeHidden
+            ? "flex h-full flex-col overflow-y-auto"
+            : "mx-auto flex h-full max-w-5xl flex-col overflow-y-auto py-6 px-2"
+        }
+      >
         {(fetching || (!loadError && bundleLoading)) && (
           <p className="text-sm text-gray-400 dark:text-gray-500">{t("common.loading")}</p>
         )}
@@ -441,7 +466,13 @@ export default function ModulePage() {
         )}
 
         {!fetching && !bundleLoading && !loadError && moduleMatchesRoute && mod?.tier !== 1 && ModuleComponent && (
-          <ModuleComponent moduleName={moduleName} apiBase={apiBase} token={token} initialQuery={searchParams} />
+          <ModuleComponent
+            moduleName={moduleName}
+            apiBase={apiBase}
+            token={token}
+            initialQuery={searchParams}
+            setChromeHidden={setChromeHidden}
+          />
         )}
 
         {!fetching && !bundleLoading && !loadError && moduleMatchesRoute && mod?.tier !== 1 && !ModuleComponent && mod && (
