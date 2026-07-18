@@ -421,10 +421,20 @@ function SourceBadge({ source }: { source: string }) {
 // installed_modules.cosign_verified.
 function UnverifiedBadge({ hasPubKey }: { hasPubKey: boolean }) {
   const { t } = useTranslation();
+  // hasPubKey=true ("signable") and false ("unverified") used to share the
+  // same red styling, which read as "something's wrong" either way even
+  // though hasPubKey=true is the good state (a signing key is on file,
+  // installer.go CAN verify releases from this source). Split the colors:
+  // teal for "signable", matching the same teal Core already uses elsewhere
+  // for positive/active states (see StorePage.tsx's official-source badge,
+  // ModulePage.tsx's tier badge) - red stays reserved for "unverified".
+  const colorClasses = hasPubKey
+    ? "bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-300"
+    : "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300";
   return (
     <span
       title={t(hasPubKey ? "store.custom.signed_hint" : "store.custom.unverified_hint")}
-      className="flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-medium text-red-700 dark:bg-red-950 dark:text-red-300"
+      className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${colorClasses}`}
     >
       <i className={`ti ${hasPubKey ? "ti-shield-check" : "ti-shield-exclamation"} text-[11px]`} />
       {t(hasPubKey ? "store.custom.signed" : "store.custom.unverified")}
