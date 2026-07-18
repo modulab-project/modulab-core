@@ -2273,10 +2273,10 @@ func (p *Pool) EnsureModuleStoreSchema(ctx context.Context) error {
 	// custom sources were introduced, so installing (InsertInstalledModule)
 	// any custom-source module - not just querying the registry cache -
 	// failed with "violates check constraint installed_modules_source_check"
-	// (23514). Only ever hit now because payback-coupons (2026-07-18) is the
-	// first custom-source module actually installed rather than just listed
-	// in the store. Same idempotent drop-then-recreate pattern; 'direct'
-	// stays for any existing row.
+	// (23514). Only ever hit now (2026-07-18) because this was the first
+	// custom-source module actually installed rather than just listed in the
+	// store. Same idempotent drop-then-recreate pattern; 'direct' stays for
+	// any existing row.
 	if _, err := p.Exec(ctx, `
 		ALTER TABLE installed_modules DROP CONSTRAINT IF EXISTS installed_modules_source_check
 	`); err != nil {

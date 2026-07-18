@@ -544,8 +544,8 @@ const githubReleaseDownloadPrefix = "https://github.com/"
 // api.github.com asset-id URL GitHub actually honors a PAT Authorization
 // header on for a PRIVATE repo.
 //
-// Found 2026-07-18 installing the first real private custom-source module
-// (payback-coupons): the plain releases/download URL is meant for an
+// Found 2026-07-18 installing the first real private custom-source module:
+// the plain releases/download URL is meant for an
 // unauthenticated browser redirect flow. Sending it a Bearer token does not
 // authenticate a private repo's request - GitHub returns 404 regardless of
 // the token, indistinguishable from "the asset genuinely doesn't exist".

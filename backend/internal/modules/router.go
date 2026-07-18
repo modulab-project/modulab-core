@@ -605,8 +605,8 @@ func ModuleTokenHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 
 // ModuleUsersDirectoryHandler is GET /v1/modules/{name}/api/_users-directory:
 // a minimal, admin-gated user directory any Tier 2/3 module can call to
-// build a "pick a ModuLab user" UI (e.g. payback-coupons' group membership
-// admin) without needing its own Deno worker to reach Core's users table.
+// build a "pick a ModuLab user" UI (e.g. a group-membership admin screen)
+// without needing its own Deno worker to reach Core's users table.
 //
 // Deliberately NOT proxied to the module's Deno worker like every other
 // /api/ route (see ModuleProxyHandler) - implemented directly in Go instead,

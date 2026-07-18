@@ -393,9 +393,9 @@ func fetchCustomManifestAt(ctx context.Context, repoPath, subPath, token string)
 // fetchCustomRegistryJSON tries to fetch and parse a registry.json at the
 // root of a custom source repo, trying every branch in
 // customManifestBranches. Same on-the-wire shape as the official registry.json
-// (officialEntry) - reused as-is rather than duplicated, since
-// scripts/check-build-and-push.sh (the modulab-modules-private counterpart
-// to build-module.sh) already writes exactly this shape.
+// (officialEntry) - reused as-is rather than duplicated, since a
+// build-module.sh-style release script for a private monorepo can write
+// exactly this shape with no extra work.
 //
 // Returns (nil, nil) - not an error - when no branch has the file, or it
 // parses as an empty array: both mean "this custom source doesn't maintain
@@ -440,8 +440,8 @@ func fetchCustomRegistryJSON(ctx context.Context, repoPath, token string) ([]off
 // the "<subdirectory>-v..." tag convention this requires.
 //
 // Before any of that: tries fetchCustomRegistryJSON first. A repo that
-// maintains its own registry.json (like modulab-modules-private's
-// scripts/check-build-and-push.sh does) gets its Entries built directly from
+// maintains its own registry.json (a build-module.sh-style release script
+// can write one) gets its Entries built directly from
 // it - explicit release_url/cosign_sig_url per module, exactly like official/
 // community sources - instead of Core guessing a fixed "module.zip" asset
 // name per release. This was a real gap found 2026-07-18: a private monorepo
