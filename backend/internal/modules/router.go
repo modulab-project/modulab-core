@@ -603,6 +603,52 @@ func ModuleTokenHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	}
 }
 
+// ModuleUsersDirectoryHandler is GET /v1/modules/{name}/api/_users-directory:
+// a minimal, admin-gated user directory any Tier 2/3 module can call to
+// build a "pick a ModuLab user" UI (e.g. payback-coupons' group membership
+// admin) without needing its own Deno worker to reach Core's users table.
+//
+// Deliberately NOT proxied to the module's Deno worker like every other
+// /api/ route (see ModuleProxyHandler) - implemented directly in Go instead,
+// specifically so a module's own Postgres role never needs a cross-schema
+// grant onto the users table just to look someone up. Go itself does the
+// query (db.Pool.ListUsers, the same one UsersHandler/admin.go's
+// /v1/admin/users uses) and hands back only the two fields a module could
+// plausibly need to reference a real account: Subject (id - the actual
+// value that must be stored to match WorkerAuth.UserID on a later request)
+// and Name (so an admin can tell users apart in a picker). Email, role,
+// approval/lock status etc. are intentionally not exposed here - a module
+// has no legitimate use for them, and the admin already reviews those on
+// Core's own /v1/admin/users page.
+//
+// Gated by auth.RequireAdminSession, the same admin check
+// /v1/admin/users itself uses - NOT auth.RequireModuleToken (every other
+// route in this file). A module-scoped token is deliberately not accepted
+// here: it identifies "some active session calling this module's API", not
+// "an admin", and this endpoint must not be reachable by a regular group
+// member.
+func ModuleUsersDirectoryHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := auth.RequireAdminSession(authDeps, w, r); !ok {
+			return
+		}
+		users, err := d.DB.ListUsers(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		type directoryEntry struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
+		resp := make([]directoryEntry, 0, len(users))
+		for _, u := range users {
+			resp = append(resp, directoryEntry{ID: u.Subject, Name: u.Name})
+		}
+		writeModuleJSON(w, http.StatusOK, resp)
+	}
+}
+
 // RegisterModuleRoutes wires the module proxy, locale, bundle, storage, and
 // token handlers into mux. Called from main.go after module install and at
 // startup for each already-installed module.
@@ -610,10 +656,14 @@ func ModuleTokenHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 // Note: the literal /v1/modules and /v1/modules/install etc. routes that
 // handle the lifecycle API are registered first in main.go and take
 // precedence over this wildcard because Go's 1.22 ServeMux gives more-
-// specific paths priority over less-specific ones.
+// specific paths priority over less-specific ones. The same rule is why
+// _users-directory below (a fixed final path segment) takes priority over
+// the "/v1/modules/{name}/api/" trailing-slash pattern for that one exact
+// path, even though both are registered on this same mux.
 func RegisterModuleRoutes(mux *http.ServeMux, d Deps, authDeps auth.Deps) {
 	mux.HandleFunc("GET /v1/modules/{name}/token", ModuleTokenHandler(d, authDeps))
 	mux.HandleFunc("GET /v1/modules/{name}/locales/{lng}", ModuleLocaleHandler(d, authDeps))
+	mux.HandleFunc("GET /v1/modules/{name}/api/_users-directory", ModuleUsersDirectoryHandler(d, authDeps))
 	mux.HandleFunc("/v1/modules/{name}/api/", ModuleProxyHandler(d, authDeps))
 	mux.HandleFunc("GET /v1/modules/{name}/ui/bundle.js", ModuleBundleHandler(d, authDeps))
 	mux.HandleFunc("GET /v1/modules/{name}/storage/{path...}", ModuleStorageHandler(d, authDeps))
