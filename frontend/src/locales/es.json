@@ -400,7 +400,25 @@
       "validation_error": "Los límites en bytes deben ser 0 o mayores; los límites de velocidad y el tamaño del pool deben ser mayores que 0.",
       "unit_bytes": "Bytes",
       "unit_seconds": "segundos",
-      "unit_minutes": "minutos"
+      "unit_minutes": "minutos",
+      "tab_updates": "Actualizaciones",
+      "weekday_mon": "Lun",
+      "weekday_tue": "Mar",
+      "weekday_wed": "Mié",
+      "weekday_thu": "Jue",
+      "weekday_fri": "Vie",
+      "weekday_sat": "Sáb",
+      "weekday_sun": "Dom",
+      "core_update_check_weekdays_label": "Días de comprobación",
+      "core_update_check_weekdays_hint": "Días de la semana en los que Core comprueba en GitHub si hay una versión más reciente.",
+      "core_update_check_weekdays_error": "Selecciona al menos un día.",
+      "core_update_check_time_label": "Hora de comprobación",
+      "core_update_check_time_hint": "Hora del día en que se ejecuta la comprobación en cada día seleccionado.",
+      "core_update_check_time_error": "Introduce una hora válida (HH:MM).",
+      "check_now_button": "Comprobar ahora",
+      "check_now_update_found": "La versión {{version}} está disponible.",
+      "check_now_up_to_date": "Ya tienes la versión más reciente.",
+      "check_now_error": "Error al comprobar. Inténtalo de nuevo."
     },
     "system_info": {
       "title": "Información del sistema",
@@ -453,7 +471,9 @@
       "col_count": "Cantidad",
       "col_resets_in": "Restablece",
       "rate_limit_reset": "Restablecer",
-      "rate_limit_reset_error": "No se pudo restablecer el límite de tasa."
+      "rate_limit_reset_error": "No se pudo restablecer el límite de tasa.",
+      "core_update_available_short": "Actualización disponible",
+      "check_now_button": "Comprobar actualizaciones ahora"
     },
     "security_info": {
       "title": "Información de seguridad",
@@ -744,7 +764,11 @@
       "time_minutes_ago_one": "hace {{count}} min",
       "time_minutes_ago_other": "hace {{count}} min",
       "time_hours_ago_one": "hace {{count}} h",
-      "time_hours_ago_other": "hace {{count}} h"
+      "time_hours_ago_other": "hace {{count}} h",
+      "core_update_toast": "Hay una nueva versión de Core ({{version}}) disponible.",
+      "core_update_toast_generic": "Hay una nueva versión de Core disponible.",
+      "core_update_one": "Actualización de Core disponible ({{version}})",
+      "core_update_generic": "Actualización de Core disponible"
     },
     "chat": {
       "no_provider": "Sin proveedor",

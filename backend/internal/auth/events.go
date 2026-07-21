@@ -74,10 +74,18 @@ func EventsHandler(d Deps) http.HandlerFunc {
 		// Every session subscribes to its own channel (user.approved and
 		// any future per-user event); org-admin/super-admin sessions
 		// additionally get the shared admin channel (new pending user,
-		// eventually module health/install events too).
+		// eventually module health/install events too). super-admin sessions
+		// further get SuperAdminChannel (core.update_available) - narrower
+		// than AdminChannel on purpose, since Core/system settings are
+		// already a super-admin-exclusive concern elsewhere in this app; an
+		// org-admin session never subscribes to it at all, see
+		// notify.SuperAdminChannel's doc comment.
 		channels := []string{notify.UserChannel(sess.UserID)}
 		if sess.Role == RoleOrgAdmin || sess.Role == RoleSuperAdmin {
 			channels = append(channels, notify.AdminChannel())
+		}
+		if sess.Role == RoleSuperAdmin {
+			channels = append(channels, notify.SuperAdminChannel())
 		}
 		sub := d.Valkey.Subscribe(ctx, channels...)
 		defer func() {

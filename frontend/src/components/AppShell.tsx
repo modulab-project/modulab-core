@@ -6,6 +6,7 @@ import i18n from "../lib/i18n";
 import {
   getHealth,
   getUserPrefs,
+  getSystemInfo,
   listAIProviders,
   setAIPreferredProvider,
   listInstalledModules,
@@ -184,6 +185,14 @@ export function AppShell({
   // Shown in the notification bell badge alongside pending-user count.
   // null = not yet fetched, 0 = all up to date, n = n updates available.
   const [moduleUpdateCount, setModuleUpdateCount] = useState<number | null>(null);
+  // Whether a newer modulab-core release is known (GET /v1/admin/system/info's
+  // cached coreupdate result, see coreupdate.CachedResult's doc comment) -
+  // super-admin only, unlike moduleUpdateCount above: Core/system settings
+  // are already a super-admin-exclusive concern elsewhere in this app (see
+  // AdminSystemPage's own super-admin gate), so this deliberately does not
+  // fetch or show for a plain org-admin session.
+  const [coreUpdateAvailable, setCoreUpdateAvailable] = useState(false);
+  const [latestCoreVersion, setLatestCoreVersion] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
@@ -269,6 +278,7 @@ export function AppShell({
   }
 
   const isAdmin = isAdminRole(session.role);
+  const isSuperAdmin = session.role === "super-admin";
   const [chatOpen, setChatOpen] = useState(false);
   const installPrompt = useInstallPrompt();
   const [iosInstallHelpOpen, setIosInstallHelpOpen] = useState(false);
@@ -319,6 +329,32 @@ export function AppShell({
     refreshPendingCount();
   }, [refreshPendingCount]);
 
+  // refreshCoreUpdateInfo: same "refetch on mount, on the matching SSE
+  // event, and whenever the notifications panel is opened" treatment as
+  // refreshPendingCount/refreshModuleUpdateCount above, just gated on
+  // isSuperAdmin instead of isAdmin (see coreUpdateAvailable's own doc
+  // comment for why) and reusing GET /v1/admin/system/info rather than a
+  // dedicated endpoint - the same call AdminSystemInfoPage/AdminSystemPage
+  // already make, just for the two fields this bell needs.
+  const refreshCoreUpdateInfo = useCallback(() => {
+    if (!isSuperAdmin) {
+      return;
+    }
+    getSystemInfo()
+      .then((info) => {
+        setCoreUpdateAvailable(info.core_update_available);
+        setLatestCoreVersion(info.latest_core_version);
+      })
+      .catch(() => {
+        // Left at whatever it was before - same "unknown, not zero" reasoning
+        // as refreshPendingCount's own catch above.
+      });
+  }, [isSuperAdmin]);
+
+  useEffect(() => {
+    refreshCoreUpdateInfo();
+  }, [refreshCoreUpdateInfo]);
+
   // Spec section 3.5's real-time notifications: every authenticated page
   // using AppShell gets one SSE connection (lib/useEvents.ts), but only
   // org-admin/super-admin sessions ever actually receive anything on
@@ -365,6 +401,28 @@ export function AppShell({
       ].slice(0, FEED_LIMIT));
       refreshModuleUpdateCount();
     }
+    if (event.type === "core.update_available" && isSuperAdmin) {
+      // Published by coreupdate.CheckNow (backend/internal/coreupdate) to
+      // notify.SuperAdminChannel - narrower than the AdminChannel events
+      // above, see that channel's doc comment for why org-admin sessions
+      // never receive this one at all. Fires at most once per newer
+      // version (dedup lives server-side), so this toast/feed entry is a
+      // "look, something changed" nudge, not something that repeats on
+      // every scheduled tick while the same version is still current.
+      const data = (event.data ?? {}) as { version?: string };
+      setCoreUpdateAvailable(true);
+      setLatestCoreVersion(data.version);
+      const goToSystemInfo = () => navigate("/admin/system/info");
+      const updateMsg = data.version
+        ? t("shell.notifications_panel.core_update_toast", { version: data.version })
+        : t("shell.notifications_panel.core_update_toast_generic");
+      const viewLabel = t("shell.notifications_panel.review");
+      push({ message: updateMsg, actionLabel: viewLabel, onAction: goToSystemInfo });
+      setFeed((prev) => [
+        { id: nextFeedItemID++, message: updateMsg, at: Date.now(), actionLabel: viewLabel, onAction: goToSystemInfo },
+        ...prev,
+      ].slice(0, FEED_LIMIT));
+    }
     // Module-triggered events (Core: WorkerResponse.Notifications, deno.go —
     // published from modules.JobRunner.dispatchJob, jobs.go, under the
     // single generic "module.notification" type). A module's own job code
@@ -408,6 +466,7 @@ export function AppShell({
       if (next === "notifications") {
         refreshPendingCount();
         refreshModuleUpdateCount();
+        refreshCoreUpdateInfo();
         setUnreadModuleNotifications(0);
       }
       return next;
@@ -423,6 +482,7 @@ export function AppShell({
           pendingCount={pendingCount}
           moduleUpdateCount={moduleUpdateCount}
           unreadModuleNotifications={unreadModuleNotifications}
+          coreUpdateAvailable={coreUpdateAvailable}
           openPanel={openPanel}
           onTogglePanel={togglePanel}
           chatOpen={chatOpen}
@@ -486,6 +546,8 @@ export function AppShell({
         <NotificationsPanelContent
           pendingCount={pendingCount}
           moduleUpdateCount={moduleUpdateCount}
+          coreUpdateAvailable={coreUpdateAvailable}
+          latestCoreVersion={latestCoreVersion}
           feed={feed}
           onReviewPending={() => {
             setOpenPanel(null);
@@ -494,6 +556,10 @@ export function AppShell({
           onViewModuleUpdates={() => {
             setOpenPanel(null);
             navigate("/admin/modules/installed");
+          }}
+          onViewCoreUpdate={() => {
+            setOpenPanel(null);
+            navigate("/admin/system/info");
           }}
         />
       </SlidePanel>
@@ -509,6 +575,7 @@ function Header({
   pendingCount,
   moduleUpdateCount,
   unreadModuleNotifications,
+  coreUpdateAvailable,
   openPanel,
   onTogglePanel,
   chatOpen,
@@ -519,6 +586,7 @@ function Header({
   pendingCount: number | null;
   moduleUpdateCount: number | null;
   unreadModuleNotifications: number;
+  coreUpdateAvailable: boolean;
   openPanel: OpenPanel;
   onTogglePanel: (panel: Exclude<OpenPanel, null>) => void;
   chatOpen: boolean;
@@ -558,7 +626,7 @@ function Header({
               // after the next reload — see its declaration for why this is
               // a separate client-only counter rather than a server refetch
               // like the other two.
-              const total = (pendingCount ?? 0) + (moduleUpdateCount ?? 0) + unreadModuleNotifications;
+              const total = (pendingCount ?? 0) + (moduleUpdateCount ?? 0) + unreadModuleNotifications + (coreUpdateAvailable ? 1 : 0);
               if (total === 0) return null;
               // Red for pending users, amber otherwise (module updates
               // and/or unread module notifications)
@@ -1016,15 +1084,21 @@ function ProfilePanelContent({
 function NotificationsPanelContent({
   pendingCount,
   moduleUpdateCount,
+  coreUpdateAvailable,
+  latestCoreVersion,
   feed,
   onReviewPending,
   onViewModuleUpdates,
+  onViewCoreUpdate,
 }: {
   pendingCount: number | null;
   moduleUpdateCount: number | null;
+  coreUpdateAvailable: boolean;
+  latestCoreVersion: string | undefined;
   feed: FeedItem[];
   onReviewPending: () => void;
   onViewModuleUpdates: () => void;
+  onViewCoreUpdate: () => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -1073,6 +1147,27 @@ function NotificationsPanelContent({
           </span>
         )}
       </button>
+
+      {/* Core update - only shown when one is actually known, unlike the
+          pending/module rows above which always show a "none"/"n" state.
+          super-admin only (coreUpdateAvailable is never fetched, so always
+          false, for any other role - see AppShell's own doc comment on
+          coreUpdateAvailable). */}
+      {coreUpdateAvailable && (
+        <button
+          type="button"
+          onClick={onViewCoreUpdate}
+          className="flex w-full items-center justify-between rounded-lg px-2.5 py-2.5 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
+        >
+          <span className="flex items-center gap-2.5">
+            <i className="ti ti-arrow-big-up-lines text-[15px] text-teal-600 dark:text-teal-400" />
+            {latestCoreVersion
+              ? t("shell.notifications_panel.core_update_one", { version: latestCoreVersion })
+              : t("shell.notifications_panel.core_update_generic")}
+          </span>
+          <i className="ti ti-chevron-right text-gray-400" />
+        </button>
+      )}
 
       <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />
       <p className="px-2.5 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">

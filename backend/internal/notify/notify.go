@@ -40,6 +40,19 @@ func AdminChannel() string {
 	return "notify:admin"
 }
 
+// SuperAdminChannel is where events meant only for currently-connected
+// super-admin sessions are published - narrower than AdminChannel above,
+// which also reaches org-admin. Used for "core.update_available"
+// (internal/coreupdate): Core/system-level settings are already a
+// super-admin-exclusive concern elsewhere in this app (see /admin/system's
+// own super-admin gate), so an org-admin session deliberately does not
+// subscribe to this channel at all (see auth.EventsHandler's channel
+// selection) rather than receiving and having to ignore an event about
+// something it can't act on anyway.
+func SuperAdminChannel() string {
+	return "notify:super-admin"
+}
+
 // UserChannel is where events meant for exactly one subject are
 // published - spec section 3.5's "user.approved" row. Takes the OIDC
 // subject (Session.UserID), not the email, since that is what every

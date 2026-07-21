@@ -400,7 +400,25 @@
       "validation_error": "Byte limits must be 0 or greater; rate limits and pool size must be greater than 0.",
       "unit_bytes": "Bytes",
       "unit_seconds": "seconds",
-      "unit_minutes": "minutes"
+      "unit_minutes": "minutes",
+      "tab_updates": "Updates",
+      "weekday_mon": "Mon",
+      "weekday_tue": "Tue",
+      "weekday_wed": "Wed",
+      "weekday_thu": "Thu",
+      "weekday_fri": "Fri",
+      "weekday_sat": "Sat",
+      "weekday_sun": "Sun",
+      "core_update_check_weekdays_label": "Check days",
+      "core_update_check_weekdays_hint": "Days of the week Core checks GitHub for a newer release.",
+      "core_update_check_weekdays_error": "Select at least one day.",
+      "core_update_check_time_label": "Check time",
+      "core_update_check_time_hint": "Time of day the check runs on each selected day.",
+      "core_update_check_time_error": "Enter a valid time (HH:MM).",
+      "check_now_button": "Check now",
+      "check_now_update_found": "Version {{version}} is available.",
+      "check_now_up_to_date": "You're already on the latest version.",
+      "check_now_error": "Check failed. Please try again."
     },
     "system_info": {
       "title": "System info",
@@ -453,7 +471,9 @@
       "col_count": "Count",
       "col_resets_in": "Resets",
       "rate_limit_reset": "Reset",
-      "rate_limit_reset_error": "Could not reset the rate limit."
+      "rate_limit_reset_error": "Could not reset the rate limit.",
+      "core_update_available_short": "Update available",
+      "check_now_button": "Check for updates now"
     },
     "security_info": {
       "title": "Security info",
@@ -744,7 +764,11 @@
       "time_minutes_ago_one": "{{count}}m ago",
       "time_minutes_ago_other": "{{count}}m ago",
       "time_hours_ago_one": "{{count}}h ago",
-      "time_hours_ago_other": "{{count}}h ago"
+      "time_hours_ago_other": "{{count}}h ago",
+      "core_update_toast": "A new Core version ({{version}}) is available.",
+      "core_update_toast_generic": "A new Core version is available.",
+      "core_update_one": "Core update available ({{version}})",
+      "core_update_generic": "Core update available"
     },
     "chat": {
       "no_provider": "No provider",

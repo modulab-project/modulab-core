@@ -887,6 +887,14 @@ export interface LimitsSettings {
   store_github_api_timeout_seconds: number;
   modules_install_download_timeout_seconds: number;
   chat_rpm_limit: number;
+  // core_update_check_weekdays: comma-separated weekday integers
+  // (0=Sunday..6=Saturday, matching JS Date.getDay()/backend time.Weekday)
+  // naming which days coreupdate.RunScheduler checks GitHub for a newer
+  // modulab-core release. Default "0,1,2,3,4,5,6" (every day).
+  core_update_check_weekdays: string;
+  // core_update_check_time: "HH:MM" (24h) time of day the check above runs.
+  // Default "03:00".
+  core_update_check_time: string;
 }
 
 // GET /v1/admin/system/limits — super-admin only.
@@ -903,6 +911,19 @@ export function adminPatchLimitsSettings(settings: LimitsSettings): Promise<Limi
     method: "PATCH",
     body: JSON.stringify(settings),
   });
+}
+
+// POST /v1/admin/system/core-update-check — super-admin only. Manually
+// triggers coreupdate.CheckNow instead of waiting for the next scheduled
+// (core_update_check_weekdays/_time) tick — used by the "check now" button
+// on both AdminSystemLimitsPage (next to the schedule fields) and
+// AdminSystemInfoPage (next to the update-available banner).
+export interface CoreUpdateCheckResult {
+  latest_core_version?: string;
+  core_update_available: boolean;
+}
+export function adminCheckCoreUpdateNow(): Promise<CoreUpdateCheckResult> {
+  return request<CoreUpdateCheckResult>("/v1/admin/system/core-update-check", { method: "POST" });
 }
 
 export interface AIUserProvidersResponse {

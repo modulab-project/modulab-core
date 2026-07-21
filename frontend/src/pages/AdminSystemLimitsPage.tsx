@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useNavigate, Link } from "react-router";
 import { useTranslation } from "react-i18next";
-import { adminGetLimitsSettings, adminPatchLimitsSettings, type LimitsSettings } from "../lib/api";
+import {
+  adminGetLimitsSettings,
+  adminPatchLimitsSettings,
+  adminCheckCoreUpdateNow,
+  type LimitsSettings,
+} from "../lib/api";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
 
@@ -47,8 +52,22 @@ import { AppShell } from "../components/AppShell";
 // it moved here from max_body_bytes-style "0 = unlimited" semantics on its
 // old single-field admin endpoint (see AdminLimitsHandler's doc comment).
 type FieldKind = "byte" | "count" | "ms" | "seconds" | "minutes";
-type Tab = "uploads" | "ai" | "search" | "modules" | "system";
-const FIELDS: Array<{ key: keyof LimitsSettings; kind: FieldKind; tab: Tab; allowZero?: boolean }> = [
+// "updates" (core_update_check_weekdays/_time + the manual "check now"
+// button) is not in FIELDS below: unlike every other setting here, it isn't
+// a plain integer, so it gets its own bespoke weekday-checkbox/time-input
+// UI and its own local state (weekdayInput/timeInput) instead of going
+// through FIELDS/renderField's generic number-parsing loop. It is still
+// part of the same LimitsSettings object and the same PATCH request -
+// see handleSave.
+type Tab = "uploads" | "ai" | "search" | "modules" | "system" | "updates";
+// NumericFieldKey excludes core_update_check_weekdays/_time - both strings,
+// handled by their own bespoke UI/state above, never through this array's
+// generic integer parse/render loop. Narrowing FIELDS to only the numeric
+// keys (rather than the full keyof LimitsSettings) is what lets
+// `parsed[f.key] = n` in handleSave type-check now that LimitsSettings has
+// non-numeric fields too.
+type NumericFieldKey = keyof Omit<LimitsSettings, "core_update_check_weekdays" | "core_update_check_time">;
+const FIELDS: Array<{ key: NumericFieldKey; kind: FieldKind; tab: Tab; allowZero?: boolean }> = [
   { key: "max_body_bytes", kind: "byte", tab: "uploads" },
   { key: "max_opml_upload_bytes", kind: "byte", tab: "uploads" },
   { key: "chat_rpm_limit", kind: "count", tab: "ai", allowZero: true },
@@ -74,6 +93,21 @@ const TABS: Array<{ id: Tab; icon: string }> = [
   { id: "search", icon: "ti-search" },
   { id: "modules", icon: "ti-puzzle" },
   { id: "system", icon: "ti-server-2" },
+  { id: "updates", icon: "ti-arrow-big-up-lines" },
+];
+
+// Weekday order shown in the checkbox row - Monday-first (matches this
+// app's other weekday-picker conventions), each mapped to its
+// time.Weekday/Date.getDay() integer (0=Sunday..6=Saturday) since that is
+// the wire format core_update_check_weekdays actually stores.
+const WEEKDAYS: Array<{ value: number; labelKey: string }> = [
+  { value: 1, labelKey: "mon" },
+  { value: 2, labelKey: "tue" },
+  { value: 3, labelKey: "wed" },
+  { value: 4, labelKey: "thu" },
+  { value: 5, labelKey: "fri" },
+  { value: 6, labelKey: "sat" },
+  { value: 0, labelKey: "sun" },
 ];
 
 type ByteUnit = "B" | "KB" | "MB";
@@ -101,6 +135,14 @@ export default function AdminSystemLimitsPage() {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const hasFetched = useRef(false);
 
+  // core_update_check_weekdays/_time — kept separate from inputs/FIELDS
+  // above (see Tab's doc comment): weekdayInput is the set of selected
+  // weekday integers, timeInput the raw "HH:MM" string.
+  const [weekdayInput, setWeekdayInput] = useState<Set<number>>(new Set());
+  const [timeInput, setTimeInput] = useState("");
+  const [checking, setChecking] = useState(false);
+  const [checkResult, setCheckResult] = useState<{ ok: boolean; text: string } | null>(null);
+
   useEffect(() => {
     if (!session) return;
     if (session.role !== "super-admin") { navigate("/", { replace: true }); return; }
@@ -113,13 +155,55 @@ export default function AdminSystemLimitsPage() {
         setUnits(Object.fromEntries(
           FIELDS.filter((f) => f.kind === "byte").map((f) => [f.key, detectUnit(Number(s[f.key]))]),
         ));
+        setWeekdayInput(new Set(
+          s.core_update_check_weekdays.split(",").map((v) => parseInt(v, 10)).filter((n) => !isNaN(n)),
+        ));
+        setTimeInput(s.core_update_check_time);
       })
       .catch(() => setMsg({ ok: false, text: t("admin.system_limits.load_error") }));
   }, [session, navigate, t]);
 
   if (loading || !session || session.role !== "super-admin") return null;
 
-  const dirty = settings !== null && FIELDS.some((f) => inputs[f.key] !== String(settings[f.key]));
+  const dirty = settings !== null && (
+    FIELDS.some((f) => inputs[f.key] !== String(settings[f.key])) ||
+    Array.from(weekdayInput).sort().join(",") !== settings.core_update_check_weekdays.split(",").map((v) => parseInt(v, 10)).sort().join(",") ||
+    timeInput !== settings.core_update_check_time
+  );
+
+  function toggleWeekday(value: number) {
+    setWeekdayInput((prev) => {
+      const next = new Set(prev);
+      if (next.has(value)) {
+        // At least one weekday must stay selected - see
+        // coreupdate.ParseWeekdays, which rejects an empty set outright.
+        if (next.size === 1) return next;
+        next.delete(value);
+      } else {
+        next.add(value);
+      }
+      return next;
+    });
+  }
+
+  async function handleCheckNow() {
+    if (checking) return;
+    setChecking(true);
+    setCheckResult(null);
+    try {
+      const result = await adminCheckCoreUpdateNow();
+      setCheckResult({
+        ok: true,
+        text: result.core_update_available && result.latest_core_version
+          ? t("admin.system_limits.check_now_update_found", { version: result.latest_core_version })
+          : t("admin.system_limits.check_now_up_to_date"),
+      });
+    } catch (err) {
+      setCheckResult({ ok: false, text: err instanceof Error ? err.message : t("admin.system_limits.check_now_error") });
+    } finally {
+      setChecking(false);
+    }
+  }
 
   async function handleSave(e: FormEvent) {
     e.preventDefault();
@@ -142,6 +226,16 @@ export default function AdminSystemLimitsPage() {
       }
       parsed[f.key] = n;
     }
+    if (weekdayInput.size === 0) {
+      setMsg({ ok: false, text: t("admin.system_limits.core_update_check_weekdays_error") });
+      return;
+    }
+    parsed.core_update_check_weekdays = Array.from(weekdayInput).sort().join(",");
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(timeInput)) {
+      setMsg({ ok: false, text: t("admin.system_limits.core_update_check_time_error") });
+      return;
+    }
+    parsed.core_update_check_time = timeInput;
 
     setSaving(true);
     setMsg(null);
@@ -149,6 +243,10 @@ export default function AdminSystemLimitsPage() {
       const result = await adminPatchLimitsSettings(parsed as LimitsSettings);
       setSettings(result);
       setInputs(Object.fromEntries(FIELDS.map((f) => [f.key, String(result[f.key])])));
+      setWeekdayInput(new Set(
+        result.core_update_check_weekdays.split(",").map((v) => parseInt(v, 10)).filter((n) => !isNaN(n)),
+      ));
+      setTimeInput(result.core_update_check_time);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err) {
@@ -226,9 +324,70 @@ export default function AdminSystemLimitsPage() {
         </div>
 
         <form onSubmit={handleSave} className="space-y-8">
-          <Group title={t(`admin.system_limits.tab_${activeTab}`)}>
-            {visibleFields.map((f) => renderField(f))}
-          </Group>
+          {activeTab === "updates" ? (
+            <Group title={t("admin.system_limits.tab_updates")}>
+              <div>
+                <label className="mb-2 block text-xs text-gray-500 dark:text-gray-400">
+                  {t("admin.system_limits.core_update_check_weekdays_label")}
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {WEEKDAYS.map((wd) => (
+                    <button
+                      key={wd.value}
+                      type="button"
+                      onClick={() => toggleWeekday(wd.value)}
+                      className={`rounded-lg border px-3 py-1.5 text-sm ${
+                        weekdayInput.has(wd.value)
+                          ? "border-teal-500 bg-teal-50 font-medium text-teal-700 dark:border-teal-500 dark:bg-teal-950 dark:text-teal-300"
+                          : "border-gray-200 text-gray-500 hover:border-gray-300 dark:border-gray-700 dark:text-gray-400"
+                      }`}
+                    >
+                      {t(`admin.system_limits.weekday_${wd.labelKey}`)}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                  {t("admin.system_limits.core_update_check_weekdays_hint")}
+                </p>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">
+                  {t("admin.system_limits.core_update_check_time_label")}
+                </label>
+                <input
+                  type="time"
+                  value={timeInput}
+                  onChange={(e) => setTimeInput(e.target.value)}
+                  className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-base outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-800"
+                />
+                <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                  {t("admin.system_limits.core_update_check_time_hint")}
+                </p>
+              </div>
+
+              <div className="border-t border-gray-100 pt-4 dark:border-gray-800">
+                <button
+                  type="button"
+                  onClick={handleCheckNow}
+                  disabled={checking}
+                  className="flex items-center gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:border-teal-400 hover:text-teal-700 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:border-teal-600 dark:hover:text-teal-400"
+                >
+                  <i className={`ti ${checking ? "ti-loader-2 animate-spin" : "ti-refresh"} text-[14px]`} />
+                  {checking ? t("common.loading") : t("admin.system_limits.check_now_button")}
+                </button>
+                {checkResult && (
+                  <p className={`mt-2 text-sm ${checkResult.ok ? "text-teal-700 dark:text-teal-400" : "text-red-600 dark:text-red-400"}`}>
+                    {checkResult.text}
+                  </p>
+                )}
+              </div>
+            </Group>
+          ) : (
+            <Group title={t(`admin.system_limits.tab_${activeTab}`)}>
+              {visibleFields.map((f) => renderField(f))}
+            </Group>
+          )}
 
           <div className="flex justify-end">
             <button type="submit" disabled={saving || !dirty}

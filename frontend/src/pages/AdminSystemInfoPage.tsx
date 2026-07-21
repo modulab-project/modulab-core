@@ -13,7 +13,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, Link } from "react-router";
 import { useTranslation } from "react-i18next";
-import { getSystemInfo, type SystemInfo, type SystemInfoModule, type SystemInfoTimer } from "../lib/api";
+import {
+  getSystemInfo,
+  adminCheckCoreUpdateNow,
+  type SystemInfo,
+  type SystemInfoModule,
+  type SystemInfoTimer,
+} from "../lib/api";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { useNow } from "../lib/useNow";
 import { AppShell } from "../components/AppShell";
@@ -29,6 +35,28 @@ export default function AdminSystemInfoPage() {
   const [info, setInfo] = useState<SystemInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const hasFetched = useRef(false);
+  const [checking, setChecking] = useState(false);
+
+  async function handleCheckNow() {
+    if (checking) return;
+    setChecking(true);
+    try {
+      const result = await adminCheckCoreUpdateNow();
+      // Merge straight into the already-loaded info rather than refetching
+      // the whole GET /v1/admin/system/info response - the manual check's
+      // own response already carries the two fields that changed.
+      setInfo((prev) => prev && ({
+        ...prev,
+        latest_core_version: result.latest_core_version,
+        core_update_available: result.core_update_available,
+      }));
+    } catch {
+      // Best-effort - the existing (possibly stale) banner state is left as
+      // is rather than showing a second error alongside the page's own.
+    } finally {
+      setChecking(false);
+    }
+  }
 
   useEffect(() => {
     if (!session) return;
@@ -90,6 +118,15 @@ export default function AdminSystemInfoPage() {
                   {t("admin.system_info.core_update_available", { version: info.latest_core_version })}
                 </div>
               )}
+              <button
+                type="button"
+                onClick={handleCheckNow}
+                disabled={checking}
+                className="mb-3 flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-teal-700 disabled:opacity-50 dark:text-gray-400 dark:hover:text-teal-400"
+              >
+                <i className={`ti ${checking ? "ti-loader-2 animate-spin" : "ti-refresh"} text-[13px]`} />
+                {checking ? t("common.loading") : t("admin.system_info.check_now_button")}
+              </button>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <Stat label={t("shell.status.backend_version")} value={info.version} />
                 <Stat label={t("shell.status.frontend_version")} value={FRONTEND_VERSION} />

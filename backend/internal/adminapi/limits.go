@@ -35,6 +35,7 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/ai"
 	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
+	"github.com/modulab-project/modulab-core/backend/internal/coreupdate"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
 	"github.com/modulab-project/modulab-core/backend/internal/modules"
 	"github.com/modulab-project/modulab-core/backend/internal/news"
@@ -131,30 +132,42 @@ const (
 //     different admin pages. Unlike every other rate limit/pool/timeout
 //     field above, 0 is a valid "unlimited" value here, same as the byte
 //     caps - not a config mistake to reject.
+//   - core_update_check_weekdays: comma-separated time.Weekday integers
+//     (0=Sunday..6=Saturday) naming which days of the week
+//     coreupdate.RunScheduler checks GitHub for a newer modulab-core
+//     release. Must parse via coreupdate.ParseWeekdays (at least one valid
+//     0-6 entry). Default "0,1,2,3,4,5,6" (every day).
+//   - core_update_check_time: "HH:MM" (24h) time of day the check above
+//     runs, on each selected weekday. Must parse via coreupdate.ParseTime.
+//     Default "03:00".
 //
 // Every field except deno_conn_pool_size takes effect immediately, on the
 // next request, with no restart required. store_sync_interval_seconds is a
 // partial exception: a change takes effect on the *next* sync cycle rather
 // than instantly, since the background goroutine is already sleeping until
-// then (see store.RunSync's doc comment).
+// then (see store.RunSync's doc comment). core_update_check_weekdays/_time
+// share that same "next tick" semantics with coreupdate.RunScheduler's
+// minute-granularity ticker.
 type LimitsSettings struct {
-	MaxBodyBytes                      int64 `json:"max_body_bytes"`
-	MaxUploadBodyBytes                int64 `json:"max_upload_body_bytes"`
-	MaxModuleZIPBytes                 int64 `json:"max_module_zip_bytes"`
-	MaxOPMLUploadBytes                int64 `json:"max_opml_upload_bytes"`
-	AuthRateLimitMax                  int64 `json:"auth_rate_limit_max"`
-	AIChatIPRateLimitMax              int64 `json:"ai_chat_ip_rate_limit_max"`
-	GlobalRateLimitMax                int64 `json:"global_rate_limit_max"`
-	DenoConnPoolSize                  int   `json:"deno_conn_pool_size"`
-	GeoTimeoutMS                      int   `json:"geo_timeout_ms"`
-	AIProviderTimeoutSeconds          int   `json:"ai_provider_timeout_seconds"`
-	SearchTimeoutSeconds              int   `json:"search_timeout_seconds"`
-	SearchFallbackTimeoutSeconds      int   `json:"search_fallback_timeout_seconds"`
-	NewsFetchTimeoutSeconds           int   `json:"news_fetch_timeout_seconds"`
-	StoreSyncIntervalSeconds          int   `json:"store_sync_interval_seconds"`
-	StoreGithubAPITimeoutSeconds      int   `json:"store_github_api_timeout_seconds"`
-	ModulesInstallDownloadTimeoutSecs int   `json:"modules_install_download_timeout_seconds"`
-	ChatRPMLimit                      int   `json:"chat_rpm_limit"`
+	MaxBodyBytes                      int64  `json:"max_body_bytes"`
+	MaxUploadBodyBytes                int64  `json:"max_upload_body_bytes"`
+	MaxModuleZIPBytes                 int64  `json:"max_module_zip_bytes"`
+	MaxOPMLUploadBytes                int64  `json:"max_opml_upload_bytes"`
+	AuthRateLimitMax                  int64  `json:"auth_rate_limit_max"`
+	AIChatIPRateLimitMax              int64  `json:"ai_chat_ip_rate_limit_max"`
+	GlobalRateLimitMax                int64  `json:"global_rate_limit_max"`
+	DenoConnPoolSize                  int    `json:"deno_conn_pool_size"`
+	GeoTimeoutMS                      int    `json:"geo_timeout_ms"`
+	AIProviderTimeoutSeconds          int    `json:"ai_provider_timeout_seconds"`
+	SearchTimeoutSeconds              int    `json:"search_timeout_seconds"`
+	SearchFallbackTimeoutSeconds      int    `json:"search_fallback_timeout_seconds"`
+	NewsFetchTimeoutSeconds           int    `json:"news_fetch_timeout_seconds"`
+	StoreSyncIntervalSeconds          int    `json:"store_sync_interval_seconds"`
+	StoreGithubAPITimeoutSeconds      int    `json:"store_github_api_timeout_seconds"`
+	ModulesInstallDownloadTimeoutSecs int    `json:"modules_install_download_timeout_seconds"`
+	ChatRPMLimit                      int    `json:"chat_rpm_limit"`
+	CoreUpdateCheckWeekdays           string `json:"core_update_check_weekdays"`
+	CoreUpdateCheckTime               string `json:"core_update_check_time"`
 }
 
 // readRateLimitInt is a copy of main.go's readRateLimitSetting (see this
@@ -201,6 +214,8 @@ func currentLimitsSettings(r *http.Request, pool *db.Pool) LimitsSettings {
 		StoreGithubAPITimeoutSeconds:      store.GithubAPITimeoutSeconds(ctx, pool),
 		ModulesInstallDownloadTimeoutSecs: modules.InstallDownloadTimeoutSeconds(ctx, pool),
 		ChatRPMLimit:                      ai.ChatRPMLimit(ctx, pool),
+		CoreUpdateCheckWeekdays:           coreupdate.CheckWeekdaysRaw(ctx, pool),
+		CoreUpdateCheckTime:               coreupdate.CheckTimeRaw(ctx, pool),
 	}
 }
 
@@ -267,6 +282,20 @@ func AdminLimitsHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 					return
 				}
 			}
+			// core_update_check_weekdays/_time: string-shaped, validated via
+			// their own parsers rather than the numeric loops above -
+			// coreupdate owns the actual format (see its doc comments), this
+			// handler just rejects anything it can't parse rather than
+			// storing a value the scheduler would silently fall back away
+			// from later.
+			if _, err := coreupdate.ParseWeekdays(body.CoreUpdateCheckWeekdays); err != nil {
+				http.Error(w, "core_update_check_weekdays: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+			if _, _, err := coreupdate.ParseTime(body.CoreUpdateCheckTime); err != nil {
+				http.Error(w, "core_update_check_time: "+err.Error(), http.StatusBadRequest)
+				return
+			}
 
 			settings := map[string]string{
 				"max_body_bytes":                           strconv.FormatInt(body.MaxBodyBytes, 10),
@@ -286,6 +315,8 @@ func AdminLimitsHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 				"store_github_api_timeout_seconds":         strconv.Itoa(body.StoreGithubAPITimeoutSeconds),
 				"modules_install_download_timeout_seconds": strconv.Itoa(body.ModulesInstallDownloadTimeoutSecs),
 				"ai_chat_rpm_limit":                        strconv.Itoa(body.ChatRPMLimit),
+				"core_update_check_weekdays":               body.CoreUpdateCheckWeekdays,
+				"core_update_check_time":                   body.CoreUpdateCheckTime,
 			}
 			for key, val := range settings {
 				if err := pool.SetSetting(ctx, key, val); err != nil {

@@ -5,6 +5,7 @@ import {
   getSystemStatus,
   smtpStatus as fetchSmtpStatus,
   adminListSearchProviders,
+  getSystemInfo,
 } from "../lib/api";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
@@ -19,6 +20,12 @@ export default function AdminSystemPage() {
   const [oidcConfigured, setOidcConfigured] = useState(false);
   const [smtpConfigured, setSmtpConfigured] = useState(false);
   const [searxngConfigured, setSearxngConfigured] = useState(false);
+  // coreUpdateAvailable drives the small badge dot on the "System Info" card
+  // below - reuses the same GET /v1/admin/system/info call that page itself
+  // makes, just for the one boolean this hub needs at a glance. A second,
+  // independent fetch (not shared React state) since this page and
+  // AdminSystemInfoPage are never mounted at the same time.
+  const [coreUpdateAvailable, setCoreUpdateAvailable] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const hasFetched = useRef(false);
 
@@ -36,8 +43,9 @@ export default function AdminSystemPage() {
       getSystemStatus(),
       fetchSmtpStatus(),
       adminListSearchProviders(),
+      getSystemInfo(),
     ])
-      .then(([sys, smtp, providers]) => {
+      .then(([sys, smtp, providers, info]) => {
         setOidcConfigured(sys.oidc.configured);
         setSmtpConfigured(smtp.configured);
         // "Configured" here means at least one provider is both enabled and
@@ -45,6 +53,7 @@ export default function AdminSystemPage() {
         // matches the old single-provider searxng.configured check, just
         // generalized to however many providers are set up now.
         setSearxngConfigured(providers.some((p) => p.enabled && (p.has_admin_key || !!p.base_url)));
+        setCoreUpdateAvailable(info.core_update_available);
       })
       .catch(() => setLoadError(t("admin.system.load_error")));
   }, [session, navigate, t]);
@@ -159,6 +168,16 @@ export default function AdminSystemPage() {
                 <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
                   {t("admin.system_info.title")}
                 </span>
+                {/* Mirrors the same core_update_available flag the System
+                    Info page itself shows as a full banner - just a dot
+                    here, since this hub card has no room for the version
+                    text. */}
+                {coreUpdateAvailable && (
+                  <span
+                    className="h-1.5 w-1.5 rounded-full bg-teal-500"
+                    title={t("admin.system_info.core_update_available_short")}
+                  />
+                )}
               </div>
               <i className="ti ti-chevron-right flex-none text-gray-300 group-hover:text-teal-500 dark:text-gray-600 dark:group-hover:text-teal-400" />
             </div>

@@ -38,6 +38,7 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
 	"github.com/modulab-project/modulab-core/backend/internal/bootstrap"
 	"github.com/modulab-project/modulab-core/backend/internal/config"
+	"github.com/modulab-project/modulab-core/backend/internal/coreupdate"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
 	"github.com/modulab-project/modulab-core/backend/internal/mail"
 	"github.com/modulab-project/modulab-core/backend/internal/modules"
@@ -632,6 +633,18 @@ func main() {
 	go store.RunSync(ctx, storeDeps, onStoreSynced)
 	mux.HandleFunc("POST /v1/store/sync", store.SyncHandler(storeDeps, authDeps, onStoreSynced))
 
+	// Core's own GitHub-release update check (internal/coreupdate): unlike
+	// the registry sync above (fixed interval), this runs on an
+	// admin-configurable weekday+time schedule (core_update_check_weekdays/
+	// _time, default every day at 03:00 - see coreupdate's doc comments),
+	// and notifies only super-admin sessions (notify.SuperAdminChannel), not
+	// every org-admin, since Core/system settings are a super-admin-only
+	// concern elsewhere in this app already. The manual "check now" route
+	// below (adjacent to systemInfoHandler's registration further down)
+	// lets an admin trigger the same check on demand instead of waiting for
+	// the next scheduled tick.
+	go coreupdate.RunScheduler(ctx, pool, valkeyClient)
+
 	// Installed-module update checking has no background loop of its own
 	// (see modules.RunUpdateCheckOnce's doc comment for why a separate
 	// 15-minute ticker was removed 2026-07-05 as pure redundancy): it is
@@ -650,6 +663,22 @@ func main() {
 	// hasn't ModuLab noticed yet" has a concrete answer instead of "wait and
 	// see".
 	mux.Handle("GET /v1/admin/system/info", superAdminOnly(systemInfoHandler(pool, valkeyClient, cfg, startTime, storeDeps, authDeps)))
+
+	// POST /v1/admin/system/core-update-check — manual trigger for
+	// coreupdate.CheckNow, alongside the scheduled weekday+time check
+	// (coreupdate.RunScheduler, started above). Lets an admin get an
+	// immediate answer (and, if a new version just shipped, the SSE
+	// notification) right after changing the schedule, instead of waiting
+	// for the next scheduled tick.
+	mux.Handle("POST /v1/admin/system/core-update-check", superAdminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		result, err := coreupdate.CheckNow(r.Context(), pool, valkeyClient)
+		if err != nil {
+			http.Error(w, "check failed: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(result)
+	})))
 	mux.Handle("DELETE /v1/admin/sessions/{id}", superAdminOnly(revokeSessionHandler(authDeps)))
 	mux.Handle("DELETE /v1/admin/system/rate-limits", superAdminOnly(resetRateLimitHandler(valkeyClient)))
 
@@ -1576,17 +1605,16 @@ func systemInfoHandler(pool *db.Pool, valkeyClient *valkey.Client, cfg config.Co
 			resp.NTPDriftOK = &ok
 		}
 
-		// Core's own update check - reuses the exact same GitHub Releases
-		// lookup CheckUpdates already uses for community modules, just
-		// pointed at modulab-core's own repo instead of an installed
-		// module's source_repo. version.Version has no leading "v" (see that
-		// constant's doc comment); GitHub release tags conventionally do, so
-		// both sides are normalized before comparing.
-		if latest, err := store.FetchLatestRelease(ctx, pool, "https://github.com/modulab-project/modulab-core", ""); err == nil && latest != "" {
-			normalized := strings.TrimPrefix(strings.TrimSpace(latest), "v")
-			resp.LatestCoreVersion = normalized
-			resp.CoreUpdateAvailable = normalized != version.Version
-		}
+		// Core's own update check - reads coreupdate's cache (last result
+		// from either the scheduled weekday+time check or a manual "check
+		// now" click) rather than calling GitHub live on every page load.
+		// This used to call store.FetchLatestRelease directly here, which
+		// meant simply opening/reloading this page repeatedly could exhaust
+		// GitHub's unauthenticated rate limit (60 requests/hour/IP) on its
+		// own - see coreupdate.CachedResult's doc comment.
+		coreResult := coreupdate.CachedResult(ctx, pool)
+		resp.LatestCoreVersion = coreResult.LatestVersion
+		resp.CoreUpdateAvailable = coreResult.UpdateAvailable
 
 		// Active sessions: who's currently logged in and from how many
 		// tabs/devices (see auth.ActiveSession's doc comment for exactly
