@@ -3,7 +3,7 @@ module github.com/modulab-project/modulab-core/backend
 go 1.26.5
 
 require (
-	github.com/coreos/go-oidc/v3 v3.19.0
+	github.com/coreos/go-oidc/v3 v3.20.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/redis/go-redis/v9 v9.21.0
 	golang.org/x/oauth2 v0.36.0
