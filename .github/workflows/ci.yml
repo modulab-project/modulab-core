@@ -144,7 +144,10 @@ jobs:
     needs: [backend, frontend]
     if: github.event_name == 'release'
     permissions:
-      contents: read
+      # write (not read) because the SBOM step below attaches a file to
+      # this same GitHub Release via `gh release upload` - packages: write
+      # alone only covers the ghcr.io push.
+      contents: write
       packages: write
     steps:
       - uses: actions/checkout@v7
@@ -196,6 +199,22 @@ jobs:
           image-ref: ghcr.io/modulab-project/modulab-core:${{ github.event.release.tag_name }}
           severity: HIGH,CRITICAL
           exit-code: "1"
+      # Generates a CycloneDX SBOM of the exact image just published (OS
+      # packages + Go/npm/Deno/cosign versions baked in), reusing the same
+      # Trivy scanner as the vulnerability scan above rather than a second
+      # tool. Attached to the GitHub Release so anyone consuming this image
+      # - or checking it against a newly disclosed CVE later - can see
+      # what's actually in it without re-scanning it themselves.
+      - name: Generate SBOM (CycloneDX)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ghcr.io/modulab-project/modulab-core:${{ github.event.release.tag_name }}
+          format: cyclonedx
+          output: sbom.cdx.json
+      - name: Attach SBOM to the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.event.release.tag_name }}" sbom.cdx.json --clobber
 
   # deploy/Dockerfile.nginx copies its static frontend files out of the core
   # image (COPY --from=core-source, ARG CORE_IMAGE) rather than building the

@@ -1,0 +1,77 @@
+version: 2
+
+# Keeps every dependency this project actually manages on a weekly update
+# cadence, across all four places a version can go stale: Go modules,
+# npm packages, the two Dockerfiles' pinned base images, and the GitHub
+# Actions used by ci.yml itself. govulncheck/npm audit/Trivy (see ci.yml)
+# only catch a *known, published* vulnerability in whatever is already
+# pinned - they say nothing about a dependency simply being outdated. This
+# is the other half: it opens the PR that lets a new version get in at all,
+# which the "always use the latest stable version" project convention
+# otherwise relies on someone remembering to check for by hand.
+updates:
+  - package-ecosystem: "gomod"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "backend"
+    commit-message:
+      prefix: "backend"
+
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "frontend"
+    commit-message:
+      prefix: "frontend"
+
+  # The root Dockerfile pins node:24-alpine, golang:1.26-alpine, and
+  # debian:bookworm-slim as base images, plus the Deno/Cosign versions
+  # baked in via ENV - Dependabot only tracks the FROM lines here, not the
+  # curl-downloaded ENV-pinned versions, which stay a manual bump (see
+  # Dockerfile's own version-pin comments).
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "docker"
+
+  - package-ecosystem: "docker"
+    directory: "/deploy"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "docker"
+
+  # Keeps the actions pinned in ci.yml (actions/checkout, setup-go,
+  # golangci-lint-action, trivy-action, etc.) current - several of those
+  # are pinned to an exact release tag deliberately (see ci.yml's comments
+  # on trivy-action and golangci-lint-action) precisely so their behavior
+  # doesn't drift under an unpinned branch ref; Dependabot is how that pin
+  # still gets moved forward instead of silently going stale forever.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "ci"
+    commit-message:
+      prefix: "ci"
