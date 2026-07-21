@@ -6,6 +6,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image/gif"
+	"image/jpeg"
+	"image/png"
 	"io"
 	"log"
 	"mime"
@@ -432,9 +435,81 @@ func saveUploadedFile(r *http.Request, dataDir, moduleName string, limit int64) 
 		return uploadedFile{}, fmt.Errorf("write file: %w", err)
 	}
 
+	// Re-validate the full file against its sniffed mediaType, not just the
+	// first 512 bytes DetectContentType looked at above. A small, otherwise
+	// arbitrary payload can be crafted to start with valid magic bytes (a
+	// "polyglot") while the rest of the file is garbage or smuggled content -
+	// decoding the real structure now catches that, and also rejects a
+	// decompression-bomb-style image (tiny file, absurd pixel dimensions)
+	// before it reaches any downstream consumer (AI vision providers, image
+	// resizing, etc.).
+	if err := validateUploadedFileStructure(mediaType, content.Bytes()); err != nil {
+		if rmErr := os.Remove(dst); rmErr != nil {
+			log.Printf("modules: saveUploadedFile: remove rejected upload %s: %v", dst, rmErr)
+		}
+		return uploadedFile{}, fmt.Errorf("upload rejected: %w", err)
+	}
+
 	// Return a relative path so the DB value is portable across environments.
 	// The storage handler reconstructs the absolute path from DataDir at serve time.
 	return uploadedFile{relPath: "uploads/" + safeName, bytes: content.Bytes(), mimeType: mediaType}, nil
+}
+
+// maxUploadImageDimension caps the width/height (in pixels) accepted for an
+// uploaded image, checked against the image's own decoded header rather
+// than file size alone - a tiny file can still declare an enormous pixel
+// count (a decompression bomb), which is cheap to upload but expensive for
+// whatever decodes it downstream.
+const maxUploadImageDimension = 12000
+
+// validateUploadedFileStructure re-checks an uploaded file's full content
+// against its sniffed mediaType, beyond the magic-byte check
+// http.DetectContentType already did on only the first 512 bytes. Only
+// checked for types the standard library can actually decode (jpeg/png/gif)
+// plus a lightweight structural check for PDF; image/webp and image/avif
+// have no std-lib decoder (a third-party dependency would be needed - not
+// pulled in here without discussing it first), so those two still rely on
+// the magic-byte sniff alone, same as before this check existed.
+func validateUploadedFileStructure(mediaType string, data []byte) error {
+	switch mediaType {
+	case "image/jpeg":
+		cfg, err := jpeg.DecodeConfig(bytes.NewReader(data))
+		if err != nil {
+			return fmt.Errorf("not a valid JPEG: %w", err)
+		}
+		return checkUploadImageDimensions(cfg.Width, cfg.Height)
+	case "image/png":
+		cfg, err := png.DecodeConfig(bytes.NewReader(data))
+		if err != nil {
+			return fmt.Errorf("not a valid PNG: %w", err)
+		}
+		return checkUploadImageDimensions(cfg.Width, cfg.Height)
+	case "image/gif":
+		cfg, err := gif.DecodeConfig(bytes.NewReader(data))
+		if err != nil {
+			return fmt.Errorf("not a valid GIF: %w", err)
+		}
+		return checkUploadImageDimensions(cfg.Width, cfg.Height)
+	case "application/pdf":
+		if !bytes.HasPrefix(data, []byte("%PDF-")) {
+			return fmt.Errorf("not a valid PDF: missing %%PDF- header")
+		}
+		tail := data
+		if len(tail) > 2048 {
+			tail = tail[len(tail)-2048:]
+		}
+		if !bytes.Contains(tail, []byte("%%EOF")) {
+			return fmt.Errorf("not a valid PDF: missing %%%%EOF trailer")
+		}
+	}
+	return nil
+}
+
+func checkUploadImageDimensions(width, height int) error {
+	if width <= 0 || height <= 0 || width > maxUploadImageDimension || height > maxUploadImageDimension {
+		return fmt.Errorf("image dimensions %dx%d out of allowed range", width, height)
+	}
+	return nil
 }
 
 // ModuleLocaleHandler serves a module's locale file from its installed

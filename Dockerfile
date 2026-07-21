@@ -23,7 +23,11 @@ FROM debian:bookworm-slim
 # Install Deno (required for Tier 2/3 module handlers) and cosign (required by
 # VerifyCosign, backend/internal/modules/verifier.go, to check official/community
 # module signatures on install/update). Both pinned to a specific version for
-# reproducible builds.
+# reproducible builds, and both verified against the official SHA256 checksum
+# published alongside each release before being made executable - a corrupted
+# or MITM'd binary at build time would otherwise become the module-signature
+# verifier / Tier 2-3 runtime itself, so its own integrity is checked the same
+# way modules.downloadFile + VerifySHA256 already check module ZIPs.
 ENV DENO_VERSION=2.9.0
 ENV COSIGN_VERSION=3.0.6
 # Detect CPU arch at build time so the image works on both x86_64 and arm64
@@ -42,13 +46,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
          *) echo "Unsupported arch: $ARCH" && exit 1 ;; \
        esac \
     && curl -fsSL "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-${DENO_ARCH}.zip" \
-        -o /tmp/deno.zip \
-    && unzip /tmp/deno.zip -d /usr/local/bin \
-    && rm /tmp/deno.zip \
+        -o "/tmp/deno-${DENO_ARCH}.zip" \
+    && curl -fsSL "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-${DENO_ARCH}.zip.sha256sum" \
+        -o /tmp/deno.zip.sha256sum \
+    && (cd /tmp && sha256sum -c deno.zip.sha256sum) \
+    && unzip "/tmp/deno-${DENO_ARCH}.zip" -d /usr/local/bin \
+    && rm "/tmp/deno-${DENO_ARCH}.zip" /tmp/deno.zip.sha256sum \
     && chmod +x /usr/local/bin/deno \
     && deno --version \
     && curl -fsSL "https://github.com/sigstore/cosign/releases/download/v${COSIGN_VERSION}/cosign-linux-${COSIGN_ARCH}" \
-        -o /usr/local/bin/cosign \
+        -o "/tmp/cosign-linux-${COSIGN_ARCH}" \
+    && curl -fsSL "https://github.com/sigstore/cosign/releases/download/v${COSIGN_VERSION}/cosign_checksums.txt" \
+        -o /tmp/cosign_checksums.txt \
+    && (cd /tmp && grep -E "  cosign-linux-${COSIGN_ARCH}\$" cosign_checksums.txt | sha256sum -c -) \
+    && mv "/tmp/cosign-linux-${COSIGN_ARCH}" /usr/local/bin/cosign \
+    && rm /tmp/cosign_checksums.txt \
     && chmod +x /usr/local/bin/cosign \
     && cosign version \
     && apt-get remove -y unzip \

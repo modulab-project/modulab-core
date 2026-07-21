@@ -182,6 +182,14 @@ func validateCrudTable(ctx context.Context, d Deps, moduleName string, crud *Man
 const (
 	defaultCrudPageSize = 50
 	maxCrudPageSize     = 200
+
+	// maxCrudPage caps the client-supplied page number. Without this, page
+	// * pageSize feeds straight into the query's OFFSET (see listCrudRows) -
+	// an arbitrarily large page number costs Postgres a full index/seq scan
+	// to skip that many rows before returning nothing, cheap for the client
+	// to request and comparatively expensive for the DB to serve, so it's
+	// rejected as a bad request rather than silently executed.
+	maxCrudPage = 100000
 )
 
 // ServeCrudRequest handles one HTTP request for a Tier 1 module - called from
@@ -287,6 +295,10 @@ func listCrudRows(w http.ResponseWriter, r *http.Request, d Deps, schemaName str
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			page = n
 		}
+	}
+	if page > maxCrudPage {
+		http.Error(w, fmt.Sprintf("page must not exceed %d", maxCrudPage), http.StatusBadRequest)
+		return
 	}
 	offset := (page - 1) * pageSize
 
