@@ -159,7 +159,7 @@ jobs:
       # how to produce a multi-platform manifest list from a single build
       # invocation; the default docker driver can't.
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
       - name: Log in to ghcr.io
@@ -252,7 +252,7 @@ jobs:
       # resolve per-platform, which only buildx (with QEMU registered for the
       # non-native arch) can do in one invocation.
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
       - name: Log in to ghcr.io
