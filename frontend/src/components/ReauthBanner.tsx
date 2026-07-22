@@ -3,6 +3,12 @@ import { useTranslation } from "react-i18next";
 interface ReauthBannerProps {
   waiting: boolean;
   onReauth: () => void;
+  // Optional: lets the caller dismiss the banner without re-authenticating
+  // (e.g. the user wants to keep editing other fields first, or just
+  // clicked into this by accident). Purely a local UI dismiss - nothing
+  // was queued server-side to roll back, since the gated action never
+  // went through in the first place.
+  onDismiss?: () => void;
 }
 
 // Shown whenever a super-admin/self-service action comes back with
@@ -17,7 +23,7 @@ interface ReauthBannerProps {
 // first place. No mention of "passkey" specifically - the IdP is
 // pluggable (OIDC provider compatibility check earlier this session) and
 // not every provider/user is on passkeys.
-export function ReauthBanner({ waiting, onReauth }: ReauthBannerProps) {
+export function ReauthBanner({ waiting, onReauth, onDismiss }: ReauthBannerProps) {
   const { t } = useTranslation();
   return (
     <div className="mb-4 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/40">
@@ -31,14 +37,26 @@ export function ReauthBanner({ waiting, onReauth }: ReauthBannerProps) {
         <p className="mt-0.5 text-sm text-amber-800 dark:text-amber-300/90">
           {t("common.reauth.body")}
         </p>
-        <button
-          type="button"
-          onClick={onReauth}
-          disabled={waiting}
-          className="mt-2.5 rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-teal-500 dark:hover:bg-teal-400"
-        >
-          {waiting ? t("login.waiting_other_tab") : t("common.reauth.button")}
-        </button>
+        <div className="mt-2.5 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onReauth}
+            disabled={waiting}
+            className="rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-teal-500 dark:hover:bg-teal-400"
+          >
+            {waiting ? t("login.waiting_other_tab") : t("common.reauth.button")}
+          </button>
+          {onDismiss && (
+            <button
+              type="button"
+              onClick={onDismiss}
+              disabled={waiting}
+              className="rounded-md border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            >
+              {t("common.cancel")}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

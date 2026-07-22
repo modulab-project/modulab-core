@@ -160,6 +160,7 @@ export default function AdminSystemSmtpPage() {
           <ReauthBanner
             waiting={reauthWaiting}
             onReauth={() => startLogin({ reauth: true, returnPath: window.location.pathname })}
+            onDismiss={() => setReauthRequired(false)}
           />
         )}
         <form onSubmit={handleSubmit} className="space-y-4">

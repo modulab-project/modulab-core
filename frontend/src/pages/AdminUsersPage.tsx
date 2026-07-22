@@ -134,6 +134,7 @@ export default function AdminUsersPage() {
           <ReauthBanner
             waiting={reauthWaiting}
             onReauth={() => startLogin({ reauth: true, returnPath: window.location.pathname })}
+            onDismiss={() => setReauthRequired(false)}
           />
         )}
 
