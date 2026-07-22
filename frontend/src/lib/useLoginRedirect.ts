@@ -61,12 +61,18 @@ export function useLoginRedirect(onAlreadyAuthenticated?: (session: Session) => 
   // OIDC round-trip. Returns nothing - navigation happens synchronously via
   // window.location.href, or `waiting` flips to true if another tab already
   // holds the lock, same as the mount-time check above.
-  function startLogin() {
+  //
+  // options are passed straight through to loginRedirectUrl - AdminUsersPage.tsx/
+  // ProfilePage.tsx's "please log in again" links pass { reauth: true,
+  // returnPath: <current page> } here; Login.tsx's main button and
+  // SetupWizard.tsx's step 4 call this with no options at all, same as
+  // before this parameter existed.
+  function startLogin(options?: { reauth?: boolean; returnPath?: string }) {
     if (!acquireLoginLock()) {
       setWaiting(true);
       return;
     }
-    window.location.href = loginRedirectUrl();
+    window.location.href = loginRedirectUrl(options);
   }
 
   return { waiting, startLogin };

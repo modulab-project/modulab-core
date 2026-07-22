@@ -8,6 +8,11 @@ export interface AuthResult {
   email?: string;
   role?: string;
   error?: string;
+  // Set only for the step-up reauth flow (backend's LoginHandler ?return=,
+  // echoed back by CallbackHandler once sanitizeReturnPath validated it) -
+  // where AuthComplete.tsx should navigate back to on success, instead of
+  // its ordinary role-based default. Absent for every other login.
+  returnPath?: string;
 }
 
 export const AUTH_RESULT_STORAGE_KEY = "modulab_auth_result";

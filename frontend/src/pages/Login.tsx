@@ -45,7 +45,7 @@ export default function Login() {
       centerText
     >
       {error && <p className="mb-4 text-center text-sm text-red-600 dark:text-red-400">{t(error)}</p>}
-      <AuthButton type="button" onClick={startLogin} disabled={waiting} className="w-full">
+      <AuthButton type="button" onClick={() => startLogin()} disabled={waiting} className="w-full">
         {waiting ? t("login.waiting_other_tab") : t("login.button")}
       </AuthButton>
     </AuthShell>

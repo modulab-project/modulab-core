@@ -274,6 +274,8 @@
       "save_error": "Saving failed.",
       "remove_error": "Removing the configuration failed.",
       "remove_confirm": "Remove the SMTP configuration? Account notification emails will stop going out until it is set up again.",
+      "reauth_required": "For security, this change requires a recent login.",
+      "reauth_login_link": "Log in again",
       "host": "Host",
       "port": "Port",
       "username": "Username",
@@ -346,6 +348,8 @@
       "secret_placeholder_existing": "Leave blank to keep existing secret",
       "save_oidc": "Save OIDC",
       "save": "Save",
+      "reauth_required": "For security, this change requires a recent login.",
+      "reauth_login_link": "Log in again",
       "oidc": {
         "removing": "Removing…",
         "remove": "Remove configuration"
@@ -769,7 +773,9 @@
       "core_update_toast_generic": "A new Core version is available.",
       "core_update_one": "Core update available ({{version}})",
       "core_update_generic": "Core update available",
-      "rate_limit_toast": "Rate limit triggered: {{label}} ({{identifier}})"
+      "rate_limit_toast": "Rate limit triggered: {{label}} ({{identifier}})",
+      "session_new_toast": "New sign-in from {{ip}}",
+      "session_new_anomaly_toast": "⚠️ Sign-in from an unusual country ({{country}}, previously {{previousCountry}}) from {{ip}}"
     },
     "chat": {
       "no_provider": "No provider",

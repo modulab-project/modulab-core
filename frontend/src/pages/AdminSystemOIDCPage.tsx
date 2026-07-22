@@ -3,6 +3,8 @@ import { useNavigate, Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import { getSystemStatus, updateOIDC, deleteOIDCConfig } from "../lib/api";
 import { useAuthenticatedSession } from "../lib/useSession";
+import { useLoginRedirect } from "../lib/useLoginRedirect";
+import { isReauthRequiredError } from "../lib/authErrors";
 import { AppShell } from "../components/AppShell";
 
 export default function AdminSystemOIDCPage() {
@@ -22,7 +24,17 @@ export default function AdminSystemOIDCPage() {
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [reauthRequired, setReauthRequired] = useState(false);
   const hasFetched = useRef(false);
+  // Backend now gates PATCH/DELETE /v1/admin/oidc behind requireRecentLogin
+  // (RequireSuperAdminReauthMiddleware) - this is the trust root for every
+  // login on the instance, so changing it gets the same step-up treatment
+  // as locking/deleting a user (AdminUsersPage.tsx). See that page's
+  // identical pattern for why reauth/returnPath are passed to startLogin.
+  const { waiting: reauthWaiting, startLogin } = useLoginRedirect(() => {
+    setReauthRequired(false);
+    setMsg(null);
+  });
 
   useEffect(() => {
     if (!session) return;
@@ -51,6 +63,7 @@ export default function AdminSystemOIDCPage() {
     }
     setSaving(true);
     setMsg(null);
+    setReauthRequired(false);
     try {
       await updateOIDC({
         issuer_url: issuer.trim(),
@@ -61,7 +74,12 @@ export default function AdminSystemOIDCPage() {
       setSecret("");
       setMsg({ ok: true, text: t("admin.system.saved") });
     } catch (err) {
-      setMsg({ ok: false, text: err instanceof Error ? err.message : t("admin.system.save_error") });
+      if (isReauthRequiredError(err)) {
+        setReauthRequired(true);
+        setMsg({ ok: false, text: t("admin.system.reauth_required") });
+      } else {
+        setMsg({ ok: false, text: err instanceof Error ? err.message : t("admin.system.save_error") });
+      }
     } finally {
       setSaving(false);
     }
@@ -71,12 +89,18 @@ export default function AdminSystemOIDCPage() {
     if (removing) return;
     setRemoving(true);
     setMsg(null);
+    setReauthRequired(false);
     try {
       await deleteOIDCConfig();
       setConfigured(false);
       setIssuer(""); setClientId(""); setSecret("");
     } catch (err) {
-      setMsg({ ok: false, text: err instanceof Error ? err.message : t("admin.system.save_error") });
+      if (isReauthRequiredError(err)) {
+        setReauthRequired(true);
+        setMsg({ ok: false, text: t("admin.system.reauth_required") });
+      } else {
+        setMsg({ ok: false, text: err instanceof Error ? err.message : t("admin.system.save_error") });
+      }
     } finally {
       setRemoving(false);
     }
@@ -111,6 +135,18 @@ export default function AdminSystemOIDCPage() {
         </div>
 
         {msg && <Msg msg={msg} />}
+        {reauthRequired && (
+          <p className="-mt-3 mb-4 text-sm text-red-600 dark:text-red-400">
+            <button
+              type="button"
+              onClick={() => startLogin({ reauth: true, returnPath: window.location.pathname })}
+              disabled={reauthWaiting}
+              className="font-medium underline disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {reauthWaiting ? t("login.waiting_other_tab") : t("admin.system.reauth_login_link")}
+            </button>
+          </p>
+        )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <Field label={t("setup.step2.issuer_url")}>
             <input type="url" value={issuer} onChange={(e) => setIssuer(e.target.value)}

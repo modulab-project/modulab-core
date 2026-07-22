@@ -274,6 +274,8 @@
       "save_error": "Échec de l'enregistrement.",
       "remove_error": "Échec de la suppression de la configuration.",
       "remove_confirm": "Supprimer la configuration SMTP ? Les e-mails de notification de compte cesseront d'être envoyés jusqu'à ce qu'elle soit reconfigurée.",
+      "reauth_required": "Par sécurité, cette modification nécessite une connexion récente.",
+      "reauth_login_link": "Se reconnecter",
       "host": "Hôte",
       "port": "Port",
       "username": "Nom d'utilisateur",
@@ -346,6 +348,8 @@
       "secret_placeholder_existing": "Laisser vide pour conserver le secret existant",
       "save_oidc": "Enregistrer OIDC",
       "save": "Enregistrer",
+      "reauth_required": "Par sécurité, cette modification nécessite une connexion récente.",
+      "reauth_login_link": "Se reconnecter",
       "oidc": {
         "removing": "Suppression…",
         "remove": "Supprimer la configuration"
@@ -769,7 +773,9 @@
       "core_update_toast_generic": "Une nouvelle version de Core est disponible.",
       "core_update_one": "Mise à jour Core disponible ({{version}})",
       "core_update_generic": "Mise à jour Core disponible",
-      "rate_limit_toast": "Limite de requêtes déclenchée : {{label}} ({{identifier}})"
+      "rate_limit_toast": "Limite de requêtes déclenchée : {{label}} ({{identifier}})",
+      "session_new_toast": "Nouvelle connexion depuis {{ip}}",
+      "session_new_anomaly_toast": "⚠️ Connexion depuis un pays inhabituel ({{country}}, précédemment {{previousCountry}}) depuis {{ip}}"
     },
     "chat": {
       "no_provider": "Aucun fournisseur",

@@ -66,6 +66,7 @@ export default function AuthComplete() {
       email: params.get("email") ?? undefined,
       role: params.get("role") ?? undefined,
       error: params.get("error") ?? undefined,
+      returnPath: params.get("return") ?? undefined,
     };
     sessionStorage.setItem(AUTH_RESULT_STORAGE_KEY, JSON.stringify(result));
     window.history.replaceState(null, "", window.location.pathname);
@@ -87,7 +88,19 @@ export default function AuthComplete() {
         // sessionStorage for the entire tab lifetime otherwise, holding the
         // user's email unnecessarily long after login already succeeded.
         sessionStorage.removeItem(AUTH_RESULT_STORAGE_KEY);
-        navigate(result.role === "pending" ? "/pending" : "/", { replace: true });
+        // returnPath is only ever a step-up reauth's origin page (backend's
+        // sanitizeReturnPath already rejected anything that wasn't a
+        // same-app, single-leading-slash path before it ever reached this
+        // fragment) - re-checked here anyway on general principle before
+        // handing it to navigate(), since this value did travel through a
+        // browser-visible URL fragment. Pending still wins over it: a
+        // reauth's return path is always inside the admin/profile area,
+        // which a pending-role session cannot reach anyway.
+        const isSafeReturnPath = result.returnPath?.startsWith("/") && !result.returnPath.startsWith("//");
+        const destination = result.role === "pending"
+          ? "/pending"
+          : (isSafeReturnPath ? result.returnPath! : "/");
+        navigate(destination, { replace: true });
       })
       .catch(() => navigate("/setup", { replace: true }));
   }, [navigate]);

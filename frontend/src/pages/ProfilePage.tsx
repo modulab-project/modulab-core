@@ -189,7 +189,7 @@ export default function ProfilePage() {
                   {" "}
                   <button
                     type="button"
-                    onClick={startLogin}
+                    onClick={() => startLogin({ reauth: true, returnPath: window.location.pathname })}
                     disabled={reauthWaiting}
                     className="font-medium underline disabled:cursor-not-allowed disabled:opacity-50"
                   >

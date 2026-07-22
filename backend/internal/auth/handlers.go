@@ -36,6 +36,109 @@ const oauthStateTTL = 5 * time.Minute
 
 const oauthStateKeyPrefix = "oauthstate:"
 
+// oauthStatePayload is what LoginHandler stores in Valkey under
+// oauthStateKeyPrefix+state, and CallbackHandler reads back and consumes.
+// Replaces an earlier version of this codebase that stored the bare PKCE
+// codeVerifier string directly - widened to a small JSON envelope so the
+// step-up reauth flow (LoginHandler's ?reauth=1&return=... query params)
+// can carry its own two extra fields through the same round trip without a
+// second Valkey key. Reauth/ReturnPath are simply absent (Go zero values)
+// for an ordinary login, so every existing call site that doesn't know
+// about step-up reauth at all keeps working unchanged.
+type oauthStatePayload struct {
+	CodeVerifier string `json:"code_verifier"`
+	// Reauth marks this round-trip as a step-up reauth (see AuthCodeURL's
+	// forceReauth doc comment), not a fresh login - CallbackHandler uses it
+	// to decide whether to log an auth_time freshness check.
+	Reauth bool `json:"reauth,omitempty"`
+	// ReturnPath is where the SPA should navigate back to once this
+	// round-trip completes, instead of its normal post-login landing page -
+	// e.g. "/admin/users", the page whose delete/lock action originally
+	// triggered requireRecentLogin's 403. Validated by sanitizeReturnPath
+	// before it is ever stored or echoed back to the browser.
+	ReturnPath string `json:"return_path,omitempty"`
+}
+
+// sanitizeReturnPath validates raw (the ?return= query parameter
+// LoginHandler receives from the SPA) before it is trusted enough to be
+// stored in oauthStatePayload and later echoed back into
+// redirectToFrontend's URL fragment. Only ever needs to permit an
+// in-app path, so the bar is deliberately strict rather than trying to
+// enumerate every unsafe pattern: must start with exactly one "/" (a
+// leading "//" is protocol-relative - e.g. "//evil.example" - and browsers
+// resolve it as an absolute URL to a different host, the classic open-
+// redirect trick this exists to block), must not itself start a new
+// origin, and is capped at a sane length. Returns "" for anything that
+// fails this - callers treat that exactly like "no return path was
+// requested at all", never as an error worth surfacing to the user.
+func sanitizeReturnPath(raw string) string {
+	if raw == "" || len(raw) > 256 {
+		return ""
+	}
+	if !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") {
+		return ""
+	}
+	if strings.ContainsAny(raw, " \t\n\r") {
+		return ""
+	}
+	return raw
+}
+
+// lastCountryKeyPrefix indexes the two-letter country (from Cloudflare's
+// CF-IPCountry header - see loginCountry below) of a subject's most recent
+// login, keyed by UserID. Deliberately NOT tied to SessionTTL/
+// SessionAbsoluteMaxAge: the whole point is to remember "where did this
+// person usually log in from" across the gap between sessions (e.g. a
+// login once a week), so it gets its own long, independent TTL
+// (lastCountryTTL) instead of expiring alongside whatever session happened
+// to create it. A two-letter country code is coarse-grained enough (millions
+// of people share it) that it is not treated as PII requiring GCM
+// encryption here, unlike Session.IP itself - same reasoning as Role/
+// Locked staying plaintext in storedSession.
+const lastCountryKeyPrefix = "lastcountry:"
+
+// lastCountryTTL bounds how long a remembered login country survives with
+// no new login at all - a year is generous enough that a returning user
+// essentially never loses their baseline, while still not keeping the key
+// around forever for an account nobody uses anymore.
+const lastCountryTTL = 365 * 24 * time.Hour
+
+// loginCountry reads Cloudflare's CF-IPCountry header, set on every request
+// that actually passes through Cloudflare's proxy (not present for a
+// DNS-only/"grey cloud" setup, or for local/direct access bypassing it).
+// Returns "" if absent - callers must treat that as "anomaly detection not
+// available for this request" and skip the check entirely (fail open),
+// never as evidence of anything by itself.
+func loginCountry(r *http.Request) string {
+	return r.Header.Get("CF-IPCountry")
+}
+
+// checkAndRecordLoginCountry compares country (this login's CF-IPCountry,
+// possibly "") against the last country remembered for subject, then
+// records country as the new baseline for next time. Returns anomaly=true
+// only when both the previous and current country are known and they
+// differ - a first-ever login (no baseline yet) or a request with no
+// CF-IPCountry header at all is never flagged, since there is nothing
+// meaningful to compare. previous is returned alongside purely so the
+// caller can include it in the notification text ("previously DE, now
+// US") without a second Valkey round trip.
+func checkAndRecordLoginCountry(ctx context.Context, vk *valkey.Client, subject, country string) (anomaly bool, previous string) {
+	if country == "" {
+		return false, ""
+	}
+	key := lastCountryKeyPrefix + subject
+	prev, exists, err := vk.Get(ctx, key)
+	if err != nil {
+		log.Printf("auth: read last login country for %s: %v", subject, err)
+	} else if exists && prev != "" && prev != country {
+		anomaly, previous = true, prev
+	}
+	if err := vk.SetWithTTL(ctx, key, country, lastCountryTTL); err != nil {
+		log.Printf("auth: record last login country for %s: %v", subject, err)
+	}
+	return anomaly, previous
+}
+
 // Deps bundles what the login/callback/logout/me handlers need.
 // MasterKeyEnv is the one remaining raw environment value (config.Config's
 // MasterKey) - resolution against what the Setup Wizard may have persisted
@@ -111,9 +214,22 @@ func (d Deps) resolveProvider(ctx context.Context) (*Provider, error) {
 // LoginHandler starts the OIDC authorization-code flow: it resolves the
 // currently configured OIDC provider (returns 412 if the Setup Wizard's
 // steps 2-3 have not been completed yet), generates a CSRF/replay state
-// value plus a PKCE code verifier (RFC 7636), stores the verifier in Valkey
-// keyed by state for oauthStateTTL, and redirects the browser to the IdP's
-// authorization endpoint with the verifier's S256 challenge attached.
+// value plus a PKCE code verifier (RFC 7636), stores the verifier (plus the
+// step-up reauth flags below) in Valkey keyed by state for oauthStateTTL,
+// and redirects the browser to the IdP's authorization endpoint with the
+// verifier's S256 challenge attached.
+//
+// ?reauth=1 and ?return=<path> are set by the frontend's "please log in
+// again" links (AdminUsersPage.tsx/ProfilePage.tsx, via
+// useLoginRedirect.ts's startLogin options) whenever a destructive action
+// was refused for needing a more recent login (requireRecentLogin,
+// admin.go) - reauth=1 makes AuthCodeURL below force a genuine fresh IdP
+// authentication instead of a silent SSO round-trip, and return carries
+// the page the user was on so CallbackHandler can send them straight back
+// to it (see oauthStatePayload/sanitizeReturnPath) instead of the ordinary
+// post-login landing page. Both are simply absent for every other login on
+// this instance (main login screen, Setup Wizard step 5), which behave
+// exactly as before.
 func LoginHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
@@ -130,15 +246,29 @@ func LoginHandler(d Deps) http.HandlerFunc {
 			return
 		}
 		codeVerifier := oauth2.GenerateVerifier()
-		// The verifier itself is stored, not just a marker - CallbackHandler
-		// needs it back to complete the PKCE exchange. It never leaves Core:
-		// the browser only ever sees the state value and the S256 challenge.
-		if err := d.Valkey.SetWithTTL(ctx, oauthStateKeyPrefix+state, codeVerifier, oauthStateTTL); err != nil {
+		reauth := r.URL.Query().Get("reauth") == "1"
+		returnPath := sanitizeReturnPath(r.URL.Query().Get("return"))
+
+		payload, err := json.Marshal(oauthStatePayload{
+			CodeVerifier: codeVerifier,
+			Reauth:       reauth,
+			ReturnPath:   returnPath,
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		// The verifier (and the two step-up flags above) are stored, not
+		// just a marker - CallbackHandler needs them back to complete the
+		// PKCE exchange and to know how to finish the round trip. None of
+		// this ever leaves Core: the browser only ever sees the state value
+		// and the S256 challenge.
+		if err := d.Valkey.SetWithTTL(ctx, oauthStateKeyPrefix+state, string(payload), oauthStateTTL); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		http.Redirect(w, r, provider.AuthCodeURL(state, codeVerifier), http.StatusFound)
+		http.Redirect(w, r, provider.AuthCodeURL(state, codeVerifier, reauth), http.StatusFound)
 	}
 }
 
@@ -197,7 +327,7 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 			return
 		}
 
-		codeVerifier, stateValid, err := d.Valkey.Get(ctx, oauthStateKeyPrefix+state)
+		rawState, stateValid, err := d.Valkey.Get(ctx, oauthStateKeyPrefix+state)
 		if err != nil {
 			redirectToFrontend(w, r, target, url.Values{"error": {"server_error"}})
 			return
@@ -210,6 +340,11 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 			redirectToFrontend(w, r, target, url.Values{"error": {"invalid_or_expired_state"}})
 			return
 		}
+		var statePayload oauthStatePayload
+		if err := json.Unmarshal([]byte(rawState), &statePayload); err != nil {
+			redirectToFrontend(w, r, target, url.Values{"error": {"invalid_or_expired_state"}})
+			return
+		}
 
 		provider, err := d.resolveProvider(ctx)
 		if err != nil {
@@ -217,10 +352,30 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 			return
 		}
 
-		claims, refreshToken, err := provider.Exchange(ctx, code, codeVerifier)
+		claims, refreshToken, err := provider.Exchange(ctx, code, statePayload.CodeVerifier)
 		if err != nil {
 			redirectToFrontend(w, r, target, url.Values{"error": {"exchange_failed"}})
 			return
+		}
+		// Step-up reauth (statePayload.Reauth, set by LoginHandler's
+		// ?reauth=1): best-effort informational check only, never a hard
+		// gate - see AuthCodeURL's forceReauth doc comment for why real-world
+		// auth_time/max_age conformance varies across IdPs, and why failing
+		// this closed would risk locking out the instance's only admin over
+		// a protocol quirk rather than an actual security problem. A missing
+		// AuthTime (0) means this IdP simply doesn't return the claim -
+		// nothing to compare, logged as such rather than as a mismatch.
+		// Session.CreatedAt is what requireRecentLogin actually re-checks
+		// (via the brand-new session CreateSession mints below, same as any
+		// other login) - this block only adds visibility into whether the
+		// IdP genuinely forced fresh authentication or silently reused its
+		// own SSO session, it does not itself gate anything.
+		if statePayload.Reauth {
+			if claims.AuthTime == 0 {
+				log.Printf("auth: step-up reauth for %s: IdP returned no auth_time claim, cannot verify freshness", claims.Subject)
+			} else if age := time.Since(time.Unix(claims.AuthTime, 0)); age > 2*time.Minute {
+				log.Printf("auth: step-up reauth for %s: auth_time is %s old despite prompt=login/max_age=0 - IdP may have silently reused an existing session instead of forcing fresh authentication", claims.Subject, age.Round(time.Second))
+			}
 		}
 
 		prefix, err := setup.ResolveGroupPrefix(ctx, d.Pool)
@@ -374,6 +529,35 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 			}
 		}
 
+		// Live "you just logged in" push to any other already-open tab/
+		// device for this same subject (notify.UserChannel, subscribed to
+		// by every session regardless of role - see events.go). This is
+		// the one signal a stolen/replayed session token itself can never
+		// suppress: if someone else is using your account from a second
+		// browser, a tab you already have open elsewhere sees it
+		// immediately instead of you finding out from the System Info
+		// active-sessions table days later, if ever. anomaly/previous come
+		// from comparing Cloudflare's CF-IPCountry header (loginCountry)
+		// against the last country remembered for this subject - both are
+		// "" when no CF-IPCountry header is present at all (e.g. local
+		// access bypassing Cloudflare), in which case anomaly is always
+		// false and this degrades to a plain "new login" notice with no
+		// country claim.
+		country := loginCountry(r)
+		anomaly, previousCountry := checkAndRecordLoginCountry(ctx, d.Valkey, claims.Subject, country)
+		if pubErr := notify.Publish(ctx, d.Valkey, notify.UserChannel(claims.Subject), notify.Event{
+			Type: "session.new",
+			Data: map[string]any{
+				"ip":               clientIP(r),
+				"user_agent":       r.Header.Get("User-Agent"),
+				"country":          country,
+				"anomaly":          anomaly,
+				"previous_country": previousCountry,
+			},
+		}); pubErr != nil {
+			log.Printf("auth: notify session.new for %s: %v", claims.Subject, pubErr)
+		}
+
 		// The session cookie is set directly on this redirect response,
 		// never carried in the URL fragment the way the bearer token used
 		// to be (see setSessionCookie's doc comment) - httpOnly means the
@@ -381,10 +565,18 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 		// its immediate "where do I send the browser next" decision.
 		setSessionCookie(w, token)
 
-		redirectToFrontend(w, r, target, url.Values{
+		fragment := url.Values{
 			"email": {claims.Email},
 			"role":  {sessionRole},
-		})
+		}
+		// Only set when LoginHandler's ?return= produced a validated path
+		// (statePayload.ReturnPath, via sanitizeReturnPath) - AuthComplete.tsx
+		// treats an absent value exactly like an ordinary login, landing on
+		// its normal role-based default instead.
+		if statePayload.ReturnPath != "" {
+			fragment.Set("return", statePayload.ReturnPath)
+		}
+		redirectToFrontend(w, r, target, fragment)
 	}
 }
 

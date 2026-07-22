@@ -3,6 +3,8 @@ import { useNavigate, Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import { smtpStatus as fetchSmtpStatus, configureSmtp, deleteSmtpConfig, testSmtp, type SMTPStatus } from "../lib/api";
 import { useAuthenticatedSession } from "../lib/useSession";
+import { useLoginRedirect } from "../lib/useLoginRedirect";
+import { isReauthRequiredError } from "../lib/authErrors";
 import { AppShell } from "../components/AppShell";
 
 export default function AdminSystemSmtpPage() {
@@ -23,7 +25,16 @@ export default function AdminSystemSmtpPage() {
   const [testAddress, setTestAddress] = useState("");
   const [testBusy, setTestBusy] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const [reauthRequired, setReauthRequired] = useState(false);
   const hasFetched = useRef(false);
+  // Backend now gates POST /v1/admin/smtp/configure and DELETE /v1/admin/smtp
+  // behind requireRecentLogin (RequireSuperAdminReauthMiddleware) - not the
+  // test-send endpoint, which changes nothing. Same step-up pattern as
+  // AdminSystemOIDCPage.tsx/AdminUsersPage.tsx.
+  const { waiting: reauthWaiting, startLogin } = useLoginRedirect(() => {
+    setReauthRequired(false);
+    setMsg(null);
+  });
 
   useEffect(() => {
     if (!session) return;
@@ -55,6 +66,7 @@ export default function AdminSystemSmtpPage() {
     }
     setSaving(true);
     setMsg(null);
+    setReauthRequired(false);
     try {
       const result = await configureSmtp({
         host: host.trim(), port: parsedPort, username: username.trim(),
@@ -64,7 +76,12 @@ export default function AdminSystemSmtpPage() {
       setPassword("");
       setMsg({ ok: true, text: t("admin.smtp.saved") });
     } catch (err) {
-      setMsg({ ok: false, text: err instanceof Error ? err.message : t("admin.smtp.save_error") });
+      if (isReauthRequiredError(err)) {
+        setReauthRequired(true);
+        setMsg({ ok: false, text: t("admin.smtp.reauth_required") });
+      } else {
+        setMsg({ ok: false, text: err instanceof Error ? err.message : t("admin.smtp.save_error") });
+      }
     } finally {
       setSaving(false);
     }
@@ -105,12 +122,18 @@ export default function AdminSystemSmtpPage() {
     if (!window.confirm(t("admin.smtp.remove_confirm"))) return;
     setRemoving(true);
     setMsg(null);
+    setReauthRequired(false);
     try {
       await deleteSmtpConfig();
       setStatus({ configured: false });
       setHost(""); setPort("465"); setUsername(""); setPassword(""); setFromAddress(""); setEncryption("tls");
     } catch (err) {
-      setMsg({ ok: false, text: err instanceof Error ? err.message : t("admin.smtp.remove_error") });
+      if (isReauthRequiredError(err)) {
+        setReauthRequired(true);
+        setMsg({ ok: false, text: t("admin.smtp.reauth_required") });
+      } else {
+        setMsg({ ok: false, text: err instanceof Error ? err.message : t("admin.smtp.remove_error") });
+      }
     } finally {
       setRemoving(false);
     }
@@ -134,6 +157,18 @@ export default function AdminSystemSmtpPage() {
           <p className="mb-4 text-sm text-amber-600 dark:text-amber-400">{t("admin.smtp.warning_not_configured")}</p>
         )}
         {msg && <Msg msg={msg} />}
+        {reauthRequired && (
+          <p className="-mt-3 mb-4 text-sm text-red-600 dark:text-red-400">
+            <button
+              type="button"
+              onClick={() => startLogin({ reauth: true, returnPath: window.location.pathname })}
+              disabled={reauthWaiting}
+              className="font-medium underline disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {reauthWaiting ? t("login.waiting_other_tab") : t("admin.smtp.reauth_login_link")}
+            </button>
+          </p>
+        )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <Field label={t("admin.smtp.host")}>
             <input type="text" value={host} onChange={(e) => setHost(e.target.value)}

@@ -88,8 +88,41 @@ func NewProvider(ctx context.Context, issuerURL, clientID, clientSecret, redirec
 // secret): it is cheap, defends against authorization-code interception,
 // and is the current best practice for every client type, not just public
 // ones.
-func (p *Provider) AuthCodeURL(state, codeVerifier string) string {
-	return p.oauth2Config.AuthCodeURL(state, oauth2.S256ChallengeOption(codeVerifier))
+//
+// forceReauth adds the two standard OIDC Core §3.1.2.1 parameters that ask
+// the IdP to prove a genuinely fresh authentication rather than silently
+// reusing its own existing browser SSO session: prompt=login ("the
+// Authorization Server SHOULD prompt the End-User for reauthentication")
+// and max_age=0 (zero seconds of staleness tolerated - the OP "MUST attempt
+// to actively re-authenticate the End-User" and, per spec, MUST then
+// include an auth_time claim in the returned ID token). Used by
+// CallbackHandler's step-up flow (requireRecentLogin/reauthWindow in
+// admin.go) so "please log in again" before a destructive action actually
+// means something: without this, re-running the ordinary login redirect
+// could complete without any real user interaction at all if the IdP's own
+// session cookie (a separate cookie, at the IdP's own domain) is still
+// alive - which would make the whole reauth check security theater against
+// exactly the threat it exists for (a stolen/replayed ModuLab session
+// token, used from a device that still has a live IdP browser session
+// too).
+//
+// Both parameters are MUST-support per the OIDC Core spec, but real-world
+// conformance among self-hosted IdPs varies - e.g. Keycloak has a known bug
+// mishandling max_age=0 specifically (github.com/keycloak/keycloak/issues/
+// 33641). Exchange's caller (CallbackHandler) treats a missing/stale
+// auth_time claim as best-effort informational logging, never a hard
+// failure - see that call site's doc comment for why locking out the
+// instance's only admin over an IdP's protocol quirk would be worse than
+// the step-up simply providing a weaker guarantee on that particular IdP.
+func (p *Provider) AuthCodeURL(state, codeVerifier string, forceReauth bool) string {
+	opts := []oauth2.AuthCodeOption{oauth2.S256ChallengeOption(codeVerifier)}
+	if forceReauth {
+		opts = append(opts,
+			oauth2.SetAuthURLParam("prompt", "login"),
+			oauth2.SetAuthURLParam("max_age", "0"),
+		)
+	}
+	return p.oauth2Config.AuthCodeURL(state, opts...)
 }
 
 // Claims is the subset of ID token claims the login flow needs. Name and
@@ -121,6 +154,15 @@ type Claims struct {
 	PreferredUsername string   `json:"preferred_username"`
 	Picture           string   `json:"picture"`
 	Groups            []string `json:"groups"`
+	// AuthTime is the Unix timestamp of the End-User's last active
+	// authentication at the IdP (OIDC Core "auth_time" claim) - normally
+	// absent/zero for an ordinary login (nothing in NewProvider's scopes
+	// requests it as an Essential Claim), but the OIDC Core spec requires
+	// the IdP to include it whenever a max_age request parameter was sent
+	// (see AuthCodeURL's forceReauth doc comment). Zero means "not present
+	// in this ID token", handled by the step-up flow's caller as "cannot
+	// verify freshness on this IdP", not as evidence of anything.
+	AuthTime int64 `json:"auth_time"`
 }
 
 // Exchange completes the authorization-code flow: it trades code for

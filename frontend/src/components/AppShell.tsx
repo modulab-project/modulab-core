@@ -423,6 +423,38 @@ export function AppShell({
         ...prev,
       ].slice(0, FEED_LIMIT));
     }
+    // Published by CallbackHandler (backend/internal/auth/handlers.go) on
+    // notify.UserChannel - every session subscribes to its own channel
+    // regardless of role (see events.go), so this is intentionally NOT
+    // gated on isAdmin: the whole point is that any already-open tab for
+    // this same account, admin or not, hears about a fresh login
+    // immediately. anomaly/country/previous_country come from comparing
+    // Cloudflare's CF-IPCountry header against the country remembered from
+    // this subject's last login - both empty (and anomaly false) whenever
+    // that header isn't present at all (e.g. local access bypassing
+    // Cloudflare), in which case this degrades to a plain "new login"
+    // notice with no country claim.
+    if (event.type === "session.new") {
+      const data = (event.data ?? {}) as {
+        ip?: string;
+        country?: string;
+        anomaly?: boolean;
+        previous_country?: string;
+      };
+      const ip = data.ip ?? "?";
+      const msg = data.anomaly
+        ? t("shell.notifications_panel.session_new_anomaly_toast", {
+            ip,
+            country: data.country ?? "?",
+            previousCountry: data.previous_country ?? "?",
+          })
+        : t("shell.notifications_panel.session_new_toast", { ip });
+      push({ message: msg });
+      setFeed((prev) => [
+        { id: nextFeedItemID++, message: msg, at: Date.now() },
+        ...prev,
+      ].slice(0, FEED_LIMIT));
+    }
     // Published by main.go's rateLimitMiddleware (auth/login/callback,
     // ai-chat-per-IP, global backstop) and ai.go's ChatHandler (per-user
     // chat RPM cap) whenever a limit actually trips - see those files' doc

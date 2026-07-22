@@ -169,6 +169,51 @@ func RequireSuperAdminMiddleware(d Deps) func(http.Handler) http.Handler {
 	}
 }
 
+// RequireSuperAdminReauthMiddleware layers the same step-up gate as
+// LockUserHandler/DeleteUserHandler/ApproveUserHandler (requireRecentLogin)
+// on top of RequireSuperAdminMiddleware, for the handful of super-admin
+// actions consequential enough to warrant it even though they live outside
+// this package (adminapi.OIDCUpdateHandler/OIDCDeleteHandler,
+// setup.SMTPConfigureHandler/the SMTP delete handler in cmd/core) - see
+// main.go's superAdminReauthOnly for exactly which routes use this instead
+// of the plain superAdminOnly.
+//
+// Deliberately NOT applied to every super-admin route: read-only endpoints
+// (system info, audit log, status/test checks) have nothing to step up
+// for, and a few mutating ones are excluded on purpose - rate limits and
+// AI/search provider keys are reversible, low-stakes settings, and ending
+// an active session (DELETE /v1/admin/sessions/{id}) is itself an incident-
+// response action that should never be made slower by an extra login step
+// right when speed matters most.
+//
+// OIDC config is the highest-value target of the two routes this actually
+// gates: it is the trust root the entire login flow depends on - whoever
+// controls IssuerURL/ClientID/ClientSecret can point every future login at
+// an IdP of their own choosing, and log in as anyone. SMTP config is lower
+// stakes but still worth it - anyone who could quietly redirect the
+// instance's outgoing mail could intercept its own pending-approval/
+// account emails, or send convincing phishing "from" this instance.
+func RequireSuperAdminReauthMiddleware(d Deps) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return RequireSuperAdminMiddleware(d)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			sess, ok := SessionFromContext(r.Context())
+			if !ok {
+				// Unreachable in practice - RequireSuperAdminMiddleware
+				// always calls ContextWithSession before invoking next.
+				// Handled explicitly anyway rather than assuming it, same
+				// principle as requireAdmin's own belt-and-suspenders
+				// checks elsewhere in this file.
+				http.Error(w, "invalid or expired session", http.StatusUnauthorized)
+				return
+			}
+			if !requireRecentLogin(w, sess) {
+				return
+			}
+			next.ServeHTTP(w, r)
+		}))
+	}
+}
+
 // guardAgainstSelfOrLastSuperAdmin blocks an admin action (lock or delete)
 // that would either act on the caller's own account, or strip the
 // instance's last remaining super-admin of their elevated status, leaving
@@ -325,6 +370,14 @@ func ApproveUserHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := requireAdmin(d, w, r)
 		if !ok {
+			return
+		}
+		// Same step-up gate as LockUserHandler/DeleteUserHandler below -
+		// granting someone real access is just as consequential as revoking
+		// it: a compromised-but-still-within-SessionTTL admin session
+		// approving a malicious pending signup hands that account a
+		// legitimate, fully-privileged role, not just a nuisance.
+		if !requireRecentLogin(w, sess) {
 			return
 		}
 		subject := r.PathValue("id")

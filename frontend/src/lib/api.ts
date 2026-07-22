@@ -111,8 +111,25 @@ export function completeSetup(bootstrapToken: string): Promise<CompleteResponse>
 // Not a fetch() call - this is a full-page navigation target. The backend
 // redirects the browser to the IdP from here, so it can't go through
 // request() above.
-export function loginRedirectUrl(): string {
-  return `${API_BASE_URL}/v1/auth/login`;
+//
+// options.reauth/returnPath are for the "step-up" flow (backend's
+// LoginHandler ?reauth=1&return=... - see its doc comment): a destructive
+// admin action that was refused for needing a more recent login
+// (requireRecentLogin) uses these so the resulting IdP round-trip actually
+// forces fresh authentication (not a silently-reused IdP SSO session) and
+// lands the user back on the page they were on, instead of the ordinary
+// post-login destination. Omitted entirely for a normal login - the
+// backend treats their absence exactly like a plain login redirect.
+export function loginRedirectUrl(options?: { reauth?: boolean; returnPath?: string }): string {
+  const params = new URLSearchParams();
+  if (options?.reauth) {
+    params.set("reauth", "1");
+  }
+  if (options?.returnPath) {
+    params.set("return", options.returnPath);
+  }
+  const query = params.toString();
+  return `${API_BASE_URL}/v1/auth/login${query ? `?${query}` : ""}`;
 }
 
 export interface HealthResponse {

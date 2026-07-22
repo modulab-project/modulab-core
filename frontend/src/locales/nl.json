@@ -274,6 +274,8 @@
       "save_error": "Opslaan mislukt.",
       "remove_error": "Verwijderen van configuratie mislukt.",
       "remove_confirm": "SMTP-configuratie verwijderen? Accountmeldingsmails worden niet meer verzonden totdat het opnieuw is geconfigureerd.",
+      "reauth_required": "Om veiligheidsredenen vereist deze wijziging een recente aanmelding.",
+      "reauth_login_link": "Opnieuw aanmelden",
       "host": "Host",
       "port": "Poort",
       "username": "Gebruikersnaam",
@@ -346,6 +348,8 @@
       "secret_placeholder_existing": "Leeg laten om bestaand geheim te behouden",
       "save_oidc": "OIDC opslaan",
       "save": "Opslaan",
+      "reauth_required": "Om veiligheidsredenen vereist deze wijziging een recente aanmelding.",
+      "reauth_login_link": "Opnieuw aanmelden",
       "oidc": {
         "removing": "Verwijderen…",
         "remove": "Configuratie verwijderen"
@@ -769,7 +773,9 @@
       "core_update_toast_generic": "Er is een nieuwe Core-versie beschikbaar.",
       "core_update_one": "Core-update beschikbaar ({{version}})",
       "core_update_generic": "Core-update beschikbaar",
-      "rate_limit_toast": "Rate limit geactiveerd: {{label}} ({{identifier}})"
+      "rate_limit_toast": "Rate limit geactiveerd: {{label}} ({{identifier}})",
+      "session_new_toast": "Nieuwe aanmelding vanaf {{ip}}",
+      "session_new_anomaly_toast": "⚠️ Aanmelding vanuit een ongebruikelijk land ({{country}}, voorheen {{previousCountry}}) vanaf {{ip}}"
     },
     "chat": {
       "no_provider": "Geen provider",

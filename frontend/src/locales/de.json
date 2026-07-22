@@ -274,6 +274,8 @@
       "save_error": "Speichern fehlgeschlagen.",
       "remove_error": "Konfiguration konnte nicht entfernt werden.",
       "remove_confirm": "SMTP-Konfiguration entfernen? Kontobenachrichtigungen werden nicht mehr gesendet, bis sie neu eingerichtet wird.",
+      "reauth_required": "Aus Sicherheitsgründen erfordert diese Änderung eine kürzliche Anmeldung.",
+      "reauth_login_link": "Erneut anmelden",
       "host": "Host",
       "port": "Port",
       "username": "Benutzername",
@@ -346,6 +348,8 @@
       "secret_placeholder_existing": "Leer lassen, um bestehendes Secret zu behalten",
       "save_oidc": "OIDC speichern",
       "save": "Speichern",
+      "reauth_required": "Aus Sicherheitsgründen erfordert diese Änderung eine kürzliche Anmeldung.",
+      "reauth_login_link": "Erneut anmelden",
       "oidc": {
         "removing": "Wird entfernt…",
         "remove": "Konfiguration entfernen"
@@ -769,7 +773,9 @@
       "core_update_toast_generic": "Eine neue Core-Version ist verfügbar.",
       "core_update_one": "Core-Update verfügbar ({{version}})",
       "core_update_generic": "Core-Update verfügbar",
-      "rate_limit_toast": "Rate-Limit ausgelöst: {{label}} ({{identifier}})"
+      "rate_limit_toast": "Rate-Limit ausgelöst: {{label}} ({{identifier}})",
+      "session_new_toast": "Neue Anmeldung von {{ip}}",
+      "session_new_anomaly_toast": "⚠️ Anmeldung aus ungewöhnlichem Land ({{country}}, zuletzt {{previousCountry}}) von {{ip}}"
     },
     "chat": {
       "no_provider": "Kein Anbieter",

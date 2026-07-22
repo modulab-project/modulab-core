@@ -373,9 +373,15 @@ func main() {
 	// can't actually fail in practice (no DB fallback left to resolve),
 	// kept this shape purely for consistency.
 	superAdminOnly := auth.RequireSuperAdminMiddleware(authDeps)
+	// Step-up variant (auth.RequireSuperAdminReauthMiddleware): same role
+	// check as superAdminOnly, plus requireRecentLogin's reauth gate - see
+	// that middleware's doc comment for exactly why these particular
+	// routes (SMTP write/delete, OIDC write/delete below) get it and the
+	// read-only/reversible super-admin routes around them do not.
+	superAdminReauthOnly := auth.RequireSuperAdminReauthMiddleware(authDeps)
 	mux.Handle("GET /v1/admin/smtp/status", superAdminOnly(setup.SMTPStatusHandler(pool, cfg.MasterKey)))
 	mux.Handle("POST /v1/admin/smtp/test", superAdminOnly(setup.SMTPTestHandler(pool, cfg.MasterKey)))
-	mux.Handle("POST /v1/admin/smtp/configure", superAdminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("POST /v1/admin/smtp/configure", superAdminReauthOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		masterKey, err := setup.ResolveMasterKey(r.Context(), pool, cfg.MasterKey)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusPreconditionFailed)
@@ -419,7 +425,7 @@ func main() {
 			}
 		}
 	})))
-	mux.Handle("DELETE /v1/admin/smtp", superAdminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("DELETE /v1/admin/smtp", superAdminReauthOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rw := &responseRecorder{ResponseWriter: w, code: http.StatusOK}
 		setup.SMTPDeleteHandler(pool)(rw, r)
 		if rw.code < 400 {
@@ -439,8 +445,8 @@ func main() {
 	// Admin system page + OIDC post-wizard config + audit log.
 	// All super-admin only (same tier as SMTP above).
 	mux.Handle("GET /v1/admin/system", superAdminOnly(adminapi.SystemStatusHandler(pool, cfg.MasterKey)))
-	mux.Handle("PATCH /v1/admin/oidc", superAdminOnly(adminapi.OIDCUpdateHandler(pool, cfg.MasterKey)))
-	mux.Handle("DELETE /v1/admin/oidc", superAdminOnly(adminapi.OIDCDeleteHandler(pool, cfg.MasterKey)))
+	mux.Handle("PATCH /v1/admin/oidc", superAdminReauthOnly(adminapi.OIDCUpdateHandler(pool, cfg.MasterKey)))
+	mux.Handle("DELETE /v1/admin/oidc", superAdminReauthOnly(adminapi.OIDCDeleteHandler(pool, cfg.MasterKey)))
 	mux.Handle("GET /v1/audit-log", superAdminOnly(adminapi.AuditLogHandler(pool, cfg.MasterKey)))
 	mux.Handle("GET /v1/audit-log/verify", superAdminOnly(adminapi.AuditVerifyHandler(pool, cfg.MasterKey)))
 	mux.Handle("GET /v1/audit-log/actors", superAdminOnly(adminapi.AuditActorsHandler(pool)))
