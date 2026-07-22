@@ -9,6 +9,13 @@ import { queryClient } from "./lib/queryClient";
 import App from "./App";
 import "./index.css";
 import "./lib/i18n";
+// Self-hosted Tabler Icons webfont (used throughout the app as ti/ti-*
+// classes) - replaces the previous <link> to cdnjs.cloudflare.com in
+// index.html. Bundled and fingerprinted by Vite like any other asset, so
+// the app no longer makes a third-party request just to render its own
+// icons, and the CSP's style-src/font-src no longer need a
+// cdnjs.cloudflare.com exception (see nginx.conf).
+import "@tabler/icons-webfont/dist/tabler-icons.min.css";
 
 // Expose host singletons for module bundles loaded via Blob URL.
 // Modules declare these as externals and read them from window.__MODULAB_HOST__

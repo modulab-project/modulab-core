@@ -25,16 +25,13 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="ModuLab" />
     <meta name="theme-color" content="#1f2d3d" />
-    <!-- Used only by Home.tsx's header/profile-panel icons. Loaded globally
-         here rather than per-component since it is a single small
-         stylesheet, not a JS bundle - see dashboard-demo/index.html for
-         where this exact version was already verified to load correctly
-         (an earlier 2.47.0/iconfont/ path silently 404'd; this one does
-         not). -->
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/3.35.0/tabler-icons-outline.min.css"
-    />
+    <!-- Tabler Icons webfont is now self-hosted (@tabler/icons-webfont,
+         imported in src/main.tsx) rather than loaded from
+         cdnjs.cloudflare.com here - see main.tsx's import comment and
+         nginx.conf's CSP comment for the full rationale (no third-party
+         request per page load, no CSP style-src/font-src exception needed,
+         and the earlier "missing SRI" review finding is moot once the
+         resource is same-origin). -->
   </head>
   <body>
     <div id="root"></div>
