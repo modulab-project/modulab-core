@@ -18,12 +18,30 @@ import (
 
 // SessionTTL is the sliding-window duration for session tokens. Every
 // authenticated request resets the expiry back to this value (see
-// ValidateSession below), so an actively-used session never expires.
+// ValidateSession below), so an actively-used session never expires on its
+// own - subject to SessionAbsoluteMaxAge below, which bounds that
+// indefinitely-renewing lifetime.
 // A session that goes completely unused for SessionTTL - e.g. the user
 // closes all their tabs and is away for 24 hours - will require a new
 // login. This is the simplest form of "silent renewal": no OIDC refresh
 // token flow needed, no client-side timer, no extra round-trip.
 const SessionTTL = 24 * time.Hour
+
+// SessionAbsoluteMaxAge is a hard ceiling on how long a session may live at
+// all, measured from Session.CreatedAt, independent of how recently it was
+// used. Without this, SessionTTL's sliding window means an actively-used
+// session never expires - fine for the threat model of "you forgot to
+// close a tab", but not for "this exact bearer token was copied out of the
+// browser once (stolen cookie, compromised device) and is now being kept
+// alive indefinitely by whoever holds it". Login itself is PocketID
+// passkey-only (phishing-resistant, no password to steal), so this is a
+// second line of defense against token theft specifically, not password
+// compromise. 30 days is generous enough that a real user essentially
+// never notices it (a login roughly monthly), while still bounding a
+// stolen token's usable lifetime to a known, finite window instead of
+// "forever, as long as someone keeps using it." See ValidateSession for
+// where this is enforced.
+const SessionAbsoluteMaxAge = 30 * 24 * time.Hour
 
 const sessionKeyPrefix = "session:"
 
@@ -416,6 +434,22 @@ func ValidateSession(ctx context.Context, d Deps, token string) (Session, bool, 
 	sess, err := decryptSession(masterKey, stored)
 	if err != nil {
 		return Session{}, false, fmt.Errorf("auth: decrypt session: %w", err)
+	}
+
+	// Absolute ceiling, checked before the sliding-window renewal below: a
+	// session past SessionAbsoluteMaxAge is force-expired here regardless of
+	// how recently it was used, rather than having its TTL extended yet
+	// again. Deletes both Valkey keys outright instead of just letting this
+	// one lookup fail, so the very next request (from this browser or a
+	// replayed/stolen token) gets the same "invalid or expired session"
+	// result everywhere else already returns, not just this one call site.
+	// Best-effort on the deletes themselves - if Valkey hiccups here the
+	// keys simply age out on their existing TTL instead, same fallback as
+	// the renewal path below.
+	if !sess.CreatedAt.IsZero() && time.Since(sess.CreatedAt) > SessionAbsoluteMaxAge {
+		_ = d.Valkey.Del(ctx, sessionKeyPrefix+token)
+		_ = d.Valkey.RemoveSetMember(ctx, userSessionsKeyPrefix+sess.UserID, token)
+		return Session{}, false, nil
 	}
 
 	// Slide the window - best effort, non-fatal if Valkey hiccups here.

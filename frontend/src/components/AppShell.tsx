@@ -423,6 +423,28 @@ export function AppShell({
         ...prev,
       ].slice(0, FEED_LIMIT));
     }
+    // Published by main.go's rateLimitMiddleware (auth/login/callback,
+    // ai-chat-per-IP, global backstop) and ai.go's ChatHandler (per-user
+    // chat RPM cap) whenever a limit actually trips - see those files' doc
+    // comments for why this is gated server-side to fire once per trip, not
+    // once per subsequent blocked retry. Durable detail (which IP/user,
+    // exact count/max) always lands in the audit log regardless of whether
+    // any admin tab is open to receive this live push - this is purely the
+    // "notice it without having to go looking" layer on top of that.
+    if (event.type === "rate_limit.exceeded" && isAdmin) {
+      const data = (event.data ?? {}) as { label?: string; identifier?: string };
+      const goToAudit = () => navigate("/admin/audit");
+      const msg = t("shell.notifications_panel.rate_limit_toast", {
+        label: data.label ?? "?",
+        identifier: data.identifier ?? "?",
+      });
+      const reviewLabel = t("shell.notifications_panel.review");
+      push({ message: msg, actionLabel: reviewLabel, onAction: goToAudit });
+      setFeed((prev) => [
+        { id: nextFeedItemID++, message: msg, at: Date.now(), actionLabel: reviewLabel, onAction: goToAudit },
+        ...prev,
+      ].slice(0, FEED_LIMIT));
+    }
     // Module-triggered events (Core: WorkerResponse.Notifications, deno.go —
     // published from modules.JobRunner.dispatchJob, jobs.go, under the
     // single generic "module.notification" type). A module's own job code

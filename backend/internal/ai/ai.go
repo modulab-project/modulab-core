@@ -48,6 +48,7 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
 	"github.com/modulab-project/modulab-core/backend/internal/netguard"
+	"github.com/modulab-project/modulab-core/backend/internal/notify"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
 )
 
@@ -994,6 +995,17 @@ func ChatHandler(deps auth.Deps) http.HandlerFunc {
 				log.Printf("ai: rate limit check failed for %s: %v", sess.UserID, rlErr)
 			} else if count > int64(rpmLimit) {
 				log.Printf("ai: rate limit exceeded for %s: count=%d max=%d", sess.UserID, count, rpmLimit)
+				// Same live admin-panel notification as main.go's shared
+				// rateLimitMiddleware, gated the same way (only the request
+				// that actually tripped the limit, not every retry after).
+				if count == int64(rpmLimit)+1 {
+					if pubErr := notify.Publish(r.Context(), deps.Valkey, notify.AdminChannel(), notify.Event{
+						Type: "rate_limit.exceeded",
+						Data: map[string]any{"label": "chat", "identifier": sess.Email, "count": count, "max": rpmLimit},
+					}); pubErr != nil {
+						log.Printf("ai: notify rate limit exceeded: %v", pubErr)
+					}
+				}
 				if masterKey, mkErr := setup.ResolveMasterKey(r.Context(), deps.Pool, deps.MasterKeyEnv); mkErr == nil {
 					if auditErr := audit.Log(r.Context(), deps.Pool, masterKey, audit.LogParams{
 						EventType:  audit.EventRateLimitExceeded,

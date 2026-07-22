@@ -768,7 +768,8 @@
       "core_update_toast": "Er is een nieuwe Core-versie ({{version}}) beschikbaar.",
       "core_update_toast_generic": "Er is een nieuwe Core-versie beschikbaar.",
       "core_update_one": "Core-update beschikbaar ({{version}})",
-      "core_update_generic": "Core-update beschikbaar"
+      "core_update_generic": "Core-update beschikbaar",
+      "rate_limit_toast": "Rate limit geactiveerd: {{label}} ({{identifier}})"
     },
     "chat": {
       "no_provider": "Geen provider",

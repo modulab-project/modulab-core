@@ -768,7 +768,8 @@
       "core_update_toast": "Une nouvelle version de Core ({{version}}) est disponible.",
       "core_update_toast_generic": "Une nouvelle version de Core est disponible.",
       "core_update_one": "Mise à jour Core disponible ({{version}})",
-      "core_update_generic": "Mise à jour Core disponible"
+      "core_update_generic": "Mise à jour Core disponible",
+      "rate_limit_toast": "Limite de requêtes déclenchée : {{label}} ({{identifier}})"
     },
     "chat": {
       "no_provider": "Aucun fournisseur",

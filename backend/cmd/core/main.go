@@ -1150,6 +1150,25 @@ func rateLimitMiddleware(vk *valkey.Client, pool *db.Pool, masterKeyEnv string, 
 			// comment for the counter-never-resets bug this line's silence
 			// was hiding.
 			log.Printf("main: rate limit exceeded: label=%q identifier=%q count=%d max=%d", label, identifier, count, max)
+			// Notify currently-connected admins in the bell/notifications
+			// panel (frontend/src/components/AppShell.tsx), on top of the
+			// durable audit.Log entry below - the audit log is only ever
+			// seen if an admin thinks to go check /admin/audit, whereas this
+			// surfaces a trip live, the same way "user.pending"/
+			// "module.updates_available" already do. Gated to count ==
+			// max+1 (the exact request that tripped the limit), not every
+			// subsequent blocked request while the window is still active -
+			// IncrExpire keeps incrementing past max on every retry, and a
+			// script hammering a blocked endpoint would otherwise flood the
+			// panel with one toast per request instead of one per trip.
+			if count == max+1 {
+				if pubErr := notify.Publish(r.Context(), vk, notify.AdminChannel(), notify.Event{
+					Type: "rate_limit.exceeded",
+					Data: map[string]any{"label": label, "identifier": identifier, "count": count, "max": max},
+				}); pubErr != nil {
+					log.Printf("main: notify rate limit exceeded: %v", pubErr)
+				}
+			}
 			if masterKey, mkErr := setup.ResolveMasterKey(r.Context(), pool, masterKeyEnv); mkErr == nil {
 				if auditErr := audit.Log(r.Context(), pool, masterKey, audit.LogParams{
 					EventType: audit.EventRateLimitExceeded,
