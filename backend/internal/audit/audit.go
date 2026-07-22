@@ -478,11 +478,13 @@ type ActorOption struct {
 // together ahead of bare IPs/subs from rate-limit entries.
 func ListActors(ctx context.Context, pool *db.Pool) ([]ActorOption, error) {
 	rows, err := pool.Query(ctx, `
-		SELECT DISTINCT a.actor_id, COALESCE(u.name, '') AS name
-		FROM audit_log a
-		LEFT JOIN users u ON u.id = a.actor_id
-		WHERE a.actor_id <> ''
-		ORDER BY (name = '') ASC, name ASC, a.actor_id ASC
+		SELECT actor_id, name FROM (
+			SELECT DISTINCT a.actor_id, COALESCE(u.name, '') AS name
+			FROM audit_log a
+			LEFT JOIN users u ON u.id = a.actor_id
+			WHERE a.actor_id <> ''
+		) sub
+		ORDER BY (name = '') ASC, name ASC, actor_id ASC
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("audit: list actors: %w", err)

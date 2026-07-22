@@ -23,6 +23,7 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/httperr"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
 )
 
@@ -94,7 +95,7 @@ func isValidTileURL(raw string) bool {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	data, err := json.Marshal(v)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httperr.Internal(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -180,17 +181,17 @@ func ListHandler(d auth.Deps) http.HandlerFunc {
 		}
 		adminLinks, err := d.Pool.ListAdminQuickLinks(r.Context())
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		userLinks, err := d.Pool.ListUserQuickLinks(r.Context(), sess.UserID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		order, err := d.Pool.GetUserTileOrder(r.Context(), sess.UserID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		tiles := mergedTiles(adminLinks, userLinks, order)
@@ -230,7 +231,7 @@ func CreateUserLinkHandler(d auth.Deps) http.HandlerFunc {
 		}
 		id, err := d.Pool.CreateUserQuickLink(r.Context(), sess.UserID, body.Title, body.URL, body.Icon, body.Description)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		writeJSON(w, http.StatusCreated, map[string]string{"id": id})
@@ -248,7 +249,7 @@ func DeleteUserLinkHandler(d auth.Deps) http.HandlerFunc {
 		id := r.PathValue("id")
 		found, err := d.Pool.DeleteUserQuickLink(r.Context(), sess.UserID, id)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if !found {
@@ -276,7 +277,7 @@ func SaveOrderHandler(d auth.Deps) http.HandlerFunc {
 			return
 		}
 		if err := d.Pool.SetUserTileOrder(r.Context(), sess.UserID, body.Order); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -293,7 +294,7 @@ func AdminListHandler(d auth.Deps) http.HandlerFunc {
 		}
 		links, err := d.Pool.ListAdminQuickLinks(r.Context())
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		resp := make([]AdminTile, 0, len(links))
@@ -342,7 +343,7 @@ func AdminCreateHandler(d auth.Deps) http.HandlerFunc {
 		link, err := d.Pool.CreateAdminQuickLink(r.Context(),
 			body.Title, body.URL, body.Icon, body.Description, body.SortOrder, sess.UserID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		logQuickLinkAudit(r.Context(), d, audit.LogParams{
@@ -395,7 +396,7 @@ func AdminUpdateHandler(d auth.Deps) http.HandlerFunc {
 		found, err := d.Pool.UpdateAdminQuickLink(r.Context(),
 			id, body.Title, body.URL, body.Icon, body.Description, body.SortOrder)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if !found {
@@ -423,7 +424,7 @@ func AdminDeleteHandler(d auth.Deps) http.HandlerFunc {
 		id := r.PathValue("id")
 		found, err := d.Pool.DeleteAdminQuickLink(r.Context(), id)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if !found {

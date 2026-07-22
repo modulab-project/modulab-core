@@ -1158,6 +1158,26 @@ export function revokeSession(id: string): Promise<void> {
   });
 }
 
+// GET /v1/auth/sessions — self-service counterpart to getSystemInfo's
+// active_sessions: every currently-active session belonging to the calling
+// user only (backend's ListActiveSessionsForUser), for the Profile page's
+// "my devices" section. Any approved session can call this, not just an
+// admin.
+export function listMySessions(): Promise<ActiveSession[]> {
+  return request<ActiveSession[]>("/v1/auth/sessions");
+}
+
+// DELETE /v1/auth/sessions/{id} — self-service counterpart to revokeSession
+// above: ends one of the caller's own sessions (e.g. a lost phone), not
+// any other user's. 404 if id doesn't resolve to one of the caller's own
+// sessions - see backend's RevokeOwnSessionByID doc comment for why that
+// case is indistinguishable from "no such session" rather than a 403.
+export function revokeMySession(id: string): Promise<void> {
+  return request<void>(`/v1/auth/sessions/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
 // DELETE /v1/admin/system/rate-limits — manually clears one rate-limit
 // counter (System Info page's per-row "reset" button). key is
 // SystemInfoRateLimit.key, the raw Valkey key ("ratelimit:<label>:<id>"),

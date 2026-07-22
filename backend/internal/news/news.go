@@ -34,6 +34,7 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/httperr"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
 )
 
@@ -384,7 +385,7 @@ func isHTTPURL(raw string) bool {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	data, err := json.Marshal(v)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httperr.Internal(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -745,7 +746,7 @@ func AdminListHandler(d auth.Deps) http.HandlerFunc {
 		}
 		feeds, err := d.Pool.ListFeeds(r.Context())
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		resp := make([]FeedResponse, 0, len(feeds))
@@ -789,7 +790,7 @@ func AdminCreateHandler(d auth.Deps) http.HandlerFunc {
 		}
 		feed, err := d.Pool.CreateFeed(r.Context(), body.URL, body.Label)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		logFeedAudit(r.Context(), d, audit.LogParams{
@@ -841,7 +842,7 @@ func AdminUpdateHandler(d auth.Deps) http.HandlerFunc {
 		}
 		found, err := d.Pool.UpdateFeed(r.Context(), id, body.URL, body.Label)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if !found {
@@ -890,7 +891,7 @@ func AdminDeleteHandler(d auth.Deps) http.HandlerFunc {
 		}
 		found, err := d.Pool.DeleteFeed(r.Context(), id)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if !found {
@@ -922,7 +923,7 @@ func FeedsHandler(d auth.Deps) http.HandlerFunc {
 		}
 		feeds, err := d.Pool.ListFeedsForUser(r.Context(), sess.UserID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		resp := make([]FeedResponse, 0, len(feeds))
@@ -966,7 +967,7 @@ func SubscriptionHandler(d auth.Deps) http.HandlerFunc {
 				http.Error(w, "no such feed", http.StatusNotFound)
 				return
 			}
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -985,7 +986,7 @@ func NewsHandler(d auth.Deps) http.HandlerFunc {
 
 		feeds, err := d.Pool.EnabledFeedsForUser(r.Context(), sess.UserID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if len(feeds) == 0 {
@@ -1136,7 +1137,7 @@ func AdminNewsSettingsHandler(d auth.Deps) http.HandlerFunc {
 				v = 1000
 			}
 			if err := d.Pool.SetSetting(r.Context(), "news_max_articles", strconv.Itoa(v)); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				httperr.Internal(w, err)
 				return
 			}
 			changed["max_articles"] = v
@@ -1150,7 +1151,7 @@ func AdminNewsSettingsHandler(d auth.Deps) http.HandlerFunc {
 				v = 50
 			}
 			if err := d.Pool.SetSetting(r.Context(), "news_home_count", strconv.Itoa(v)); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				httperr.Internal(w, err)
 				return
 			}
 			changed["home_count"] = v
@@ -1161,7 +1162,7 @@ func AdminNewsSettingsHandler(d auth.Deps) http.HandlerFunc {
 				val = "false"
 			}
 			if err := d.Pool.SetSetting(r.Context(), "news_show_images", val); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				httperr.Internal(w, err)
 				return
 			}
 			changed["show_images"] = *body.ShowImages

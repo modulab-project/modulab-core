@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/httperr"
 	"github.com/modulab-project/modulab-core/backend/internal/netguard"
 	"github.com/modulab-project/modulab-core/backend/internal/valkey"
 )
@@ -201,7 +202,7 @@ func Handler(vk *valkey.Client) http.HandlerFunc {
 
 		data, err := json.Marshal(resp)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 
@@ -433,7 +434,7 @@ func LocationHandler(vk *valkey.Client) http.HandlerFunc {
 
 		data, err := json.Marshal(loc)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 

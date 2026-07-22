@@ -1,10 +1,11 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell, Avatar } from "../components/AppShell";
 import { AuthButton } from "../components/AuthShell";
-import { deleteSelf, exportMyData } from "../lib/api";
+import { deleteSelf, exportMyData, listMySessions, revokeMySession, type ActiveSession } from "../lib/api";
 import { isReauthRequiredError } from "../lib/authErrors";
 import { queryClient } from "../lib/queryClient";
 import { useLoginRedirect } from "../lib/useLoginRedirect";
@@ -46,6 +47,46 @@ export default function ProfilePage() {
     setDeleteError(null);
   });
   const [exportError, setExportError] = useState<string | null>(null);
+
+  // Self-service "my devices" (GET/DELETE /v1/auth/sessions) - the same
+  // active-sessions data System Info shows admins, scoped by the backend
+  // to the caller's own sessions only (ListActiveSessionsForUser), so any
+  // approved user can see and end a lost/stolen device's session
+  // themselves instead of needing to ask a super-admin.
+  const [sessions, setSessions] = useState<ActiveSession[] | null>(null);
+  const [sessionsError, setSessionsError] = useState<string | null>(null);
+  const [revokingIds, setRevokingIds] = useState<Set<string>>(new Set());
+  const [revokeError, setRevokeError] = useState<string | null>(null);
+  const hasFetchedSessions = useRef(false);
+
+  useEffect(() => {
+    if (!session || hasFetchedSessions.current) return;
+    hasFetchedSessions.current = true;
+    listMySessions()
+      .then(setSessions)
+      .catch(() => setSessionsError(t("profile.sessions_load_error")));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch-once-on-mount guarded by hasFetchedSessions, not meant to re-run on t changing.
+  }, [session]);
+
+  function handleRevokeSession(target: ActiveSession) {
+    if (!window.confirm(t("profile.sessions_end_confirm", { device: target.user_agent ? parseUserAgent(target.user_agent, t) : target.ip || target.role }))) {
+      return;
+    }
+    setRevokeError(null);
+    setRevokingIds((prev) => new Set(prev).add(target.id));
+    revokeMySession(target.id)
+      .then(() => {
+        setSessions((prev) => (prev ? prev.filter((s) => s.id !== target.id) : prev));
+      })
+      .catch(() => setRevokeError(t("profile.sessions_end_error")))
+      .finally(() => {
+        setRevokingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(target.id);
+          return next;
+        });
+      });
+  }
 
   if (loading || !session) {
     return null;
@@ -176,6 +217,31 @@ export default function ProfilePage() {
           </button>
         </div>
 
+        <div className="mt-6 rounded-2xl border border-gray-200 p-4 dark:border-gray-800">
+          <p className="text-sm font-medium">{t("profile.sessions_title")}</p>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("profile.sessions_desc")}</p>
+          {sessionsError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{sessionsError}</p>}
+          {revokeError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{revokeError}</p>}
+          {sessions === null && !sessionsError && (
+            <p className="mt-3 text-sm text-gray-400 dark:text-gray-500">{t("common.loading")}</p>
+          )}
+          {sessions && sessions.length === 0 && (
+            <p className="mt-3 text-sm text-gray-400 dark:text-gray-500">{t("profile.sessions_empty")}</p>
+          )}
+          {sessions && sessions.length > 0 && (
+            <ul className="mt-3 flex flex-col gap-2">
+              {sessions.map((s) => (
+                <SessionListItem
+                  key={s.id}
+                  session={s}
+                  revoking={revokingIds.has(s.id)}
+                  onRevoke={() => handleRevokeSession(s)}
+                />
+              ))}
+            </ul>
+          )}
+        </div>
+
         <div className="mt-6 rounded-2xl border border-red-200 p-4 dark:border-red-900">
           <p className="text-sm font-medium text-red-700 dark:text-red-400">{t("profile.delete_section_title")}</p>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -227,6 +293,92 @@ function ClaimValue({ value }: { value: string }) {
     return <span className="text-gray-400 dark:text-gray-500">{t("profile.not_available")}</span>;
   }
   return <>{value}</>;
+}
+
+// One row in the "my devices" list - deliberately a plainer single-line
+// layout than AdminSecurityInfoPage.tsx's SessionRow table (no name/email/
+// role columns, since every row here is unambiguously "you"; just device,
+// IP, last-active, and an end button). parseUserAgent/formatDuration below
+// are local copies of that page's identical helpers - same reasoning as
+// its own formatDuration comment: duplicating ~15 lines beats a cross-file
+// dependency for something this small.
+function SessionListItem({
+  session,
+  revoking,
+  onRevoke,
+}: {
+  session: ActiveSession;
+  revoking: boolean;
+  onRevoke: () => void;
+}) {
+  const { t } = useTranslation();
+  const device = session.user_agent ? parseUserAgent(session.user_agent, t) : t("profile.sessions_unknown_device");
+  return (
+    <li
+      className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-sm ${
+        session.current
+          ? "border-teal-200 bg-teal-50/60 dark:border-teal-900 dark:bg-teal-950/30"
+          : "border-gray-200 dark:border-gray-800"
+      }`}
+    >
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="truncate font-medium">{device}</span>
+          {session.current && (
+            <span className="whitespace-nowrap rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-medium text-teal-700 dark:bg-teal-900 dark:text-teal-300">
+              {t("profile.sessions_current")}
+            </span>
+          )}
+        </div>
+        <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
+          {session.ip || "—"}
+          {session.last_active_seconds_ago !== undefined && (
+            <> · {t("profile.sessions_last_active", { duration: formatDuration(session.last_active_seconds_ago) })}</>
+          )}
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={onRevoke}
+        disabled={revoking || session.current}
+        title={session.current ? t("profile.sessions_end_self_hint") : undefined}
+        className="flex-shrink-0 text-xs font-medium text-red-600 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-40 dark:text-red-400 dark:hover:text-red-300"
+      >
+        {revoking ? t("common.loading") : t("profile.sessions_end")}
+      </button>
+    </li>
+  );
+}
+
+function parseUserAgent(ua: string, t: TFunction): string {
+  let browser = t("profile.sessions_unknown_device");
+  if (ua.includes("Edg/")) browser = "Edge";
+  else if (ua.includes("OPR/") || ua.includes("Opera")) browser = "Opera";
+  else if (ua.includes("Firefox/")) browser = "Firefox";
+  else if (ua.includes("CriOS") || ua.includes("Chrome/")) browser = "Chrome";
+  else if (ua.includes("Safari/")) browser = "Safari";
+
+  let os = "";
+  if (ua.includes("Windows")) os = "Windows";
+  else if (ua.includes("Mac OS X") || ua.includes("Macintosh")) os = "macOS";
+  else if (ua.includes("Android")) os = "Android";
+  else if (ua.includes("iPhone") || ua.includes("iPad") || ua.includes("iOS")) os = "iOS";
+  else if (ua.includes("Linux")) os = "Linux";
+
+  return os ? `${browser} · ${os}` : browser;
+}
+
+function formatDuration(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 60) return `${s}s`;
+  const minutes = Math.floor(s / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remMinutes = minutes % 60;
+  if (hours < 24) return `${hours}h ${remMinutes}m`;
+  const days = Math.floor(hours / 24);
+  const remHours = hours % 24;
+  return `${days}d ${remHours}h`;
 }
 
 function ProfileRow({

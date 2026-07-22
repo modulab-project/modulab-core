@@ -16,6 +16,7 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/crypto"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/httperr"
 )
 
 const (
@@ -131,7 +132,7 @@ func OIDCStatusHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 
 		encIssuer, exists, err := pool.GetSetting(ctx, oidcIssuerSettingKey)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if !exists {
@@ -146,7 +147,7 @@ func OIDCStatusHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 
 		encClientID, _, err := pool.GetSetting(ctx, oidcClientIDSettingKey)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		clientID, err := crypto.Decrypt(masterKey, encClientID)
@@ -201,31 +202,31 @@ func OIDCConfigureHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 
 		encIssuer, err := crypto.Encrypt(masterKey, req.IssuerURL)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		encClientID, err := crypto.Encrypt(masterKey, req.ClientID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		encryptedSecret, err := crypto.Encrypt(masterKey, req.ClientSecret)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 
 		ctx := r.Context()
 		if err := pool.SetSetting(ctx, oidcIssuerSettingKey, encIssuer); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if err := pool.SetSetting(ctx, oidcClientIDSettingKey, encClientID); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if err := pool.SetSetting(ctx, oidcClientSecretSettingKey, encryptedSecret); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 

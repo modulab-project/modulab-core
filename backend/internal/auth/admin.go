@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/modulab-project/modulab-core/backend/internal/audit"
+	"github.com/modulab-project/modulab-core/backend/internal/httperr"
 	"github.com/modulab-project/modulab-core/backend/internal/mail"
 	"github.com/modulab-project/modulab-core/backend/internal/notify"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
@@ -118,7 +119,7 @@ func requireAdmin(d Deps, w http.ResponseWriter, r *http.Request) (Session, bool
 	}
 	sess, ok, err := ValidateSession(r.Context(), d, token)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httperr.Internal(w, err)
 		return Session{}, false
 	}
 	if !ok {
@@ -275,7 +276,7 @@ func requireActiveSessionWithToken(d Deps, w http.ResponseWriter, r *http.Reques
 	}
 	sess, ok, err := ValidateSession(r.Context(), d, token)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httperr.Internal(w, err)
 		return Session{}, false
 	}
 	if !ok {
@@ -332,7 +333,7 @@ func UsersHandler(d Deps) http.HandlerFunc {
 		}
 		users, err := d.Pool.ListUsers(r.Context())
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		resp := make([]UserResponse, 0, len(users))
@@ -387,7 +388,7 @@ func ApproveUserHandler(d Deps) http.HandlerFunc {
 		}
 		affected, err := d.Pool.ApproveUser(r.Context(), subject)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if affected == 0 {
@@ -459,7 +460,7 @@ func LockUserHandler(d Deps) http.HandlerFunc {
 		}
 		blocked, reason, err := guardAgainstSelfOrLastSuperAdmin(r.Context(), d, sess.UserID, subject)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if blocked {
@@ -468,7 +469,7 @@ func LockUserHandler(d Deps) http.HandlerFunc {
 		}
 		affected, err := d.Pool.LockUser(r.Context(), subject)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if affected == 0 {
@@ -520,7 +521,7 @@ func UnlockUserHandler(d Deps) http.HandlerFunc {
 		}
 		affected, err := d.Pool.UnlockUser(r.Context(), subject)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if affected == 0 {
@@ -568,7 +569,7 @@ func DeleteUserHandler(d Deps) http.HandlerFunc {
 		}
 		blocked, reason, err := guardAgainstSelfOrLastSuperAdmin(r.Context(), d, sess.UserID, subject)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if blocked {
@@ -585,12 +586,12 @@ func DeleteUserHandler(d Deps) http.HandlerFunc {
 		// same 500 response.
 		target, targetExists, err := d.Pool.GetUser(r.Context(), subject)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		affected, err := d.Pool.DeleteUser(r.Context(), subject)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if affected == 0 {

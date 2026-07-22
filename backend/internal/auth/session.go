@@ -403,6 +403,60 @@ func RevokeSessionByID(ctx context.Context, d Deps, id string) (bool, error) {
 	return false, nil
 }
 
+// RevokeOwnSessionByID is RevokeSessionByID's self-service counterpart: any
+// approved user can end one of their own currently-active sessions (e.g.
+// "I lost my phone, kill that session") from their own Profile page,
+// without needing an admin. Deliberately a separate function rather than
+// reusing RevokeSessionByID with an extra parameter - the two have
+// different trust levels (any approved session vs. super-admin-only) and
+// keeping them syntactically distinct means a future change to one can
+// never accidentally loosen the other's ownership check.
+//
+// The ownership check (stored.UserID == subject) is the entire reason this
+// exists instead of just exposing RevokeSessionByID more widely: an ID is a
+// one-way hash of a token (SessionID), not a per-user-scoped value, so
+// without this check a self-service caller could pass any other session's
+// ID (e.g. found by guessing, or the same ID shown in an admin
+// screenshot) and end a stranger's session. A mismatch is treated
+// identically to "no session with that ID" (ok = false, no error) - not
+// distinguishing "wrong owner" from "doesn't exist" avoids confirming to
+// the caller that some other, inaccessible session ID is currently valid.
+func RevokeOwnSessionByID(ctx context.Context, d Deps, subject, id string) (bool, error) {
+	keys, err := d.Valkey.ScanKeysWithPrefix(ctx, sessionKeyPrefix)
+	if err != nil {
+		return false, fmt.Errorf("auth: revoke own session by id: scan: %w", err)
+	}
+	for _, key := range keys {
+		token := strings.TrimPrefix(key, sessionKeyPrefix)
+		if SessionID(token) != id {
+			continue
+		}
+		raw, exists, err := d.Valkey.Get(ctx, key)
+		if err != nil {
+			return false, fmt.Errorf("auth: revoke own session by id: get: %w", err)
+		}
+		if !exists {
+			return false, nil
+		}
+		var stored storedSession
+		if err := json.Unmarshal([]byte(raw), &stored); err != nil {
+			return false, fmt.Errorf("auth: revoke own session by id: decode: %w", err)
+		}
+		if stored.UserID != subject {
+			return false, nil
+		}
+		bestEffortRevokeAtIdP(ctx, d, []storedSession{stored})
+		if err := d.Valkey.Del(ctx, key); err != nil {
+			return false, fmt.Errorf("auth: revoke own session by id: delete: %w", err)
+		}
+		if err := d.Valkey.RemoveSetMember(ctx, userSessionsKeyPrefix+subject, token); err != nil {
+			return true, fmt.Errorf("auth: revoke own session by id: unindex: %w", err)
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
 // ValidateSession looks up token in Valkey and returns the session it maps
 // to, if any. A missing or expired token is not an error - ok is simply
 // false.
@@ -555,6 +609,74 @@ func ListActiveSessions(ctx context.Context, d Deps) ([]ActiveSession, error) {
 			// exactly how long ago the last request on this session was -
 			// no extra Valkey write needed on every single request just to
 			// track this.
+			if elapsed := SessionTTL - ttl; elapsed > 0 {
+				as.LastActiveSecondsAgo = int64(elapsed / time.Second)
+			}
+		}
+		out = append(out, as)
+	}
+	return out, nil
+}
+
+// ListActiveSessionsForUser is ListActiveSessions' self-service counterpart
+// (Profile page's "my devices" section, MySessionsHandler) - every
+// approved user can already see this same information about themselves
+// via GET /v1/auth/me plus the active-sessions table admins see on System
+// Info; this just exposes it to the session's own owner directly, without
+// a super-admin role.
+//
+// Deliberately does NOT reuse ListActiveSessions' full ScanKeysWithPrefix
+// over every session in the system plus an in-memory filter - that would
+// mean a non-admin-triggered code path still walks every other user's
+// session key on every call. Instead it goes through the same per-user
+// index RevokeUserSessions/UpdateSessionsRole already rely on
+// (userSessionsKeyPrefix+subject), so this function is scoped to the
+// caller's own tokens by construction, not just by a filter that a future
+// edit could accidentally drop.
+func ListActiveSessionsForUser(ctx context.Context, d Deps, subject string) ([]ActiveSession, error) {
+	tokens, err := d.Valkey.SetMembers(ctx, userSessionsKeyPrefix+subject)
+	if err != nil {
+		return nil, fmt.Errorf("auth: list active sessions for user: %w", err)
+	}
+	if len(tokens) == 0 {
+		return nil, nil
+	}
+
+	masterKey, err := setup.ResolveMasterKey(ctx, d.Pool, d.MasterKeyEnv)
+	if err != nil {
+		return nil, fmt.Errorf("auth: list active sessions for user: resolve master key: %w", err)
+	}
+
+	out := make([]ActiveSession, 0, len(tokens))
+	for _, token := range tokens {
+		key := sessionKeyPrefix + token
+		raw, exists, err := d.Valkey.Get(ctx, key)
+		if err != nil || !exists {
+			// Same best-effort treatment as ListActiveSessions - the index
+			// can lag a token that already expired/was revoked on its own.
+			continue
+		}
+		var stored storedSession
+		if err := json.Unmarshal([]byte(raw), &stored); err != nil {
+			continue
+		}
+		sess, err := decryptSession(masterKey, stored)
+		if err != nil {
+			continue
+		}
+		as := ActiveSession{
+			ID:        SessionID(token),
+			Name:      sess.Name,
+			Email:     sess.Email,
+			Role:      sess.Role,
+			IP:        sess.IP,
+			UserAgent: sess.UserAgent,
+		}
+		if !sess.CreatedAt.IsZero() {
+			as.CreatedAt = sess.CreatedAt.UTC().Format(time.RFC3339)
+		}
+		if ttl, ok, err := d.Valkey.TTL(ctx, key); err == nil && ok {
+			as.ExpiresInSeconds = int64(ttl / time.Second)
 			if elapsed := SessionTTL - ttl; elapsed > 0 {
 				as.LastActiveSecondsAgo = int64(elapsed / time.Second)
 			}

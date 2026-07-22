@@ -16,6 +16,7 @@ import (
 
 	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/httperr"
 )
 
 const groupPrefixSettingKey = "group_prefix"
@@ -80,7 +81,7 @@ func GroupPrefixStatusHandler(pool *db.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		prefix, exists, err := pool.GetSetting(r.Context(), groupPrefixSettingKey)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if !exists {
@@ -129,7 +130,7 @@ func GroupPrefixConfigureHandler(pool *db.Pool, masterKey string) http.HandlerFu
 		}
 
 		if err := pool.SetSetting(r.Context(), groupPrefixSettingKey, prefix); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 

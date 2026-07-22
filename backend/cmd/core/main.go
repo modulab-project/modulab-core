@@ -264,6 +264,13 @@ func main() {
 		_ = json.NewEncoder(w).Encode(status)
 	})
 
+	// CSP violation reports (secHeadersMiddleware's report-uri/report-to
+	// directives, cspReportHandler's own doc comment for the full
+	// rationale) - deliberately public/unauthenticated, same reasoning as
+	// /healthz above: a violation can be reported from a page a browser
+	// hasn't logged in on yet.
+	mux.HandleFunc("POST /v1/csp-report", cspReportHandler())
+
 	// Every Setup Wizard route below is wrapped in bootstrapMgr.Middleware:
 	// per spec section 6.5, the entire wizard API is locked until the
 	// correct bootstrap token (printed above, once, at startup) is supplied
@@ -331,6 +338,14 @@ func main() {
 	// DSGVO data-portability export (GDPR Article 20): returns all personal
 	// data stored for the calling user as a JSON attachment.
 	mux.HandleFunc("GET /v1/auth/me/export", auth.ExportSelfHandler(authDeps))
+	// Self-service "my devices" (Profile page) - any approved session can
+	// list and end its OWN active sessions, no admin role required. Distinct
+	// from the super-admin-only GET /v1/admin/system/info active-sessions
+	// table and DELETE /v1/admin/sessions/{id} below: those can act on
+	// anyone's session, these two are scoped to the caller's own by
+	// RevokeOwnSessionByID's ownership check (see auth/mysessions.go).
+	mux.HandleFunc("GET /v1/auth/sessions", auth.MySessionsHandler(authDeps))
+	mux.HandleFunc("DELETE /v1/auth/sessions/{id}", auth.RevokeMySessionHandler(authDeps))
 	// Rate-limited the same as login/callback (2026-07-15 security review):
 	// reuses authRateLimitMiddleware/auth_rate_limit_max rather than a
 	// dedicated logout_rate_limit_max setting - logout has far less abuse
@@ -976,6 +991,17 @@ func secHeadersMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		// report-to/report-uri (added alongside cspReportHandler below): CSP
+		// has blocked violations silently since this header was first
+		// introduced - a real XSS attempt hitting it would leave no trace
+		// anywhere an operator would think to look. report-uri is the
+		// still-universally-supported legacy directive; report-to is the
+		// modern replacement Chrome now prefers, which needs the separate
+		// Reporting-Endpoints header below to name what "csp-endpoint"
+		// actually points at. Sending both costs nothing extra (a browser
+		// that understands report-to ignores report-uri, and vice versa)
+		// and covers every browser either way.
+		w.Header().Set("Reporting-Endpoints", `csp-endpoint="/v1/csp-report"`)
 		w.Header().Set("Content-Security-Policy",
 			"default-src 'none'; "+
 				"script-src 'self'; "+
@@ -984,7 +1010,9 @@ func secHeadersMiddleware(next http.Handler) http.Handler {
 				"connect-src 'self'; "+
 				"object-src 'none'; "+
 				"frame-ancestors 'none'; "+
-				"base-uri 'none'")
+				"base-uri 'none'; "+
+				"report-uri /v1/csp-report; "+
+				"report-to csp-endpoint")
 		// Permissions-Policy: default-deny every powerful browser feature,
 		// then allow back exactly the three a module actually uses -
 		// geolocation (my-place's MapLibre view), clipboard-write (copy
@@ -1001,6 +1029,76 @@ func secHeadersMiddleware(next http.Handler) http.Handler {
 				"magnetometer=(), gyroscope=(), accelerometer=()")
 		next.ServeHTTP(w, r)
 	})
+}
+
+// cspReportMaxBodyBytes caps how much of a single CSP violation report body
+// this handler will read - a real violation report (legacy or Reporting
+// API shape) is a few hundred bytes at most; this is purely a backstop
+// against a malicious or malfunctioning caller posting an oversized body to
+// this deliberately unauthenticated endpoint.
+const cspReportMaxBodyBytes = 16 * 1024
+
+// cspReportHandler is POST /v1/csp-report, the target of secHeadersMiddleware's
+// report-uri/report-to CSP directives (see that middleware's doc comment).
+// Deliberately unauthenticated - a violation can fire on the login page
+// itself, before any session exists - and covered only by the global rate
+// limit backstop every route already gets (globalRateLimitMiddleware),
+// rather than a bespoke limiter: this is not a high-value target, just an
+// endpoint that should not be free to flood the log without any bound.
+//
+// Browsers send one of two incompatible JSON shapes depending on which of
+// the two directives above they honor - the older report-uri POSTs
+// {"csp-report": {...}}, the newer Reporting API (report-to) POSTs a JSON
+// array of {"type":"csp-violation","body":{...}}. Both are decoded loosely
+// into maps rather than strict structs: a browser's exact field set has
+// drifted before (camelCase vs kebab-case, fields added/removed across
+// versions) and the only thing this handler does with the result is log
+// it for an operator to read, so a partial/best-effort parse that still
+// surfaces the useful fields beats a strict schema that silently drops an
+// entire report over one unexpected field.
+func cspReportHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		body, err := io.ReadAll(io.LimitReader(r.Body, cspReportMaxBodyBytes))
+		if err != nil {
+			// Still 204: per the Reporting API spec, browsers do not
+			// inspect this endpoint's response at all - there is no
+			// legitimate retry/backoff behavior on the sending side to
+			// preserve by returning an error status instead.
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		// Legacy report-uri shape: a single object with a "csp-report" key.
+		var legacy struct {
+			CSPReport map[string]any `json:"csp-report"`
+		}
+		if err := json.Unmarshal(body, &legacy); err == nil && legacy.CSPReport != nil {
+			log.Printf("csp: violation (report-uri): document=%v violated=%v blocked=%v",
+				legacy.CSPReport["document-uri"], legacy.CSPReport["violated-directive"], legacy.CSPReport["blocked-uri"])
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		// Modern Reporting API shape: a JSON array of report objects.
+		var reports []struct {
+			Type string         `json:"type"`
+			Body map[string]any `json:"body"`
+		}
+		if err := json.Unmarshal(body, &reports); err == nil {
+			for _, rep := range reports {
+				if rep.Type != "csp-violation" {
+					continue
+				}
+				log.Printf("csp: violation (report-to): document=%v violated=%v blocked=%v",
+					rep.Body["documentURL"], rep.Body["effectiveDirective"], rep.Body["blockedURL"])
+			}
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 // recoverMiddleware turns a panicking handler into a 500 response with a

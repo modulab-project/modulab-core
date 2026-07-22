@@ -23,6 +23,7 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/httperr"
 	"github.com/modulab-project/modulab-core/backend/internal/notify"
 )
 
@@ -655,7 +656,7 @@ func ModuleTokenHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 		}
 		row, found, err := d.DB.GetInstalledModule(r.Context(), moduleName)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if !found {
@@ -668,7 +669,7 @@ func ModuleTokenHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 		}
 		token, err := auth.CreateModuleToken(r.Context(), authDeps, auth.BearerToken(r), moduleName)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		writeModuleJSON(w, http.StatusOK, struct {
@@ -709,7 +710,7 @@ func ModuleUsersDirectoryHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 		}
 		users, err := d.DB.ListUsers(r.Context())
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		type directoryEntry struct {

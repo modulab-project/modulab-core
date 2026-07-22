@@ -22,6 +22,7 @@ import (
 
 	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/httperr"
 	"github.com/modulab-project/modulab-core/backend/internal/mail"
 	"github.com/modulab-project/modulab-core/backend/internal/notify"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
@@ -242,7 +243,7 @@ func LoginHandler(d Deps) http.HandlerFunc {
 
 		state, err := randomToken()
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		codeVerifier := oauth2.GenerateVerifier()
@@ -255,7 +256,7 @@ func LoginHandler(d Deps) http.HandlerFunc {
 			ReturnPath:   returnPath,
 		})
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		// The verifier (and the two step-up flags above) are stored, not
@@ -264,7 +265,7 @@ func LoginHandler(d Deps) http.HandlerFunc {
 		// this ever leaves Core: the browser only ever sees the state value
 		// and the S256 challenge.
 		if err := d.Valkey.SetWithTTL(ctx, oauthStateKeyPrefix+state, string(payload), oauthStateTTL); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 
@@ -612,7 +613,7 @@ func MeHandler(d Deps) http.HandlerFunc {
 		ctx := r.Context()
 		sess, ok, err := ValidateSession(ctx, d, token)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if !ok {
@@ -665,7 +666,7 @@ func DeleteSelfHandler(d Deps) http.HandlerFunc {
 		ctx := r.Context()
 		sess, ok, err := ValidateSession(ctx, d, token)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if !ok {
@@ -678,7 +679,7 @@ func DeleteSelfHandler(d Deps) http.HandlerFunc {
 
 		blocked, reason, err := guardAgainstLastSuperAdmin(ctx, d, sess.UserID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if blocked {
@@ -688,7 +689,7 @@ func DeleteSelfHandler(d Deps) http.HandlerFunc {
 
 		affected, err := d.Pool.DeleteUser(ctx, sess.UserID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if affected == 0 {
@@ -760,7 +761,7 @@ func UserPrefsHandler(d Deps) http.HandlerFunc {
 		ctx := r.Context()
 		sess, ok, err := ValidateSession(ctx, d, token)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if !ok {
@@ -842,7 +843,7 @@ func ExportSelfHandler(d Deps) http.HandlerFunc {
 		ctx := r.Context()
 		sess, ok, err := ValidateSession(ctx, d, token)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if !ok {
@@ -1019,7 +1020,7 @@ func LogoutHandler(d Deps) http.HandlerFunc {
 		}
 
 		if err := DeleteSession(ctx, d.Valkey, token); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		// The token itself is gone from Valkey above - this makes sure the

@@ -28,6 +28,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/modulab-project/modulab-core/backend/internal/httperr"
 )
 
 const moduleTokenKeyPrefix = "moduletoken:"
@@ -121,7 +123,7 @@ func RequireModuleToken(d Deps, module string, w http.ResponseWriter, r *http.Re
 	}
 	sess, ok, err := ValidateModuleToken(r.Context(), d, token, module)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httperr.Internal(w, err)
 		return Session{}, false
 	}
 	if !ok {
@@ -156,7 +158,7 @@ func RequireSessionOrModuleToken(d Deps, module string, w http.ResponseWriter, r
 	if token := sessionToken(r); token != "" {
 		sess, ok, err := ValidateSession(r.Context(), d, token)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return Session{}, false
 		}
 		if ok {
@@ -179,7 +181,7 @@ func RequireSessionOrModuleToken(d Deps, module string, w http.ResponseWriter, r
 	}
 	sess, ok, err := ValidateModuleToken(r.Context(), d, token, module)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httperr.Internal(w, err)
 		return Session{}, false
 	}
 	if !ok {

@@ -37,6 +37,7 @@ import (
 
 	"github.com/modulab-project/modulab-core/backend/internal/crypto"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/httperr"
 )
 
 const (
@@ -230,7 +231,7 @@ func SMTPStatusHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 
 		encHost, exists, err := pool.GetSetting(ctx, smtpHostSettingKey)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if !exists {
@@ -246,14 +247,14 @@ func SMTPStatusHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 
 		portStr, _, err := pool.GetSetting(ctx, smtpPortSettingKey)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		port, _ := strconv.Atoi(portStr)
 
 		encUsername, _, err := pool.GetSetting(ctx, smtpUsernameSettingKey)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		username, err := crypto.DecryptIfNotEmpty(masterKey, encUsername)
@@ -264,7 +265,7 @@ func SMTPStatusHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 
 		encFromAddress, _, err := pool.GetSetting(ctx, smtpFromAddressSettingKey)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		fromAddress, err := crypto.DecryptIfNotEmpty(masterKey, encFromAddress)
@@ -275,7 +276,7 @@ func SMTPStatusHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 
 		encryption, err := resolveSMTPEncryption(ctx, pool)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 
@@ -332,17 +333,17 @@ func SMTPConfigureHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 
 		encHost, err := crypto.Encrypt(masterKey, req.Host)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		encUsername, err := crypto.EncryptIfNotEmpty(masterKey, req.Username)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		encFromAddress, err := crypto.Encrypt(masterKey, req.FromAddress)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		ctx := r.Context()
@@ -361,14 +362,14 @@ func SMTPConfigureHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 		if req.Password != "" {
 			encryptedPassword, err := crypto.Encrypt(masterKey, req.Password)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				httperr.Internal(w, err)
 				return
 			}
 			settings[smtpPasswordSettingKey] = encryptedPassword
 		}
 		for key, value := range settings {
 			if err := pool.SetSetting(ctx, key, value); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				httperr.Internal(w, err)
 				return
 			}
 		}
@@ -378,7 +379,7 @@ func SMTPConfigureHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 		// to fall back to (it only matters if smtpEncryptionSettingKey is
 		// ever deleted independently, but cheap to keep both in sync).
 		if err := pool.DeleteSetting(ctx, smtpUseTLSSettingKeyLegacy); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 
@@ -590,7 +591,7 @@ func SMTPDeleteHandler(pool *db.Pool) http.HandlerFunc {
 			smtpUseTLSSettingKeyLegacy,
 		} {
 			if err := pool.DeleteSetting(ctx, key); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				httperr.Internal(w, err)
 				return
 			}
 		}

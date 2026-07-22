@@ -30,6 +30,7 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
 	"github.com/modulab-project/modulab-core/backend/internal/crypto"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/httperr"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
 )
 
@@ -66,7 +67,7 @@ func SystemStatusHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 		var oidcStatus OIDCStatus
 		encIssuer, issuerExists, err := pool.GetSetting(ctx, "oidc_issuer_url")
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if issuerExists && encIssuer != "" {
@@ -81,7 +82,7 @@ func SystemStatusHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 		// Group prefix (plaintext)
 		prefix, _, err := pool.GetSetting(ctx, "group_prefix")
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 
@@ -131,31 +132,31 @@ func OIDCUpdateHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 
 		encIssuer, err := crypto.Encrypt(masterKey, req.IssuerURL)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		encClientID, err := crypto.Encrypt(masterKey, req.ClientID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 
 		if err := pool.SetSetting(ctx, "oidc_issuer_url", encIssuer); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if err := pool.SetSetting(ctx, "oidc_client_id", encClientID); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if req.ClientSecret != "" {
 			encSecret, err := crypto.Encrypt(masterKey, req.ClientSecret)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				httperr.Internal(w, err)
 				return
 			}
 			if err := pool.SetSetting(ctx, "oidc_client_secret_enc", encSecret); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				httperr.Internal(w, err)
 				return
 			}
 		}
@@ -195,7 +196,7 @@ func OIDCDeleteHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 
 		for _, key := range []string{"oidc_issuer_url", "oidc_client_id", "oidc_client_secret_enc"} {
 			if err := pool.DeleteSetting(ctx, key); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				httperr.Internal(w, err)
 				return
 			}
 		}
@@ -275,7 +276,7 @@ func AuditLogHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 			Limit:     limit,
 		})
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if entries == nil {
@@ -295,7 +296,7 @@ func AuditActorsHandler(pool *db.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actors, err := audit.ListActors(r.Context(), pool)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if actors == nil {
@@ -325,7 +326,7 @@ func AuditVerifyHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 
 		result, err := audit.Verify(ctx, pool, masterKey)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, result)

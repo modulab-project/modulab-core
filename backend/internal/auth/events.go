@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/modulab-project/modulab-core/backend/internal/httperr"
 	"github.com/modulab-project/modulab-core/backend/internal/notify"
 )
 
@@ -42,7 +43,7 @@ func EventsHandler(d Deps) http.HandlerFunc {
 		ctx := r.Context()
 		sess, ok, err := ValidateSession(ctx, d, token)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if !ok {

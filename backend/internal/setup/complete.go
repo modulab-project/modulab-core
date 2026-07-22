@@ -12,6 +12,7 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/bootstrap"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/httperr"
 )
 
 // CompleteResponse is the body of POST /v1/setup/complete.
@@ -41,7 +42,7 @@ func CompleteHandler(pool *db.Pool, mgr *bootstrap.Manager, masterKeyEnv string)
 		ctx := r.Context()
 		missing, err := missingSteps(ctx, pool)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if len(missing) > 0 {
