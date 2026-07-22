@@ -507,11 +507,19 @@ func LockUserHandler(d Deps) http.HandlerFunc {
 
 // UnlockUserHandler is POST /v1/admin/users/{id}/unlock. No self/last-
 // super-admin guard needed: unlocking only ever restores access, it can
-// never strand the instance the way locking or deleting could.
+// never strand the instance the way locking or deleting could. Does get
+// the same requireRecentLogin step-up gate as ApproveUserHandler though -
+// missed when that one was added (2026-07-22) even though restoring a
+// locked account's access is exactly as consequential as approving a new
+// one: a compromised-but-still-within-SessionTTL admin session could
+// otherwise reinstate an account another admin deliberately locked.
 func UnlockUserHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := requireAdmin(d, w, r)
 		if !ok {
+			return
+		}
+		if !requireRecentLogin(w, sess) {
 			return
 		}
 		subject := r.PathValue("id")

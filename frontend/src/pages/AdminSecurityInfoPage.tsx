@@ -21,8 +21,11 @@ import {
   type SystemInfoRateLimit,
 } from "../lib/api";
 import { useAuthenticatedSession } from "../lib/useSession";
+import { useLoginRedirect } from "../lib/useLoginRedirect";
+import { isReauthRequiredError } from "../lib/authErrors";
 import { queryClient } from "../lib/queryClient";
 import { AppShell } from "../components/AppShell";
+import { ReauthBanner } from "../components/ReauthBanner";
 
 export default function AdminSecurityInfoPage() {
   const navigate = useNavigate();
@@ -52,6 +55,15 @@ export default function AdminSecurityInfoPage() {
   // row can show an inline error without disturbing the rest of the table.
   const [revokingIds, setRevokingIds] = useState<Set<string>>(new Set());
   const [revokeError, setRevokeError] = useState<string | null>(null);
+  // Backend now gates DELETE /v1/admin/sessions/{id} behind requireRecentLogin
+  // (RequireSuperAdminReauthMiddleware) - forcibly ending someone else's
+  // session has the same immediate effect as locking their account, which
+  // already got this step-up treatment. Same pattern as AdminUsersPage.tsx.
+  const [reauthRequired, setReauthRequired] = useState(false);
+  const { waiting: reauthWaiting, startLogin } = useLoginRedirect(() => {
+    setReauthRequired(false);
+    setRevokeError(null);
+  });
 
   function handleRevoke(target: ActiveSession) {
     const confirmKey = target.current
@@ -61,6 +73,7 @@ export default function AdminSecurityInfoPage() {
       return;
     }
     setRevokeError(null);
+    setReauthRequired(false);
     setRevokingIds((prev) => new Set(prev).add(target.id));
     revokeSession(target.id)
       .then(() => {
@@ -84,7 +97,13 @@ export default function AdminSecurityInfoPage() {
             : prev,
         );
       })
-      .catch(() => setRevokeError(t("admin.system_info.end_session_error")))
+      .catch((err) => {
+        if (isReauthRequiredError(err)) {
+          setReauthRequired(true);
+        } else {
+          setRevokeError(t("admin.system_info.end_session_error"));
+        }
+      })
       .finally(() => {
         setRevokingIds((prev) => {
           const next = new Set(prev);
@@ -150,7 +169,16 @@ export default function AdminSecurityInfoPage() {
             <Section
               title={t("admin.system_info.section_sessions", { count: info.active_sessions?.length ?? 0 })}
             >
-              {revokeError && <p className="mb-2 text-sm text-red-600 dark:text-red-400">{revokeError}</p>}
+              {revokeError && !reauthRequired && (
+                <p className="mb-2 text-sm text-red-600 dark:text-red-400">{revokeError}</p>
+              )}
+              {reauthRequired && (
+                <ReauthBanner
+                  waiting={reauthWaiting}
+                  onReauth={() => startLogin({ reauth: true, returnPath: window.location.pathname })}
+                  onDismiss={() => setReauthRequired(false)}
+                />
+              )}
               {!info.active_sessions || info.active_sessions.length === 0 ? (
                 <p className="text-sm text-gray-400 dark:text-gray-500">{t("admin.system_info.no_sessions")}</p>
               ) : (

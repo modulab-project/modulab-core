@@ -40,6 +40,7 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/config"
 	"github.com/modulab-project/modulab-core/backend/internal/coreupdate"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/httperr"
 	"github.com/modulab-project/modulab-core/backend/internal/mail"
 	"github.com/modulab-project/modulab-core/backend/internal/modules"
 	"github.com/modulab-project/modulab-core/backend/internal/news"
@@ -700,7 +701,13 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(result)
 	})))
-	mux.Handle("DELETE /v1/admin/sessions/{id}", superAdminOnly(revokeSessionHandler(authDeps)))
+	// Reauth-gated (not just superAdminOnly, 2026-07-22): forcibly ending
+	// another user's session has the same immediate, hard-to-undo-for-them
+	// effect as locking their account, which already gets this step-up
+	// treatment - a compromised-but-still-within-SessionTTL admin session
+	// shouldn't be able to kick people off any more than it should be able
+	// to lock them.
+	mux.Handle("DELETE /v1/admin/sessions/{id}", superAdminReauthOnly(revokeSessionHandler(authDeps)))
 	mux.Handle("DELETE /v1/admin/system/rate-limits", superAdminOnly(resetRateLimitHandler(valkeyClient)))
 
 	// At startup, restart Deno workers for all Tier 2/3 modules that were
@@ -1541,7 +1548,7 @@ func resetRateLimitHandler(vk *valkey.Client) http.HandlerFunc {
 			return
 		}
 		if err := vk.Del(r.Context(), body.Key); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -1849,7 +1856,7 @@ func revokeSessionHandler(authDeps auth.Deps) http.HandlerFunc {
 		}
 		found, err := auth.RevokeSessionByID(r.Context(), authDeps, id)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		if !found {
