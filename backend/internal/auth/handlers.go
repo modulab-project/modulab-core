@@ -873,7 +873,15 @@ func bearerToken(r *http.Request) string {
 // bearerToken above stay header-only, see moduletoken.go) - a module's own
 // UI bundle must keep attaching its own narrower token explicitly, never
 // inherit whatever this cookie happens to hold.
-const sessionCookieName = "modulab_session"
+//
+// The __Host- prefix is a browser-enforced contract (RFC 6265bis), not just
+// a naming convention: a cookie named with this prefix is only accepted by
+// the browser if it also carries Secure, Path=/, and no Domain attribute -
+// exactly the three properties setSessionCookie already sets below, so this
+// costs nothing and gives an extra, browser-side guarantee against a
+// subdomain (or same-site sibling app) ever setting or overriding this
+// cookie out from under Core.
+const sessionCookieName = "__Host-modulab_session"
 
 // sessionToken reads the caller's full session bearer token from its
 // httpOnly cookie. This is the one and only place that does so - every

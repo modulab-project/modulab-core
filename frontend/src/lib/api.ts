@@ -30,7 +30,7 @@ async function request<T>(
   const res = await fetch(`${API_BASE_URL}${path}`, {
     ...rest,
     // Every session-authenticated endpoint now relies on the browser
-    // sending the httpOnly modulab_session cookie automatically (see
+    // sending the httpOnly __Host-modulab_session cookie automatically (see
     // backend/internal/auth/handlers.go's setSessionCookie) instead of a
     // caller-supplied Authorization header - `credentials: "include"` is
     // what makes the browser actually attach it, same-origin or not
@@ -176,7 +176,7 @@ export interface Session {
 // GET /v1/auth/me - the one endpoint every page that needs to know "who is
 // this and what role do they have" calls, whether that's to render a
 // dashboard or just to decide whether to bounce to /pending or /login. No
-// token parameter: the browser attaches the httpOnly modulab_session cookie
+// token parameter: the browser attaches the httpOnly __Host-modulab_session cookie
 // automatically (see request()'s credentials: "include").
 export function getMe(): Promise<Session> {
   return request<Session>("/v1/auth/me");
@@ -195,7 +195,7 @@ export function eventsUrl(): string {
 }
 
 // POST /v1/auth/logout - invalidates the token server-side immediately and
-// clears the modulab_session cookie (see backend's LogoutHandler). No
+// clears the __Host-modulab_session cookie (see backend's LogoutHandler). No
 // token parameter to pass or locally-stored token to clear afterward - the
 // cookie is httpOnly, so there is nothing for the frontend to hold in the
 // first place.
@@ -985,7 +985,7 @@ export interface ChatMessage {
 // text chunk received. Returns a Promise that resolves when [DONE] is received
 // or rejects on error. The caller is responsible for aborting via the signal.
 // No token parameter: raw fetch() with credentials: "include" so the
-// browser attaches the modulab_session cookie, same as request() above.
+// browser attaches the __Host-modulab_session cookie, same as request() above.
 export function streamAIChat(
   providerId: string,
   model: string,

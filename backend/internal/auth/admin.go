@@ -125,6 +125,11 @@ func requireAdmin(d Deps, w http.ResponseWriter, r *http.Request) (Session, bool
 		http.Error(w, "invalid or expired session", http.StatusUnauthorized)
 		return Session{}, false
 	}
+	// Re-issue the cookie so its own Max-Age slides forward together with
+	// the Valkey-side TTL that ValidateSession just extended - otherwise
+	// the browser drops the cookie exactly SessionTTL after login
+	// regardless of activity, defeating the sliding-window design entirely.
+	setSessionCookie(w, token)
 	// Pending sessions never reach here in practice (the frontend bounces
 	// them to /pending before they could call this), but checked
 	// explicitly anyway rather than relying on that: RoleUser is also not
@@ -232,6 +237,8 @@ func requireActiveSessionWithToken(d Deps, w http.ResponseWriter, r *http.Reques
 		http.Error(w, "invalid or expired session", http.StatusUnauthorized)
 		return Session{}, false
 	}
+	// Same sliding-cookie reasoning as requireAdmin above.
+	setSessionCookie(w, token)
 	if sess.Role == RolePending || sess.Locked {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return Session{}, false

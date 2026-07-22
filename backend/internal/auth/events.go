@@ -49,6 +49,12 @@ func EventsHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "invalid or expired session", http.StatusUnauthorized)
 			return
 		}
+		// Same sliding-cookie reasoning as admin.go's requireAdmin/
+		// requireActiveSessionWithToken: keep the browser's Max-Age in step
+		// with the Valkey TTL ValidateSession just extended. Must happen
+		// before the SSE headers are written below (a cookie can't be set
+		// once the response has started streaming).
+		setSessionCookie(w, token)
 		// Deliberately NOT gated against RolePending the way every other
 		// endpoint is (see CallbackHandler's doc comment: a pending session
 		// may otherwise only reach /v1/auth/me and /v1/auth/logout). This

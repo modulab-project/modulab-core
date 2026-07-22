@@ -31,7 +31,7 @@ export interface TileRef {
 
 // ---- User endpoints ---------------------------------------------------------
 // No token parameter on any function below: every request relies on the
-// browser attaching the httpOnly modulab_session cookie automatically
+// browser attaching the httpOnly __Host-modulab_session cookie automatically
 // (credentials: "include"), same as lib/api.ts's request() wrapper - see
 // backend/internal/auth/handlers.go's setSessionCookie.
 
