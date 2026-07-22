@@ -21,7 +21,7 @@ jobs:
         working-directory: backend
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           # Reads the exact version straight from go.mod's own "go" line
           # instead of a hardcoded value here - single source of truth, no
