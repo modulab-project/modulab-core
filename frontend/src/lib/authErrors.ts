@@ -31,6 +31,15 @@ export function authErrorKey(code: string): string {
 // carry a human-readable reason and are shown as-is). Callers should offer
 // a re-login link (loginRedirectUrl, api.ts) rather than just displaying
 // this raw string.
+//
+// .trim() matters here: Go's http.Error (what requireRecentLogin/
+// RequireSuperAdminReauthMiddleware actually call) writes the body via
+// fmt.Fprintln, which always appends a trailing "\n" - so the real response
+// body is "reauth_required\n", not "reauth_required". Without trimming,
+// this strict-equality check silently never matched, and every caller fell
+// through to displaying the raw (newline-terminated) message instead of
+// the friendly "please log in again" UI - found 2026-07-22 testing the
+// SMTP config page's step-up reauth.
 export function isReauthRequiredError(err: unknown): boolean {
-  return err instanceof ApiError && err.status === 403 && err.message === "reauth_required";
+  return err instanceof ApiError && err.status === 403 && err.message.trim() === "reauth_required";
 }
