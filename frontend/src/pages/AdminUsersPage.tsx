@@ -14,6 +14,7 @@ import { useLoginRedirect } from "../lib/useLoginRedirect";
 import { AppShell } from "../components/AppShell";
 import { isAdminRole } from "../lib/roles";
 import { isReauthRequiredError } from "../lib/authErrors";
+import { ReauthBanner } from "../components/ReauthBanner";
 
 // "/admin/users" - replaces the manual "UPDATE users SET approved = true"
 // (and, before this page, no way at all to lock or delete someone) with a
@@ -97,7 +98,6 @@ export default function AdminUsersPage() {
     } catch (err) {
       if (isReauthRequiredError(err)) {
         setReauthRequired(true);
-        setError(t("admin.users.reauth_required"));
       } else {
         // lockUser/deleteUser's self- and last-super-admin guards surface
         // here as a 400 with a human-readable message (see admin.go's
@@ -127,23 +127,14 @@ export default function AdminUsersPage() {
           {t("admin.users.subtitle")}
         </p>
 
-        {error && (
-          <p className="mb-4 text-sm text-red-600 dark:text-red-400">
-            {error}
-            {reauthRequired && (
-              <>
-                {" "}
-                <button
-                  type="button"
-                  onClick={() => startLogin({ reauth: true, returnPath: window.location.pathname })}
-                  disabled={reauthWaiting}
-                  className="font-medium underline disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {reauthWaiting ? t("login.waiting_other_tab") : t("admin.users.reauth_login_link")}
-                </button>
-              </>
-            )}
-          </p>
+        {error && !reauthRequired && (
+          <p className="mb-4 text-sm text-red-600 dark:text-red-400">{error}</p>
+        )}
+        {reauthRequired && (
+          <ReauthBanner
+            waiting={reauthWaiting}
+            onReauth={() => startLogin({ reauth: true, returnPath: window.location.pathname })}
+          />
         )}
 
         {users === null ? null : users.length === 0 ? (

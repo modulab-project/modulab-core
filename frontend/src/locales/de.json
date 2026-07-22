@@ -56,9 +56,7 @@
     "delete_confirm": "Konto löschen? Das kann nicht rückgängig gemacht werden.",
     "delete_button": "Mein Konto löschen",
     "deleting": "Wird gelöscht…",
-    "delete_error_fallback": "Konto konnte nicht gelöscht werden.",
-    "reauth_required": "Aus Sicherheitsgründen erfordert diese Aktion einen kürzlichen Login.",
-    "reauth_login_link": "Erneut anmelden"
+    "delete_error_fallback": "Konto konnte nicht gelöscht werden."
   },
   "admin": {
     "users": {
@@ -67,8 +65,6 @@
       "empty": "Noch keine Benutzer",
       "load_error": "Benutzer konnten nicht geladen werden.",
       "action_error": "Diese Aktion ist fehlgeschlagen.",
-      "reauth_required": "Aus Sicherheitsgründen erfordert diese Aktion einen kürzlichen Login.",
-      "reauth_login_link": "Erneut anmelden",
       "you": "(du)",
       "delete_confirm": "{{name}} löschen? Das kann nicht rückgängig gemacht werden.",
       "joined": "beigetreten",
@@ -285,8 +281,6 @@
       "save_error": "Speichern fehlgeschlagen.",
       "remove_error": "Konfiguration konnte nicht entfernt werden.",
       "remove_confirm": "SMTP-Konfiguration entfernen? Kontobenachrichtigungen werden nicht mehr gesendet, bis sie neu eingerichtet wird.",
-      "reauth_required": "Aus Sicherheitsgründen erfordert diese Änderung eine kürzliche Anmeldung.",
-      "reauth_login_link": "Erneut anmelden",
       "host": "Host",
       "port": "Port",
       "username": "Benutzername",
@@ -359,8 +353,6 @@
       "secret_placeholder_existing": "Leer lassen, um bestehendes Secret zu behalten",
       "save_oidc": "OIDC speichern",
       "save": "Speichern",
-      "reauth_required": "Aus Sicherheitsgründen erfordert diese Änderung eine kürzliche Anmeldung.",
-      "reauth_login_link": "Erneut anmelden",
       "oidc": {
         "removing": "Wird entfernt…",
         "remove": "Konfiguration entfernen"
@@ -874,7 +866,12 @@
     "loading": "Wird geladen…",
     "saved": "Gespeichert",
     "dismiss": "Schließen",
-    "tier": "Tier {{tier}}"
+    "tier": "Tier {{tier}}",
+    "reauth": {
+      "title": "Bestätigung erforderlich",
+      "body": "Diese Aktion betrifft sicherheitsrelevante Einstellungen. Bitte melde dich erneut an, um fortzufahren.",
+      "button": "Erneut anmelden"
+    }
   },
   "user": {
     "ai": {

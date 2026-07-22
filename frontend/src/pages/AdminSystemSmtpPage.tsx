@@ -6,6 +6,7 @@ import { useAuthenticatedSession } from "../lib/useSession";
 import { useLoginRedirect } from "../lib/useLoginRedirect";
 import { isReauthRequiredError } from "../lib/authErrors";
 import { AppShell } from "../components/AppShell";
+import { ReauthBanner } from "../components/ReauthBanner";
 
 export default function AdminSystemSmtpPage() {
   const navigate = useNavigate();
@@ -78,7 +79,6 @@ export default function AdminSystemSmtpPage() {
     } catch (err) {
       if (isReauthRequiredError(err)) {
         setReauthRequired(true);
-        setMsg({ ok: false, text: t("admin.smtp.reauth_required") });
       } else {
         setMsg({ ok: false, text: err instanceof Error ? err.message : t("admin.smtp.save_error") });
       }
@@ -130,7 +130,6 @@ export default function AdminSystemSmtpPage() {
     } catch (err) {
       if (isReauthRequiredError(err)) {
         setReauthRequired(true);
-        setMsg({ ok: false, text: t("admin.smtp.reauth_required") });
       } else {
         setMsg({ ok: false, text: err instanceof Error ? err.message : t("admin.smtp.remove_error") });
       }
@@ -158,16 +157,10 @@ export default function AdminSystemSmtpPage() {
         )}
         {msg && <Msg msg={msg} />}
         {reauthRequired && (
-          <p className="-mt-3 mb-4 text-sm text-red-600 dark:text-red-400">
-            <button
-              type="button"
-              onClick={() => startLogin({ reauth: true, returnPath: window.location.pathname })}
-              disabled={reauthWaiting}
-              className="font-medium underline disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {reauthWaiting ? t("login.waiting_other_tab") : t("admin.smtp.reauth_login_link")}
-            </button>
-          </p>
+          <ReauthBanner
+            waiting={reauthWaiting}
+            onReauth={() => startLogin({ reauth: true, returnPath: window.location.pathname })}
+          />
         )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <Field label={t("admin.smtp.host")}>

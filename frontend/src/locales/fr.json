@@ -56,9 +56,7 @@
     "delete_confirm": "Supprimer votre compte ? Cette action est irréversible.",
     "delete_button": "Supprimer mon compte",
     "deleting": "Suppression…",
-    "delete_error_fallback": "Impossible de supprimer votre compte.",
-    "reauth_required": "Pour votre sécurité, cette action nécessite une connexion récente.",
-    "reauth_login_link": "Se reconnecter"
+    "delete_error_fallback": "Impossible de supprimer votre compte."
   },
   "admin": {
     "users": {
@@ -67,8 +65,6 @@
       "empty": "Aucun utilisateur pour l'instant",
       "load_error": "Impossible de charger les utilisateurs.",
       "action_error": "Cette action a échoué.",
-      "reauth_required": "Pour votre sécurité, cette action nécessite une connexion récente.",
-      "reauth_login_link": "Se reconnecter",
       "you": "(vous)",
       "delete_confirm": "Supprimer {{name}} ? Cette action est irréversible.",
       "joined": "inscrit",
@@ -285,8 +281,6 @@
       "save_error": "Échec de l'enregistrement.",
       "remove_error": "Échec de la suppression de la configuration.",
       "remove_confirm": "Supprimer la configuration SMTP ? Les e-mails de notification de compte cesseront d'être envoyés jusqu'à ce qu'elle soit reconfigurée.",
-      "reauth_required": "Par sécurité, cette modification nécessite une connexion récente.",
-      "reauth_login_link": "Se reconnecter",
       "host": "Hôte",
       "port": "Port",
       "username": "Nom d'utilisateur",
@@ -359,8 +353,6 @@
       "secret_placeholder_existing": "Laisser vide pour conserver le secret existant",
       "save_oidc": "Enregistrer OIDC",
       "save": "Enregistrer",
-      "reauth_required": "Par sécurité, cette modification nécessite une connexion récente.",
-      "reauth_login_link": "Se reconnecter",
       "oidc": {
         "removing": "Suppression…",
         "remove": "Supprimer la configuration"
@@ -874,7 +866,12 @@
     "loading": "Chargement…",
     "saved": "Enregistré",
     "dismiss": "Fermer",
-    "tier": "Niveau {{tier}}"
+    "tier": "Niveau {{tier}}",
+    "reauth": {
+      "title": "Confirmation requise",
+      "body": "Cette action concerne des paramètres sensibles pour la sécurité. Merci de vous reconnecter pour continuer.",
+      "button": "Se reconnecter"
+    }
   },
   "user": {
     "ai": {

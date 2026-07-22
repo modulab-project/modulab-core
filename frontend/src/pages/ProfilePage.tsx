@@ -7,6 +7,7 @@ import { AppShell, Avatar } from "../components/AppShell";
 import { AuthButton } from "../components/AuthShell";
 import { deleteSelf, exportMyData, listMySessions, revokeMySession, type ActiveSession } from "../lib/api";
 import { isReauthRequiredError } from "../lib/authErrors";
+import { ReauthBanner } from "../components/ReauthBanner";
 import { queryClient } from "../lib/queryClient";
 import { useLoginRedirect } from "../lib/useLoginRedirect";
 
@@ -135,7 +136,6 @@ export default function ProfilePage() {
     } catch (err) {
       if (isReauthRequiredError(err)) {
         setReauthRequired(true);
-        setDeleteError(t("profile.reauth_required"));
       } else {
         const message = err instanceof Error ? err.message : t("profile.delete_error_fallback");
         setDeleteError(message);
@@ -247,23 +247,14 @@ export default function ProfilePage() {
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             {t("profile.delete_section_body")}
           </p>
-          {deleteError && (
-            <p className="mt-2 text-sm text-red-600 dark:text-red-400">
-              {deleteError}
-              {reauthRequired && (
-                <>
-                  {" "}
-                  <button
-                    type="button"
-                    onClick={() => startLogin({ reauth: true, returnPath: window.location.pathname })}
-                    disabled={reauthWaiting}
-                    className="font-medium underline disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {reauthWaiting ? t("login.waiting_other_tab") : t("profile.reauth_login_link")}
-                  </button>
-                </>
-              )}
-            </p>
+          {deleteError && !reauthRequired && (
+            <p className="mt-2 text-sm text-red-600 dark:text-red-400">{deleteError}</p>
+          )}
+          {reauthRequired && (
+            <ReauthBanner
+              waiting={reauthWaiting}
+              onReauth={() => startLogin({ reauth: true, returnPath: window.location.pathname })}
+            />
           )}
           <button
             type="button"

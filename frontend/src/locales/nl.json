@@ -56,9 +56,7 @@
     "delete_confirm": "Uw account verwijderen? Deze actie kan niet ongedaan worden gemaakt.",
     "delete_button": "Mijn account verwijderen",
     "deleting": "Verwijderen…",
-    "delete_error_fallback": "Kan uw account niet verwijderen.",
-    "reauth_required": "Voor uw veiligheid vereist deze actie een recente aanmelding.",
-    "reauth_login_link": "Opnieuw aanmelden"
+    "delete_error_fallback": "Kan uw account niet verwijderen."
   },
   "admin": {
     "users": {
@@ -67,8 +65,6 @@
       "empty": "Nog geen gebruikers",
       "load_error": "Kan gebruikers niet laden.",
       "action_error": "Deze actie is mislukt.",
-      "reauth_required": "Voor uw veiligheid vereist deze actie een recente aanmelding.",
-      "reauth_login_link": "Opnieuw aanmelden",
       "you": "(u)",
       "delete_confirm": "{{name}} verwijderen? Deze actie kan niet ongedaan worden gemaakt.",
       "joined": "aangemeld",
@@ -285,8 +281,6 @@
       "save_error": "Opslaan mislukt.",
       "remove_error": "Verwijderen van configuratie mislukt.",
       "remove_confirm": "SMTP-configuratie verwijderen? Accountmeldingsmails worden niet meer verzonden totdat het opnieuw is geconfigureerd.",
-      "reauth_required": "Om veiligheidsredenen vereist deze wijziging een recente aanmelding.",
-      "reauth_login_link": "Opnieuw aanmelden",
       "host": "Host",
       "port": "Poort",
       "username": "Gebruikersnaam",
@@ -359,8 +353,6 @@
       "secret_placeholder_existing": "Leeg laten om bestaand geheim te behouden",
       "save_oidc": "OIDC opslaan",
       "save": "Opslaan",
-      "reauth_required": "Om veiligheidsredenen vereist deze wijziging een recente aanmelding.",
-      "reauth_login_link": "Opnieuw aanmelden",
       "oidc": {
         "removing": "Verwijderen…",
         "remove": "Configuratie verwijderen"
@@ -874,7 +866,12 @@
     "loading": "Laden…",
     "saved": "Opgeslagen",
     "dismiss": "Sluiten",
-    "tier": "Tier {{tier}}"
+    "tier": "Tier {{tier}}",
+    "reauth": {
+      "title": "Bevestiging vereist",
+      "body": "Deze actie betreft veiligheidsgevoelige instellingen. Meld u opnieuw aan om door te gaan.",
+      "button": "Opnieuw aanmelden"
+    }
   },
   "user": {
     "ai": {
