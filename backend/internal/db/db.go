@@ -2641,6 +2641,65 @@ func (p *Pool) ListCustomSources(ctx context.Context) ([]CustomSourceRow, error)
 	return out, rows.Err()
 }
 
+// UpdateCustomSource patches an existing custom source's display name,
+// Cosign public key, and/or GitHub token. repo_url is intentionally not
+// editable here - changing it would silently orphan whatever
+// module_registry rows were fetched under the old URL (see
+// DeleteEntriesBySourceRepo, which keys on exactly that repo_url); the
+// correct path for a genuine URL change is delete-and-re-add.
+//
+// name/pubKeyPEM/token are *string, not string: nil means "leave this
+// field unchanged", any non-nil value (including "") means "set it to
+// exactly this". This is what lets an admin explicitly clear pubKeyPEM
+// back to unsigned/unverified (added 2026-07-22 so a maintainer rotating
+// or dropping their Cosign key doesn't require deleting and re-adding the
+// whole source, losing added_by/added_at and re-triggering a full initial
+// fetch) while a nil token from the caller leaves whatever is already on
+// file untouched - the same "blank means keep existing secret" UX as the
+// SMTP/OIDC secret fields, since token is the one truly sensitive field
+// among these three.
+func (p *Pool) UpdateCustomSource(ctx context.Context, id string, name, pubKeyPEM, token *string) (CustomSourceRow, bool, error) {
+	var encName *string
+	if name != nil {
+		enc, err := crypto.Encrypt(p.masterKey, *name)
+		if err != nil {
+			return CustomSourceRow{}, false, fmt.Errorf("db: encrypt custom source name: %w", err)
+		}
+		encName = &enc
+	}
+	var encToken *string
+	if token != nil {
+		enc, err := crypto.EncryptIfNotEmpty(p.masterKey, *token)
+		if err != nil {
+			return CustomSourceRow{}, false, fmt.Errorf("db: encrypt custom source token: %w", err)
+		}
+		encToken = &enc
+	}
+	tag, err := p.Exec(ctx, `
+		UPDATE custom_sources SET
+		  name_enc  = COALESCE($2, name_enc),
+		  pubkey    = COALESCE($3, pubkey),
+		  token_enc = COALESCE($4, token_enc)
+		WHERE id = $1
+	`, id, encName, pubKeyPEM, encToken)
+	if err != nil {
+		return CustomSourceRow{}, false, fmt.Errorf("db: update custom_source %q: %w", id, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return CustomSourceRow{}, false, nil
+	}
+	rows, err := p.ListCustomSources(ctx)
+	if err != nil {
+		return CustomSourceRow{}, false, err
+	}
+	for _, r := range rows {
+		if r.ID == id {
+			return r, true, nil
+		}
+	}
+	return CustomSourceRow{}, false, nil
+}
+
 // GetCustomSourceByRepoURL finds a custom source by its (plaintext) repo
 // URL. repo_url_enc can't be queried directly (GCM ciphertext is
 // non-deterministic per encryption, see crypto.Encrypt's random nonce), so

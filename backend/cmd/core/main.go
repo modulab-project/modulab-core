@@ -490,8 +490,12 @@ func main() {
 	// session - resolves the active provider(s) and returns normalized JSON
 	// results regardless of which one answered.
 	mux.Handle("GET /v1/admin/search/providers", superAdminOnly(search.AdminListProvidersHandler(authDeps)))
-	mux.Handle("PATCH /v1/admin/search/providers/{id}", superAdminOnly(search.AdminPatchProviderHandler(authDeps)))
-	mux.Handle("DELETE /v1/admin/search/providers/{id}/key", superAdminOnly(search.AdminClearProviderKeyHandler(authDeps)))
+	// Providers are pre-seeded, not admin-created (see patchProviderRequest's
+	// doc comment) - so unlike AI providers there's no separate reauth-free
+	// "create" case here; PATCH can touch the stored key, so it and the
+	// dedicated key-clear route are both reauth-gated (2026-07-22).
+	mux.Handle("PATCH /v1/admin/search/providers/{id}", superAdminReauthOnly(search.AdminPatchProviderHandler(authDeps)))
+	mux.Handle("DELETE /v1/admin/search/providers/{id}/key", superAdminReauthOnly(search.AdminClearProviderKeyHandler(authDeps)))
 	mux.Handle("GET /v1/admin/search/settings", superAdminOnly(search.AdminSettingsHandler(authDeps)))
 	mux.Handle("PATCH /v1/admin/search/settings", superAdminOnly(search.AdminSettingsHandler(authDeps)))
 	mux.HandleFunc("GET /v1/search/web", search.SearchHandler(authDeps))
@@ -532,10 +536,14 @@ func main() {
 	// field moved to GET/PATCH /v1/admin/system/limits alongside its sibling
 	// ai_chat_ip_rate_limit_max (see adminapi.AdminLimitsHandler).
 	mux.Handle("GET /v1/admin/ai/providers", superAdminOnly(ai.AdminListHandler(authDeps)))
+	// Create stays reauth-free ("anlegen" case) - PATCH/DELETE/clear-key are
+	// reauth-gated (2026-07-22): adding a new provider is lower-risk than
+	// changing or removing an already-trusted one's stored API key, same
+	// create-vs-change/delete split as the custom module sources below.
 	mux.Handle("POST /v1/admin/ai/providers", superAdminOnly(ai.AdminCreateHandler(authDeps)))
-	mux.Handle("PATCH /v1/admin/ai/providers/{id}", superAdminOnly(ai.AdminPatchHandler(authDeps)))
-	mux.Handle("DELETE /v1/admin/ai/providers/{id}", superAdminOnly(ai.AdminDeleteHandler(authDeps)))
-	mux.Handle("DELETE /v1/admin/ai/providers/{id}/key", superAdminOnly(ai.AdminClearKeyHandler(authDeps)))
+	mux.Handle("PATCH /v1/admin/ai/providers/{id}", superAdminReauthOnly(ai.AdminPatchHandler(authDeps)))
+	mux.Handle("DELETE /v1/admin/ai/providers/{id}", superAdminReauthOnly(ai.AdminDeleteHandler(authDeps)))
+	mux.Handle("DELETE /v1/admin/ai/providers/{id}/key", superAdminReauthOnly(ai.AdminClearKeyHandler(authDeps)))
 	mux.Handle("GET /v1/admin/ai/providers/{id}/models", superAdminOnly(ai.AdminListModelsHandler(authDeps)))
 	mux.Handle("GET /v1/admin/ai/providers/{id}/balance", superAdminOnly(ai.AdminBalanceHandler(authDeps)))
 	mux.HandleFunc("GET /v1/ai/providers", ai.UserProvidersHandler(authDeps))
@@ -577,13 +585,22 @@ func main() {
 	mux.HandleFunc("GET /v1/store/{name}", store.DetailHandler(storeDeps, authDeps))
 
 	// Custom module source management (admin brainstorm 2026-07-16): lets an
-	// org-admin/super-admin add arbitrary GitHub repos as a third Store
-	// source alongside official/community, HACS-style. Admin-only for both
-	// read and write - unlike GET /v1/store above, the source list itself
-	// (repo URLs, who added them) is not exposed to plain active sessions.
-	mux.HandleFunc("GET /v1/admin/store/custom-sources", store.ListCustomSourcesHandler(storeDeps, authDeps))
-	mux.HandleFunc("POST /v1/admin/store/custom-sources", store.AddCustomSourceHandler(storeDeps, authDeps))
-	mux.HandleFunc("DELETE /v1/admin/store/custom-sources/{id}", store.DeleteCustomSourceHandler(storeDeps, authDeps))
+	// admin add arbitrary GitHub repos as a third Store source alongside
+	// official/community, HACS-style. Admin-only for both read and write -
+	// unlike GET /v1/store above, the source list itself (repo URLs, who
+	// added them) is not exposed to plain active sessions.
+	//
+	// Elevated from org-admin/super-admin to super-admin-only (2026-07-22):
+	// a GitHub token plus the ability to point Core at arbitrary third-party
+	// code is a higher-value target than typical org-admin-level config.
+	// GET/POST stay reauth-free (listing, and "anlegen" per the same policy
+	// as the AI provider create route above); PATCH (edit - e.g. rotating a
+	// Cosign key) and DELETE are reauth-gated, same reasoning as locking a
+	// user or deleting an AI provider's key.
+	mux.Handle("GET /v1/admin/store/custom-sources", superAdminOnly(store.ListCustomSourcesHandler(storeDeps, authDeps)))
+	mux.Handle("POST /v1/admin/store/custom-sources", superAdminOnly(store.AddCustomSourceHandler(storeDeps, authDeps)))
+	mux.Handle("PATCH /v1/admin/store/custom-sources/{id}", superAdminReauthOnly(store.UpdateCustomSourceHandler(storeDeps, authDeps)))
+	mux.Handle("DELETE /v1/admin/store/custom-sources/{id}", superAdminReauthOnly(store.DeleteCustomSourceHandler(storeDeps, authDeps)))
 
 	// Module management endpoints (spec section 4.6–4.9).
 	// List/detail: any active session. Install/uninstall/update/pin: org-admin+.

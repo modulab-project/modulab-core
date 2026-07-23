@@ -165,12 +165,17 @@ const (
 	EventQuickLinkDeleted = "quicklink.deleted"
 	// Manual Module Store registry sync trigger, internal/store.
 	EventStoreSyncTriggered = "store.sync_triggered"
-	// Custom module source management (org-admin/super-admin), internal/store.
-	// Details includes the repo URL so a later audit review can see exactly
-	// which third-party source was trusted/removed and when - unlike most
+	// Custom module source management. Super-admin only since 2026-07-22
+	// (previously org-admin/super-admin - elevated alongside adding the
+	// step-up reauth gate on update/delete below: a GitHub token plus the
+	// ability to point Core at arbitrary third-party code is a higher-
+	// value target than typical org-admin-level config). Details includes
+	// the repo URL so a later audit review can see exactly which third-
+	// party source was trusted/changed/removed and when - unlike most
 	// audited resources, custom_sources has no separate "list" UI of its own
 	// history once a row is deleted, so this is the only record that survives.
 	EventCustomSourceAdded   = "store.custom_source_added"
+	EventCustomSourceUpdated = "store.custom_source_updated"
 	EventCustomSourceRemoved = "store.custom_source_removed"
 	// A per-client rate limit (login/callback/ai-chat/global/chat, see
 	// cmd/core/main.go's rateLimitMiddleware) was exceeded. ActorID is

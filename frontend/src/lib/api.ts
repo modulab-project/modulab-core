@@ -1404,12 +1404,14 @@ export interface CustomSource {
   added_at: string;
 }
 
-// GET /v1/admin/store/custom-sources — org-admin/super-admin only.
+// GET /v1/admin/store/custom-sources — super-admin only (elevated from
+// org-admin/super-admin 2026-07-22).
 export function listCustomSources(): Promise<CustomSource[]> {
   return request<CustomSource[]>("/v1/admin/store/custom-sources");
 }
 
-// POST /v1/admin/store/custom-sources — org-admin/super-admin only.
+// POST /v1/admin/store/custom-sources — super-admin only, reauth-free (the
+// "anlegen" case - see main.go's route registration comment).
 // pubkey and token are both optional; leave pubkey empty for an
 // unsigned/unverified custom source, and token empty for a public repo.
 export function addCustomSource(
@@ -1424,7 +1426,26 @@ export function addCustomSource(
   });
 }
 
-// DELETE /v1/admin/store/custom-sources/{id} — org-admin/super-admin only.
+// PATCH /v1/admin/store/custom-sources/{id} — super-admin only, step-up
+// reauth-gated. token is omitted entirely (not sent as "") when the admin
+// left it blank in the edit form - that means "keep the existing token",
+// matching the SMTP/OIDC secret-field convention; sending an empty string
+// would instead explicitly clear it back to a public/unauthenticated repo.
+export function updateCustomSource(
+  id: string,
+  name: string,
+  pubkey: string,
+  token?: string,
+): Promise<CustomSource> {
+  return request<CustomSource>(`/v1/admin/store/custom-sources/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ name, pubkey, ...(token !== undefined ? { token } : {}) }),
+  });
+}
+
+// DELETE /v1/admin/store/custom-sources/{id} — super-admin only, step-up
+// reauth-gated (2026-07-22 - same reasoning as locking a user or deleting
+// an AI provider's key).
 export function deleteCustomSource(id: string): Promise<void> {
   return request<void>(`/v1/admin/store/custom-sources/${encodeURIComponent(id)}`, {
     method: "DELETE",

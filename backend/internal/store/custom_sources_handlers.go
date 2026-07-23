@@ -48,14 +48,12 @@ func toCustomSourceResponse(r db.CustomSourceRow) CustomSourceResponse {
 // ── GET /v1/admin/store/custom-sources ────────────────────────────────────────
 
 // ListCustomSourcesHandler serves GET /v1/admin/store/custom-sources.
-// Requires org-admin or super-admin — same trust boundary as adding one:
-// deliberately not exposed to the plain GET /v1/store list (which already
-// surfaces the resulting module_registry rows to any active session).
+// Super-admin only (main.go wraps this in superAdminOnly) - same trust
+// boundary as adding/changing/removing one: deliberately not exposed to
+// the plain GET /v1/store list (which already surfaces the resulting
+// module_registry rows to any active session).
 func ListCustomSourcesHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := auth.RequireAdminSession(authDeps, w, r); !ok {
-			return
-		}
 		rows, err := d.Pool.ListCustomSources(r.Context())
 		if err != nil {
 			http.Error(w, "failed to list custom sources", http.StatusInternalServerError)
@@ -88,20 +86,23 @@ type addCustomSourceRequest struct {
 }
 
 // AddCustomSourceHandler serves POST /v1/admin/store/custom-sources.
-// Requires org-admin or super-admin. Validates the repo URL, stores the
-// source (encrypted - see db.CreateCustomSource), then does a one-off fetch
-// to populate the Store listing immediately instead of waiting for the next
-// scheduled/manual sync. The fetch failing does not fail the request - the
-// source is still saved, and the admin will see it succeed on the next sync
-// once whatever was wrong (missing manifest.yaml, no releases yet, ...) is
-// fixed - same "save now, verify later" pattern as adding a quick link with
-// an unreachable URL.
+// Super-admin only (main.go wraps this in superAdminOnly - deliberately
+// NOT superAdminReauthOnly: adding a new source is the "anlegen" case,
+// which stays reauth-free per the same policy the AI/search provider key
+// endpoints follow - creating something new to review/act on later is
+// lower-risk than changing or removing an already-trusted one, see
+// UpdateCustomSourceHandler/DeleteCustomSourceHandler below). Validates
+// the repo URL, stores the source (encrypted - see db.CreateCustomSource),
+// then does a one-off fetch to populate the Store listing immediately
+// instead of waiting for the next scheduled/manual sync. The fetch
+// failing does not fail the request - the source is still saved, and the
+// admin will see it succeed on the next sync once whatever was wrong
+// (missing manifest.yaml, no releases yet, ...) is fixed - same "save
+// now, verify later" pattern as adding a quick link with an unreachable
+// URL.
 func AddCustomSourceHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sess, ok := auth.RequireAdminSession(authDeps, w, r)
-		if !ok {
-			return
-		}
+		sess, _ := auth.SessionFromContext(r.Context())
 
 		var req addCustomSourceRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -166,16 +167,17 @@ func AddCustomSourceHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 // ── DELETE /v1/admin/store/custom-sources/{id} ────────────────────────────────
 
 // DeleteCustomSourceHandler serves DELETE /v1/admin/store/custom-sources/{id}.
-// Requires org-admin or super-admin. Removes the source and, best-effort, any
-// module_registry rows it produced right away (see
-// DeleteEntriesBySourceRepo) so the Store list updates immediately rather
-// than only on the next sync.
+// Super-admin only, and step-up reauth-gated (main.go wraps this in
+// superAdminReauthOnly, added 2026-07-22 alongside AddCustomSourceHandler's
+// role elevation): removing a trusted source is the kind of action a
+// compromised-but-still-within-SessionTTL session shouldn't be able to do
+// without a fresh login, same reasoning as locking a user or deleting an
+// AI provider. Removes the source and, best-effort, any module_registry
+// rows it produced right away (see DeleteEntriesBySourceRepo) so the Store
+// list updates immediately rather than only on the next sync.
 func DeleteCustomSourceHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sess, ok := auth.RequireAdminSession(authDeps, w, r)
-		if !ok {
-			return
-		}
+		sess, _ := auth.SessionFromContext(r.Context())
 		id := r.PathValue("id")
 		if id == "" {
 			http.Error(w, "missing id", http.StatusBadRequest)
@@ -224,6 +226,84 @@ func DeleteCustomSourceHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 		})
 
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// ── PATCH /v1/admin/store/custom-sources/{id} ─────────────────────────────────
+
+// updateCustomSourceRequest mirrors search.patchProviderRequest's *string
+// convention: a field absent from the request body is nil (leave
+// unchanged), any field present - including an empty string - is applied
+// as-is. Name/PubKey are echoed back in full either way (they're not
+// secrets), so the frontend always sends both. Token is the one field
+// callers are expected to omit entirely when the admin didn't type a new
+// one - see db.UpdateCustomSource's doc comment.
+type updateCustomSourceRequest struct {
+	Name   *string `json:"name"`
+	PubKey *string `json:"pubkey"`
+	Token  *string `json:"token"`
+}
+
+// UpdateCustomSourceHandler serves PATCH /v1/admin/store/custom-sources/{id}.
+// Added 2026-07-22: until now the only way to react to a maintainer
+// rotating their Cosign key, fix a typo'd display name, or replace an
+// expiring GitHub token was to delete the source and re-add it from
+// scratch - losing added_by/added_at and re-triggering a full initial
+// fetch for no reason. Super-admin only and step-up reauth-gated
+// (superAdminReauthOnly in main.go), same reasoning as
+// DeleteCustomSourceHandler above. repo_url is deliberately not part of
+// the request body - see db.UpdateCustomSource's doc comment for why.
+func UpdateCustomSourceHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, _ := auth.SessionFromContext(r.Context())
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, "missing id", http.StatusBadRequest)
+			return
+		}
+
+		var req updateCustomSourceRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		if req.Name != nil {
+			trimmed := strings.TrimSpace(*req.Name)
+			req.Name = &trimmed
+		}
+		if req.PubKey != nil {
+			trimmed := strings.TrimSpace(*req.PubKey)
+			if trimmed != "" && !strings.Contains(trimmed, "-----BEGIN PUBLIC KEY-----") {
+				http.Error(w, "pubkey must be a PEM-encoded public key (or left empty)", http.StatusBadRequest)
+				return
+			}
+			req.PubKey = &trimmed
+		}
+		if req.Token != nil {
+			trimmed := strings.TrimSpace(*req.Token)
+			req.Token = &trimmed
+		}
+
+		updated, found, err := d.Pool.UpdateCustomSource(r.Context(), id, req.Name, req.PubKey, req.Token)
+		if err != nil {
+			log.Printf("store: update custom source %q: %v", id, err)
+			http.Error(w, "failed to update custom source", http.StatusInternalServerError)
+			return
+		}
+		if !found {
+			http.Error(w, "custom source not found", http.StatusNotFound)
+			return
+		}
+
+		logStoreAudit(r.Context(), authDeps, audit.LogParams{
+			EventType:  audit.EventCustomSourceUpdated,
+			ActorID:    sess.UserID,
+			ActorEmail: sess.Email,
+			Details: fmt.Sprintf(`{"repo_url":%q,"name_changed":%v,"pubkey_changed":%v,"token_changed":%v}`,
+				updated.RepoURL, req.Name != nil, req.PubKey != nil, req.Token != nil),
+		})
+
+		writeJSON(w, http.StatusOK, toCustomSourceResponse(updated))
 	}
 }
 

@@ -12,13 +12,17 @@ import {
   syncStore,
   listCustomSources,
   addCustomSource,
+  updateCustomSource,
   deleteCustomSource,
   type StoreEntry,
   type InstalledModule,
   type CustomSource,
 } from "../lib/api";
 import { useAuthenticatedSession } from "../lib/useSession";
+import { useLoginRedirect } from "../lib/useLoginRedirect";
+import { isReauthRequiredError } from "../lib/authErrors";
 import { AppShell } from "../components/AppShell";
+import { ReauthBanner } from "../components/ReauthBanner";
 import { Logo } from "../components/AuthShell";
 import { isAdminRole } from "../lib/roles";
 import { safeHref } from "../lib/url";
@@ -49,6 +53,13 @@ export default function StorePage() {
   const [showCustomDialog, setShowCustomDialog] = useState(false);
 
   const isAdmin = !!session && isAdminRole(session.role);
+  // Custom module sources were elevated to super-admin-only on the backend
+  // (2026-07-22, alongside adding step-up reauth for edit/delete) - a
+  // GitHub token plus the ability to point Core at arbitrary third-party
+  // code is a higher-value target than typical org-admin-level config.
+  // isAdmin above still gates the rest of this page (browsing/installing
+  // from the Store), which org-admins keep unrestricted access to.
+  const isSuperAdmin = !!session && session.role === "super-admin";
 
   // Redirect stays an effect (imperative router call, not a setState the
   // render-time-adjustment pattern applies to) - kept separate from the
@@ -89,7 +100,7 @@ export default function StorePage() {
   const { data: customSources } = useQuery({
     queryKey: CUSTOM_SOURCES_QUERY_KEY,
     queryFn: listCustomSources,
-    enabled: !loading && isAdmin,
+    enabled: !loading && isSuperAdmin,
   });
 
   async function handleSync() {
@@ -168,14 +179,16 @@ export default function StorePage() {
           </div>
           {isAdmin && (
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setShowCustomDialog(true)}
-                className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-900"
-              >
-                <i className="ti ti-plus text-[14px]" />
-                {t("store.custom.manage")}
-              </button>
+              {isSuperAdmin && (
+                <button
+                  type="button"
+                  onClick={() => setShowCustomDialog(true)}
+                  className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-900"
+                >
+                  <i className="ti ti-plus text-[14px]" />
+                  {t("store.custom.manage")}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={handleSync}
@@ -462,6 +475,31 @@ function CustomSourcesDialog({
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  // Edit (added 2026-07-22 alongside elevating this whole feature to
+  // super-admin-only + step-up reauth): until now, reacting to a
+  // maintainer rotating their Cosign key meant deleting the source and
+  // re-adding it from scratch. editingId identifies which row (if any) is
+  // currently showing its inline edit form instead of its normal display.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editPubkey, setEditPubkey] = useState("");
+  const [editToken, setEditToken] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
+
+  // PATCH (edit) and DELETE are both step-up reauth-gated on the backend
+  // now (main.go's superAdminReauthOnly) - POST (add, above) deliberately
+  // is not, see main.go's route registration comment. One shared banner
+  // for the whole dialog rather than per-row: only one action can be
+  // in flight at a time here anyway (editSaving/deletingId are mutually
+  // exclusive in practice), and a single banner is simpler than tracking
+  // which specific row triggered it.
+  const [reauthRequired, setReauthRequired] = useState(false);
+  const { waiting: reauthWaiting, startLogin } = useLoginRedirect(() => {
+    setReauthRequired(false);
+    setActionError(null);
+  });
 
   async function handleAdd(e: FormEvent) {
     e.preventDefault();
@@ -481,13 +519,54 @@ function CustomSourcesDialog({
     }
   }
 
+  function startEdit(s: CustomSource) {
+    setEditingId(s.id);
+    setEditName(s.name);
+    setEditPubkey(s.pubkey ?? "");
+    setEditToken("");
+    setActionError(null);
+    setReauthRequired(false);
+  }
+
+  async function handleSaveEdit(e: FormEvent) {
+    e.preventDefault();
+    if (!editingId) return;
+    setEditSaving(true);
+    setActionError(null);
+    setReauthRequired(false);
+    try {
+      await updateCustomSource(
+        editingId,
+        editName.trim(),
+        editPubkey.trim(),
+        editToken.trim() ? editToken.trim() : undefined,
+      );
+      setEditingId(null);
+      onChanged();
+    } catch (err) {
+      if (isReauthRequiredError(err)) {
+        setReauthRequired(true);
+      } else {
+        setActionError((err as Error).message || t("store.custom.edit_error"));
+      }
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
   async function handleDelete(id: string) {
     setDeletingId(id);
+    setActionError(null);
+    setReauthRequired(false);
     try {
       await deleteCustomSource(id);
       onChanged();
-    } catch {
-      // Best-effort - the dialog stays open so the admin can retry.
+    } catch (err) {
+      if (isReauthRequiredError(err)) {
+        setReauthRequired(true);
+      } else {
+        setActionError((err as Error).message || t("store.custom.remove_error"));
+      }
     } finally {
       setDeletingId(null);
     }
@@ -515,38 +594,115 @@ function CustomSourcesDialog({
         {/* Existing sources */}
         {sources.length > 0 && (
           <div className="mb-4 flex flex-col gap-2">
-            {sources.map((s) => (
-              <div
-                key={s.id}
-                className="flex items-center justify-between gap-2 rounded-xl border border-gray-200 px-3 py-2 dark:border-gray-800"
-              >
-                <div className="min-w-0">
-                  <p className="flex flex-wrap items-center gap-1.5 break-words text-sm font-medium">
-                    {s.name}
-                    {s.has_token && (
-                      <i
-                        className="ti ti-lock text-[12px] text-gray-400"
-                        title={t("store.custom.private")}
-                      />
-                    )}
-                  </p>
-                  <p className="break-all text-xs text-gray-500 dark:text-gray-400">{s.repo_url}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => handleDelete(s.id)}
-                  disabled={deletingId === s.id}
-                  className="flex-none rounded-lg p-1.5 text-red-500 hover:bg-red-50 disabled:opacity-50 dark:hover:bg-red-950"
-                  title={t("store.custom.remove")}
+            {sources.map((s) =>
+              editingId === s.id ? (
+                <form
+                  key={s.id}
+                  onSubmit={handleSaveEdit}
+                  className="flex flex-col gap-2 rounded-xl border border-teal-300 p-3 dark:border-teal-700"
                 >
-                  <i className={`ti ${deletingId === s.id ? "ti-loader-2 animate-spin" : "ti-trash"} text-[15px]`} />
-                </button>
-              </div>
-            ))}
+                  <p className="break-all text-xs text-gray-500 dark:text-gray-400">{s.repo_url}</p>
+                  <input
+                    type="text"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    placeholder={t("store.custom.name")}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-950"
+                    style={{ fontSize: 16 }}
+                  />
+                  <textarea
+                    value={editPubkey}
+                    onChange={(e) => setEditPubkey(e.target.value)}
+                    placeholder={t("store.custom.pubkey")}
+                    rows={2}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-xs outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-950"
+                    style={{ fontSize: 16 }}
+                  />
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={editToken}
+                    onChange={(e) => setEditToken(e.target.value)}
+                    placeholder={s.has_token ? "•••••••••••• " : t("store.custom.token")}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-xs outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-950"
+                    style={{ fontSize: 16 }}
+                  />
+                  <p className="text-[11px] text-gray-400 dark:text-gray-500">
+                    {t("store.custom.token_keep_hint")}
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="submit"
+                      disabled={editSaving}
+                      className="flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-700 disabled:opacity-50"
+                    >
+                      {editSaving && <i className="ti ti-loader-2 animate-spin text-[12px]" />}
+                      {t("common.save")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingId(null)}
+                      disabled={editSaving}
+                      className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                    >
+                      {t("common.cancel")}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <div
+                  key={s.id}
+                  className="flex items-center justify-between gap-2 rounded-xl border border-gray-200 px-3 py-2 dark:border-gray-800"
+                >
+                  <div className="min-w-0">
+                    <p className="flex flex-wrap items-center gap-1.5 break-words text-sm font-medium">
+                      {s.name}
+                      {s.has_token && (
+                        <i
+                          className="ti ti-lock text-[12px] text-gray-400"
+                          title={t("store.custom.private")}
+                        />
+                      )}
+                    </p>
+                    <p className="break-all text-xs text-gray-500 dark:text-gray-400">{s.repo_url}</p>
+                  </div>
+                  <div className="flex flex-none items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => startEdit(s)}
+                      className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+                      title={t("store.custom.edit")}
+                    >
+                      <i className="ti ti-pencil text-[15px]" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(s.id)}
+                      disabled={deletingId === s.id}
+                      className="rounded-lg p-1.5 text-red-500 hover:bg-red-50 disabled:opacity-50 dark:hover:bg-red-950"
+                      title={t("store.custom.remove")}
+                    >
+                      <i className={`ti ${deletingId === s.id ? "ti-loader-2 animate-spin" : "ti-trash"} text-[15px]`} />
+                    </button>
+                  </div>
+                </div>
+              ),
+            )}
           </div>
         )}
         {sources.length === 0 && (
           <p className="mb-4 text-xs text-gray-400 dark:text-gray-500">{t("store.custom.empty")}</p>
+        )}
+
+        {actionError && !reauthRequired && (
+          <p className="mb-4 text-sm text-red-600 dark:text-red-400">{actionError}</p>
+        )}
+        {reauthRequired && (
+          <ReauthBanner
+            waiting={reauthWaiting}
+            onReauth={() => startLogin({ reauth: true, returnPath: window.location.pathname })}
+            onDismiss={() => setReauthRequired(false)}
+          />
         )}
 
         {/* Warning */}
