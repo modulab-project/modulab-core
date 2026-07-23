@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -930,12 +931,55 @@ func extractZIPEntry(f *zip.File, target string) (int64, error) {
 	return io.Copy(out, rc)
 }
 
+// moduleNameRe restricts manifest.yaml's name field to a safe identifier:
+// lowercase alphanumerics and hyphens, no leading hyphen, matching the
+// naming convention every real module already uses (my-places, recipes,
+// unifi-network). This is what every install/update path uses to build
+// filepath.Join(d.DataDir, mf.Name) — a registry-based Install/Update also
+// cross-checks mf.Name against entry.Name (itself only ever synced from a
+// curated registry.json), but InstallManual/UpdateManual have no such
+// anchor: the manifest is the ONLY source for the name there. Without this
+// check, a manually uploaded ZIP with name: "../../etc/cron.d" would resolve
+// destDir outside DataDir entirely (found 2026-07-23 while reviewing the
+// manual-upload feature - the same unchecked filepath.Join already existed
+// on the registry path too, just harder to reach since the registry itself
+// is curated). Enforced here rather than only in the manual-upload handler
+// so both paths are covered by one check.
+var moduleNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+
+// validateSafeRelativePath rejects a manifest-supplied relative path
+// (handler, egress_hosts_handler, or a job's handler) that could resolve
+// outside the module's own destDir once joined with filepath.Join — an
+// absolute path or a ".." segment would otherwise let a crafted manifest
+// point the Deno worker's entrypoint (or a job's) at an arbitrary file on
+// disk. Empty is allowed through; callers already enforce required-ness
+// separately (e.g. tier >= 2 requires a non-empty Handler, checked below).
+func validateSafeRelativePath(field, p string) error {
+	if p == "" {
+		return nil
+	}
+	if filepath.IsAbs(p) || strings.Contains(p, "\\") {
+		return fmt.Errorf("%s must be a relative path: %q", field, p)
+	}
+	cleaned := filepath.Clean(p)
+	if cleaned == ".." || strings.HasPrefix(cleaned, "../") || strings.HasPrefix(cleaned, "/") {
+		return fmt.Errorf("%s escapes the module directory: %q", field, p)
+	}
+	return nil
+}
+
 // validateManifestTier cross-checks mf.Tier against the fields that actually
 // imply Tier 2/3 capability. Shared by Install and Update so a tier-changing
 // module update is held to the exact same rules as a first install - before
 // this existed, Update skipped tier validation entirely (found 2026-07-16).
+// Also shared by InstallManual/UpdateManual (2026-07-23) - the name/handler
+// path-traversal checks below apply identically regardless of source.
 //
 // Rules, per Pflichtenheft §4.1:
+//   - name must be a safe identifier — see moduleNameRe's doc comment.
+//   - handler / egress_hosts_handler / each job's handler must be a relative
+//     path that cannot escape the module's own directory — see
+//     validateSafeRelativePath's doc comment.
 //   - Tier 1 (config-driven, no worker): must not declare handler/jobs/
 //     egress_allowlist - those are Tier 2/3-only concepts.
 //   - Tier 2/3 (has a Deno worker): must declare a handler, or Workers.Start
@@ -952,6 +996,20 @@ func extractZIPEntry(f *zip.File, target string) (int64, error) {
 //     module installs with no functionality and no clear error explaining
 //     why - see docs/tier1-crud-plan.md.
 func validateManifestTier(mf Manifest) error {
+	if !moduleNameRe.MatchString(mf.Name) {
+		return fmt.Errorf("invalid module name %q (must match %s)", mf.Name, moduleNameRe.String())
+	}
+	if err := validateSafeRelativePath("handler", mf.Handler); err != nil {
+		return err
+	}
+	if err := validateSafeRelativePath("egress_hosts_handler", mf.EgressHostsHandler); err != nil {
+		return err
+	}
+	for _, j := range mf.Jobs {
+		if err := validateSafeRelativePath(fmt.Sprintf("jobs[%s].handler", j.Name), j.Handler); err != nil {
+			return err
+		}
+	}
 	if mf.Tier < 1 || mf.Tier > 3 {
 		return fmt.Errorf("invalid tier %d (must be 1–3)", mf.Tier)
 	}
