@@ -182,48 +182,65 @@ export default function AdminSecurityInfoPage() {
               {!info.active_sessions || info.active_sessions.length === 0 ? (
                 <p className="text-sm text-gray-400 dark:text-gray-500">{t("admin.system_info.no_sessions")}</p>
               ) : (
-                <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800">
-                  <table className="min-w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-200 bg-gray-50 text-left dark:border-gray-800 dark:bg-gray-900">
-                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                          {t("admin.system_info.col_name")}
-                        </th>
-                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                          {t("admin.system_info.col_role")}
-                        </th>
-                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                          {t("admin.system_info.col_login")}
-                        </th>
-                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                          {t("admin.system_info.col_ip")}
-                        </th>
-                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                          {t("admin.system_info.col_device")}
-                        </th>
-                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                          {t("admin.system_info.col_last_active")}
-                        </th>
-                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                          {t("admin.system_info.col_expires")}
-                        </th>
-                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                          <span className="sr-only">{t("admin.system_info.col_actions")}</span>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {info.active_sessions.map((s) => (
-                        <SessionRow
-                          key={s.id}
-                          session={s}
-                          revoking={revokingIds.has(s.id)}
-                          onRevoke={() => handleRevoke(s)}
-                        />
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <>
+                  {/* Desktop/tablet: table. Hidden below the sm breakpoint -
+                      seven columns of tabular data does not fit a phone
+                      screen; see the stacked cards below instead. */}
+                  <div className="hidden overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800 sm:block">
+                    <table className="min-w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-gray-200 bg-gray-50 text-left dark:border-gray-800 dark:bg-gray-900">
+                          <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                            {t("admin.system_info.col_name")}
+                          </th>
+                          <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                            {t("admin.system_info.col_role")}
+                          </th>
+                          <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                            {t("admin.system_info.col_login")}
+                          </th>
+                          <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                            {t("admin.system_info.col_ip")}
+                          </th>
+                          <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                            {t("admin.system_info.col_device")}
+                          </th>
+                          <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                            {t("admin.system_info.col_last_active")}
+                          </th>
+                          <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                            {t("admin.system_info.col_expires")}
+                          </th>
+                          <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                            <span className="sr-only">{t("admin.system_info.col_actions")}</span>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {info.active_sessions.map((s) => (
+                          <SessionRow
+                            key={s.id}
+                            session={s}
+                            revoking={revokingIds.has(s.id)}
+                            onRevoke={() => handleRevoke(s)}
+                          />
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Phone: stacked cards, same data. */}
+                  <div className="flex flex-col gap-2 sm:hidden">
+                    {info.active_sessions.map((s) => (
+                      <SessionCard
+                        key={s.id}
+                        session={s}
+                        revoking={revokingIds.has(s.id)}
+                        onRevoke={() => handleRevoke(s)}
+                      />
+                    ))}
+                  </div>
+                </>
               )}
             </Section>
 
@@ -241,39 +258,55 @@ export default function AdminSecurityInfoPage() {
               {!info.rate_limits || info.rate_limits.length === 0 ? (
                 <p className="text-sm text-gray-400 dark:text-gray-500">{t("admin.system_info.no_rate_limits")}</p>
               ) : (
-                <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800">
-                  <table className="min-w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-200 bg-gray-50 text-left dark:border-gray-800 dark:bg-gray-900">
-                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                          {t("admin.system_info.col_label")}
-                        </th>
-                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                          {t("admin.system_info.col_identifier")}
-                        </th>
-                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                          {t("admin.system_info.col_count")}
-                        </th>
-                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                          {t("admin.system_info.col_resets_in")}
-                        </th>
-                        <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                          <span className="sr-only">{t("admin.system_info.col_actions")}</span>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {info.rate_limits.map((r) => (
-                        <RateLimitRow
-                          key={r.key}
-                          entry={r}
-                          resetting={resettingKeys.has(r.key)}
-                          onReset={() => handleResetRateLimit(r)}
-                        />
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <>
+                  {/* Desktop/tablet: table. Hidden below the sm breakpoint -
+                      see the stacked cards below instead. */}
+                  <div className="hidden overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800 sm:block">
+                    <table className="min-w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-gray-200 bg-gray-50 text-left dark:border-gray-800 dark:bg-gray-900">
+                          <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                            {t("admin.system_info.col_label")}
+                          </th>
+                          <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                            {t("admin.system_info.col_identifier")}
+                          </th>
+                          <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                            {t("admin.system_info.col_count")}
+                          </th>
+                          <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                            {t("admin.system_info.col_resets_in")}
+                          </th>
+                          <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                            <span className="sr-only">{t("admin.system_info.col_actions")}</span>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {info.rate_limits.map((r) => (
+                          <RateLimitRow
+                            key={r.key}
+                            entry={r}
+                            resetting={resettingKeys.has(r.key)}
+                            onReset={() => handleResetRateLimit(r)}
+                          />
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Phone: stacked cards, same data. */}
+                  <div className="flex flex-col gap-2 sm:hidden">
+                    {info.rate_limits.map((r) => (
+                      <RateLimitCard
+                        key={r.key}
+                        entry={r}
+                        resetting={resettingKeys.has(r.key)}
+                        onReset={() => handleResetRateLimit(r)}
+                      />
+                    ))}
+                  </div>
+                </>
               )}
             </Section>
           </div>
@@ -394,6 +427,123 @@ function RateLimitRow({
         </button>
       </td>
     </tr>
+  );
+}
+
+// Phone counterpart of SessionRow - same fields, stacked instead of in
+// table columns so nothing needs whitespace-nowrap/horizontal scroll on a
+// narrow viewport. Same pattern as AdminAuditPage's EntryCard.
+function SessionCard({
+  session,
+  revoking,
+  onRevoke,
+}: {
+  session: ActiveSession;
+  revoking: boolean;
+  onRevoke: () => void;
+}) {
+  const { t } = useTranslation();
+  const device = session.user_agent ? parseUserAgent(session.user_agent, t) : null;
+  return (
+    <div
+      className={`rounded-lg border p-3 text-sm ${
+        session.current
+          ? "border-teal-200 bg-teal-50/60 dark:border-teal-900 dark:bg-teal-950/30"
+          : "border-gray-200 dark:border-gray-800"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-medium text-gray-700 dark:text-gray-300">
+            {session.name || session.email || <span className="text-gray-300 dark:text-gray-600">—</span>}
+          </span>
+          {session.current && (
+            <span className="whitespace-nowrap rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-medium text-teal-700 dark:bg-teal-900 dark:text-teal-300">
+              {t("admin.system_info.session_current")}
+            </span>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={onRevoke}
+          disabled={revoking}
+          className="flex-shrink-0 text-xs font-medium text-red-600 hover:text-red-700 disabled:opacity-50 dark:text-red-400 dark:hover:text-red-300"
+        >
+          {revoking ? t("common.loading") : t("admin.system_info.end_session")}
+        </button>
+      </div>
+      <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+        <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_role")}</dt>
+        <dd>{session.role}</dd>
+        <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_login")}</dt>
+        <dd>{session.created_at ? new Date(session.created_at).toLocaleString() : "—"}</dd>
+        <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_ip")}</dt>
+        <dd className="break-all">{session.ip || "—"}</dd>
+        <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_device")}</dt>
+        <dd title={session.user_agent}>{device ? `${device.browser} · ${device.os}` : "—"}</dd>
+        <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_last_active")}</dt>
+        <dd>
+          {session.last_active_seconds_ago !== undefined
+            ? t("admin.system_info.last_active_ago", { duration: formatDuration(session.last_active_seconds_ago) })
+            : "—"}
+        </dd>
+        <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_expires")}</dt>
+        <dd>
+          {session.expires_in_seconds !== undefined
+            ? t("admin.system_info.expires_in", { duration: formatDuration(session.expires_in_seconds) })
+            : "—"}
+        </dd>
+      </dl>
+    </div>
+  );
+}
+
+// Phone counterpart of RateLimitRow - same reasoning as SessionCard above.
+function RateLimitCard({
+  entry,
+  resetting,
+  onReset,
+}: {
+  entry: SystemInfoRateLimit;
+  resetting: boolean;
+  onReset: () => void;
+}) {
+  const { t } = useTranslation();
+  const overLimit = entry.max !== undefined && entry.max > 0 && entry.count > entry.max;
+  return (
+    <div className="rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-800">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <span className="font-medium text-gray-700 dark:text-gray-300">{entry.label}</span>
+          {entry.display_name ? (
+            <div className="mt-0.5 flex flex-col gap-0.5">
+              <span className="break-all text-xs text-gray-600 dark:text-gray-400">{entry.display_name}</span>
+              <span className="break-all font-mono text-[10px] text-gray-400 dark:text-gray-600">{entry.identifier}</span>
+            </div>
+          ) : (
+            <div className="mt-0.5 break-all font-mono text-xs text-gray-600 dark:text-gray-400">
+              {entry.identifier || "—"}
+            </div>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={onReset}
+          disabled={resetting}
+          className="flex-shrink-0 text-xs font-medium text-red-600 hover:text-red-700 disabled:opacity-50 dark:text-red-400 dark:hover:text-red-300"
+        >
+          {resetting ? t("common.loading") : t("admin.system_info.rate_limit_reset")}
+        </button>
+      </div>
+      <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+        <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_count")}</dt>
+        <dd className={overLimit ? "font-medium text-red-600 dark:text-red-400" : ""}>
+          {entry.max ? `${entry.count} / ${entry.max}` : entry.count}
+        </dd>
+        <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_resets_in")}</dt>
+        <dd>{t("admin.system_info.expires_in", { duration: formatDuration(entry.reset_in_seconds) })}</dd>
+      </dl>
+    </div>
   );
 }
 

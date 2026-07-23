@@ -157,7 +157,7 @@ export default function AdminUsersPage() {
                 >
                   {/* Row 1: name + status badge */}
                   <div className="flex items-center justify-between gap-2">
-                    <p className="min-w-0 truncate font-medium">
+                    <p className="min-w-0 break-words font-medium">
                       {u.name.trim() || u.email}
                       {isSelf && <span className="ml-1.5 text-xs text-gray-400">{t("admin.users.you")}</span>}
                     </p>
@@ -165,8 +165,8 @@ export default function AdminUsersPage() {
                   </div>
                   {/* Row 2: details */}
                   <div className="mt-1 min-w-0 text-xs text-gray-500 dark:text-gray-400">
-                    <p className="truncate">{u.email} · {u.role}</p>
-                    <p className="truncate">{t("admin.users.joined")} {new Date(u.created_at).toLocaleDateString()} · {t("admin.users.last_login")} {new Date(u.last_login_at).toLocaleDateString()}</p>
+                    <p className="break-words">{u.email} · {u.role}</p>
+                    <p className="break-words">{t("admin.users.joined")} {new Date(u.created_at).toLocaleDateString()} · {t("admin.users.last_login")} {new Date(u.last_login_at).toLocaleDateString()}</p>
                   </div>
                   {/* Row 3: action buttons — stacked vertically */}
                   {(status === "pending" || (status === "active" && !isSelf) || status === "locked") && (

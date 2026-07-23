@@ -1603,7 +1603,7 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
               onClick={() => setModelPickerOpen((v) => !v)}
               className="flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
             >
-              <span className="max-w-[80px] truncate">{selectedProvider?.name ?? t("shell.chat.no_provider")}</span>
+              <span className="max-w-[120px] break-words text-left leading-tight">{selectedProvider?.name ?? t("shell.chat.no_provider")}</span>
               <i className="ti ti-chevron-down text-[10px]" />
             </button>
             {modelPickerOpen && providers.length > 0 && (
@@ -1624,14 +1624,14 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
                       }`}
                     >
                       <div className="flex items-center gap-1.5">
-                        <span className="flex-1 truncate font-medium">{p.name}</span>
+                        <span className="flex-1 break-words font-medium">{p.name}</span>
                         {p.has_user_key && (
                           <span className="rounded-full bg-teal-50 px-1.5 py-0.5 text-[10px] text-teal-600 dark:bg-teal-950 dark:text-teal-400">
                             {t("shell.chat.own_key")}
                           </span>
                         )}
                       </div>
-                      <span className="mt-0.5 truncate text-[10px] text-gray-400 dark:text-gray-500">
+                      <span className="mt-0.5 break-words text-[10px] text-gray-400 dark:text-gray-500">
                         {modelLabel}
                         {!p.has_user_key && ` ${t("shell.chat.managed_by")}`}
                       </span>

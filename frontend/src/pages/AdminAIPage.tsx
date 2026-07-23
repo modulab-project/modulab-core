@@ -281,7 +281,7 @@ export default function AdminAIPage() {
                   </span>
                 </div>
                 <div className="mt-1.5 flex items-center justify-between gap-2">
-                  <p className="min-w-0 truncate text-xs text-gray-500 dark:text-gray-400">
+                  <p className="min-w-0 break-all text-xs text-gray-500 dark:text-gray-400">
                     {p.base_url} · {p.default_model}
                     {p.has_admin_key ? "" : t("admin.ai.no_key_suffix")}
                   </p>
@@ -736,10 +736,10 @@ function Overlay({ onClose, children }: { onClose: () => void; children: React.R
     // Click-outside-to-close backdrop; the inner div only stops
     // propagation so clicking the dialog itself doesn't also close it.
     // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
-    <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40" onClick={onClose}>
+    <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
       <div
-        className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-xl dark:border-gray-800 dark:bg-gray-950"
+        className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl border border-gray-200 bg-white p-6 shadow-xl dark:border-gray-800 dark:bg-gray-950"
         onClick={(e) => e.stopPropagation()}
       >
         {children}

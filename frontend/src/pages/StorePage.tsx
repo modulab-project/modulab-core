@@ -521,7 +521,7 @@ function CustomSourcesDialog({
                 className="flex items-center justify-between gap-2 rounded-xl border border-gray-200 px-3 py-2 dark:border-gray-800"
               >
                 <div className="min-w-0">
-                  <p className="flex items-center gap-1.5 truncate text-sm font-medium">
+                  <p className="flex flex-wrap items-center gap-1.5 break-words text-sm font-medium">
                     {s.name}
                     {s.has_token && (
                       <i
@@ -530,7 +530,7 @@ function CustomSourcesDialog({
                       />
                     )}
                   </p>
-                  <p className="truncate text-xs text-gray-500 dark:text-gray-400">{s.repo_url}</p>
+                  <p className="break-all text-xs text-gray-500 dark:text-gray-400">{s.repo_url}</p>
                 </div>
                 <button
                   type="button"

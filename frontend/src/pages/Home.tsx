@@ -572,7 +572,7 @@ function Hero({
           {weatherLocation && (
             <>
               <span>·</span>
-              <span className="max-w-[160px] truncate">{weatherLocation.city}</span>
+              <span className="max-w-[200px] break-words text-left">{weatherLocation.city}</span>
             </>
           )}
           <i className="ti ti-chevron-right text-[11px] text-gray-400" aria-hidden="true" />
@@ -1332,7 +1332,7 @@ function ArticleCard({
             {article.title}
           </p>
           <div className="mt-1 flex items-center gap-1.5 text-[11px] text-gray-400 dark:text-gray-500">
-            <span className="truncate font-medium text-gray-500 dark:text-gray-400">
+            <span className="break-words font-medium text-gray-500 dark:text-gray-400">
               {article.source}
             </span>
             {age && (
@@ -1367,7 +1367,7 @@ function ArticleCard({
           {article.title}
         </p>
         <div className="mt-auto flex items-center gap-1.5 pt-1 text-[11px] text-gray-400 dark:text-gray-500">
-          <span className="truncate font-medium text-gray-500 dark:text-gray-400">
+          <span className="break-words font-medium text-gray-500 dark:text-gray-400">
             {article.source}
           </span>
           {age && (
@@ -1482,8 +1482,8 @@ function FeedsPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
               >
                 <i className="ti ti-rss shrink-0 text-[15px] text-teal-600 dark:text-teal-400" />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{feed.label}</p>
-                  <p className="truncate text-xs text-gray-500 dark:text-gray-400">{feed.url}</p>
+                  <p className="break-words text-sm font-medium">{feed.label}</p>
+                  <p className="break-all text-xs text-gray-500 dark:text-gray-400">{feed.url}</p>
                 </div>
                 {/* Toggle */}
                 <button

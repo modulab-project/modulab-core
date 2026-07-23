@@ -381,7 +381,7 @@ export default function AdminFeedsPage() {
               })}
             </p>
             {importResults.filter(r => !!r.error).map((r, i) => (
-              <p key={i} className="text-xs text-red-600 dark:text-red-400 truncate">✗ {r.label}: {r.error}</p>
+              <p key={i} className="break-words text-xs text-red-600 dark:text-red-400">✗ {r.label}: {r.error}</p>
             ))}
             <button
               type="button"
@@ -421,8 +421,8 @@ export default function AdminFeedsPage() {
               >
                 <i className="ti ti-rss shrink-0 text-[16px] text-teal-600 dark:text-teal-400" />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{feed.label}</p>
-                  <p className="truncate text-xs text-gray-500 dark:text-gray-400">{feed.url}</p>
+                  <p className="break-words text-sm font-medium">{feed.label}</p>
+                  <p className="break-all text-xs text-gray-500 dark:text-gray-400">{feed.url}</p>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   <button
@@ -712,8 +712,8 @@ function OPMLSelectionModal({
                   className="mt-0.5 h-4 w-4 shrink-0 accent-teal-600"
                 />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium leading-tight">{entry.label}</p>
-                  <p className="truncate text-xs text-gray-500 dark:text-gray-400">{entry.url}</p>
+                  <p className="break-words text-sm font-medium leading-tight">{entry.label}</p>
+                  <p className="break-all text-xs text-gray-500 dark:text-gray-400">{entry.url}</p>
                   <div className="mt-0.5 flex flex-wrap gap-1">
                     {entry.already_exists && (
                       <span className="inline-block rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400">
@@ -831,7 +831,7 @@ function FeedModal({
         aria-hidden="true"
       />
       {/* Dialog */}
-      <div className="fixed inset-x-4 top-[20%] z-50 mx-auto max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-gray-800 dark:bg-gray-950">
+      <div className="fixed inset-x-4 top-[20%] z-50 mx-auto max-h-[80vh] max-w-md overflow-y-auto rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-gray-800 dark:bg-gray-950">
         <h2 className="mb-4 text-base font-semibold">
           {feed ? t("admin.feeds.modal.title_edit") : t("admin.feeds.modal.title_add")}
         </h2>

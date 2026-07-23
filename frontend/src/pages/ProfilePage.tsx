@@ -307,22 +307,22 @@ function SessionListItem({
   const device = session.user_agent ? parseUserAgent(session.user_agent, t) : t("profile.sessions_unknown_device");
   return (
     <li
-      className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-sm ${
+      className={`flex flex-col gap-2 rounded-lg border px-3 py-2.5 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-3 ${
         session.current
           ? "border-teal-200 bg-teal-50/60 dark:border-teal-900 dark:bg-teal-950/30"
           : "border-gray-200 dark:border-gray-800"
       }`}
     >
       <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="truncate font-medium">{device}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-medium">{device}</span>
           {session.current && (
             <span className="whitespace-nowrap rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-medium text-teal-700 dark:bg-teal-900 dark:text-teal-300">
               {t("profile.sessions_current")}
             </span>
           )}
         </div>
-        <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
+        <p className="mt-0.5 break-all text-xs text-gray-500 dark:text-gray-400">
           {session.ip || "—"}
           {session.last_active_seconds_ago !== undefined && (
             <> · {t("profile.sessions_last_active", { duration: formatDuration(session.last_active_seconds_ago) })}</>
@@ -334,7 +334,7 @@ function SessionListItem({
         onClick={onRevoke}
         disabled={revoking || session.current}
         title={session.current ? t("profile.sessions_end_self_hint") : undefined}
-        className="flex-shrink-0 text-xs font-medium text-red-600 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-40 dark:text-red-400 dark:hover:text-red-300"
+        className="self-start text-xs font-medium text-red-600 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-40 dark:text-red-400 dark:hover:text-red-300 sm:flex-shrink-0"
       >
         {revoking ? t("common.loading") : t("profile.sessions_end")}
       </button>

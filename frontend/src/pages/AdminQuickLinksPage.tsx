@@ -384,10 +384,10 @@ export default function AdminQuickLinksPage() {
                     <i className={`ti ${link.icon || "ti-link"} text-lg`} />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+                    <p className="break-words text-sm font-medium text-gray-900 dark:text-gray-100">
                       {link.title}
                     </p>
-                    <p className="truncate text-xs text-gray-400 dark:text-gray-500">
+                    <p className="break-all text-xs text-gray-400 dark:text-gray-500">
                       {link.url}
                     </p>
                   </div>

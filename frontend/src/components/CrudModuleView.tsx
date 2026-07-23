@@ -10,7 +10,7 @@
 // same moduleApiFetch/module-scoped-token mechanism a real Tier 2/3 bundle
 // would use - from the API's point of view this is just another module
 // client, nothing special.
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { moduleApiFetch, type InstalledModule } from "../lib/api";
 
@@ -204,45 +204,87 @@ export function CrudModuleView({ mod, token }: { mod: InstalledModule; token: st
       )}
 
       {!loading && rows.length > 0 && (
-        <div className="overflow-x-auto rounded-2xl border border-gray-200 dark:border-gray-800">
-          <table className="min-w-full divide-y divide-gray-200 text-sm dark:divide-gray-800">
-            <thead>
-              <tr className="text-left text-gray-500 dark:text-gray-400">
-                {crud.fields.map((f) => (
-                  <th key={f.name} className="whitespace-nowrap px-4 py-2 font-medium capitalize">
-                    {fieldLabel(f.name)}
-                  </th>
-                ))}
-                <th className="px-4 py-2" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-              {rows.map((row) => (
-                <tr key={String(row.id)}>
+        <>
+          {/* Desktop/tablet: table. Hidden below the sm breakpoint - a
+              schema-driven table can have an arbitrary number of columns,
+              which never fits a phone screen even with horizontal scroll;
+              see the stacked cards below instead. */}
+          <div className="hidden overflow-x-auto rounded-2xl border border-gray-200 dark:border-gray-800 sm:block">
+            <table className="min-w-full divide-y divide-gray-200 text-sm dark:divide-gray-800">
+              <thead>
+                <tr className="text-left text-gray-500 dark:text-gray-400">
                   {crud.fields.map((f) => (
-                    <td key={f.name} className="px-4 py-2">
-                      {f.type === "boolean" ? (row[f.name] ? "✓" : "") : String(row[f.name] ?? "")}
-                    </td>
+                    <th key={f.name} className="whitespace-nowrap px-4 py-2 font-medium capitalize">
+                      {fieldLabel(f.name)}
+                    </th>
                   ))}
-                  <td className="whitespace-nowrap px-4 py-2 text-right">
-                    <button
-                      onClick={() => openEdit(row)}
-                      className="mr-3 text-teal-600 hover:underline dark:text-teal-400"
-                    >
-                      {t("module_page.crud.edit")}
-                    </button>
-                    <button
-                      onClick={() => handleDelete(row)}
-                      className="text-red-600 hover:underline dark:text-red-400"
-                    >
-                      {t("module_page.crud.delete")}
-                    </button>
-                  </td>
+                  <th className="px-4 py-2" />
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                {rows.map((row) => (
+                  <tr key={String(row.id)}>
+                    {crud.fields.map((f) => (
+                      <td key={f.name} className="px-4 py-2">
+                        {f.type === "boolean" ? (row[f.name] ? "✓" : "") : String(row[f.name] ?? "")}
+                      </td>
+                    ))}
+                    <td className="whitespace-nowrap px-4 py-2 text-right">
+                      <button
+                        onClick={() => openEdit(row)}
+                        className="mr-3 text-teal-600 hover:underline dark:text-teal-400"
+                      >
+                        {t("module_page.crud.edit")}
+                      </button>
+                      <button
+                        onClick={() => handleDelete(row)}
+                        className="text-red-600 hover:underline dark:text-red-400"
+                      >
+                        {t("module_page.crud.delete")}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Phone: stacked cards, one per row, field label/value pairs
+              instead of columns. */}
+          <div className="flex flex-col gap-2 sm:hidden">
+            {rows.map((row) => (
+              <div
+                key={String(row.id)}
+                className="rounded-xl border border-gray-200 p-3 text-sm dark:border-gray-800"
+              >
+                <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1">
+                  {crud.fields.map((f) => (
+                    <Fragment key={f.name}>
+                      <dt className="capitalize text-gray-400 dark:text-gray-500">{fieldLabel(f.name)}</dt>
+                      <dd className="break-all text-gray-700 dark:text-gray-300">
+                        {f.type === "boolean" ? (row[f.name] ? "✓" : "—") : String(row[f.name] ?? "—")}
+                      </dd>
+                    </Fragment>
+                  ))}
+                </dl>
+                <div className="mt-3 flex justify-end gap-3">
+                  <button
+                    onClick={() => openEdit(row)}
+                    className="text-teal-600 hover:underline dark:text-teal-400"
+                  >
+                    {t("module_page.crud.edit")}
+                  </button>
+                  <button
+                    onClick={() => handleDelete(row)}
+                    className="text-red-600 hover:underline dark:text-red-400"
+                  >
+                    {t("module_page.crud.delete")}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
       {editing && (

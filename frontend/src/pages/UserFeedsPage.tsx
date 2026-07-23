@@ -88,8 +88,8 @@ export default function UserFeedsPage() {
               >
                 <i className="ti ti-rss shrink-0 text-[15px] text-teal-600 dark:text-teal-400" />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{feed.label}</p>
-                  <p className="truncate text-xs text-gray-500 dark:text-gray-400">{feed.url}</p>
+                  <p className="break-words text-sm font-medium">{feed.label}</p>
+                  <p className="break-all text-xs text-gray-500 dark:text-gray-400">{feed.url}</p>
                 </div>
                 <button
                   type="button"

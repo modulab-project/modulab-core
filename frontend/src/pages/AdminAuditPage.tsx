@@ -655,7 +655,7 @@ export default function AdminAuditPage() {
                           {new Date(first.created_at).toLocaleString()}
                         </span>
                       </div>
-                      <div className="mb-1 truncate text-xs text-gray-500 dark:text-gray-400">
+                      <div className="mb-1 break-words text-xs text-gray-500 dark:text-gray-400">
                         {t("admin.audit.col_target")}: {summarizeTargets(g.entries, t)}
                       </div>
                       <div className="flex items-center gap-1.5 text-sm text-teal-700 dark:text-teal-300">
@@ -745,32 +745,16 @@ function EventBadge({ type }: { type: string }) {
   );
 }
 
-// Renders text that's truncated by default with a click/tap to reveal the
-// full value inline. Replaces a bare hover `title` tooltip, which does not
-// exist on touch devices at all - a phone user previously had no way to see
-// the full details/reason/hash short of squinting at the truncated text.
+// Renders the full value, always - wraps onto new lines instead of hiding
+// any of it behind an ellipsis or a click-to-expand toggle. Details/reason/
+// hash values (e.g. config.system_limits' dozen+ key:value pairs) can make
+// a row tall, but that's preferable to text a phone user can't ever see in
+// full (a hover `title` tooltip doesn't exist on touch devices at all).
 function ExpandableText({ text, className = "" }: { text: string; className?: string }) {
-  const [expanded, setExpanded] = useState(false);
-  if (expanded) {
-    return (
-      <button
-        type="button"
-        onClick={() => setExpanded(false)}
-        className={`min-h-[1.5rem] whitespace-pre-wrap break-words text-left ${className}`}
-      >
-        {text}
-      </button>
-    );
-  }
   return (
-    <button
-      type="button"
-      onClick={() => setExpanded(true)}
-      title={text}
-      className={`block max-w-[70vw] truncate text-left underline decoration-dotted underline-offset-2 sm:max-w-xs ${className}`}
-    >
+    <span className={`block whitespace-pre-wrap break-words text-left ${className}`}>
       {text}
-    </button>
+    </span>
   );
 }
 
