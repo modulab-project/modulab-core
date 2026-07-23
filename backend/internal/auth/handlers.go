@@ -627,6 +627,15 @@ func MeHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "invalid or expired session", http.StatusUnauthorized)
 			return
 		}
+		// Same sliding-cookie reasoning as requireActiveSessionWithToken
+		// (admin.go): ValidateSession already extended the Valkey-side TTL
+		// above, so the cookie's own Max-Age must slide forward with it too,
+		// otherwise a tab that only ever calls GET /v1/auth/me (e.g. on app
+		// boot, or while idle) has its cookie expire exactly SessionTTL after
+		// login regardless of activity - the same bug that motivated adding
+		// this call to requireAdmin/requireActiveSessionWithToken in the
+		// first place, just missed here.
+		setSessionCookie(w, token)
 
 		resp := MeResponse{Session: sess}
 		if issuer, exists, err := setup.IssuerURL(ctx, d.Pool, d.MasterKeyEnv); err == nil && exists {
@@ -673,6 +682,8 @@ func DeleteSelfHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "invalid or expired session", http.StatusUnauthorized)
 			return
 		}
+		// Same sliding-cookie reasoning as MeHandler above.
+		setSessionCookie(w, token)
 		if !requireRecentLogin(w, sess) {
 			return
 		}
@@ -768,6 +779,8 @@ func UserPrefsHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "invalid or expired session", http.StatusUnauthorized)
 			return
 		}
+		// Same sliding-cookie reasoning as MeHandler above.
+		setSessionCookie(w, token)
 
 		switch r.Method {
 		case http.MethodGet:
@@ -850,6 +863,8 @@ func ExportSelfHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "invalid or expired session", http.StatusUnauthorized)
 			return
 		}
+		// Same sliding-cookie reasoning as MeHandler above.
+		setSessionCookie(w, token)
 
 		// Profile row (decrypted).
 		user, found, err := d.Pool.GetUserExportRow(ctx, sess.UserID)

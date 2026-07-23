@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -651,9 +652,19 @@ func ListActiveSessionsForUser(ctx context.Context, d Deps, subject string) ([]A
 	for _, token := range tokens {
 		key := sessionKeyPrefix + token
 		raw, exists, err := d.Valkey.Get(ctx, key)
-		if err != nil || !exists {
-			// Same best-effort treatment as ListActiveSessions - the index
-			// can lag a token that already expired/was revoked on its own.
+		if err != nil {
+			// A transient Valkey error, not evidence the token is actually
+			// dead - skip this entry for this call, but don't unindex it.
+			continue
+		}
+		if !exists {
+			// Genuinely expired/revoked on its own - opportunistic cleanup,
+			// same reasoning as UpdateSessionsRole's stale-token removal
+			// above, instead of only ever relying on the whole set's TTL to
+			// eventually drop it.
+			if err := d.Valkey.RemoveSetMember(ctx, userSessionsKeyPrefix+subject, token); err != nil {
+				log.Printf("auth: list active sessions for user: unindex stale token for %s: %v", subject, err)
+			}
 			continue
 		}
 		var stored storedSession
@@ -714,9 +725,14 @@ func UpdateSessionsRole(ctx context.Context, vk *valkey.Client, subject, role st
 			return fmt.Errorf("auth: load session for role update: %w", err)
 		}
 		if !exists {
-			// Already expired on its own - nothing to rewrite, and not
-			// worth treating as an error (the set itself is cleaned up
-			// lazily, same as RevokeUserSessions).
+			// Already expired on its own - nothing to rewrite. Opportunistic
+			// cleanup: drop this dead token from the per-user index now
+			// instead of leaving it to linger until the whole set's own TTL
+			// lapses - best-effort, since a failed removal here is no worse
+			// than the lazy cleanup this used to rely on exclusively.
+			if err := vk.RemoveSetMember(ctx, userSessionsKeyPrefix+subject, token); err != nil {
+				log.Printf("auth: update sessions role: unindex stale token for %s: %v", subject, err)
+			}
 			continue
 		}
 		// Unmarshals into storedSession, not Session: Role/Locked are the
