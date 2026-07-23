@@ -80,7 +80,10 @@ services:
 
   # ── Traefik (edge proxy + TLS) ───────────────────────────────────────────────
   traefik:
-    image: traefik:v3
+    # Digest-pinned (2026-07-23 security pass): a tag like v3 is a mutable
+    # pointer, so `docker compose pull` weeks later could silently swap in a
+    # different image. Bump this deliberately, not implicitly on every pull.
+    image: traefik:v3@sha256:4299bbed850421258fc5448c2e0e6ad350981d4d335a68de11b92448aedbefe5
     restart: unless-stopped
     command:
       - "--log.level=INFO"
@@ -125,7 +128,8 @@ services:
 
   # ── PostgreSQL ───────────────────────────────────────────────────────────────
   postgres:
-    image: postgres:16-alpine
+    # Digest-pinned - same reasoning as the traefik service above.
+    image: postgres:16-alpine@sha256:16bc17c64a573ef34162af9298258d1aec548232985b33ed7b1eac33ba35c229
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
@@ -145,7 +149,8 @@ services:
 
   # ── Valkey ───────────────────────────────────────────────────────────────────
   valkey:
-    image: valkey/valkey:8-alpine
+    # Digest-pinned - same reasoning as the traefik service above.
+    image: valkey/valkey:8-alpine@sha256:77643d152547b446fc15cbafaff22004545663fcd40c6b28038ad283837baa75
     restart: unless-stopped
     mem_limit: 256m
     cpus: 0.5
@@ -271,7 +276,10 @@ services:
   # version-controlled, do not commit your real key back - keep the edit
   # local to your deployment.
   searxng:
-    image: searxng/searxng:latest
+    # Digest-pinned (2026-07-23 security pass) - was previously "latest"
+    # with no version information at all, the worst case of the mutable-tag
+    # risk described for the other services in this file. Bump deliberately.
+    image: searxng/searxng:latest@sha256:02d441bbb647b7be422d21041420115cddadac4644368f67c7c7f407bbe72e22
     restart: unless-stopped
     environment:
       SEARXNG_BASE_URL: https://${MODULAB_DOMAIN}/searxng/
@@ -292,24 +300,18 @@ services:
       timeout: 5s
       start_period: 10s
       retries: 5
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.searxng.rule=Host(`${MODULAB_DOMAIN}`) && PathPrefix(`/searxng`)"
-      - "traefik.http.routers.searxng.entrypoints=websecure"
-      - "traefik.http.routers.searxng.tls.certresolver=le"
-      - "traefik.http.middlewares.searxng-strip.stripprefix.prefixes=/searxng"
-      # Own copy of the hsts middleware (same settings as the modulab
-      # router's, deploy/docker-compose.yml's nginx service) rather than
-      # referencing that one by name across containers: Traefik's Docker
-      # provider discovers each container's labels independently of Compose's
-      # depends_on, so if searxng is discovered before nginx at startup, a
-      # cross-container "hsts" reference here briefly does not exist yet -
-      # exactly the "middleware \"hsts@docker\" does not exist" error seen in
-      # the logs (2026-07-12). A self-contained definition on this container
-      # removes that race entirely.
-      - "traefik.http.middlewares.searxng-hsts.headers.stsSeconds=31536000"
-      - "traefik.http.routers.searxng.middlewares=searxng-strip,searxng-hsts"
-      - "traefik.http.services.searxng.loadbalancer.server.port=8080"
+    # No Traefik labels here on purpose (2026-07-23 security pass): this
+    # service used to be reachable at https://${MODULAB_DOMAIN}/searxng/
+    # with no auth in front of it, while settings.yml below disables
+    # SearXNG's own rate limiter - together that made it an open,
+    # unauthenticated, unthrottled search proxy for anyone who found the
+    # path. SearXNG only needs to be reachable from Core over
+    # modulab-internal (see internal/searxng/searxng.go), never from the
+    # public internet, so it now has no traefik.enable label at all - Core
+    # reaches it directly via Docker's internal DNS (http://searxng:8080).
+    # If a future need for public access ever comes up, put a
+    # forwardAuth/basic-auth middleware in front of it and re-enable its
+    # limiter in settings.yml before adding a router again.
     networks:
       - modulab-internal
 

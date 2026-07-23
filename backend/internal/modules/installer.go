@@ -895,19 +895,39 @@ func extractZIP(src, destDir string, maxTotalBytes int64) error {
 			return err
 		}
 
-		written, err := extractZIPEntry(f, target)
+		// Per-entry remaining budget (2026-07-23 security pass): pass what's
+		// left of maxTotalBytes into this entry's extraction so a single
+		// highly-compressed entry (deflate can exceed 1000:1) can't write
+		// far past the configured cap before the old post-hoc
+		// totalWritten > maxTotalBytes check below ever ran. maxTotalBytes
+		// <= 0 means "unlimited" (see MaxModuleZIPBytes/handlers.go) - skip
+		// capping the copy in that case, same as before.
+		remaining := int64(-1)
+		if maxTotalBytes > 0 {
+			remaining = maxTotalBytes - totalWritten
+			if remaining < 0 {
+				remaining = 0
+			}
+		}
+		written, err := extractZIPEntry(f, target, remaining)
 		if err != nil {
 			return err
 		}
 		totalWritten += written
-		if totalWritten > maxTotalBytes {
+		if maxTotalBytes > 0 && totalWritten > maxTotalBytes {
 			return fmt.Errorf("extracted size exceeds %d byte limit", maxTotalBytes)
 		}
 	}
 	return nil
 }
 
-func extractZIPEntry(f *zip.File, target string) (int64, error) {
+// extractZIPEntry copies a single zip entry to target. maxBytes bounds how
+// much of the (decompressed) entry is written before extraction aborts with
+// an error - pass a negative value for "unlimited". This is what stops a
+// decompression bomb: without it, io.Copy would happily write the entry's
+// full decompressed size to disk before the caller's running-total check in
+// extractZIP ever got a chance to reject it.
+func extractZIPEntry(f *zip.File, target string, maxBytes int64) (int64, error) {
 	rc, err := f.Open()
 	if err != nil {
 		return 0, err
@@ -928,7 +948,22 @@ func extractZIPEntry(f *zip.File, target string) (int64, error) {
 		}
 	}()
 
-	return io.Copy(out, rc)
+	if maxBytes < 0 {
+		return io.Copy(out, rc)
+	}
+
+	// Read one byte past the limit so an entry that lands exactly on the
+	// budget doesn't get mistaken for one that exceeded it, and so an
+	// oversized entry is detected here instead of silently truncated.
+	limited := io.LimitReader(rc, maxBytes+1)
+	written, err := io.Copy(out, limited)
+	if err != nil {
+		return written, err
+	}
+	if written > maxBytes {
+		return written, fmt.Errorf("zip entry %q exceeds remaining size budget", f.Name)
+	}
+	return written, nil
 }
 
 // moduleNameRe restricts manifest.yaml's name field to a safe identifier:

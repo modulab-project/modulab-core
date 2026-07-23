@@ -7,5 +7,8 @@
 ARG CORE_IMAGE=ghcr.io/modulab-project/modulab-core:latest
 FROM ${CORE_IMAGE} AS core-source
 
-FROM nginx:alpine
+# Pinned to a digest, not just the nginx:alpine tag (2026-07-23 security
+# pass) - same reasoning as the root Dockerfile's base images: a tag is a
+# mutable pointer and a later rebuild could silently pull a different image.
+FROM nginx:alpine@sha256:8b1e78743a03dbb2c95171cc58639fef29abc8816598e27fb910ed2e621e589a
 COPY --from=core-source /app/frontend/dist/ /usr/share/nginx/html/

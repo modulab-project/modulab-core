@@ -1,5 +1,10 @@
 # ── Stage 1: Frontend build ───────────────────────────────────────────────────
-FROM node:26-alpine AS frontend-builder
+# Pinned to a digest, not just the node:26-alpine tag (2026-07-23 security
+# pass): a tag is a mutable pointer, so a rebuild weeks later can silently
+# pull a different (and potentially compromised or behaviorally-changed)
+# image under the same name. Bump this deliberately via Renovate/Dependabot
+# rather than letting `docker build` resolve it implicitly.
+FROM node:26-alpine@sha256:e88a35be04478413b7c71c455cd9865de9b9360e1f43456be5951032d7ac1a66 AS frontend-builder
 
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
@@ -9,7 +14,8 @@ RUN npm run build
 # Output: /app/frontend/dist/
 
 # ── Stage 2: Go build ─────────────────────────────────────────────────────────
-FROM golang:1.26-alpine AS go-builder
+# Same digest-pinning reasoning as the frontend-builder stage above.
+FROM golang:1.26-alpine@sha256:f23e8b227fb4493eabe03bede4d5a32d04092da71962f1fb79b5f7d1e6c2a17f AS go-builder
 
 WORKDIR /app/backend
 COPY backend/go.mod backend/go.sum ./
@@ -18,7 +24,9 @@ COPY backend/ ./
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /modulab-core ./cmd/core
 
 # ── Stage 3: Final image ──────────────────────────────────────────────────────
-FROM debian:bookworm-slim
+# Same digest-pinning reasoning as the frontend-builder stage above - this
+# is the base of the image that actually ships, so it matters most here.
+FROM debian:bookworm-slim@sha256:0104b334637a5f19aa9c983a91b54c89887c0984081f2068983107a6f6c21eeb
 
 # Install Deno (required for Tier 2/3 module handlers) and cosign (required by
 # VerifyCosign, backend/internal/modules/verifier.go, to check official/community

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/smtp"
+	"strings"
 
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
 )
@@ -104,9 +105,30 @@ func send(cfg setup.SMTPRuntimeConfig, msg Message) error {
 // only, one fixed header set. Sufficient for the short, single-paragraph
 // notifications templates.go produces; revisit if a future message
 // actually needs HTML or attachments.
+//
+// from/msg.To/msg.Subject are stripped of CR/LF before being placed into
+// header lines (2026-07-23 security pass): msg.To in particular ultimately
+// derives from the OIDC "email" claim (db.go's UpsertUser stores it with no
+// CRLF validation), so without this a crafted claim value could inject
+// extra header lines into the raw message this function hand-builds via
+// fmt.Sprintf. The actual SMTP MAIL FROM/RCPT TO commands sent separately
+// (net/smtp validates those internally) were never affected - this only
+// hardens the header block written into the DATA payload.
 func buildMessage(from string, msg Message) []byte {
+	from = stripCRLF(from)
+	to := stripCRLF(msg.To)
+	subject := stripCRLF(msg.Subject)
 	return []byte(fmt.Sprintf(
 		"From: %s\r\nTo: %s\r\nSubject: %s\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s\r\n",
-		from, msg.To, msg.Subject, msg.Body,
+		from, to, subject, msg.Body,
 	))
+}
+
+// stripCRLF removes CR and LF from a value destined for a single RFC 5322
+// header line, preventing header/line injection via an attacker-influenced
+// value (e.g. an OIDC email claim with no CRLF validation upstream).
+func stripCRLF(s string) string {
+	s = strings.ReplaceAll(s, "\r", "")
+	s = strings.ReplaceAll(s, "\n", "")
+	return s
 }

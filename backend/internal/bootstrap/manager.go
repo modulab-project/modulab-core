@@ -220,12 +220,44 @@ func (m *Manager) recordSuccess(ip string) {
 	delete(m.attempts, ip)
 }
 
+// clientIP mirrors cmd/core/main.go's clientIP/isTrustedProxyPeer (kept in
+// sync deliberately, duplicated rather than shared since bootstrap must not
+// import the main package): honor X-Forwarded-For, but only when the
+// immediate TCP peer is Traefik itself (loopback/private-range, since
+// Traefik reaches Core over the Docker-internal network).
+//
+// Before this fix (2026-07-23 security pass) this used r.RemoteAddr alone.
+// Behind Traefik that is always the proxy's own address, so every distinct
+// external client's failed bootstrap-token attempts collapsed into one
+// shared bucket - a single unauthenticated actor could trip both the
+// per-address block (failuresBeforeIPBlock) and the process-wide
+// failuresBeforeGlobalPause with a handful of requests, well before a real
+// distributed attack would. Trusting XFF only from a private-range peer
+// keeps that from being spoofable by an untrusted client while fixing the
+// bucketing.
 func clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
+	}
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" && isTrustedProxyPeer(host) {
+		if i := strings.IndexByte(xff, ','); i != -1 {
+			return strings.TrimSpace(xff[:i])
+		}
+		return strings.TrimSpace(xff)
 	}
 	return host
+}
+
+// isTrustedProxyPeer reports whether host (the immediate TCP peer, before
+// any X-Forwarded-For is considered) is a loopback or private-range
+// address. See cmd/core/main.go's identical helper for the full reasoning.
+func isTrustedProxyPeer(host string) bool {
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate()
 }
 
 func generateToken() (string, error) {

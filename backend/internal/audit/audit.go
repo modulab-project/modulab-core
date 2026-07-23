@@ -258,7 +258,7 @@ func Log(ctx context.Context, pool *db.Pool, masterKey string, p LogParams) erro
 
 	// Compute this entry's hash over all fields plus prev_hash, using the
 	// master key as the HMAC secret so the chain is tied to this instance.
-	h := entryHMAC(masterKey, p.EventType, p.ActorID, p.TargetID, prevHash)
+	h := entryHMAC(masterKey, p.EventType, p.ActorID, p.TargetID, actorEmailEnc, targetEmailEnc, detailsEnc, prevHash)
 
 	_, err = pool.Exec(ctx, `
 		INSERT INTO audit_log
@@ -534,16 +534,27 @@ func latestHash(ctx context.Context, pool *db.Pool) (string, error) {
 	return h, nil
 }
 
-// entryHMAC computes HMAC-SHA256 of the entry's non-encrypted fields plus
-// prev_hash. Using the master key as the HMAC secret ties the chain to this
-// specific instance - even if someone copies the DB to another host with a
-// different master key, the hashes will not verify.
-func entryHMAC(masterKey, eventType, actorID, targetID, prevHash string) string {
+// entryHMAC computes HMAC-SHA256 of every stored field (including the
+// encrypted actor/target email and details ciphertexts) plus prev_hash.
+// Using the master key as the HMAC secret ties the chain to this specific
+// instance - even if someone copies the DB to another host with a different
+// master key, the hashes will not verify.
+//
+// actorEmailEnc/targetEmailEnc/detailsEnc were not originally covered here
+// (2026-07-23 security pass) - only eventType/actorID/targetID/prevHash
+// were. That let anyone able to write directly to the audit_log table
+// (compromised DB credentials, a future SQL-injection bug elsewhere)
+// silently rewrite the encrypted email/details columns of an existing row
+// without Verify's chain-integrity check ever noticing, since the HMAC
+// didn't depend on those columns' contents. Including the ciphertexts here
+// closes that gap: any edit to them now breaks the stored hash the same way
+// editing eventType/actorID/targetID already did.
+func entryHMAC(masterKey, eventType, actorID, targetID, actorEmailEnc, targetEmailEnc, detailsEnc, prevHash string) string {
 	mac := hmac.New(sha256.New, []byte(masterKey))
 	// hash.Hash.Write (which hmac.New's Writer wraps) is documented to
 	// never return an error - safe to discard explicitly rather than
 	// thread an error return through a pure hashing helper.
-	_, _ = fmt.Fprintf(mac, "%s|%s|%s|%s", eventType, actorID, targetID, prevHash)
+	_, _ = fmt.Fprintf(mac, "%s|%s|%s|%s|%s|%s|%s", eventType, actorID, targetID, actorEmailEnc, targetEmailEnc, detailsEnc, prevHash)
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
@@ -567,7 +578,8 @@ type VerifyResult struct {
 // integrity" action.
 func Verify(ctx context.Context, pool *db.Pool, masterKey string) (VerifyResult, error) {
 	rows, err := pool.Query(ctx, `
-		SELECT id, event_type, actor_id, target_id, prev_hash, hash
+		SELECT id, event_type, actor_id, target_id,
+		       actor_email_enc, target_email_enc, details_enc, prev_hash, hash
 		FROM audit_log
 		ORDER BY id ASC
 	`)
@@ -583,11 +595,13 @@ func Verify(ctx context.Context, pool *db.Pool, masterKey string) (VerifyResult,
 	)
 	for rows.Next() {
 		var (
-			id                           int64
-			eventType, actorID, targetID string
-			prevHash, hash               string
+			id                                        int64
+			eventType, actorID, targetID              string
+			actorEmailEnc, targetEmailEnc, detailsEnc string
+			prevHash, hash                            string
 		)
-		if err := rows.Scan(&id, &eventType, &actorID, &targetID, &prevHash, &hash); err != nil {
+		if err := rows.Scan(&id, &eventType, &actorID, &targetID,
+			&actorEmailEnc, &targetEmailEnc, &detailsEnc, &prevHash, &hash); err != nil {
 			return VerifyResult{}, fmt.Errorf("audit: verify scan: %w", err)
 		}
 		checked++
@@ -595,7 +609,7 @@ func Verify(ctx context.Context, pool *db.Pool, masterKey string) (VerifyResult,
 			return VerifyResult{OK: false, EntriesChecked: checked, BrokenAtID: id}, nil
 		}
 		first = false
-		if entryHMAC(masterKey, eventType, actorID, targetID, prevHash) != hash {
+		if entryHMAC(masterKey, eventType, actorID, targetID, actorEmailEnc, targetEmailEnc, detailsEnc, prevHash) != hash {
 			return VerifyResult{OK: false, EntriesChecked: checked, BrokenAtID: id}, nil
 		}
 		expected = hash

@@ -1024,7 +1024,15 @@ func secHeadersMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Content-Security-Policy",
 			"default-src 'none'; "+
 				"script-src 'self'; "+
-				"style-src 'self' 'unsafe-inline'; "+
+				// Split the same way as deploy/nginx.conf's CSP (2026-07-23
+				// security pass, keep in sync - see that file's comment for
+				// the reasoning): style-src-elem blocks injected <style>
+				// blocks/<link>s (the actual CSS-exfiltration/selector-abuse
+				// vector), style-src-attr keeps 'unsafe-inline' since a bare
+				// style="..." attribute can't carry attacker-controlled
+				// selectors on its own.
+				"style-src-elem 'self'; "+
+				"style-src-attr 'unsafe-inline'; "+
 				"img-src 'self' data:; "+
 				"connect-src 'self'; "+
 				"object-src 'none'; "+
