@@ -14,8 +14,15 @@ RUN npm run build
 # Output: /app/frontend/dist/
 
 # ── Stage 2: Go build ─────────────────────────────────────────────────────────
-# Same digest-pinning reasoning as the frontend-builder stage above.
-FROM golang:1.26-alpine@sha256:f23e8b227fb4493eabe03bede4d5a32d04092da71962f1fb79b5f7d1e6c2a17f AS go-builder
+# Same digest-pinning reasoning as the frontend-builder stage above. Pinned
+# to the 1.26.5-alpine tag specifically (not just golang:1.26-alpine) since
+# go.mod requires go >= 1.26.5 and, as of this pin, Docker Hub's floating
+# "1.26-alpine" tag was still serving a stale 1.26.4 digest that fails
+# `go mod download` outright ("go.mod requires go >= 1.26.5 (running go
+# 1.26.4)") - found 2026-07-23 when this pin broke the very first local
+# build after being added. Re-verify against go.mod's required version
+# before bumping this digest in the future.
+FROM golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2 AS go-builder
 
 WORKDIR /app/backend
 COPY backend/go.mod backend/go.sum ./
