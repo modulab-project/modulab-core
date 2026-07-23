@@ -566,8 +566,8 @@ func SendTest(cfg SMTPRuntimeConfig, to string) error {
 	return conn.Quit()
 }
 
-// SMTPDeleteHandler clears the SMTP configuration entirely (all six
-// settings keys), returning the instance to "not configured" - the
+// SMTPDeleteHandler clears the SMTP configuration entirely (all seven
+// settings keys, including the legacy TLS flag), returning the instance to "not configured" - the
 // counterpart to SMTPConfigureHandler an admin needs to actually remove a
 // relay rather than only ever being able to overwrite it with different
 // values. After this, SMTPConfigured reports false again and

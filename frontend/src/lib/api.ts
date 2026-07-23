@@ -1050,12 +1050,6 @@ export function streamAIChat(
 
 // ---- Admin system status -------------------------------------------------------
 
-export interface OIDCStatus {
-  configured: boolean;
-  issuer_url?: string;
-  client_id?: string;
-}
-
 export interface SystemStatus {
   oidc: OIDCStatus;
   group_prefix: string;

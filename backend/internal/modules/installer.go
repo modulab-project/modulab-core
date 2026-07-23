@@ -252,8 +252,8 @@ func MaxModuleZIPBytes(ctx context.Context, pool *db.Pool) int64 {
 //  8. Record module in DB with status "installing"
 //  9. Copy module files to permanent DataDir/{name}
 //
-// 10. Run module-supplied SQL migrations (v1: skipped — no migration runner yet)
-// 11. Deno worker registration (post-v1 stub)
+// 10. Run module-supplied SQL migrations
+// 11. Deno worker registration and start
 // 12. Mark module status "active"
 func Install(ctx context.Context, d Deps, entry store.Entry) error {
 	if entry.LatestVersion == "" {

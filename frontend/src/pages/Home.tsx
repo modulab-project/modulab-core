@@ -41,11 +41,6 @@ import { listQuickLinks, type Tile } from "../lib/quicklinks";
 // ProfilePage so the two feel like the same app, not a homepage plus a
 // bolted-on settings screen.
 //
-// Deliberately honest about what is real right now: module installs and
-// bookmarks (spec sections 4.x / 5.x) have no backend yet (Phase 3 of the
-// project roadmap), so there is no tile grid of fake data here, and no
-// notification bell either (no SSE/notifications endpoint exists).
-//
 // Weather widget (spec section 8):
 // - Browser Geolocation API supplies lat/lon on mount (one-time permission
 //   prompt, no stored location on the server).

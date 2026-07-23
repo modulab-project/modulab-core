@@ -46,10 +46,10 @@ function QuickLinkForm({
   const { t, i18n } = useTranslation();
   const lang = i18n.language?.slice(0, 2) ?? "en";
 
-  // When editing an existing tile that points to a module path, start in module mode.
-  const initialMode: FormMode =
-    !initial || initial.url.startsWith("/modules/") ? "url" : "url";
-  const [mode, setMode] = useState<FormMode>(initialMode);
+  // The mode toggle (and module picker) only renders when creating a new tile
+  // (see `!initial` below); editing an existing tile always uses the URL form
+  // regardless of this value, so it always starts as "url".
+  const [mode, setMode] = useState<FormMode>("url");
 
   const [title, setTitle] = useState(initial?.title ?? "");
   const [url, setUrl] = useState(initial?.url ?? "");

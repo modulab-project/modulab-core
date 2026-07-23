@@ -1,5 +1,5 @@
-// This file implements the self-service counterpart to admin.go's
-// systemInfoHandler active-sessions table / RevokeSessionByID: any
+// This file implements the self-service counterpart to cmd/core's
+// systemInfoHandler active-sessions table / session.go's RevokeSessionByID: any
 // approved user (not just a super-admin) can see their own
 // currently-logged-in devices and end one of them, from their own Profile
 // page. Motivation: before this, "I lost my phone, is my session on it

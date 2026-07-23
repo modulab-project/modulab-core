@@ -1598,9 +1598,6 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
     }
   }
 
-  // Derive the active model label for display: user's preferred model when
-  // they have their own key, otherwise the admin-set default.
-
   return (
     // Below sm: inset-x-4 spans the panel edge-to-edge (minus a 16px margin
     // on each side) instead of the fixed 340px/right-4 floating box, which

@@ -1,14 +1,8 @@
 // Command core is the entry point for the modulab-core backend.
 //
-// This commit adds three more admin-only endpoints (internal/auth/admin.go)
-// alongside the existing approve: GET /v1/admin/users now lists every
-// user (not just pending ones), and POST .../lock, POST .../unlock, and
-// DELETE /v1/admin/users/{id} let an org-admin/super-admin revoke or
-// forget someone entirely - previously to revoke access at all
-// short of deleting the row had no API path whatsoever. The Deno
-// subprocess supervisor (spec section 4.7) is still unimplemented - that
-// lands later, as part of the module-pipeline phase of the project
-// roadmap.
+// Wires up HTTP routing, admin endpoints (internal/auth/admin.go), the
+// module installation/update pipeline, and the Deno worker pool
+// (internal/modules/deno.go) that supervises module subprocesses.
 package main
 
 import (
