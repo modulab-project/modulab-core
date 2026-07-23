@@ -25,6 +25,7 @@ const EVENT_TYPE_CATEGORIES: { category: string; types: string[] }[] = [
       "auth.logout",
       "auth.session_revoked_by_admin",
       "auth.session_revoked_by_idp",
+      "auth.reauth_repeated_failures",
     ],
   },
   {

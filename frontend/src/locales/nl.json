@@ -538,6 +538,7 @@
         "auth_logout": "Afmelding",
         "auth_session_revoked_by_admin": "Sessie beëindigd door beheerder",
         "auth_session_revoked_by_idp": "Sessie ingetrokken door identiteitsprovider",
+        "auth_reauth_repeated_failures": "Herhaalde herauthenticatie-mislukkingen",
         "user_approved": "Gebruiker goedgekeurd",
         "user_locked": "Gebruiker vergrendeld",
         "user_unlocked": "Gebruiker ontgrendeld",
@@ -778,6 +779,7 @@
       "core_update_one": "Core-update beschikbaar ({{version}})",
       "core_update_generic": "Core-update beschikbaar",
       "rate_limit_toast": "Rate limit geactiveerd: {{label}} ({{identifier}})",
+      "reauth_failures_toast": "Herhaalde mislukte herauthenticatiepogingen: {{email}} bij {{label}} ({{count}}x)",
       "session_new_toast": "Nieuwe aanmelding vanaf {{ip}}",
       "session_new_anomaly_toast": "⚠️ Aanmelding vanuit een ongebruikelijk land ({{country}}, voorheen {{previousCountry}}) vanaf {{ip}}"
     },

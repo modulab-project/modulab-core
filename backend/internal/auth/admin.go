@@ -9,6 +9,7 @@ package auth
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -33,18 +34,83 @@ import (
 // not to make routine admin work annoying.
 const reauthWindow = 15 * time.Minute
 
+// reauthFailWindow/reauthFailAlertThreshold bound recordReauthFailure below.
+// A single reauth_required response is completely ordinary - anyone who
+// hasn't logged in within the last reauthWindow hits it on their very next
+// step-up action, with nothing suspicious about it. Only *repeated*
+// failures in a short burst are worth an admin's attention: that pattern
+// looks less like "I forgot I'd been idle" and more like a stale/stolen
+// session cookie being used to probe for something it can still get away
+// with. 5 minutes/3 failures is deliberately tighter than reauthWindow
+// itself (15 min) - this is about catching a burst of retries against the
+// same still-stale session, not just "still not reauthenticated".
+const (
+	reauthFailWindow         = 5 * time.Minute
+	reauthFailAlertThreshold = 3
+)
+
 // requireRecentLogin returns true if sess's original login (Session.
 // CreatedAt - stamped once at CreateSession, never touched by the sliding-
 // window TTL refresh) is within reauthWindow. On failure it writes 403 with
 // a machine-readable "reauth_required" body itself and returns false; the
 // frontend (AdminUsersPage.tsx / ProfilePage.tsx) recognises exactly that
 // body and offers a re-login link rather than showing a generic error.
-func requireRecentLogin(w http.ResponseWriter, sess Session) bool {
+//
+// label identifies which step-up-gated action was refused (e.g.
+// "lock_user", "PATCH /v1/admin/oidc") - purely for recordReauthFailure's
+// alert/audit payload, so an admin reviewing a repeated-failures notice
+// knows what was actually being attempted, not just that something was.
+func requireRecentLogin(ctx context.Context, d Deps, w http.ResponseWriter, sess Session, label string) bool {
 	if time.Since(sess.CreatedAt) > reauthWindow {
 		http.Error(w, "reauth_required", http.StatusForbidden)
+		recordReauthFailure(ctx, d, sess, label)
 		return false
 	}
 	return true
+}
+
+// recordReauthFailure counts failed step-up attempts per user (not per IP -
+// unlike main.go's rateLimitMiddleware, this is about a session that is
+// already authenticated but stale, not an anonymous caller, so the OIDC
+// subject is the meaningful bucket key) and alerts admins once repeated
+// failures cross reauthFailAlertThreshold within reauthFailWindow. Mirrors
+// rateLimitMiddleware's own "notify + audit.Log" pair, including the
+// gate to the exact request that crosses the threshold (count ==
+// reauthFailAlertThreshold) rather than firing again on every subsequent
+// failure while the window is still open. Best-effort throughout: a
+// missed alert here must never turn an already-rejected 403 into
+// something worse for the caller, so every failure past this point is
+// only logged, never surfaced to the response.
+func recordReauthFailure(ctx context.Context, d Deps, sess Session, label string) {
+	if d.Valkey == nil {
+		return
+	}
+	count, err := d.Valkey.IncrExpire(ctx, "reauthfail:"+sess.UserID, reauthFailWindow)
+	if err != nil {
+		log.Printf("auth: reauth-fail counter for %s: %v", sess.UserID, err)
+		return
+	}
+	if count != reauthFailAlertThreshold {
+		return
+	}
+	if pubErr := notify.Publish(ctx, d.Valkey, notify.AdminChannel(), notify.Event{
+		Type: "reauth.repeated_failures",
+		Data: map[string]any{"user_id": sess.UserID, "email": sess.Email, "label": label, "count": count},
+	}); pubErr != nil {
+		logNotifyError("reauth-fail-alert", sess.UserID, pubErr)
+	}
+	if masterKey, mkErr := setup.ResolveMasterKey(ctx, d.Pool, d.MasterKeyEnv); mkErr == nil {
+		if auditErr := audit.Log(ctx, d.Pool, masterKey, audit.LogParams{
+			EventType:  audit.EventReauthRepeatedFailures,
+			ActorID:    sess.UserID,
+			ActorEmail: sess.Email,
+			Details:    fmt.Sprintf(`{"label":%q,"count":%d}`, label, count),
+		}); auditErr != nil {
+			log.Printf("auth: audit reauth repeated failures for %s: %v", sess.UserID, auditErr)
+		}
+	} else {
+		log.Printf("auth: audit reauth repeated failures for %s: resolve master key: %v", sess.UserID, mkErr)
+	}
 }
 
 // logRevokeError logs a failed RevokeUserSessions call. Pulled out to one
@@ -175,25 +241,27 @@ func RequireSuperAdminMiddleware(d Deps) func(http.Handler) http.Handler {
 // on top of RequireSuperAdminMiddleware, for the handful of super-admin
 // actions consequential enough to warrant it even though they live outside
 // this package (adminapi.OIDCUpdateHandler/OIDCDeleteHandler,
-// setup.SMTPConfigureHandler/the SMTP delete handler in cmd/core) - see
-// main.go's superAdminReauthOnly for exactly which routes use this instead
-// of the plain superAdminOnly.
+// setup.SMTPConfigureHandler/the SMTP delete handler in cmd/core, and -
+// since 2026-07-22 - ending another user's active session, main.go's
+// revokeSessionHandler) - see main.go's superAdminReauthOnly for exactly
+// which routes use this instead of the plain superAdminOnly.
 //
 // Deliberately NOT applied to every super-admin route: read-only endpoints
 // (system info, audit log, status/test checks) have nothing to step up
-// for, and a few mutating ones are excluded on purpose - rate limits and
-// AI/search provider keys are reversible, low-stakes settings, and ending
-// an active session (DELETE /v1/admin/sessions/{id}) is itself an incident-
-// response action that should never be made slower by an extra login step
-// right when speed matters most.
+// for, and rate limits/AI/search provider keys are excluded on purpose -
+// reversible, low-stakes settings, unlike the credential/trust-root actions
+// this actually gates.
 //
-// OIDC config is the highest-value target of the two routes this actually
+// OIDC config is the highest-value target of the routes this actually
 // gates: it is the trust root the entire login flow depends on - whoever
 // controls IssuerURL/ClientID/ClientSecret can point every future login at
 // an IdP of their own choosing, and log in as anyone. SMTP config is lower
 // stakes but still worth it - anyone who could quietly redirect the
 // instance's outgoing mail could intercept its own pending-approval/
-// account emails, or send convincing phishing "from" this instance.
+// account emails, or send convincing phishing "from" this instance. Ending
+// another user's session was added later: it has the same immediate,
+// hard-to-undo-for-them effect as locking their account, which already got
+// this treatment - see main.go's route registration comment.
 func RequireSuperAdminReauthMiddleware(d Deps) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return RequireSuperAdminMiddleware(d)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -207,7 +275,11 @@ func RequireSuperAdminReauthMiddleware(d Deps) func(http.Handler) http.Handler {
 				http.Error(w, "invalid or expired session", http.StatusUnauthorized)
 				return
 			}
-			if !requireRecentLogin(w, sess) {
+			// label is the route itself, not a fixed name - this middleware
+			// wraps several distinct routes (SMTP/OIDC configure+delete,
+			// admin session revoke), and the method+path is the cheapest
+			// accurate label available at this generic a layer.
+			if !requireRecentLogin(r.Context(), d, w, sess, r.Method+" "+r.URL.Path) {
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -378,7 +450,7 @@ func ApproveUserHandler(d Deps) http.HandlerFunc {
 		// it: a compromised-but-still-within-SessionTTL admin session
 		// approving a malicious pending signup hands that account a
 		// legitimate, fully-privileged role, not just a nuisance.
-		if !requireRecentLogin(w, sess) {
+		if !requireRecentLogin(r.Context(), d, w, sess, "approve_user") {
 			return
 		}
 		subject := r.PathValue("id")
@@ -450,7 +522,7 @@ func LockUserHandler(d Deps) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		if !requireRecentLogin(w, sess) {
+		if !requireRecentLogin(r.Context(), d, w, sess, "lock_user") {
 			return
 		}
 		subject := r.PathValue("id")
@@ -519,7 +591,7 @@ func UnlockUserHandler(d Deps) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		if !requireRecentLogin(w, sess) {
+		if !requireRecentLogin(r.Context(), d, w, sess, "unlock_user") {
 			return
 		}
 		subject := r.PathValue("id")
@@ -567,7 +639,7 @@ func DeleteUserHandler(d Deps) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		if !requireRecentLogin(w, sess) {
+		if !requireRecentLogin(r.Context(), d, w, sess, "delete_user") {
 			return
 		}
 		subject := r.PathValue("id")

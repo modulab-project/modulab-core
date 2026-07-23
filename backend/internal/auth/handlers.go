@@ -690,7 +690,7 @@ func DeleteSelfHandler(d Deps) http.HandlerFunc {
 		}
 		// Same sliding-cookie reasoning as MeHandler above.
 		setSessionCookie(w, token)
-		if !requireRecentLogin(w, sess) {
+		if !requireRecentLogin(ctx, d, w, sess, "delete_self") {
 			return
 		}
 

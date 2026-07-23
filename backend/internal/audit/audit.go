@@ -70,6 +70,16 @@ const (
 	// can tell "I locked them" apart from "the IdP revoked them and Core
 	// caught it automatically".
 	EventSessionRevokedByIdP = "auth.session_revoked_by_idp"
+	// Fired by auth.recordReauthFailure (admin.go) once a caller's step-up
+	// reauth attempts (requireRecentLogin - lock/unlock/approve/delete a
+	// user, self-delete, SMTP/OIDC config, ending another session) fail
+	// repeatedly in a short window. A single failure is routine (session
+	// just hasn't been refreshed recently) and produces no audit entry at
+	// all - only reaching reauthFailAlertThreshold does, since that pattern
+	// looks less like an idle session and more like something probing a
+	// stale/stolen cookie for whatever it can still get away with. Details
+	// carries the specific action label and the failure count.
+	EventReauthRepeatedFailures = "auth.reauth_repeated_failures"
 	// System config events
 	EventConfigSMTP          = "config.smtp"
 	EventConfigSMTPDel       = "config.smtp.deleted"

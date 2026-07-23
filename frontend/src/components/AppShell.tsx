@@ -477,6 +477,29 @@ export function AppShell({
         ...prev,
       ].slice(0, FEED_LIMIT));
     }
+    // Published by auth.recordReauthFailure (admin.go) once a caller's
+    // step-up reauth (lock/unlock/approve/delete a user, self-delete,
+    // SMTP/OIDC config, ending another session) fails repeatedly in a
+    // short window - a single failure is routine and never reaches this
+    // point, only a burst that looks more like a stale/stolen session
+    // cookie being probed than someone who simply hasn't logged in
+    // recently. Same "durable in the audit log regardless, this is just
+    // the live notice" relationship as rate_limit.exceeded above.
+    if (event.type === "reauth.repeated_failures" && isAdmin) {
+      const data = (event.data ?? {}) as { email?: string; label?: string; count?: number };
+      const goToAudit = () => navigate("/admin/audit");
+      const msg = t("shell.notifications_panel.reauth_failures_toast", {
+        email: data.email ?? "?",
+        label: data.label ?? "?",
+        count: data.count ?? "?",
+      });
+      const reviewLabel = t("shell.notifications_panel.review");
+      push({ message: msg, actionLabel: reviewLabel, onAction: goToAudit });
+      setFeed((prev) => [
+        { id: nextFeedItemID++, message: msg, at: Date.now(), actionLabel: reviewLabel, onAction: goToAudit },
+        ...prev,
+      ].slice(0, FEED_LIMIT));
+    }
     // Module-triggered events (Core: WorkerResponse.Notifications, deno.go —
     // published from modules.JobRunner.dispatchJob, jobs.go, under the
     // single generic "module.notification" type). A module's own job code

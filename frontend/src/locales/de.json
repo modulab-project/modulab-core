@@ -538,6 +538,7 @@
         "auth_logout": "Abmeldung",
         "auth_session_revoked_by_admin": "Sitzung von Admin beendet",
         "auth_session_revoked_by_idp": "Sitzung vom Identity Provider widerrufen",
+        "auth_reauth_repeated_failures": "Wiederholte Reauth-Fehlschläge",
         "user_approved": "Benutzer freigegeben",
         "user_locked": "Benutzer gesperrt",
         "user_unlocked": "Benutzer entsperrt",
@@ -778,6 +779,7 @@
       "core_update_one": "Core-Update verfügbar ({{version}})",
       "core_update_generic": "Core-Update verfügbar",
       "rate_limit_toast": "Rate-Limit ausgelöst: {{label}} ({{identifier}})",
+      "reauth_failures_toast": "Wiederholte fehlgeschlagene Reauth-Versuche: {{email}} bei {{label}} ({{count}}×)",
       "session_new_toast": "Neue Anmeldung von {{ip}}",
       "session_new_anomaly_toast": "⚠️ Anmeldung aus ungewöhnlichem Land ({{country}}, zuletzt {{previousCountry}}) von {{ip}}"
     },
