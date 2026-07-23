@@ -111,6 +111,14 @@ type Session struct {
 	CreatedAt         time.Time `json:"created_at"`
 	IP                string    `json:"ip,omitempty"`
 	UserAgent         string    `json:"user_agent,omitempty"`
+	// Country is Cloudflare's CF-IPCountry header (see handlers.go's
+	// loginCountry), captured once at login time alongside IP/UserAgent for
+	// the exact same "logged in from" display purpose - "" whenever the
+	// request didn't pass through Cloudflare (local/direct access), same
+	// caveat as loginCountry's own doc comment. Never read back for any
+	// access-control decision, only for the sessions tables on the Profile
+	// and System Info pages.
+	Country string `json:"country,omitempty"`
 }
 
 // storedSession is the on-the-wire (Valkey) representation of a Session.
@@ -140,7 +148,11 @@ type Session struct {
 // are just as identifying as an email address, so the same
 // feedback_encrypt_at_implementation_time policy applies. CreatedAt stays
 // plaintext: it's a timestamp, explicitly exempt by that same policy (like
-// EmailVerified/Role/Locked below).
+// EmailVerified/Role/Locked below). Country also stays plaintext: a
+// two-letter country code is coarse-grained enough (millions of people
+// share it) that it does not meet that policy's bar, same reasoning
+// lastCountryTTL's doc comment already gives for the separate
+// "lastcountry:" Valkey key this mirrors.
 // RefreshTokenEnc holds the OIDC refresh token issued alongside this
 // session (empty if the IdP did not grant one - see NewProvider's
 // "offline_access" scope comment), GCM-encrypted like every other secret/
@@ -162,6 +174,7 @@ type storedSession struct {
 	CreatedAt            time.Time `json:"created_at"`
 	IPEnc                string    `json:"ip_enc,omitempty"`
 	UserAgentEnc         string    `json:"user_agent_enc,omitempty"`
+	Country              string    `json:"country,omitempty"`
 	RefreshTokenEnc      string    `json:"refresh_token_enc,omitempty"`
 }
 
@@ -204,6 +217,7 @@ func encryptSession(masterKey string, sess Session) (storedSession, error) {
 		CreatedAt:            sess.CreatedAt,
 		IPEnc:                ipEnc,
 		UserAgentEnc:         userAgentEnc,
+		Country:              sess.Country,
 	}, nil
 }
 
@@ -245,6 +259,7 @@ func decryptSession(masterKey string, s storedSession) (Session, error) {
 		CreatedAt:         s.CreatedAt,
 		IP:                ip,
 		UserAgent:         userAgent,
+		Country:           s.Country,
 	}, nil
 }
 
@@ -539,6 +554,7 @@ type ActiveSession struct {
 	CreatedAt            string `json:"created_at,omitempty"`
 	IP                   string `json:"ip,omitempty"`
 	UserAgent            string `json:"user_agent,omitempty"`
+	Country              string `json:"country,omitempty"`
 	LastActiveSecondsAgo int64  `json:"last_active_seconds_ago,omitempty"`
 	ExpiresInSeconds     int64  `json:"expires_in_seconds,omitempty"`
 	Current              bool   `json:"current,omitempty"`
@@ -597,6 +613,7 @@ func ListActiveSessions(ctx context.Context, d Deps) ([]ActiveSession, error) {
 			Role:      sess.Role,
 			IP:        sess.IP,
 			UserAgent: sess.UserAgent,
+			Country:   sess.Country,
 		}
 		if !sess.CreatedAt.IsZero() {
 			as.CreatedAt = sess.CreatedAt.UTC().Format(time.RFC3339)
@@ -682,6 +699,7 @@ func ListActiveSessionsForUser(ctx context.Context, d Deps, subject string) ([]A
 			Role:      sess.Role,
 			IP:        sess.IP,
 			UserAgent: sess.UserAgent,
+			Country:   sess.Country,
 		}
 		if !sess.CreatedAt.IsZero() {
 			as.CreatedAt = sess.CreatedAt.UTC().Format(time.RFC3339)

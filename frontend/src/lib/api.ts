@@ -1100,6 +1100,10 @@ export interface ActiveSession {
   created_at?: string;
   ip?: string;
   user_agent?: string;
+  // Cloudflare's CF-IPCountry header, captured once at login - absent for
+  // sessions created before this field existed, or for logins that never
+  // passed through Cloudflare (e.g. local/direct access).
+  country?: string;
   last_active_seconds_ago?: number;
   expires_in_seconds?: number;
   current?: boolean;

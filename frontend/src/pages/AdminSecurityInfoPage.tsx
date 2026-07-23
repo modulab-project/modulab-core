@@ -184,7 +184,7 @@ export default function AdminSecurityInfoPage() {
               ) : (
                 <>
                   {/* Desktop/tablet: table. Hidden below the sm breakpoint -
-                      seven columns of tabular data does not fit a phone
+                      eight columns of tabular data does not fit a phone
                       screen; see the stacked cards below instead. */}
                   <div className="hidden overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800 sm:block">
                     <table className="min-w-full text-sm">
@@ -201,6 +201,9 @@ export default function AdminSecurityInfoPage() {
                           </th>
                           <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
                             {t("admin.system_info.col_ip")}
+                          </th>
+                          <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
+                            {t("admin.system_info.col_country")}
                           </th>
                           <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
                             {t("admin.system_info.col_device")}
@@ -357,6 +360,9 @@ function SessionRow({
       <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">
         {session.ip || "—"}
       </td>
+      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">
+        {session.country || "—"}
+      </td>
       <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500" title={session.user_agent}>
         {device ? `${device.browser} · ${device.os}` : "—"}
       </td>
@@ -479,6 +485,8 @@ function SessionCard({
         <dd>{session.created_at ? new Date(session.created_at).toLocaleString() : "—"}</dd>
         <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_ip")}</dt>
         <dd className="break-all">{session.ip || "—"}</dd>
+        <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_country")}</dt>
+        <dd>{session.country || "—"}</dd>
         <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_device")}</dt>
         <dd title={session.user_agent}>{device ? `${device.browser} · ${device.os}` : "—"}</dd>
         <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_last_active")}</dt>

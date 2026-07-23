@@ -456,6 +456,7 @@
       "col_role": "Rolle",
       "col_login": "Login-Zeitpunkt",
       "col_ip": "IP-Adresse",
+      "col_country": "Land",
       "col_device": "Gerät",
       "col_last_active": "Letzte Aktivität",
       "col_expires": "Läuft ab",

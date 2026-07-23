@@ -456,6 +456,7 @@
       "col_role": "Rol",
       "col_login": "Inicio de sesión",
       "col_ip": "Dirección IP",
+      "col_country": "País",
       "col_device": "Dispositivo",
       "col_last_active": "Última actividad",
       "col_expires": "Caduca",

@@ -456,6 +456,7 @@
       "col_role": "Rol",
       "col_login": "Ingelogd",
       "col_ip": "IP-adres",
+      "col_country": "Land",
       "col_device": "Apparaat",
       "col_last_active": "Laatst actief",
       "col_expires": "Verloopt",

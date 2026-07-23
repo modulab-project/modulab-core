@@ -491,6 +491,12 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 			}
 		}
 
+		// Read once here so both the stored Session (for the sessions
+		// tables) and the anomaly check below (checkAndRecordLoginCountry)
+		// use the exact same value from this one request - see loginCountry's
+		// doc comment for what "" means here.
+		country := loginCountry(r)
+
 		token, err := CreateSession(ctx, d, Session{
 			UserID:            claims.Subject,
 			Email:             claims.Email,
@@ -503,6 +509,7 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 			CreatedAt:         time.Now(),
 			IP:                clientIP(r),
 			UserAgent:         r.Header.Get("User-Agent"),
+			Country:           country,
 		}, refreshToken)
 		if err != nil {
 			redirectToFrontend(w, r, target, url.Values{"error": {"server_error"}})
@@ -544,7 +551,6 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 		// access bypassing Cloudflare), in which case anomaly is always
 		// false and this degrades to a plain "new login" notice with no
 		// country claim.
-		country := loginCountry(r)
 		anomaly, previousCountry := checkAndRecordLoginCountry(ctx, d.Valkey, claims.Subject, country)
 		if pubErr := notify.Publish(ctx, d.Valkey, notify.UserChannel(claims.Subject), notify.Event{
 			Type: "session.new",
