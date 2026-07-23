@@ -788,6 +788,7 @@ func main() {
 	mux.HandleFunc("GET /v1/modules/{name}", modules.GetInstalledHandler(moduleDeps, authDeps))
 	mux.HandleFunc("GET /v1/modules/{name}/egress-hosts", modules.GetModuleEgressHostsHandler(moduleDeps, authDeps))
 	mux.HandleFunc("POST /v1/modules/install", modules.InstallHandler(moduleDeps, storeDeps, authDeps))
+	mux.HandleFunc("POST /v1/modules/install-manual", modules.InstallManualHandler(moduleDeps, authDeps))
 	mux.HandleFunc("DELETE /v1/modules/{name}", modules.UninstallHandler(moduleDeps, authDeps))
 	mux.HandleFunc("POST /v1/modules/{name}/update", modules.UpdateModuleHandler(moduleDeps, storeDeps, authDeps))
 	mux.HandleFunc("POST /v1/modules/{name}/restart", modules.RestartModuleHandler(moduleDeps, authDeps))
@@ -943,7 +944,7 @@ func (r *responseRecorder) WriteHeader(code int) {
 //
 // multipart/form-data requests are exempt: every file-upload handler in
 // Core (modules.ModuleProxyHandler's photo/image uploads, news.go's OPML
-// importer, modules.AdminInstallHandler's module ZIP upload) already parses
+// importer, modules.InstallManualHandler's module ZIP upload) already parses
 // its own body with its own, separately-configured limit via
 // http.MaxBytesReader/ParseMultipartForm. Nesting this generic cap
 // underneath those silently wins whenever it happens to be the smaller of

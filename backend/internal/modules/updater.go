@@ -307,6 +307,149 @@ func Update(ctx context.Context, d Deps, entry store.Entry) error {
 	return nil
 }
 
+// UpdateManual upgrades an already-installed module using a freshly
+// uploaded ZIP file (as opposed to Update, which downloads the new version
+// from a registry entry's URLs). zipPath is a file already on disk — same
+// convention as InstallManual (installer.go), ownership stays with the
+// caller.
+//
+// Mirrors Update from "extract new ZIP" onward, but:
+//   - No rollback-cache step. Update's step 2 re-downloads the *currently
+//     installed* version from row.ReleaseURL to snapshot it before
+//     overwriting — a manually installed module has release_url == ""
+//     (nothing to re-download), so there is nothing to snapshot. A failed
+//     UpdateManual therefore has no automatic rollback: d.rollback below is
+//     still called for consistency (same failure-path logging/status
+//     handling as Update), but always with cachedZip == "", so it can only
+//     mark the module "failed", never actually restore the previous code.
+//   - No SHA256/Cosign verification, same reasoning as InstallManual.
+//   - source stays "manual" — an update via re-upload doesn't change how
+//     the module was originally obtained.
+func UpdateManual(ctx context.Context, d Deps, zipPath string) error {
+	// The uploaded ZIP's manifest.yaml is the only way to know which module
+	// this even is — read it before touching the DB.
+	peekDir, err := os.MkdirTemp("", "modulab-update-manual-peek-*")
+	if err != nil {
+		return fmt.Errorf("modules: update manual: create temp dir: %w", err)
+	}
+	defer func() {
+		if err := os.RemoveAll(peekDir); err != nil {
+			log.Printf("modules: update manual: cleanup peek dir %s: %v", peekDir, err)
+		}
+	}()
+	maxZIPBytes := MaxModuleZIPBytes(ctx, d.DB)
+	if err := extractZIP(zipPath, peekDir, maxZIPBytes); err != nil {
+		return fmt.Errorf("modules: update manual: extract zip: %w", err)
+	}
+	mf, err := parseManifest(filepath.Join(peekDir, "manifest.yaml"))
+	if err != nil {
+		return fmt.Errorf("modules: update manual: %w", err)
+	}
+
+	// ── Guard: installed, not pinned ───────────────────────────────────────
+	row, exists, err := d.DB.GetInstalledModule(ctx, mf.Name)
+	if err != nil {
+		return fmt.Errorf("modules: update manual %q: lookup: %w", mf.Name, err)
+	}
+	if !exists {
+		return fmt.Errorf("modules: update manual %q: not installed", mf.Name)
+	}
+	if row.Pinned {
+		return fmt.Errorf("modules: update manual %q: module is pinned", mf.Name)
+	}
+
+	if err := validateManifestTier(mf); err != nil {
+		return fmt.Errorf("modules: update manual %q: %w", mf.Name, err)
+	}
+
+	manifestJSON, err := json.Marshal(mf)
+	if err != nil {
+		return fmt.Errorf("modules: update manual %q: marshal manifest: %w", mf.Name, err)
+	}
+
+	gotHex, err := hashSHA256File(zipPath)
+	if err != nil {
+		return fmt.Errorf("modules: update manual %q: hash zip: %w", mf.Name, err)
+	}
+
+	// extractDir reuses peekDir's already-extracted content rather than
+	// re-extracting — peekDir was only ever read from (manifest parse), not
+	// written into by anything else, so it's still exactly what copyDir
+	// needs below.
+	extractDir := peekDir
+
+	// ── Swap module files (extractDir → DataDir/{name}) ───────────────────
+	// Identical atomic dir-swap as Update's step 8 — see that function's
+	// comments for why the rename-twice dance and storage-dir preservation
+	// exist.
+	destDir := filepath.Join(d.DataDir, mf.Name)
+	newDir := destDir + ".new-" + mf.Version
+	if err := os.MkdirAll(newDir, 0o750); err != nil {
+		return d.rollback(ctx, mf.Name, "", fmt.Errorf("create new dir: %w", err))
+	}
+	if err := copyDir(extractDir, newDir); err != nil {
+		if rmErr := os.RemoveAll(newDir); rmErr != nil {
+			log.Printf("modules: update manual %q: cleanup %s after failed copy: %v", mf.Name, newDir, rmErr)
+		}
+		return d.rollback(ctx, mf.Name, "", fmt.Errorf("copy new files: %w", err))
+	}
+	oldDir := destDir + ".old-" + row.Version
+	if err := os.Rename(destDir, oldDir); err != nil {
+		if rmErr := os.RemoveAll(newDir); rmErr != nil {
+			log.Printf("modules: update manual %q: cleanup %s after failed rename: %v", mf.Name, newDir, rmErr)
+		}
+		return d.rollback(ctx, mf.Name, "", fmt.Errorf("move old dir: %w", err))
+	}
+	if err := os.Rename(newDir, destDir); err != nil {
+		if restoreErr := os.Rename(oldDir, destDir); restoreErr != nil {
+			log.Printf("modules: update manual %q: CRITICAL: could not restore %s after failed activation, module directory may be missing: %v", mf.Name, oldDir, restoreErr)
+		}
+		if rmErr := os.RemoveAll(newDir); rmErr != nil {
+			log.Printf("modules: update manual %q: cleanup %s after failed rename: %v", mf.Name, newDir, rmErr)
+		}
+		return d.rollback(ctx, mf.Name, "", fmt.Errorf("move new dir: %w", err))
+	}
+	oldStorageDir := filepath.Join(oldDir, "storage")
+	if _, err := os.Stat(oldStorageDir); err == nil {
+		newStorageDir := filepath.Join(destDir, "storage")
+		if err := os.Rename(oldStorageDir, newStorageDir); err != nil {
+			log.Printf("modules: update manual %q: could not preserve storage dir (uploaded files may be lost): %v", mf.Name, err)
+		}
+	}
+	if err := os.RemoveAll(oldDir); err != nil {
+		log.Printf("modules: update manual %q: could not remove superseded dir %s: %v", mf.Name, oldDir, err)
+	}
+
+	// ── Module migrations ───────────────────────────────────────────────────
+	newMigrationsDir := filepath.Join(extractDir, "migrations")
+	if err := runModuleUpdateMigrations(ctx, d, mf.Name, newMigrationsDir); err != nil {
+		return d.rollback(ctx, mf.Name, "", fmt.Errorf("migrations: %w", err))
+	}
+
+	if mf.Tier == 1 {
+		if err := validateCrudTable(ctx, d, mf.Name, mf.Crud); err != nil {
+			return d.rollback(ctx, mf.Name, "", err)
+		}
+	}
+
+	// ── Update DB row ───────────────────────────────────────────────────────
+	// source stays "manual" — updateInstalledModuleRecord doesn't touch the
+	// source column at all (see its own doc comment), so nothing extra is
+	// needed here to keep it from flipping to something else.
+	if err := d.updateInstalledModuleRecord(ctx, mf.Name, mf.Version, mf.Tier, gotHex, "", manifestJSON, false, ""); err != nil {
+		return fmt.Errorf("modules: update manual %q: db update: %w", mf.Name, err)
+	}
+	if _, err := d.DB.UpdateModuleStatus(ctx, mf.Name, db.ModuleStatusActive); err != nil {
+		return fmt.Errorf("modules: update manual %q: mark active: %w", mf.Name, err)
+	}
+	if err := d.DB.SetModuleAvailableVersion(ctx, mf.Name, ""); err != nil {
+		log.Printf("modules: update manual %q: could not clear available_version: %v", mf.Name, err)
+	}
+
+	log.Printf("modules: updated %q %s → %s manually (unverified)", mf.Name, row.Version, mf.Version)
+	return nil
+}
+
 // rollback attempts to restore a module to its previous state using the cached
 // ZIP, then returns a wrapped error combining the original failure with any
 // rollback error.

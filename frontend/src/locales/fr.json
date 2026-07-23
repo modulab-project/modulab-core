@@ -994,6 +994,13 @@
       "signed_hint": "Cette source personnalisée dispose d'une clé publique — la signature de la version peut être vérifiée.",
       "unverified": "non vérifiée",
       "unverified_hint": "Cette source personnalisée n'a pas de clé publique — elle s'installe sans vérification de signature."
+    },
+    "manual": {
+      "upload": "Téléverser un ZIP",
+      "uploading": "Téléversement…",
+      "upload_ok": "{{name}} {{version}} installé depuis le ZIP téléversé (non vérifié).",
+      "upload_error": "Échec de l'installation manuelle",
+      "view_installed": "Voir dans les modules installés"
     }
   },
   "modules": {

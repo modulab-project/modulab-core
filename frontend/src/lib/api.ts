@@ -1470,6 +1470,29 @@ export function installModule(name: string): Promise<InstalledModule> {
   });
 }
 
+// POST /v1/modules/install-manual — org-admin/super-admin only. Multipart
+// upload of a module ZIP with no registry entry behind it (see
+// modules.InstallManualHandler in the backend) — installs it fresh, or
+// updates it in place if a module with the same name (read from the ZIP's
+// own manifest.yaml) is already installed. Unlike installModule/
+// updateModule, there is no signature/checksum verification against a
+// registry-published one — the resulting module's source is "manual" and
+// cosign_verified is always false, see StorePage.tsx's badge for this case.
+export async function installManualModule(file: File): Promise<InstalledModule> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_BASE_URL}/v1/modules/install-manual`, {
+    method: "POST",
+    credentials: "include",
+    body: form,
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new ApiError(res.status, text || res.statusText);
+  }
+  return res.json();
+}
+
 // DELETE /v1/modules/{name} — org-admin/super-admin only.
 export function uninstallModule(name: string): Promise<void> {
   return request<void>(`/v1/modules/${encodeURIComponent(name)}`, { method: "DELETE" });

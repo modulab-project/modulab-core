@@ -3,6 +3,8 @@ package modules
 import (
 	"archive/zip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -509,6 +511,143 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 	return nil
 }
 
+// InstallManual installs a module from a locally uploaded ZIP file (as
+// opposed to Install, which downloads one from a registry entry's URLs).
+// zipPath is a file already on disk (the HTTP handler writes the uploaded
+// multipart body there before calling this) — ownership of that file stays
+// with the caller, InstallManual only reads it.
+//
+// Mirrors Install from step 6 onward (extract → parse manifest → validate
+// tier → DB insert → copy files → migrations → Deno worker), but skips
+// everything download/signature-related:
+//   - No registry entry, so no zipURL/sha256URL/sigURL to resolve.
+//   - No Cosign verification — there is no signature to check for a file
+//     that never went through the official/community/custom release
+//     pipeline. cosign_verified is persisted as false, and the source is
+//     recorded as "manual" so the Store UI shows an "unverified" badge
+//     instead of silently implying the same trust level as a signed source.
+//   - sha256 is still computed (VerifySHA256 with expectedHex == the just-
+//     computed hash, i.e. always "matches") purely so the column is
+//     populated for System Info / audit purposes, not as a security check.
+func InstallManual(ctx context.Context, d Deps, zipPath string) error {
+	maxZIPBytes := MaxModuleZIPBytes(ctx, d.DB)
+
+	// ── Extract ZIP to a scratch dir so we can read manifest.yaml before
+	// touching the DB or any installed_modules row ────────────────────────
+	tmpDir, err := os.MkdirTemp("", "modulab-install-manual-*")
+	if err != nil {
+		return fmt.Errorf("modules: install manual: create temp dir: %w", err)
+	}
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			log.Printf("modules: install manual: cleanup temp dir %s: %v", tmpDir, err)
+		}
+	}()
+
+	extractDir := filepath.Join(tmpDir, "extracted")
+	if err := extractZIP(zipPath, extractDir, maxZIPBytes); err != nil {
+		return fmt.Errorf("modules: install manual: extract zip: %w", err)
+	}
+
+	mf, err := parseManifest(filepath.Join(extractDir, "manifest.yaml"))
+	if err != nil {
+		return fmt.Errorf("modules: install manual: %w", err)
+	}
+	if err := validateManifestTier(mf); err != nil {
+		return fmt.Errorf("modules: install manual %q: %w", mf.Name, err)
+	}
+
+	// ── Guard: not already installed (mirrors Install's step 1, moved here
+	// since the module name is only known once the manifest is parsed) ────
+	_, exists, err := d.DB.GetInstalledModule(ctx, mf.Name)
+	if err != nil {
+		return fmt.Errorf("modules: install manual %q: check existing: %w", mf.Name, err)
+	}
+	if exists {
+		return fmt.Errorf("modules: install manual %q: already installed", mf.Name)
+	}
+
+	// sha256 is computed for record-keeping only (System Info / audit) —
+	// there is no separate .sha256 sidecar file to verify a manual upload
+	// against, so this is plain hashing, not VerifySHA256's mismatch check.
+	gotHex, err := hashSHA256File(zipPath)
+	if err != nil {
+		return fmt.Errorf("modules: install manual %q: hash zip: %w", mf.Name, err)
+	}
+
+	manifestJSON, err := json.Marshal(mf)
+	if err != nil {
+		return fmt.Errorf("modules: install manual %q: marshal manifest: %w", mf.Name, err)
+	}
+
+	// ── DB insert (status = installing) ────────────────────────────────────
+	if err := d.DB.InsertInstalledModule(ctx,
+		mf.Name, mf.Version, mf.Tier,
+		"manual", "", gotHex, manifestJSON, false, "",
+	); err != nil {
+		return fmt.Errorf("modules: install manual %q: db insert: %w", mf.Name, err)
+	}
+
+	// ── Copy module files to DataDir/{name} ────────────────────────────────
+	destDir := filepath.Join(d.DataDir, mf.Name)
+	if err := os.MkdirAll(destDir, 0o750); err != nil {
+		_, _ = d.DB.UpdateModuleStatus(ctx, mf.Name, db.ModuleStatusFailed)
+		return fmt.Errorf("modules: install manual %q: create dest dir: %w", mf.Name, err)
+	}
+	if err := copyDir(extractDir, destDir); err != nil {
+		_, _ = d.DB.UpdateModuleStatus(ctx, mf.Name, db.ModuleStatusFailed)
+		return fmt.Errorf("modules: install manual %q: copy files: %w", mf.Name, err)
+	}
+
+	// ── Module SQL migrations ──────────────────────────────────────────────
+	migrationsDir := filepath.Join(extractDir, "migrations")
+	if err := runModuleMigrations(ctx, d, mf.Name, migrationsDir); err != nil {
+		_, _ = d.DB.UpdateModuleStatus(ctx, mf.Name, db.ModuleStatusFailed)
+		return fmt.Errorf("modules: install manual %q: migrations: %w", mf.Name, err)
+	}
+
+	// ── Tier 1: cross-check crud against the migrated table ────────────────
+	if mf.Tier == 1 {
+		if err := validateCrudTable(ctx, d, mf.Name, mf.Crud); err != nil {
+			_, _ = d.DB.UpdateModuleStatus(ctx, mf.Name, db.ModuleStatusFailed)
+			return fmt.Errorf("modules: install manual %q: %w", mf.Name, err)
+		}
+	}
+
+	// ── Deno worker registration ────────────────────────────────────────────
+	if mf.Tier >= 2 {
+		opts := WorkerOptions{
+			EgressHosts:   mf.EgressAllowlist,
+			Jobs:          ResolveJobEntrypoints(destDir, mf.Jobs, mf.EgressHostsHandler),
+			SkipTLSVerify: mf.TLSSkipVerify,
+		}
+		if err := d.Workers.Start(mf.Name, filepath.Join(destDir, mf.Handler), opts); err != nil {
+			_, _ = d.DB.UpdateModuleStatus(ctx, mf.Name, db.ModuleStatusFailed)
+			return fmt.Errorf("modules: install manual %q: start deno worker: %w", mf.Name, err)
+		}
+		if mf.DynamicEgress && mf.EgressHostsHandler != "" {
+			if hosts, ok := d.Workers.QueryEgressHosts(ctx, mf.Name); ok {
+				if err := d.Workers.ReloadEgress(mf.Name, hosts); err != nil {
+					log.Printf("modules: install manual %q: initial egress hosts reload failed: %v", mf.Name, err)
+				}
+			}
+		}
+	}
+
+	// ── Mark active ─────────────────────────────────────────────────────────
+	if _, err := d.DB.UpdateModuleStatus(ctx, mf.Name, db.ModuleStatusActive); err != nil {
+		if mf.Tier >= 2 {
+			if stopErr := d.Workers.Stop(mf.Name); stopErr != nil {
+				log.Printf("modules: install manual %q: stop orphaned worker after failed activate: %v", mf.Name, stopErr)
+			}
+		}
+		return fmt.Errorf("modules: install manual %q: mark active: %w", mf.Name, err)
+	}
+
+	log.Printf("modules: installed %q %s manually (tier %d, unverified)", mf.Name, mf.Version, mf.Tier)
+	return nil
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 // resolveCustomSourceToken looks up the GitHub PAT for a private custom
@@ -678,6 +817,30 @@ func downloadFile(ctx context.Context, url, path string, maxBytes int64, token s
 		return fmt.Errorf("response from %s exceeds %d byte limit", url, maxBytes)
 	}
 	return nil
+}
+
+// hashSHA256File computes the hex-encoded SHA-256 digest of path, with no
+// comparison against an expected value — used by InstallManual/UpdateManual
+// to populate the sha256 column for a manual upload, where there is no
+// separate .sha256 sidecar file to check against (see VerifySHA256 in
+// verifier.go for the download-and-verify counterpart used by every other
+// source).
+func hashSHA256File(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("hash sha256: open %q: %w", path, err)
+	}
+	defer func() {
+		if err := f.Close(); err != nil {
+			log.Printf("modules: hashSHA256File: close %s: %v", path, err)
+		}
+	}()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", fmt.Errorf("hash sha256: hash %q: %w", path, err)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // readHexFile reads a .sha256 file and returns its trimmed content.

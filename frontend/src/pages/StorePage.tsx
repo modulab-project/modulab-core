@@ -9,6 +9,7 @@ import {
   listStore,
   listInstalledModules,
   installModule,
+  installManualModule,
   syncStore,
   listCustomSources,
   addCustomSource,
@@ -51,6 +52,8 @@ export default function StorePage() {
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [busyName, setBusyName] = useState<string | null>(null);
   const [showCustomDialog, setShowCustomDialog] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const isAdmin = !!session && isAdminRole(session.role);
   // Custom module sources were elevated to super-admin-only on the backend
@@ -131,6 +134,29 @@ export default function StorePage() {
     }
   }
 
+  // Handles a manually uploaded module ZIP (no registry entry) — the
+  // installed module doesn't show up in `entries` below (that list is
+  // registry-driven), so the only feedback here is uploadMsg + a link to
+  // the installed-modules page, where it will appear like any other module.
+  async function handleManualUpload(file: File) {
+    setUploading(true);
+    setUploadMsg(null);
+    try {
+      const mod = await installManualModule(file);
+      setUploadMsg({ ok: true, text: t("store.manual.upload_ok", { name: mod.name, version: mod.version }) });
+      // Different query key than STORE_QUERY_KEY (this page's registry+installed
+      // merge) - the installed-modules list lives on ModulesPage.tsx under its
+      // own "installed-modules" key, invalidated here too so it doesn't show
+      // stale data if the admin navigates there right after.
+      queryClient.invalidateQueries({ queryKey: ["installed-modules"] });
+      queryClient.invalidateQueries({ queryKey: STORE_QUERY_KEY });
+    } catch (e) {
+      setUploadMsg({ ok: false, text: `${t("store.manual.upload_error")}: ${(e as Error).message}` });
+    } finally {
+      setUploading(false);
+    }
+  }
+
   if (loading || !session || !isAdmin) return null;
 
   const lng = i18nInstance.language?.slice(0, 2) ?? "en";
@@ -198,9 +224,48 @@ export default function StorePage() {
                 <i className={`ti ti-refresh text-[14px] ${syncing ? "animate-spin" : ""}`} />
                 {syncing ? t("store.syncing") : t("store.sync")}
               </button>
+              <label
+                className={`flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-900 ${
+                  uploading ? "cursor-not-allowed opacity-50" : "cursor-pointer"
+                }`}
+              >
+                <i className={`ti ${uploading ? "ti-loader-2 animate-spin" : "ti-upload"} text-[14px]`} />
+                {uploading ? t("store.manual.uploading") : t("store.manual.upload")}
+                <input
+                  type="file"
+                  accept=".zip"
+                  disabled={uploading}
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = ""; // allow re-selecting the same file next time
+                    if (file) void handleManualUpload(file);
+                  }}
+                />
+              </label>
             </div>
           )}
         </div>
+
+        {uploadMsg && (
+          <div
+            className={`mb-4 rounded-lg border px-4 py-2 text-sm ${
+              uploadMsg.ok
+                ? "border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-800 dark:bg-teal-950 dark:text-teal-300"
+                : "border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300"
+            }`}
+          >
+            {uploadMsg.text}
+            {uploadMsg.ok && (
+              <>
+                {" "}
+                <Link to="/admin/modules/installed" className="underline">
+                  {t("store.manual.view_installed")}
+                </Link>
+              </>
+            )}
+          </div>
+        )}
 
         {showCustomDialog && (
           <CustomSourcesDialog

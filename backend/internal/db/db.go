@@ -2289,6 +2289,26 @@ func (p *Pool) EnsureModuleStoreSchema(ctx context.Context) error {
 		return fmt.Errorf("db: ensure installed_modules_source_check: %w", err)
 	}
 
+	// 'manual' addition (2026-07-23): manually uploaded module ZIPs
+	// (InstallManual/UpdateManual, installer.go) have no registry entry and
+	// no release URL to re-download from - a distinct source value from
+	// 'custom' (which is still a registry-backed GitHub repo, just an
+	// admin-added one) so the Store UI can tell "third-party but tracked"
+	// apart from "opaque local upload" and show the right badge/warning.
+	// Same idempotent drop-then-recreate pattern as the 'custom' addition
+	// above.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE installed_modules DROP CONSTRAINT IF EXISTS installed_modules_source_check
+	`); err != nil {
+		return fmt.Errorf("db: drop installed_modules_source_check (manual): %w", err)
+	}
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE installed_modules ADD CONSTRAINT installed_modules_source_check
+		    CHECK (source IN ('official', 'community', 'direct', 'custom', 'manual'))
+	`); err != nil {
+		return fmt.Errorf("db: ensure installed_modules_source_check (manual): %w", err)
+	}
+
 	// release_url: exact URL the module.zip was downloaded from.
 	if _, err := p.Exec(ctx, `
 		ALTER TABLE installed_modules ADD COLUMN IF NOT EXISTS release_url TEXT NOT NULL DEFAULT ''

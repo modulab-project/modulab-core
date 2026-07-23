@@ -994,6 +994,13 @@
       "signed_hint": "Für diese eigene Quelle ist ein Public Key hinterlegt – die Release-Signatur kann geprüft werden.",
       "unverified": "unverifiziert",
       "unverified_hint": "Für diese eigene Quelle ist kein Public Key hinterlegt – Installation ohne Signaturprüfung."
+    },
+    "manual": {
+      "upload": "ZIP hochladen",
+      "uploading": "Wird hochgeladen…",
+      "upload_ok": "{{name}} {{version}} aus der hochgeladenen ZIP installiert (unverifiziert).",
+      "upload_error": "Manuelle Installation fehlgeschlagen",
+      "view_installed": "In installierten Modulen ansehen"
     }
   },
   "modules": {

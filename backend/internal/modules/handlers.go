@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 
 	"github.com/modulab-project/modulab-core/backend/internal/audit"
@@ -204,6 +206,157 @@ func InstallHandler(d Deps, storeDeps store.Deps, authDeps auth.Deps) http.Handl
 
 		writeModuleJSON(w, http.StatusCreated, row)
 	}
+}
+
+// ── POST /v1/modules/install-manual ───────────────────────────────────────────
+
+// InstallManualHandler installs (or, if already installed, updates) a module
+// from a manually uploaded ZIP file — no registry entry, no download, no
+// Cosign signature (see InstallManual/UpdateManual's doc comments,
+// installer.go/updater.go). Multipart body, field "file".
+//
+// Whether this ends up calling InstallManual or UpdateManual is decided
+// AFTER peeking the uploaded ZIP's manifest.yaml for its module name (the
+// request itself carries no name — the ZIP is the only source of truth for
+// which module this is), not by any query param the client would have to
+// get right.
+//
+// Requires org-admin or super-admin, same as InstallHandler/UpdateModuleHandler.
+func InstallManualHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := auth.RequireAdminSession(authDeps, w, r)
+		if !ok {
+			return
+		}
+
+		maxZIPBytes := MaxModuleZIPBytes(r.Context(), d.DB)
+		// Reject oversized uploads before reading any body bytes — same
+		// Content-Length pre-check reasoning as router.go's file-upload path
+		// (avoids a bare 502 from a reverse proxy on a body that trips
+		// MaxBytesReader mid-stream instead of failing cleanly upfront).
+		if maxZIPBytes > 0 && r.ContentLength > maxZIPBytes {
+			http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		parseMemory := maxZIPBytes
+		if maxZIPBytes <= 0 {
+			parseMemory = unlimitedUploadParseMemory
+		} else {
+			r.Body = http.MaxBytesReader(w, r.Body, maxZIPBytes)
+		}
+		if err := r.ParseMultipartForm(parseMemory); err != nil {
+			http.Error(w, "parse multipart form: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		file, _, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, "missing \"file\" field", http.StatusBadRequest)
+			return
+		}
+		defer func() {
+			if err := file.Close(); err != nil {
+				log.Printf("modules: install-manual: close uploaded file: %v", err)
+			}
+		}()
+
+		tmpFile, err := os.CreateTemp("", "modulab-manual-upload-*.zip")
+		if err != nil {
+			http.Error(w, "server error", http.StatusInternalServerError)
+			return
+		}
+		tmpPath := tmpFile.Name()
+		defer func() {
+			if err := os.Remove(tmpPath); err != nil && !os.IsNotExist(err) {
+				log.Printf("modules: install-manual: cleanup uploaded zip %s: %v", tmpPath, err)
+			}
+		}()
+
+		if _, err := io.Copy(tmpFile, file); err != nil {
+			_ = tmpFile.Close()
+			http.Error(w, "failed to read upload: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := tmpFile.Close(); err != nil {
+			http.Error(w, "server error", http.StatusInternalServerError)
+			return
+		}
+
+		// Peek the manifest to learn the module name and whether it's
+		// already installed — this is what decides Install vs. Update, not
+		// anything the client sent.
+		name, alreadyInstalled, oldVersion, err := peekManualUploadModule(r.Context(), d, tmpPath, maxZIPBytes)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+			return
+		}
+
+		if alreadyInstalled {
+			if err := UpdateManual(r.Context(), d, tmpPath); err != nil {
+				http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+				return
+			}
+			row, _, _ := d.DB.GetInstalledModule(r.Context(), name)
+			logModuleAudit(r.Context(), authDeps, audit.LogParams{
+				EventType:  audit.EventModuleUpdated,
+				ActorID:    sess.UserID,
+				ActorEmail: sess.Email,
+				TargetID:   name,
+				Details:    fmt.Sprintf(`{"from_version":%q,"to_version":%q,"source":"manual"}`, oldVersion, row.Version),
+			})
+			writeModuleJSON(w, http.StatusOK, row)
+			return
+		}
+
+		if err := InstallManual(r.Context(), d, tmpPath); err != nil {
+			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+			return
+		}
+		row, _, _ := d.DB.GetInstalledModule(r.Context(), name)
+		logModuleAudit(r.Context(), authDeps, audit.LogParams{
+			EventType:  audit.EventModuleInstalled,
+			ActorID:    sess.UserID,
+			ActorEmail: sess.Email,
+			TargetID:   name,
+			Details:    fmt.Sprintf(`{"version":%q,"tier":%d,"source":"manual"}`, row.Version, row.Tier),
+		})
+		writeModuleJSON(w, http.StatusCreated, row)
+	}
+}
+
+// peekManualUploadModule extracts just manifest.yaml from the uploaded ZIP
+// (into a throwaway temp dir, separate from InstallManual/UpdateManual's own
+// extraction) to learn the module name before deciding which of the two to
+// call. Returns the name, whether installed_modules already has a row for
+// it, and that row's current version (for the audit "from_version" field —
+// zero value if not installed).
+func peekManualUploadModule(ctx context.Context, d Deps, zipPath string, maxZIPBytes int64) (name string, installed bool, currentVersion string, err error) {
+	peekDir, err := os.MkdirTemp("", "modulab-manual-upload-peek-*")
+	if err != nil {
+		return "", false, "", fmt.Errorf("create temp dir: %w", err)
+	}
+	defer func() {
+		if rmErr := os.RemoveAll(peekDir); rmErr != nil {
+			log.Printf("modules: install-manual: cleanup peek dir %s: %v", peekDir, rmErr)
+		}
+	}()
+
+	if err := extractZIP(zipPath, peekDir, maxZIPBytes); err != nil {
+		return "", false, "", fmt.Errorf("extract zip: %w", err)
+	}
+	mf, err := parseManifest(filepath.Join(peekDir, "manifest.yaml"))
+	if err != nil {
+		return "", false, "", err
+	}
+
+	row, found, err := d.DB.GetInstalledModule(ctx, mf.Name)
+	if err != nil {
+		return "", false, "", fmt.Errorf("check existing: %w", err)
+	}
+	if found {
+		return mf.Name, true, row.Version, nil
+	}
+	return mf.Name, false, "", nil
 }
 
 // ── DELETE /v1/modules/{name} ─────────────────────────────────────────────────

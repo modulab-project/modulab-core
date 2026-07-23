@@ -994,6 +994,13 @@
       "signed_hint": "Esta fuente propia tiene una clave pública guardada — su firma de versión puede verificarse.",
       "unverified": "sin verificar",
       "unverified_hint": "Esta fuente propia no tiene una clave pública guardada — se instala sin verificación de firma."
+    },
+    "manual": {
+      "upload": "Subir ZIP",
+      "uploading": "Subiendo…",
+      "upload_ok": "{{name}} {{version}} instalado desde el ZIP subido (sin verificar).",
+      "upload_error": "Fallo la instalación manual",
+      "view_installed": "Ver en módulos instalados"
     }
   },
   "modules": {
