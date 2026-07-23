@@ -11,7 +11,10 @@ import {
   type SearchSettings,
 } from "../lib/api";
 import { useAuthenticatedSession } from "../lib/useSession";
+import { useLoginRedirect } from "../lib/useLoginRedirect";
+import { isReauthRequiredError } from "../lib/authErrors";
 import { AppShell } from "../components/AppShell";
+import { ReauthBanner } from "../components/ReauthBanner";
 
 // /admin/system/search — general web-search provider admin page: lists
 // every configured provider (SearXNG, Serper.dev, and whatever gets added
@@ -40,6 +43,17 @@ export default function AdminSystemSearchPage() {
   const [error, setError] = useState<string | null>(null);
   const [modal, setModal] = useState<ModalState>({ kind: "closed" });
   const hasFetched = useRef(false);
+  // Backend now gates PATCH /v1/admin/search/providers/{id} and
+  // DELETE .../key behind requireRecentLogin (RequireSuperAdminReauthMiddleware,
+  // 2026-07-22) - same step-up pattern as SMTP/OIDC. Page-level actions
+  // (toggle enabled, clear key) use this; EditProviderModal below has its
+  // own separate instance so its banner renders inside the modal overlay,
+  // not hidden behind it in the page body.
+  const [reauthRequired, setReauthRequired] = useState(false);
+  const { waiting: reauthWaiting, startLogin } = useLoginRedirect(() => {
+    setReauthRequired(false);
+    setError(null);
+  });
 
   // Only enabled providers make sense as primary/fallback — a disabled one
   // (e.g. SearXNG after it was pulled from docker-compose) has nothing to
@@ -75,11 +89,16 @@ export default function AdminSystemSearchPage() {
   async function handleToggleEnabled(p: SearchProvider) {
     setBusy(true);
     setError(null);
+    setReauthRequired(false);
     try {
       await adminPatchSearchProvider(p.id, { enabled: !p.enabled });
       refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("admin.search.save_error"));
+      if (isReauthRequiredError(e)) {
+        setReauthRequired(true);
+      } else {
+        setError(e instanceof Error ? e.message : t("admin.search.save_error"));
+      }
     } finally {
       setBusy(false);
     }
@@ -88,11 +107,16 @@ export default function AdminSystemSearchPage() {
   async function handleClearKey(id: string) {
     setBusy(true);
     setError(null);
+    setReauthRequired(false);
     try {
       await adminClearSearchProviderKey(id);
       refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("admin.search.save_error"));
+      if (isReauthRequiredError(e)) {
+        setReauthRequired(true);
+      } else {
+        setError(e instanceof Error ? e.message : t("admin.search.save_error"));
+      }
     } finally {
       setBusy(false);
     }
@@ -117,7 +141,14 @@ export default function AdminSystemSearchPage() {
         <h1 className="mb-1 text-xl font-semibold">{t("admin.search.title")}</h1>
         <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">{t("admin.search.subtitle")}</p>
 
-        {error && <p className="mb-4 text-sm text-red-600 dark:text-red-400">{error}</p>}
+        {error && !reauthRequired && <p className="mb-4 text-sm text-red-600 dark:text-red-400">{error}</p>}
+        {reauthRequired && (
+          <ReauthBanner
+            waiting={reauthWaiting}
+            onReauth={() => startLogin({ reauth: true, returnPath: window.location.pathname })}
+            onDismiss={() => setReauthRequired(false)}
+          />
+        )}
 
         {fetching ? (
           <div className="flex flex-col gap-4">
@@ -284,11 +315,21 @@ function EditProviderModal({
   const [fetchPages, setFetchPages] = useState(provider.fetch_pages);
   const [userCanOverride, setUserCanOverride] = useState(provider.user_can_override);
   const [busy, setBusy] = useState(false);
+  // Own instance (not the page-level one in AdminSystemSearchPage) so the
+  // banner renders inside this Overlay, where it's actually visible - the
+  // page body's own reauthRequired state sits behind the modal's black/40
+  // backdrop while this dialog is open.
+  const [reauthRequired, setReauthRequired] = useState(false);
+  const { waiting: reauthWaiting, startLogin } = useLoginRedirect(() => {
+    setReauthRequired(false);
+    setError(null);
+  });
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
+    setReauthRequired(false);
     try {
       const patch: Parameters<typeof adminPatchSearchProvider>[1] = {
         max_results: Math.max(1, Math.min(100, maxResults)),
@@ -304,7 +345,11 @@ function EditProviderModal({
       onSaved();
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("admin.search.save_error"));
+      if (isReauthRequiredError(e)) {
+        setReauthRequired(true);
+      } else {
+        setError(e instanceof Error ? e.message : t("admin.search.save_error"));
+      }
     } finally {
       setBusy(false);
     }
@@ -314,6 +359,13 @@ function EditProviderModal({
     <Overlay onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <h2 className="text-base font-semibold">{t("admin.search.modal.edit_title", { name: provider.name })}</h2>
+        {reauthRequired && (
+          <ReauthBanner
+            waiting={reauthWaiting}
+            onReauth={() => startLogin({ reauth: true, returnPath: window.location.pathname })}
+            onDismiss={() => setReauthRequired(false)}
+          />
+        )}
         <div className="space-y-3">
           {isSearXNG ? (
             <>

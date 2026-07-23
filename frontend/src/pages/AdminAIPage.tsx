@@ -13,7 +13,10 @@ import {
   type AIBalanceResult,
 } from "../lib/api";
 import { useAuthenticatedSession } from "../lib/useSession";
+import { useLoginRedirect } from "../lib/useLoginRedirect";
+import { isReauthRequiredError } from "../lib/authErrors";
 import { AppShell } from "../components/AppShell";
+import { ReauthBanner } from "../components/ReauthBanner";
 import { isAdminRole } from "../lib/roles";
 
 // Built-in provider definitions — these are the four first-class providers
@@ -41,6 +44,18 @@ export default function AdminAIPage() {
   const [busy, setBusy] = useState(false);
   const [modal, setModal] = useState<ModalState>({ kind: "closed" });
   const [balances, setBalances] = useState<Record<string, AIBalanceResult & { loading?: boolean }>>({});
+  // Backend now gates PATCH/DELETE /v1/admin/ai/providers/{id} and
+  // DELETE .../key behind requireRecentLogin (RequireSuperAdminReauthMiddleware,
+  // 2026-07-22) - create (POST) stays reauth-free, see main.go's route
+  // registration comment. Page-level actions (toggle enabled, clear key,
+  // delete) use this; the two edit modals below each have their own
+  // separate instance so their banner renders inside the modal overlay,
+  // not hidden behind it in the page body.
+  const [reauthRequired, setReauthRequired] = useState(false);
+  const { waiting: reauthWaiting, startLogin } = useLoginRedirect(() => {
+    setReauthRequired(false);
+    setError(null);
+  });
 
   const refresh = useCallback(() => {
     adminListAIProviders()
@@ -66,11 +81,16 @@ export default function AdminAIPage() {
   async function handleClearKey(id: string) {
     setBusy(true);
     setError(null);
+    setReauthRequired(false);
     try {
       await adminClearAIProviderKey(id);
       refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("admin.ai.clear_key_error"));
+      if (isReauthRequiredError(e)) {
+        setReauthRequired(true);
+      } else {
+        setError(e instanceof Error ? e.message : t("admin.ai.clear_key_error"));
+      }
     } finally {
       setBusy(false);
     }
@@ -80,11 +100,16 @@ export default function AdminAIPage() {
     if (!window.confirm(t("admin.ai.delete_confirm", { name: p.name }))) return;
     setBusy(true);
     setError(null);
+    setReauthRequired(false);
     try {
       await adminDeleteAIProvider(p.id);
       refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("admin.ai.delete_error"));
+      if (isReauthRequiredError(e)) {
+        setReauthRequired(true);
+      } else {
+        setError(e instanceof Error ? e.message : t("admin.ai.delete_error"));
+      }
     } finally {
       setBusy(false);
     }
@@ -105,11 +130,16 @@ export default function AdminAIPage() {
 
   async function handleToggleEnabled(p: AIProvider) {
     setBusy(true);
+    setReauthRequired(false);
     try {
       await adminPatchAIProvider(p.id, { enabled: !p.enabled });
       refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("admin.ai.update_error"));
+      if (isReauthRequiredError(e)) {
+        setReauthRequired(true);
+      } else {
+        setError(e instanceof Error ? e.message : t("admin.ai.update_error"));
+      }
     } finally {
       setBusy(false);
     }
@@ -128,7 +158,14 @@ export default function AdminAIPage() {
           {t("admin.ai.subtitle")}
         </p>
 
-        {error && <p className="mb-4 text-sm text-red-600 dark:text-red-400">{error}</p>}
+        {error && !reauthRequired && <p className="mb-4 text-sm text-red-600 dark:text-red-400">{error}</p>}
+        {reauthRequired && (
+          <ReauthBanner
+            waiting={reauthWaiting}
+            onReauth={() => startLogin({ reauth: true, returnPath: window.location.pathname })}
+            onDismiss={() => setReauthRequired(false)}
+          />
+        )}
 
         {/* Built-in providers */}
         <h2 className="mb-2 text-sm font-semibold text-gray-700 dark:text-gray-300">
@@ -367,6 +404,14 @@ function EditBuiltinModal({
   const [models, setModels] = useState<string[] | null>(null);
   const [loadingModels, setLoadingModels] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
+  // Own instance (not the page-level one in AdminAIPage) so the banner
+  // renders inside this Overlay, where it's actually visible - the page
+  // body's own reauthRequired state sits behind the modal's black/40
+  // backdrop while this dialog is open.
+  const [reauthRequired, setReauthRequired] = useState(false);
+  const { waiting: reauthWaiting, startLogin } = useLoginRedirect(() => {
+    setReauthRequired(false);
+  });
 
   // The "load models" button is visible when either the provider already has a
   // stored key OR the user has typed a new key in this session (key.trim() != "").
@@ -375,6 +420,7 @@ function EditBuiltinModal({
   async function handleLoadModels() {
     setLoadingModels(true);
     setModelsError(null);
+    setReauthRequired(false);
     // If the user typed a new key, save it first so the backend can use it to
     // fetch the model list, then reload so has_admin_key becomes true.
     if (key.trim() && !provider.has_admin_key) {
@@ -382,7 +428,21 @@ function EditBuiltinModal({
         await adminPatchAIProvider(provider.id, {
           default_model: model.trim(),
           admin_key: key.trim(),
-        }).catch(async () => {
+        });
+        onSaved(); // refresh parent list so has_admin_key is updated
+      } catch (err) {
+        if (isReauthRequiredError(err)) {
+          // Stale session - don't attempt the create fallback below (it
+          // isn't reauth-gated, so it could otherwise silently "succeed"
+          // via a completely different code path than the admin intended,
+          // or fail confusingly on a duplicate ID since the row already
+          // exists). Show the banner and stop; the admin can reauth and
+          // retry.
+          setReauthRequired(true);
+          setLoadingModels(false);
+          return;
+        }
+        try {
           await adminCreateAIProvider({
             id: provider.id,
             type: provider.type,
@@ -393,10 +453,10 @@ function EditBuiltinModal({
             enabled: true,
             sort_order: provider.sort_order,
           });
-        });
-        onSaved(); // refresh parent list so has_admin_key is updated
-      } catch {
-        // proceed anyway — the backend will use the in-flight key if supported
+          onSaved();
+        } catch {
+          // proceed anyway — the backend will use the in-flight key if supported
+        }
       }
     }
     try {
@@ -418,6 +478,7 @@ function EditBuiltinModal({
     e.preventDefault();
     if (!model.trim()) return;
     setBusy(true);
+    setReauthRequired(false);
     try {
       const patch: Parameters<typeof adminPatchAIProvider>[1] = {
         default_model: model.trim(),
@@ -425,10 +486,16 @@ function EditBuiltinModal({
       if (key.trim()) patch.admin_key = key.trim();
 
       // Rows are seeded on startup, so PATCH should always work.
-      // Fall back to CREATE if the row somehow doesn't exist yet.
+      // Fall back to CREATE if the row somehow doesn't exist yet - but
+      // NOT when PATCH failed with reauth_required: retrying via CREATE
+      // isn't reauth-gated, so it would either "succeed" through a
+      // completely different code path than intended, or fail confusingly
+      // on a duplicate ID since the row already exists. Rethrow instead so
+      // the outer catch shows the reauth banner.
       try {
         await adminPatchAIProvider(provider.id, patch);
-      } catch {
+      } catch (patchErr) {
+        if (isReauthRequiredError(patchErr)) throw patchErr;
         await adminCreateAIProvider({
           id: provider.id,
           type: provider.type,
@@ -443,7 +510,11 @@ function EditBuiltinModal({
       onSaved();
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("admin.ai.save_error"));
+      if (isReauthRequiredError(e)) {
+        setReauthRequired(true);
+      } else {
+        setError(e instanceof Error ? e.message : t("admin.ai.save_error"));
+      }
     } finally {
       setBusy(false);
     }
@@ -453,6 +524,13 @@ function EditBuiltinModal({
     <Overlay onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <h2 className="text-base font-semibold">{t("admin.ai.modal.edit_builtin_title", { name: provider.name })}</h2>
+        {reauthRequired && (
+          <ReauthBanner
+            waiting={reauthWaiting}
+            onReauth={() => startLogin({ reauth: true, returnPath: window.location.pathname })}
+            onDismiss={() => setReauthRequired(false)}
+          />
+        )}
         <div className="space-y-3">
           <div>
             <div className="mb-1 flex items-center justify-between">
@@ -553,6 +631,13 @@ function CustomProviderModal({
   const [apiKey, setApiKey] = useState("");
   const [userCanOverride, setUserCanOverride] = useState(existing?.user_can_override ?? true);
   const [busy, setBusy] = useState(false);
+  // Only relevant for the `existing` (PATCH) branch below - create isn't
+  // reauth-gated. Own instance so the banner renders inside this Overlay,
+  // same reasoning as EditBuiltinModal above.
+  const [reauthRequired, setReauthRequired] = useState(false);
+  const { waiting: reauthWaiting, startLogin } = useLoginRedirect(() => {
+    setReauthRequired(false);
+  });
 
   // For existing providers: load models via the stored admin key.
   // The provider must already be saved (existing != null) to use this.
@@ -574,6 +659,7 @@ function CustomProviderModal({
     e.preventDefault();
     if (!name.trim() || !baseURL.trim() || !model.trim()) return;
     setBusy(true);
+    setReauthRequired(false);
     try {
       if (existing) {
         const patch: Parameters<typeof adminPatchAIProvider>[1] = {
@@ -601,7 +687,11 @@ function CustomProviderModal({
       onSaved();
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("admin.ai.modal.save_provider_error"));
+      if (isReauthRequiredError(e)) {
+        setReauthRequired(true);
+      } else {
+        setError(e instanceof Error ? e.message : t("admin.ai.modal.save_provider_error"));
+      }
     } finally {
       setBusy(false);
     }
@@ -613,6 +703,13 @@ function CustomProviderModal({
         <h2 className="text-base font-semibold">
           {existing ? t("admin.ai.modal.custom_title_edit") : t("admin.ai.modal.custom_title_add")}
         </h2>
+        {reauthRequired && (
+          <ReauthBanner
+            waiting={reauthWaiting}
+            onReauth={() => startLogin({ reauth: true, returnPath: window.location.pathname })}
+            onDismiss={() => setReauthRequired(false)}
+          />
+        )}
         <div className="space-y-3">
           <Field label={t("admin.ai.modal.name")} required>
             <input
