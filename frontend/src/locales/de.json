@@ -463,7 +463,7 @@
       "col_actions": "Aktionen",
       "expires_in": "in {{duration}}",
       "last_active_ago": "vor {{duration}}",
-      "session_current": "diese Sitzung",
+      "session_current": "Dieses Gerät",
       "end_session": "Beenden",
       "end_session_confirm": "Sitzung von {{name}} wirklich beenden?",
       "end_session_confirm_self": "Das ist deine eigene aktuelle Sitzung. Wirklich beenden? Du wirst sofort abgemeldet.",

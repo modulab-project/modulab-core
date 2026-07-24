@@ -463,7 +463,7 @@
       "col_actions": "Actions",
       "expires_in": "dans {{duration}}",
       "last_active_ago": "il y a {{duration}}",
-      "session_current": "cette session",
+      "session_current": "Cet appareil",
       "end_session": "Terminer",
       "end_session_confirm": "Terminer la session de {{name}} ?",
       "end_session_confirm_self": "C'est votre propre session actuelle. La terminer quand même ? Vous serez déconnecté immédiatement.",

@@ -342,12 +342,12 @@ function SessionRow({
   const { t } = useTranslation();
   const device = session.user_agent ? parseUserAgent(session.user_agent, t) : null;
   return (
-    <tr className={`border-b border-gray-100 last:border-0 dark:border-gray-800 ${session.current ? "bg-teal-50/60 dark:bg-teal-950/30" : ""}`}>
+    <tr className={`border-b border-gray-100 last:border-0 dark:border-gray-800 ${session.current ? "bg-green-50/60 dark:bg-green-950/30" : ""}`}>
       <td className="whitespace-nowrap px-4 py-2.5 text-gray-700 dark:text-gray-300">
         <div className="flex flex-col items-start gap-1">
           <span>{session.name || session.email || <span className="text-gray-300 dark:text-gray-600">—</span>}</span>
           {session.current && (
-            <span className="whitespace-nowrap rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-medium text-teal-700 dark:bg-teal-900 dark:text-teal-300">
+            <span className="whitespace-nowrap rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:bg-green-900 dark:text-green-300">
               {t("admin.system_info.session_current")}
             </span>
           )}
@@ -454,7 +454,7 @@ function SessionCard({
     <div
       className={`rounded-lg border p-3 text-sm ${
         session.current
-          ? "border-teal-200 bg-teal-50/60 dark:border-teal-900 dark:bg-teal-950/30"
+          ? "border-green-200 bg-green-50/60 dark:border-green-900 dark:bg-green-950/30"
           : "border-gray-200 dark:border-gray-800"
       }`}
     >
@@ -464,7 +464,7 @@ function SessionCard({
             {session.name || session.email || <span className="text-gray-300 dark:text-gray-600">—</span>}
           </span>
           {session.current && (
-            <span className="whitespace-nowrap rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-medium text-teal-700 dark:bg-teal-900 dark:text-teal-300">
+            <span className="whitespace-nowrap rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:bg-green-900 dark:text-green-300">
               {t("admin.system_info.session_current")}
             </span>
           )}

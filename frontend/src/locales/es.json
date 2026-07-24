@@ -463,7 +463,7 @@
       "col_actions": "Acciones",
       "expires_in": "en {{duration}}",
       "last_active_ago": "hace {{duration}}",
-      "session_current": "esta sesión",
+      "session_current": "Este dispositivo",
       "end_session": "Finalizar",
       "end_session_confirm": "¿Finalizar la sesión de {{name}}?",
       "end_session_confirm_self": "Esta es tu propia sesión actual. ¿Finalizarla de todos modos? Se cerrará tu sesión de inmediato.",

@@ -463,7 +463,7 @@
       "col_actions": "Acties",
       "expires_in": "over {{duration}}",
       "last_active_ago": "{{duration}} geleden",
-      "session_current": "deze sessie",
+      "session_current": "Dit apparaat",
       "end_session": "Beëindigen",
       "end_session_confirm": "Sessie van {{name}} beëindigen?",
       "end_session_confirm_self": "Dit is je eigen huidige sessie. Toch beëindigen? Je wordt direct uitgelogd.",

@@ -325,10 +325,12 @@ function SessionListItem({
         <p className="mt-0.5 break-all text-xs text-gray-500 dark:text-gray-400">
           {session.ip || "—"}
           {session.country && <> · {session.country}</>}
-          {session.last_active_seconds_ago !== undefined && (
-            <> · {t("profile.sessions_last_active", { duration: formatDuration(session.last_active_seconds_ago) })}</>
-          )}
         </p>
+        {session.last_active_seconds_ago !== undefined && (
+          <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+            {t("profile.sessions_last_active", { duration: formatDuration(session.last_active_seconds_ago) })}
+          </p>
+        )}
       </div>
       <button
         type="button"
