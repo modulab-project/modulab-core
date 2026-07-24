@@ -40,5 +40,8 @@
     "eslint-plugin-jsx-a11y": {
       "eslint": "$eslint"
     }
+  },
+  "allowScripts": {
+    "fsevents@2.3.3": true
   }
 }

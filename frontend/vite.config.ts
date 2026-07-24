@@ -63,4 +63,28 @@ export default defineConfig({
       "/healthz": "http://localhost:8080",
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Split stable, rarely-changing vendor code out of the app chunk so
+        // browsers can cache it across ModuLab releases even when app code
+        // changes on every deploy. Paired with the React.lazy route
+        // splitting in App.tsx - this only covers what's shared across all
+        // routes (react/router/query-client/i18n bootstrapped in main.tsx),
+        // page-level code already lives in its own per-route chunk.
+        //
+        // This is Rolldown-Vite (vite 8), whose manualChunks only accepts
+        // the function form - the plain object-of-arrays form from classic
+        // Rollup/Vite is not supported by its types.
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+          if (/node_modules\/(react|react-dom)\//.test(id)) return "vendor-react";
+          if (id.includes("node_modules/react-router")) return "vendor-router";
+          if (id.includes("node_modules/@tanstack")) return "vendor-query";
+          if (/node_modules\/(i18next|react-i18next|i18next-browser-languagedetector)\//.test(id))
+            return "vendor-i18n";
+        },
+      },
+    },
+  },
 });
