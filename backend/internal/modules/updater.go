@@ -58,12 +58,14 @@ func Update(ctx context.Context, d Deps, entry store.Entry) error {
 	if err := os.MkdirAll(cacheDir, 0o750); err != nil {
 		return fmt.Errorf("modules: update %q: create rollback cache dir: %w", entry.Name, err)
 	}
-	// Resolved once, fresh from custom_sources - see resolveCustomSourceToken's
-	// doc comment (installer.go) for why this is never carried on entry itself.
-	token := resolveCustomSourceToken(ctx, d.DB, entry.Source, entry.SourceRepo, entry.Name, "update")
+	// Resolved once, fresh from custom_sources - see
+	// resolveCustomSourceCredential's doc comment (installer.go) for why this
+	// is never carried on entry itself, and githubCredential's for why it is
+	// bound to entry.SourceRepo rather than being a bare token.
+	cred := resolveCustomSourceCredential(ctx, d.DB, entry.Source, entry.SourceRepo, entry.Name, "update")
 
 	cachedZip := filepath.Join(cacheDir, entry.Name+"-"+row.Version+".zip")
-	if err := cacheCurrentZIP(ctx, d.DB, row.ReleaseURL, cachedZip, maxZIPBytes, token); err != nil {
+	if err := cacheCurrentZIP(ctx, d.DB, row.ReleaseURL, cachedZip, maxZIPBytes, cred); err != nil {
 		// Not fatal — we'll proceed without rollback capability and log a warning.
 		log.Printf("modules: update %q: warning: could not cache rollback zip: %v", entry.Name, err)
 		cachedZip = ""
@@ -106,8 +108,8 @@ func Update(ctx context.Context, d Deps, entry store.Entry) error {
 	dlCtx, dlCancel := context.WithTimeout(ctx, installDownloadTimeout)
 	defer dlCancel()
 
-	go func() { zipCh <- dlResult{downloadFile(dlCtx, zipURL, zipPath, maxZIPBytes, token)} }()
-	go func() { hashCh <- dlResult{downloadFile(dlCtx, sha256URL, sha256Path, maxSHA256FileBytes, token)} }()
+	go func() { zipCh <- dlResult{downloadFile(dlCtx, zipURL, zipPath, maxZIPBytes, cred)} }()
+	go func() { hashCh <- dlResult{downloadFile(dlCtx, sha256URL, sha256Path, maxSHA256FileBytes, cred)} }()
 
 	if r := <-zipCh; r.err != nil {
 		return fmt.Errorf("modules: update %q: download zip: %w", entry.Name, r.err)
@@ -136,7 +138,7 @@ func Update(ctx context.Context, d Deps, entry store.Entry) error {
 	// discarded, same gap as the install path had.
 	cosignVerified := false
 	if entry.CosignSigURL != "" {
-		if err := downloadFile(dlCtx, entry.CosignSigURL, sigPath, maxSigFileBytes, token); err != nil {
+		if err := downloadFile(dlCtx, entry.CosignSigURL, sigPath, maxSigFileBytes, cred); err != nil {
 			return fmt.Errorf("modules: update %q: download cosign bundle: %w", entry.Name, err)
 		}
 		ok, err := VerifyCosign(zipPath, sigPath, entry.CosignPubKey, d.CosignBin)
@@ -148,7 +150,7 @@ func Update(ctx context.Context, d Deps, entry store.Entry) error {
 		// Community/custom: best-effort with conventional .sig path.
 		// entry.CosignPubKey is only set for source="custom" (admin-entered
 		// key) - see installer.go's Install for the matching comment.
-		if dlErr := downloadFile(dlCtx, sigURL, sigPath, maxSigFileBytes, token); dlErr == nil {
+		if dlErr := downloadFile(dlCtx, sigURL, sigPath, maxSigFileBytes, cred); dlErr == nil {
 			ok, err := VerifyCosign(zipPath, sigPath, entry.CosignPubKey, d.CosignBin)
 			if err == nil {
 				cosignVerified = ok
@@ -495,12 +497,15 @@ func (d Deps) rollback(ctx context.Context, name, cachedZip string, origErr erro
 // cacheCurrentZIP re-downloads the currently installed module ZIP and saves it
 // to path. Used as a rollback snapshot before an update begins. maxBytes is
 // the caller-resolved max_module_zip_bytes value (see MaxModuleZIPBytes).
-// token is the same custom-source PAT resolved once by the caller (Update).
-func cacheCurrentZIP(ctx context.Context, pool *db.Pool, releaseURL, path string, maxBytes int64, token string) error {
+// cred is the same repo-bound custom-source credential resolved once by the
+// caller (Update) - releaseURL comes from installed_modules.release_url,
+// itself derived from a registry entry, so it gets the same per-URL check
+// every other download does (see githubCredential in installer.go).
+func cacheCurrentZIP(ctx context.Context, pool *db.Pool, releaseURL, path string, maxBytes int64, cred githubCredential) error {
 	installDownloadTimeout := time.Duration(InstallDownloadTimeoutSeconds(ctx, pool)) * time.Second
 	dlCtx, cancel := context.WithTimeout(ctx, installDownloadTimeout)
 	defer cancel()
-	return downloadFile(dlCtx, releaseURL, path, maxBytes, token)
+	return downloadFile(dlCtx, releaseURL, path, maxBytes, cred)
 }
 
 // updateInstalledModuleRecord patches the version, tier, sha256, release_url,

