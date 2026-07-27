@@ -119,6 +119,24 @@ type Session struct {
 	// access-control decision, only for the sessions tables on the Profile
 	// and System Info pages.
 	Country string `json:"country,omitempty"`
+	// CSRFToken is minted once per session by CreateSession and never
+	// changes for the session's lifetime. Deliberately included here (and
+	// therefore sent to the browser in GET /v1/auth/me's response body,
+	// since MeResponse embeds Session) - unlike the session token itself,
+	// this one is *meant* to be readable by the frontend, which echoes it
+	// back as the X-CSRF-Token header on every mutating (non-GET/HEAD/
+	// OPTIONS) admin request. See admin.go's validateCSRF for why this
+	// exists: same-origin fetches from an installed module's own UI bundle
+	// carry the httpOnly session cookie automatically (see
+	// feedback_modulab_cookie_same_origin_risk), so the cookie alone cannot
+	// distinguish a legitimate admin-panel mutation from one triggered by
+	// module code. A session created before this field existed decodes with
+	// CSRFToken == "" (unknown JSON keys are silently ignored, same
+	// self-healing pattern as storedSession's *_enc fields) and is treated
+	// as failing every CSRF check until its next login - a one-time,
+	// no-migration-needed bump for anyone already logged in when this
+	// shipped.
+	CSRFToken string `json:"csrf_token,omitempty"`
 }
 
 // storedSession is the on-the-wire (Valkey) representation of a Session.
@@ -176,6 +194,10 @@ type storedSession struct {
 	UserAgentEnc         string    `json:"user_agent_enc,omitempty"`
 	Country              string    `json:"country,omitempty"`
 	RefreshTokenEnc      string    `json:"refresh_token_enc,omitempty"`
+	// CSRFToken stays plaintext, same exemption as Role/Locked/CreatedAt
+	// above: it is random security material, not PII, so the
+	// feedback_encrypt_at_implementation_time policy does not apply.
+	CSRFToken string `json:"csrf_token,omitempty"`
 }
 
 // encryptSession converts a plaintext Session into its encrypted-at-rest
@@ -218,6 +240,7 @@ func encryptSession(masterKey string, sess Session) (storedSession, error) {
 		IPEnc:                ipEnc,
 		UserAgentEnc:         userAgentEnc,
 		Country:              sess.Country,
+		CSRFToken:            sess.CSRFToken,
 	}, nil
 }
 
@@ -260,6 +283,7 @@ func decryptSession(masterKey string, s storedSession) (Session, error) {
 		IP:                ip,
 		UserAgent:         userAgent,
 		Country:           s.Country,
+		CSRFToken:         s.CSRFToken,
 	}, nil
 }
 
@@ -280,6 +304,19 @@ func decryptSession(masterKey string, s storedSession) (Session, error) {
 func CreateSession(ctx context.Context, d Deps, sess Session, refreshToken string) (string, error) {
 	if sess.CreatedAt.IsZero() {
 		sess.CreatedAt = time.Now()
+	}
+	// CSRFToken is minted here, once per session, same as the bearer token
+	// itself - see Session.CSRFToken's doc comment for why this exists and
+	// why it deliberately does NOT reuse randomness or lifetime from that
+	// bearer token (the two travel through completely different channels:
+	// httpOnly cookie vs. JSON response body, and must be independently
+	// unguessable from one another).
+	if sess.CSRFToken == "" {
+		csrfToken, err := randomToken()
+		if err != nil {
+			return "", fmt.Errorf("auth: generate csrf token: %w", err)
+		}
+		sess.CSRFToken = csrfToken
 	}
 	token, err := randomToken()
 	if err != nil {

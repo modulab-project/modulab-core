@@ -9,9 +9,11 @@ package auth
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/modulab-project/modulab-core/backend/internal/audit"
@@ -171,12 +173,86 @@ func logAudit(ctx context.Context, d Deps, p audit.LogParams) {
 	}
 }
 
+// csrfHeaderName is the header the admin frontend attaches its CSRF token
+// under for every state-changing request - see validateCSRF below and
+// frontend/src/lib/api.ts's request().
+const csrfHeaderName = "X-CSRF-Token"
+
+// csrfProtectedMethod reports whether method can mutate anything, and
+// therefore needs the CSRF check below at all. GET/HEAD/OPTIONS never
+// change server state, so there is nothing for a same-origin module fetch
+// to forge here that the ambient session cookie doesn't already expose via
+// plain read access regardless of any token.
+func csrfProtectedMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return false
+	default:
+		return true
+	}
+}
+
+// validateCSRF is requireAdmin/RequireAdminSession's second check, layered
+// on top of the session cookie itself.
+//
+// The problem this closes (feedback_modulab_cookie_same_origin_risk,
+// flagged 2026-07-14): Core's session cookie is httpOnly and SameSite=Lax,
+// but same-origin fetches - including one issued by an installed module's
+// own UI bundle, which runs in the same window/JS realm as the host SPA
+// (no iframe isolation) - carry it automatically too. The cookie alone
+// cannot tell a legitimate admin-panel mutation apart from one a module's
+// JS triggered on its own.
+//
+// sess.CSRFToken (minted once per session by CreateSession) is handed to
+// the frontend only in GET /v1/auth/me's JSON response body. The admin SPA
+// holds it in memory and echoes it back as the X-CSRF-Token header on
+// every mutating request; a module bundle has no route to that response
+// body of its own. This is not a hard guarantee in a shared-JS-realm
+// architecture - a module could still specifically intercept the host's
+// own fetch of /v1/auth/me - but it meaningfully raises the bar over the
+// realistic threat this was first scoped for: an accidental bug in one of
+// ModuLab's own first-party modules hitting an admin route it never meant
+// to, not a targeted attack. Full origin isolation (a sandboxed iframe) is
+// the harder guarantee, deliberately not pursued yet - see that same
+// memory entry - since every installed module today is first-party and
+// Cosign-signed, not third-party code.
+func validateCSRF(w http.ResponseWriter, r *http.Request, sess Session) bool {
+	if !csrfProtectedMethod(r.Method) {
+		return true
+	}
+	got := r.Header.Get(csrfHeaderName)
+	if got == "" || sess.CSRFToken == "" ||
+		subtle.ConstantTimeCompare([]byte(got), []byte(sess.CSRFToken)) != 1 {
+		http.Error(w, "missing or invalid CSRF token", http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
+// originAllowed is a lightweight, best-effort second line of defense
+// alongside validateCSRF: browsers attach an Origin header to same-origin
+// state-changing fetches, so a *present but mismatched* Origin is a strong
+// signal something is off. Deliberately does not fail closed when Origin
+// is absent - some browsers/proxies omit it even for legitimate requests,
+// and validateCSRF above is already the primary, deterministic guard; this
+// only ever adds an extra rejection, never a bypass.
+func originAllowed(d Deps, r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	origin = strings.TrimRight(origin, "/")
+	return origin == strings.TrimRight(d.PublicBaseURL, "/") ||
+		origin == strings.TrimRight(d.FrontendBaseURL, "/")
+}
+
 // requireAdmin validates the request's Bearer token and confirms the
 // resulting session's role is allowed to manage users - reused by every
 // /v1/admin/... handler below. On failure it writes the appropriate status
 // itself (401 for a missing/invalid/expired token, 403 for a valid session
-// whose role just isn't high enough) and returns ok = false; callers must
-// return immediately without writing anything further.
+// whose role just isn't high enough, or whose CSRF token/Origin failed the
+// checks above) and returns ok = false; callers must return immediately
+// without writing anything further.
 func requireAdmin(d Deps, w http.ResponseWriter, r *http.Request) (Session, bool) {
 	token := sessionToken(r)
 	if token == "" {
@@ -203,6 +279,13 @@ func requireAdmin(d Deps, w http.ResponseWriter, r *http.Request) (Session, bool
 	// enough - managing users is org-admin/super-admin territory only.
 	if sess.Role != RoleOrgAdmin && sess.Role != RoleSuperAdmin {
 		http.Error(w, "forbidden", http.StatusForbidden)
+		return Session{}, false
+	}
+	if !originAllowed(d, r) {
+		http.Error(w, "origin not allowed", http.StatusForbidden)
+		return Session{}, false
+	}
+	if !validateCSRF(w, r, sess) {
 		return Session{}, false
 	}
 	return sess, true
@@ -365,8 +448,13 @@ func requireActiveSessionWithToken(d Deps, w http.ResponseWriter, r *http.Reques
 }
 
 // RequireAdminSession is RequireActiveSession plus an org-admin/super-admin
-// role check. Use for any endpoint that manages users, configuration, or
-// other resources that regular users must not touch.
+// role check, plus the same Origin/CSRF checks requireAdmin applies above -
+// use for any endpoint that manages users, configuration, or other
+// resources that regular users must not touch. This is the choke point
+// every /v1/admin/... handler across every package (store, quicklinks,
+// news, modules, adminapi, search, ...) already calls, which is exactly
+// why the CSRF/Origin checks live here rather than in a second, easy-to-
+// forget middleware layered on top of each individual route registration.
 func RequireAdminSession(d Deps, w http.ResponseWriter, r *http.Request) (Session, bool) {
 	sess, ok := RequireActiveSession(d, w, r)
 	if !ok {
@@ -374,6 +462,13 @@ func RequireAdminSession(d Deps, w http.ResponseWriter, r *http.Request) (Sessio
 	}
 	if sess.Role != RoleOrgAdmin && sess.Role != RoleSuperAdmin {
 		http.Error(w, "forbidden", http.StatusForbidden)
+		return Session{}, false
+	}
+	if !originAllowed(d, r) {
+		http.Error(w, "origin not allowed", http.StatusForbidden)
+		return Session{}, false
+	}
+	if !validateCSRF(w, r, sess) {
 		return Session{}, false
 	}
 	return sess, true

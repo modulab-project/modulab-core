@@ -22,6 +22,43 @@ export class ApiError extends Error {
   }
 }
 
+// csrfToken mirrors backend/internal/auth.Session.CSRFToken - see that
+// field's doc comment for the full reasoning
+// (feedback_modulab_cookie_same_origin_risk). Held only as an in-memory
+// module-level variable, never in localStorage/sessionStorage: the whole
+// point is that an installed module's UI bundle, which runs in the same
+// window/JS realm as this SPA, has no route to this value unless it goes
+// out of its way to intercept getMe()'s own fetch response - a plain
+// same-origin fetch() from module code cannot read it just by existing,
+// the way it can the ambient session cookie. Populated by getMe() below
+// (GET /v1/auth/me is the only endpoint that ever returns it) and attached
+// to every mutating request by csrfHeaders(). null until the first
+// successful getMe() call - request() below simply omits the header in
+// that window, which the backend correctly treats as a missing/invalid
+// token (403) for any admin route, same as an expired session's stale copy
+// would.
+let csrfToken: string | null = null;
+
+// Must match backend/internal/auth/admin.go's csrfHeaderName exactly.
+const CSRF_HEADER = "X-CSRF-Token";
+
+// csrfHeaders returns the X-CSRF-Token header for state-changing methods
+// only (matching backend/internal/auth/admin.go's csrfProtectedMethod) -
+// GET/HEAD requests never need it, and the backend ignores it either way
+// since only requireAdmin/RequireAdminSession-gated routes ever check it.
+// Attaching it unconditionally on every mutating request (not just ones
+// aimed at /v1/admin/*) is deliberate: several admin-gated routes don't
+// live under that path prefix (e.g. POST /v1/modules/install-manual,
+// /v1/store/sync), and there's no cost to sending a header the backend
+// simply won't look at on a non-admin route.
+function csrfHeaders(method?: string): Record<string, string> {
+  const m = (method ?? "GET").toUpperCase();
+  if (m === "GET" || m === "HEAD" || !csrfToken) {
+    return {};
+  }
+  return { [CSRF_HEADER]: csrfToken };
+}
+
 async function request<T>(
   path: string,
   options: RequestInit & { bootstrapToken?: string } = {},
@@ -40,6 +77,7 @@ async function request<T>(
     headers: {
       "Content-Type": "application/json",
       ...(bootstrapToken ? { [BOOTSTRAP_HEADER]: bootstrapToken } : {}),
+      ...csrfHeaders(rest.method),
       ...headers,
     },
   });
@@ -178,6 +216,13 @@ export function getHealth(): Promise<HealthResponse> {
 // ever present (and true) alongside role === "pending" - it distinguishes
 // "an admin revoked your access" from the far more common "never approved
 // yet" case; absent (undefined) for every other session.
+// csrf_token (added alongside feedback_modulab_cookie_same_origin_risk's
+// fix) is deliberately NOT surfaced as a field consumers of this interface
+// ever read directly - getMe() below pulls it out into the module-private
+// csrfToken variable and every other caller only ever sees the rest of the
+// session. Kept optional here (rather than a separate response type) since
+// it really is just another field of backend/internal/auth.MeResponse's
+// embedded Session.
 export interface Session {
   user_id: string;
   email: string;
@@ -188,6 +233,7 @@ export interface Session {
   role: string;
   account_settings_url?: string;
   locked?: boolean;
+  csrf_token?: string;
 }
 
 // GET /v1/auth/me - the one endpoint every page that needs to know "who is
@@ -195,8 +241,18 @@ export interface Session {
 // dashboard or just to decide whether to bounce to /pending or /login. No
 // token parameter: the browser attaches the httpOnly __Host-modulab_session cookie
 // automatically (see request()'s credentials: "include").
-export function getMe(): Promise<Session> {
-  return request<Session>("/v1/auth/me");
+//
+// Also the one and only place csrfToken gets (re-)populated - every tab
+// calls this on mount and every POLL_INTERVAL_MS afterward
+// (useSession.ts), so the in-memory token is refreshed automatically
+// alongside the rest of the session state, with no separate plumbing
+// needed for the login round-trip vs. an already-open tab.
+export async function getMe(): Promise<Session> {
+  const session = await request<Session>("/v1/auth/me");
+  if (session.csrf_token) {
+    csrfToken = session.csrf_token;
+  }
+  return session;
 }
 
 // eventsUrl builds the GET /v1/events URL (backend/internal/auth/
@@ -416,6 +472,7 @@ export async function adminParseOPML(file: File): Promise<OPMLEntry[]> {
   const res = await fetch(`${API_BASE_URL}/v1/admin/feeds/opml-parse`, {
     method: "POST",
     credentials: "include",
+    headers: csrfHeaders("POST"),
     body: form,
   });
   if (!res.ok) {
@@ -1484,6 +1541,7 @@ export async function installManualModule(file: File): Promise<InstalledModule> 
   const res = await fetch(`${API_BASE_URL}/v1/modules/install-manual`, {
     method: "POST",
     credentials: "include",
+    headers: csrfHeaders("POST"),
     body: form,
   });
   if (!res.ok) {
