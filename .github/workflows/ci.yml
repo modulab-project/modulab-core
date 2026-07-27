@@ -311,10 +311,14 @@ jobs:
           image-ref: ghcr.io/modulab-project/modulab-core:${{ github.event.release.tag_name }}
           format: cyclonedx
           output: sbom.cdx.json
+      # --repo is required here: this job never checks out the source (it
+      # only needs the digest artifacts), so there's no .git directory for
+      # gh to infer the repo from - without it, `gh release upload` fails
+      # with "fatal: not a git repository".
       - name: Attach SBOM to the GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.event.release.tag_name }}" sbom.cdx.json --clobber
+        run: gh release upload "${{ github.event.release.tag_name }}" sbom.cdx.json --clobber --repo "${{ github.repository }}"
 
   # deploy/Dockerfile.nginx copies its static frontend files out of the core
   # image (COPY --from=core-source, ARG CORE_IMAGE) rather than building the
