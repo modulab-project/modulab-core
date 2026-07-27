@@ -42,9 +42,18 @@ jobs:
           go-version-file: backend/go.mod
           check-latest: true
           # Caches ~/go/pkg/mod between runs (module download cache, separate
-          # from the Docker layer cache in publish-image below) - saves the
-          # go mod download step on every PR/push instead of just releases.
+          # from the Docker layer cache in publish-image-build below) - saves
+          # the go mod download step on every PR/push instead of just
+          # releases. cache-dependency-path is required here: setup-go's
+          # cache feature looks for go.sum at the repo root by default, but
+          # this repo's go.sum lives under backend/ - without this, cache
+          # restore silently fails every run ("Dependencies file is not
+          # found ... Supported file pattern: go.mod") and caching never
+          # actually kicks in. Found in the first run after adding `cache:
+          # true` (2026-07-27, run #532): the warning showed up but the job
+          # still passed, so it would have gone unnoticed without checking.
           cache: true
+          cache-dependency-path: backend/go.sum
       # v6 + no explicit version installs golangci-lint v1.64.8, which was
       # itself built with go1.24 - it refuses to lint code targeting a newer
       # Go version than it was built with ("the Go language version (go1.24)
@@ -87,7 +96,7 @@ jobs:
           node-version: 24
           # Caches npm's download cache keyed on package-lock.json - saves
           # the npm ci step on every PR/push, separate from the Docker layer
-          # cache in publish-image below.
+          # cache in publish-image-build below.
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
@@ -160,27 +169,41 @@ jobs:
   # GITHUB_TOKEN is sufficient to push to this repo's own ghcr.io package -
   # no extra secret needed - but the job needs "packages: write" explicitly
   # since the default token permissions are read-only.
-  publish-image:
-    runs-on: ubuntu-latest
+  # Builds each platform natively instead of emulating arm64 with QEMU on an
+  # amd64 runner (as this used to do): the Dockerfile's go-builder and
+  # frontend-builder stages are genuine compile steps (go build, tsc + vite
+  # build), and QEMU's per-instruction translation overhead hits exactly
+  # those hardest - measured at 10m14s of this job's 12m28s total run time
+  # in release #532 (2026-07-23), against ~1 minute each for the backend/
+  # frontend jobs' equivalent native compiles. `ubuntu-24.04-arm` is a
+  # GitHub-hosted runner (free for this public repo, unlike a private repo
+  # where arm64 runners are billed) that runs the arm64 leg at roughly the
+  # same speed as amd64 runs its own leg, in parallel instead of serialized
+  # under one emulated builder.
+  #
+  # Each matrix leg pushes its single-platform image by digest only (no
+  # tag) - `push-by-digest: true` - because a shared tag like `:latest`
+  # pushed twice from two parallel jobs would just have the second push
+  # silently overwrite the first with a single-platform image, not merge
+  # them. publish-image-merge below combines both digests into one real
+  # multi-platform manifest under the actual tags.
+  publish-image-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     needs: [backend, frontend]
     if: github.event_name == 'release'
     permissions:
-      # write (not read) because the SBOM step below attaches a file to
-      # this same GitHub Release via `gh release upload` - packages: write
-      # alone only covers the ghcr.io push.
-      contents: write
+      contents: read
       packages: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      # QEMU lets the amd64 runner emulate arm64 to build that platform's
-      # layers (the Dockerfile's go-builder/frontend-builder stages have no
-      # native cross-compile args, so arm64 layers are built under emulation -
-      # slower than a native arm64 runner, but fine for a solo project's
-      # release cadence). Buildx is the BuildKit driver that actually knows
-      # how to produce a multi-platform manifest list from a single build
-      # invocation; the default docker driver can't.
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
       - name: Log in to ghcr.io
@@ -189,16 +212,72 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push
+      - name: Build and push by digest
+        id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ghcr.io/modulab-project/modulab-core:latest
-            ghcr.io/modulab-project/modulab-core:${{ github.event.release.tag_name }}
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=ghcr.io/modulab-project/modulab-core,push-by-digest=true,name-canonical=true,push=true
+      # Digest artifacts are how the merge job below learns what each
+      # parallel leg actually pushed - the filename (not its contents, the
+      # file itself is empty) carries the digest.
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+      - name: Sanitize platform name for artifact key
+        run: echo "PLATFORM_PAIR=${PLATFORM//\//-}" >> "$GITHUB_ENV"
+        env:
+          PLATFORM: ${{ matrix.platform }}
+      - name: Upload digest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v7.0.1
+        with:
+          name: digests-core-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-image-merge:
+    runs-on: ubuntu-latest
+    needs: [publish-image-build]
+    if: github.event_name == 'release'
+    permissions:
+      # write (not read) because the SBOM step below attaches a file to
+      # this same GitHub Release via `gh release upload` - packages: write
+      # alone only covers the ghcr.io push.
+      contents: write
+      packages: write
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: /tmp/digests
+          pattern: digests-core-*
+          merge-multiple: true
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+      - name: Log in to ghcr.io
+        uses: docker/login-action@06fb636fac595d6fb4b28a5dfcb21a6f5091859c # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Combines the amd64 and arm64 digests pushed separately above into one
+      # multi-platform manifest list under the real tags - this is the step
+      # that actually makes `docker pull ghcr.io/.../modulab-core:latest`
+      # resolve to the right image per-architecture again.
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            -t ghcr.io/modulab-project/modulab-core:latest \
+            -t ghcr.io/modulab-project/modulab-core:${{ github.event.release.tag_name }} \
+            $(printf 'ghcr.io/modulab-project/modulab-core@sha256:%s ' *)
+      - name: Inspect image
+        run: docker buildx imagetools inspect ghcr.io/modulab-project/modulab-core:${{ github.event.release.tag_name }}
       # Scans the image that was just published (OS packages + Deno/Go/npm
       # dependencies baked into it), not just the source dependency lists -
       # catches base-image CVEs (debian:bookworm-slim, node:24-alpine,
@@ -241,13 +320,17 @@ jobs:
   # image (COPY --from=core-source, ARG CORE_IMAGE) rather than building the
   # frontend itself - see that file's doc comment. That only produces a
   # correct result if it's built with CORE_IMAGE pointing at the *exact*
-  # core image publish-image just pushed, which is why this job `needs:
-  # publish-image` instead of running in parallel with it: without that
-  # ordering, this could build against whatever ghcr.io/.../modulab-core:latest
-  # happened to resolve to at the time (a stale previous release, on a
-  # runner that has no local Docker cache of its own to fall back on
-  # incorrectly either way - it would just as happily build a broken image
-  # against the wrong source).
+  # core image publish-image-merge just pushed, which is why this job
+  # `needs: publish-image-merge` instead of running in parallel with it:
+  # without that ordering, this could build against whatever
+  # ghcr.io/.../modulab-core:latest happened to resolve to at the time (a
+  # stale previous release, on a runner that has no local Docker cache of
+  # its own to fall back on incorrectly either way - it would just as
+  # happily build a broken image against the wrong source). This nginx
+  # image stays on QEMU for its own arm64 leg (unlike publish-image-build
+  # above) - it only copies static files rather than compiling anything, so
+  # it ran in 56s in release #532, not worth the same native-runner
+  # restructure.
   #
   # This is also what keeps a release "docker compose pull && docker compose
   # up -d" on the deployment host - see docker-compose.yml's nginx service,
@@ -261,7 +344,7 @@ jobs:
   # disagree on their own version number after the 1.0.1 release (2026-07-08).
   publish-nginx-image:
     runs-on: ubuntu-latest
-    needs: [publish-image]
+    needs: [publish-image-merge]
     if: github.event_name == 'release'
     permissions:
       contents: read
