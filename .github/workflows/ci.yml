@@ -13,6 +13,13 @@ on:
   release:
     types: [published]
 
+# Cancels a still-running run on the same branch/PR as soon as a newer push
+# lands, instead of letting both finish - avoids burning runner minutes on a
+# commit that's already been superseded.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend:
     runs-on: ubuntu-latest
@@ -34,6 +41,10 @@ jobs:
           # settling for whatever happens to be cached on the runner.
           go-version-file: backend/go.mod
           check-latest: true
+          # Caches ~/go/pkg/mod between runs (module download cache, separate
+          # from the Docker layer cache in publish-image below) - saves the
+          # go mod download step on every PR/push instead of just releases.
+          cache: true
       # v6 + no explicit version installs golangci-lint v1.64.8, which was
       # itself built with go1.24 - it refuses to lint code targeting a newer
       # Go version than it was built with ("the Go language version (go1.24)
@@ -56,8 +67,13 @@ jobs:
       # reachable CVEs sit in go.mod during the V1 hardening pass
       # (GO-2026-5004 in jackc/pgx, GO-2025-3540 in redis/go-redis) until a
       # manual local run happened to catch them.
+      # Pinned (not @latest) to match this workflow's pinning style
+      # elsewhere - @latest would silently pick up a new govulncheck version
+      # on every run instead of only when bumped deliberately. Confirmed
+      # current stable via `go run golang.org/x/vuln/cmd/govulncheck@latest
+      # -version` locally on 2026-07-27: govulncheck@v1.6.0.
       - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
 
   frontend:
     runs-on: ubuntu-latest
@@ -69,6 +85,11 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 24
+          # Caches npm's download cache keyed on package-lock.json - saves
+          # the npm ci step on every PR/push, separate from the Docker layer
+          # cache in publish-image below.
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       # eslint.config.js (flat config, ESLint 10) added during the pre-V1
       # review pass: js.configs.recommended + typescript-eslint recommended
