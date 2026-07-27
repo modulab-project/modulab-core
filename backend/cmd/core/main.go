@@ -1694,7 +1694,7 @@ type systemInfoRateLimit struct {
 }
 
 // sessionToken reads the caller's session bearer token from its httpOnly
-// modulab_session cookie - a package-local duplicate of auth's own
+// __Host-modulab_session cookie - a package-local duplicate of auth's own
 // unexported sessionToken (can't call that one directly since it is
 // unexported, and main imports auth, not the other way around). Used by
 // identifyBySessionOrIP and systemInfoHandler below, both of which need to
@@ -1712,8 +1712,14 @@ type systemInfoRateLimit struct {
 // caller was systemInfoHandler, fixed to use this function instead) rather
 // than leaving an now always-empty, unused-by-anything-else function
 // around.
+//
+// Cookie name must match auth's sessionCookieName ("__Host-modulab_session",
+// internal/auth/handlers.go) exactly - this copy still read the pre-hardening
+// "modulab_session" name (found 2026-07-27), so it never found the cookie and
+// silently behaved the same as the bearerToken(r) bug it was meant to fix:
+// ownID was always "", so no row was ever flagged Current on Security Info.
 func sessionToken(r *http.Request) string {
-	c, err := r.Cookie("modulab_session")
+	c, err := r.Cookie("__Host-modulab_session")
 	if err != nil {
 		return ""
 	}
