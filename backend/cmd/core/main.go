@@ -1694,9 +1694,9 @@ type systemInfoRateLimit struct {
 }
 
 // sessionToken reads the caller's session bearer token from its httpOnly
-// __Host-modulab_session cookie - a package-local duplicate of auth's own
-// unexported sessionToken (can't call that one directly since it is
-// unexported, and main imports auth, not the other way around). Used by
+// session cookie (auth.SessionCookieName) - a package-local duplicate of
+// auth's own unexported sessionToken (can't call that one directly since it
+// is unexported, and main imports auth, not the other way around). Used by
 // identifyBySessionOrIP and systemInfoHandler below, both of which need to
 // resolve a live session from the request to bucket the global rate limit
 // per-user (rather than per-IP) or flag the caller's own row as "current"
@@ -1713,13 +1713,14 @@ type systemInfoRateLimit struct {
 // than leaving an now always-empty, unused-by-anything-else function
 // around.
 //
-// Cookie name must match auth's sessionCookieName ("__Host-modulab_session",
-// internal/auth/handlers.go) exactly - this copy still read the pre-hardening
-// "modulab_session" name (found 2026-07-27), so it never found the cookie and
-// silently behaved the same as the bearerToken(r) bug it was meant to fix:
-// ownID was always "", so no row was ever flagged Current on Security Info.
+// Reads via auth.SessionCookieName rather than a hardcoded string literal
+// (found 2026-07-27): this used to duplicate the cookie name as a plain
+// string, which silently fell out of sync when the cookie picked up its
+// __Host- prefix - ownID was always "", so no row was ever flagged Current
+// on Security Info. Using the shared constant means a future rename can't
+// cause the same drift again.
 func sessionToken(r *http.Request) string {
-	c, err := r.Cookie("__Host-modulab_session")
+	c, err := r.Cookie(auth.SessionCookieName)
 	if err != nil {
 		return ""
 	}

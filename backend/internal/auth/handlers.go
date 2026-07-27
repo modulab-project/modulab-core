@@ -1097,6 +1097,17 @@ func bearerToken(r *http.Request) string {
 // cookie out from under Core.
 const sessionCookieName = "__Host-modulab_session"
 
+// SessionCookieName exposes sessionCookieName to callers outside this
+// package - same reasoning as SessionKeyPrefix in session.go. main.go used
+// to keep its own hardcoded copy of this string for its package-local
+// sessionToken(r) (identifyBySessionOrIP's rate-limit bucketing and
+// systemInfoHandler's "is this row the caller's own session" check); that
+// copy silently fell out of sync when this cookie picked up its __Host-
+// prefix (found 2026-07-27, via Security Info never flagging the caller's
+// own row as current) and would have been caught immediately by using this
+// constant instead of a second string literal.
+const SessionCookieName = sessionCookieName
+
 // sessionToken reads the caller's full session bearer token from its
 // httpOnly cookie. This is the one and only place that does so - every
 // session-consuming handler in this package (MeHandler, LogoutHandler,
