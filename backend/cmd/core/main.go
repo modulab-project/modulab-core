@@ -269,7 +269,18 @@ func main() {
 	// Every Setup Wizard route below is wrapped in bootstrapMgr.Middleware:
 	// per spec section 6.5, the entire wizard API is locked until the
 	// correct bootstrap token (printed above, once, at startup) is supplied
-	// via the X-ModuLab-Bootstrap-Token header.
+	// via the X-ModuLab-Bootstrap-Token header - and locked again, this time
+	// as a flat 404 with no token accepted at all, from the moment the wizard
+	// is complete (which for an already-configured instance is the
+	// bootstrapMgr.Complete() call at startup above, not just a live
+	// POST /v1/setup/complete).
+	//
+	// That second half is load-bearing, not cosmetic: none of these handlers
+	// authenticates on its own, so any route that reaches them is reachable
+	// unauthenticated. Do not register a new route here expecting a session
+	// check further in, and do not add an "authenticated escape hatch" back
+	// into the wizard - the ongoing equivalents already exist in the admin
+	// panel (PATCH/DELETE /v1/admin/oidc, super-admin + step-up reauth).
 	mux.Handle("/v1/setup/status", bootstrapMgr.Middleware(setup.StatusHandler(pool)))
 	mux.Handle("/v1/setup/init", bootstrapMgr.Middleware(setup.InitHandler(pool)))
 

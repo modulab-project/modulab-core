@@ -6,8 +6,16 @@
 // always produces a fresh one. Once the wizard HAS finished, main.go derives
 // that fact from the database (via setup.WizardComplete) on every startup
 // and calls Complete instead of LogToken, so a completed instance never
-// prints a fresh token or re-locks the Setup Wizard API again - see
-// LogToken and Complete's doc comments for the mechanics.
+// prints a fresh token - and, from that point on, serves 404 for the entire
+// wizard API rather than accepting any token for it. See LogToken,
+// Middleware, and Complete's doc comments for the mechanics.
+//
+// The gate is therefore the only thing standing in front of the wizard
+// handlers: none of them (setup.OIDCConfigureHandler,
+// setup.GroupPrefixConfigureHandler, ...) performs an auth check of its own,
+// by design - they run in a phase where no user account exists yet. Any
+// change to Middleware's decision logic is a change to whether unauthenticated
+// callers can rewrite this instance's OIDC trust root.
 package bootstrap
 
 import (
@@ -87,8 +95,37 @@ func (m *Manager) LogToken() {
 }
 
 // Middleware wraps next so that every request must present the correct
-// bootstrap token via the HeaderName header, unless the wizard has already
-// been completed.
+// bootstrap token via the HeaderName header - and, once the wizard has been
+// completed, so that next is never reached at all.
+//
+// The completed branch used to call next.ServeHTTP unconditionally, on the
+// reading that "the gate exists only until setup is done". That was an
+// authentication bypass, found in the 2026-07-27 security audit: none of
+// the wizard handlers this middleware wraps has any auth check of its own
+// (they were written for a phase where no user account can exist yet), and
+// main.go calls Complete() at startup for every already-configured
+// instance. So on any production deployment, POST /v1/setup/oidc/configure
+// was reachable by anyone who could reach Core at all - and it overwrites
+// issuer_url/client_id/client_secret, i.e. the trust root the entire login
+// flow depends on. Whoever set those could point every subsequent login at
+// an IdP of their own and log in as super-admin. POST
+// /v1/setup/group-prefix/configure (rewrites role derivation) and GET
+// /v1/setup/oidc/status (leaks issuer + client ID) were open the same way.
+//
+// A completed wizard has nothing left to serve: the SPA reads
+// /healthz's setup_completed, not /v1/setup/status, and SetupWizard.tsx
+// redirects /setup to /login outright once that flag is true - so no
+// first-party caller loses anything here. 404 rather than 403 because
+// "these routes do not exist on a configured instance" is the accurate
+// description, and it does not confirm to a prober that a wizard API is
+// merely gated. The ongoing, authenticated equivalents live in the admin
+// panel (PATCH/DELETE /v1/admin/oidc, super-admin + step-up reauth) and are
+// unaffected.
+//
+// Note this deliberately removes the "re-run the wizard to recover from a
+// broken OIDC config" path, which was never a designed feature - only a
+// side effect of the bypass. Recovery for a full lockout is an operator
+// action against the database, not an unauthenticated HTTP endpoint.
 func (m *Manager) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		m.mu.Lock()
@@ -97,7 +134,7 @@ func (m *Manager) Middleware(next http.Handler) http.Handler {
 		m.mu.Unlock()
 
 		if completed {
-			next.ServeHTTP(w, r)
+			http.NotFound(w, r)
 			return
 		}
 		if paused {
@@ -131,12 +168,24 @@ func (m *Manager) Middleware(next http.Handler) http.Handler {
 	})
 }
 
-// Complete permanently disables the bootstrap-token gate for the lifetime
-// of this process (spec section 6.5 step 7: "Bootstrap-Token invalidiert,
-// System geht in Normalbetrieb"). Called by setup.CompleteHandler once it
-// has verified every prior wizard step (master key, OIDC, group prefix,
-// and a bound Super-Admin) is actually persisted - Manager itself does not
+// Complete permanently closes the Setup Wizard API for the lifetime of this
+// process (spec section 6.5 step 7: "Bootstrap-Token invalidiert, System
+// geht in Normalbetrieb"). Called by setup.CompleteHandler once it has
+// verified every prior wizard step (master key, OIDC, group prefix, and a
+// bound Super-Admin) is actually persisted - Manager itself does not
 // re-check those, it only flips the gate.
+//
+// "Closes", not "opens": after this flag is set, Middleware answers every
+// wrapped route with 404 instead of forwarding it - see its doc comment for
+// why forwarding was an authentication bypass. The bootstrap token stops
+// being accepted at the same moment, so a completed instance has no path
+// back into the wizard at all, with or without the token.
+//
+// Safe to call from a handler that this same Manager's Middleware is
+// currently forwarding (setup.CompleteHandler does exactly that): the
+// middleware already made its decision before invoking the handler, so
+// flipping the flag mid-request only affects subsequent requests, never
+// this one's own response.
 //
 // This flag lives in memory only and starts false on every process start,
 // but main.go also calls Complete unconditionally at startup whenever
