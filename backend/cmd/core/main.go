@@ -223,7 +223,7 @@ func main() {
 		// generalized to "any configured search provider") since SearXNG is
 		// the only provider type with an admin-chosen network address worth
 		// probing this way - Serper is a fixed public API host.
-		if baseURL, configured, err := pool.GetSearchProviderBaseURL(r.Context(), "searxng"); err == nil {
+		if baseURL, configured, err := pool.GetSearchProviderBaseURL(r.Context(), db.DefaultSearchProviderID); err == nil {
 			status.SearXNGConfigured = configured
 			if configured {
 				up := searxng.Ping(r.Context(), baseURL)
@@ -1157,18 +1157,17 @@ func recoverMiddleware(next http.Handler) http.Handler {
 // come up in practice; only the request-count ceiling has.
 const authRateLimitWindow = time.Minute
 
-// defaultAuthRateLimitMax is the fallback used when the
-// auth_rate_limit_max setting (see authRateLimitMax) has never been set.
-// Sized for a homelab (a handful of real users, occasional retries) while
-// still cutting off unbounded scripted hammering of the login/callback
-// endpoints.
-const defaultAuthRateLimitMax = 20
-
 // authRateLimitMax reads the configured auth-endpoint rate limit ceiling
-// from core_settings ("auth_rate_limit_max"). See
-// adminapi.AdminLimitsHandler for where this is admin-editable.
+// from core_settings ("auth_rate_limit_max"). Delegates to
+// adminapi.AuthRateLimitMax (2026-07-27) rather than keeping its own copy
+// of the "auth_rate_limit_max" key string and its default - main cannot be
+// imported by other packages, but nothing stops main from importing
+// adminapi (already does, for AdminLimitsHandler itself), so the two no
+// longer need to be kept in sync by hand. Found alongside the
+// __Host-modulab_session cookie-name bug: same "two independently-hardcoded
+// copies" shape, just not yet actually drifted.
 func authRateLimitMax(ctx context.Context, pool *db.Pool) int64 {
-	return readRateLimitSetting(ctx, pool, "auth_rate_limit_max", defaultAuthRateLimitMax)
+	return adminapi.AuthRateLimitMax(ctx, pool)
 }
 
 // aiChatRateLimitWindow bounds how often a single client IP may call the AI
@@ -1176,23 +1175,14 @@ func authRateLimitMax(ctx context.Context, pool *db.Pool) int64 {
 // and why it exists on top of ai.go's own separate per-user chat limiter.
 const aiChatRateLimitWindow = time.Minute
 
-// defaultAIChatRateLimitMax is the fallback used when the
-// ai_chat_ip_rate_limit_max setting (see aiChatRateLimitMax) has never been
-// set. Unlike login/callback, every call here forwards to a paid external
-// provider (OpenAI/Anthropic/etc. - internal/ai), so an unbounded loop from
-// a single approved-but-compromised account (or a buggy frontend retry) can
-// run up real cost, not just load Core itself. 30/min is generous for
-// interactive chat use (a few messages a minute, per browser tab) while
-// still bounding worst-case spend to a known ceiling.
-const defaultAIChatRateLimitMax = 30
-
 // aiChatRateLimitMax reads the configured AI-chat per-IP rate limit
 // ceiling from core_settings ("ai_chat_ip_rate_limit_max"). This is a
 // coarse IP-based backstop layered on top of ai.go's own separate
 // per-user "chat_rpm_limit" (ai.go's chatRPMLimit) — not a replacement for
-// it. See adminapi.AdminLimitsHandler for where this is admin-editable.
+// it. Delegates to adminapi.AIChatIPRateLimitMax - see authRateLimitMax's
+// doc comment above for why.
 func aiChatRateLimitMax(ctx context.Context, pool *db.Pool) int64 {
-	return readRateLimitSetting(ctx, pool, "ai_chat_ip_rate_limit_max", defaultAIChatRateLimitMax)
+	return adminapi.AIChatIPRateLimitMax(ctx, pool)
 }
 
 // globalRateLimitWindow bounds the coarse backstop applied to every route
@@ -1201,42 +1191,12 @@ func aiChatRateLimitMax(ctx context.Context, pool *db.Pool) int64 {
 // rationale.
 const globalRateLimitWindow = time.Minute
 
-// defaultGlobalRateLimitMax is the fallback used when the
-// global_rate_limit_max setting (see globalRateLimitMax) has never been
-// set. Before this backstop existed, only /v1/auth/login and
-// /v1/auth/callback had any rate limit at all - anything else (module API
-// proxy, search, news aggregation, etc.) was reachable at unbounded volume
-// by any approved session or, for routes that don't check auth themselves,
-// any caller who can reach Core. The limit is deliberately generous (a
-// self-hosted homelab has a handful of real users, not a fleet of API
-// consumers) - it is meant to catch runaway loops and scripted abuse, not
-// to shape normal interactive traffic.
-const defaultGlobalRateLimitMax = 600
-
 // globalRateLimitMax reads the configured global rate limit ceiling from
-// core_settings ("global_rate_limit_max"). See adminapi.AdminLimitsHandler
-// for where this is admin-editable.
+// core_settings ("global_rate_limit_max"). Delegates to
+// adminapi.GlobalRateLimitMax - see authRateLimitMax's doc comment above
+// for why.
 func globalRateLimitMax(ctx context.Context, pool *db.Pool) int64 {
-	return readRateLimitSetting(ctx, pool, "global_rate_limit_max", defaultGlobalRateLimitMax)
-}
-
-// readRateLimitSetting is the shared GetSetting/parse/fallback logic behind
-// authRateLimitMax/aiChatRateLimitMax/globalRateLimitMax. 0 means unlimited
-// (IncrExpire's count can never exceed a max of 0... except it always will,
-// since count starts at 1 - so 0 here intentionally means "trips on the
-// very first request", which is never a sensible admin intent; unlike the
-// body-size settings, 0 is treated as invalid input, not "unlimited", and
-// falls back to def instead).
-func readRateLimitSetting(ctx context.Context, pool *db.Pool, key string, def int64) int64 {
-	val, ok, err := pool.GetSetting(ctx, key)
-	if err != nil || !ok || val == "" {
-		return def
-	}
-	n, err := strconv.ParseInt(val, 10, 64)
-	if err != nil || n <= 0 {
-		return def
-	}
-	return n
+	return adminapi.GlobalRateLimitMax(ctx, pool)
 }
 
 // rateLimitMiddleware applies a fixed-window rate limit (via
@@ -1750,7 +1710,7 @@ func systemInfoHandler(pool *db.Pool, valkeyClient *valkey.Client, cfg config.Co
 			CosignAvailable:   modules.CosignAvailable(cfg.CosignBinaryPath),
 		}
 
-		if baseURL, configured, err := pool.GetSearchProviderBaseURL(ctx, "searxng"); err == nil {
+		if baseURL, configured, err := pool.GetSearchProviderBaseURL(ctx, db.DefaultSearchProviderID); err == nil {
 			resp.SearxngConfigured = configured
 			if configured {
 				up := searxng.Ping(ctx, baseURL)

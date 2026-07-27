@@ -13,6 +13,7 @@ import {
 import { authErrorKey } from "../lib/authErrors";
 import { consumeAuthResult } from "../lib/authResult";
 import { useLoginRedirect } from "../lib/useLoginRedirect";
+import { isSuperAdminRole } from "../lib/roles";
 import { AuthButton, AuthField, AuthSecondaryButton, AuthShell } from "../components/AuthShell";
 
 // Persisted in sessionStorage, not React state alone, because the
@@ -68,7 +69,7 @@ export default function SetupWizard() {
   // for the ordinary (single-tab) failure case.
   const { waiting: loginWaiting, startLogin } = useLoginRedirect((session) => {
     setLoginRole(session.role);
-    if (session.role === "super-admin") {
+    if (isSuperAdminRole(session.role)) {
       goTo(5);
     }
   });
@@ -110,7 +111,7 @@ export default function SetupWizard() {
     }
     if (result.role) {
       setLoginRole(result.role);
-      if (result.role === "super-admin") {
+      if (isSuperAdminRole(result.role)) {
         goTo(5);
       }
     }
@@ -391,7 +392,7 @@ function StepSuperAdminLogin({
   onRetry: () => void;
 }) {
   const { t } = useTranslation();
-  const notSuperAdmin = role !== null && role !== "super-admin";
+  const notSuperAdmin = role !== null && !isSuperAdminRole(role);
   return (
     <div className="space-y-4">
       <p className="text-sm text-gray-600 dark:text-gray-400">

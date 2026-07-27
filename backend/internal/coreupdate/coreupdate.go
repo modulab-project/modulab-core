@@ -48,6 +48,17 @@ const (
 	defaultCheckTimeRaw     = "03:00"
 )
 
+// SettingKeyCheckWeekdays/SettingKeyCheckTime name the core_settings keys
+// CheckWeekdaysRaw/CheckTimeRaw below read. Exported so adminapi.
+// AdminLimitsHandler's PATCH handler writes through these instead of a
+// second, independently-hardcoded string literal - found 2026-07-27 as the
+// same "two copies, one of which can drift" pattern as the
+// __Host-modulab_session cookie-name bug.
+const (
+	SettingKeyCheckWeekdays = "core_update_check_weekdays"
+	SettingKeyCheckTime     = "core_update_check_time"
+)
+
 // CheckWeekdaysRaw reads the raw core_settings value for
 // "core_update_check_weekdays" (a comma-separated list of time.Weekday
 // integers, 0=Sunday..6=Saturday - the same convention modules/jobs.go's
@@ -57,7 +68,7 @@ const (
 // value that reaches core_settings at all is already known-good - this
 // fallback exists for "never configured yet", not for tolerating bad input.
 func CheckWeekdaysRaw(ctx context.Context, pool *db.Pool) string {
-	val, ok, err := pool.GetSetting(ctx, "core_update_check_weekdays")
+	val, ok, err := pool.GetSetting(ctx, SettingKeyCheckWeekdays)
 	if err != nil || !ok || val == "" {
 		return defaultCheckWeekdaysRaw
 	}
@@ -71,7 +82,7 @@ func CheckWeekdaysRaw(ctx context.Context, pool *db.Pool) string {
 // "core_update_check_time" ("HH:MM", 24h). Same fallback reasoning as
 // CheckWeekdaysRaw above.
 func CheckTimeRaw(ctx context.Context, pool *db.Pool) string {
-	val, ok, err := pool.GetSetting(ctx, "core_update_check_time")
+	val, ok, err := pool.GetSetting(ctx, SettingKeyCheckTime)
 	if err != nil || !ok || val == "" {
 		return defaultCheckTimeRaw
 	}

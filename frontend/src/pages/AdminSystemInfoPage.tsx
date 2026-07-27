@@ -21,6 +21,7 @@ import {
   type SystemInfoTimer,
 } from "../lib/api";
 import { useAuthenticatedSession } from "../lib/useSession";
+import { isSuperAdminRole } from "../lib/roles";
 import { useNow } from "../lib/useNow";
 import { AppShell } from "../components/AppShell";
 import packageJson from "../../package.json";
@@ -60,7 +61,7 @@ export default function AdminSystemInfoPage() {
 
   useEffect(() => {
     if (!session) return;
-    if (session.role !== "super-admin") {
+    if (!isSuperAdminRole(session.role)) {
       navigate("/", { replace: true });
       return;
     }
@@ -85,7 +86,7 @@ export default function AdminSystemInfoPage() {
   const now = useNow();
   const elapsedMs = now - fetchedAt;
 
-  if (loading || !session || session.role !== "super-admin") return null;
+  if (loading || !session || !isSuperAdminRole(session.role)) return null;
 
   return (
     <AppShell session={session}>

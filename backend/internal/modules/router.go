@@ -108,7 +108,7 @@ const unlimitedUploadParseMemory = 32 << 20 // 32 MB
 // adminapi.AdminLimitsHandler, which exposes this alongside every other
 // upload/rate/pool limit that had the same problem.
 func MaxUploadBodyBytes(ctx context.Context, pool *db.Pool) int64 {
-	val, ok, err := pool.GetSetting(ctx, "max_upload_body_bytes")
+	val, ok, err := pool.GetSetting(ctx, SettingKeyMaxUploadBodyBytes)
 	if err != nil || !ok || val == "" {
 		return defaultMaxUploadBytes
 	}

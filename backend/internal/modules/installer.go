@@ -189,6 +189,24 @@ type ManifestCrudField struct {
 	Encrypted bool `yaml:"encrypted" json:"encrypted,omitempty"`
 }
 
+// SettingKeyInstallDownloadTimeoutSeconds/SettingKeyMaxModuleZIPBytes/
+// SettingKeyMaxUploadBodyBytes/SettingKeyConnPoolSize name the core_settings
+// keys InstallDownloadTimeoutSeconds/MaxModuleZIPBytes/MaxUploadBodyBytes
+// (router.go)/ConnPoolSize (deno.go) below read. Exported so
+// adminapi.AdminLimitsHandler's PATCH handler writes through these instead
+// of a second, independently-hardcoded string literal per key - found
+// 2026-07-27 as the same "two copies, one of which can drift" pattern as
+// the __Host-modulab_session cookie-name bug. Declared once here for the
+// whole package rather than next to each reader, since deno.go/router.go/
+// installer.go all belong to the same modules package and can reference a
+// shared const block directly.
+const (
+	SettingKeyInstallDownloadTimeoutSeconds = "modules_install_download_timeout_seconds"
+	SettingKeyMaxModuleZIPBytes             = "max_module_zip_bytes"
+	SettingKeyMaxUploadBodyBytes            = "max_upload_body_bytes"
+	SettingKeyConnPoolSize                  = "deno_conn_pool_size"
+)
+
 const (
 	// defaultInstallDownloadTimeoutSeconds is
 	// InstallDownloadTimeoutSeconds's fallback - mirrors the fixed 5min
@@ -212,7 +230,7 @@ const (
 // setting to MaxModuleZIPBytes: a larger admin-configured ZIP cap can also
 // need a longer download window on a slow connection.
 func InstallDownloadTimeoutSeconds(ctx context.Context, pool *db.Pool) int {
-	val, ok, err := pool.GetSetting(ctx, "modules_install_download_timeout_seconds")
+	val, ok, err := pool.GetSetting(ctx, SettingKeyInstallDownloadTimeoutSeconds)
 	if err != nil || !ok || val == "" {
 		return defaultInstallDownloadTimeoutSeconds
 	}
@@ -229,7 +247,7 @@ func InstallDownloadTimeoutSeconds(ctx context.Context, pool *db.Pool) int {
 // convention max_body_bytes/MaxUploadBodyBytes use. See
 // adminapi.AdminLimitsHandler for where this is admin-editable.
 func MaxModuleZIPBytes(ctx context.Context, pool *db.Pool) int64 {
-	val, ok, err := pool.GetSetting(ctx, "max_module_zip_bytes")
+	val, ok, err := pool.GetSetting(ctx, SettingKeyMaxModuleZIPBytes)
 	if err != nil || !ok || val == "" {
 		return defaultMaxModuleZIPBytes
 	}

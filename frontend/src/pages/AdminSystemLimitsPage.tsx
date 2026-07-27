@@ -8,6 +8,7 @@ import {
   type LimitsSettings,
 } from "../lib/api";
 import { useAuthenticatedSession } from "../lib/useSession";
+import { isSuperAdminRole } from "../lib/roles";
 import { AppShell } from "../components/AppShell";
 
 // /admin/system/limits — consolidates every cross-cutting operational limit
@@ -145,7 +146,7 @@ export default function AdminSystemLimitsPage() {
 
   useEffect(() => {
     if (!session) return;
-    if (session.role !== "super-admin") { navigate("/", { replace: true }); return; }
+    if (!isSuperAdminRole(session.role)) { navigate("/", { replace: true }); return; }
     if (hasFetched.current) return;
     hasFetched.current = true;
     adminGetLimitsSettings()
@@ -163,7 +164,7 @@ export default function AdminSystemLimitsPage() {
       .catch(() => setMsg({ ok: false, text: t("admin.system_limits.load_error") }));
   }, [session, navigate, t]);
 
-  if (loading || !session || session.role !== "super-admin") return null;
+  if (loading || !session || !isSuperAdminRole(session.role)) return null;
 
   const dirty = settings !== null && (
     FIELDS.some((f) => inputs[f.key] !== String(settings[f.key])) ||

@@ -5,6 +5,7 @@ import { getSystemStatus, updateOIDC, deleteOIDCConfig } from "../lib/api";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { useLoginRedirect } from "../lib/useLoginRedirect";
 import { isReauthRequiredError } from "../lib/authErrors";
+import { isSuperAdminRole } from "../lib/roles";
 import { AppShell } from "../components/AppShell";
 import { ReauthBanner } from "../components/ReauthBanner";
 
@@ -39,7 +40,7 @@ export default function AdminSystemOIDCPage() {
 
   useEffect(() => {
     if (!session) return;
-    if (session.role !== "super-admin") { navigate("/", { replace: true }); return; }
+    if (!isSuperAdminRole(session.role)) { navigate("/", { replace: true }); return; }
     if (hasFetched.current) return;
     hasFetched.current = true;
     getSystemStatus()
@@ -54,7 +55,7 @@ export default function AdminSystemOIDCPage() {
       .catch(() => setMsg({ ok: false, text: t("admin.system.load_error") }));
   }, [session, navigate, t]);
 
-  if (loading || !session || session.role !== "super-admin") return null;
+  if (loading || !session || !isSuperAdminRole(session.role)) return null;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();

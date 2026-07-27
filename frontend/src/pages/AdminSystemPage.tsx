@@ -8,6 +8,7 @@ import {
   getSystemInfo,
 } from "../lib/api";
 import { useAuthenticatedSession } from "../lib/useSession";
+import { isSuperAdminRole } from "../lib/roles";
 import { AppShell } from "../components/AppShell";
 
 // /admin/system — super-admin hub. Shows all system-config areas as cards
@@ -31,7 +32,7 @@ export default function AdminSystemPage() {
 
   useEffect(() => {
     if (!session) return;
-    if (session.role !== "super-admin") {
+    if (!isSuperAdminRole(session.role)) {
       navigate("/", { replace: true });
       return;
     }
@@ -58,7 +59,7 @@ export default function AdminSystemPage() {
       .catch(() => setLoadError(t("admin.system.load_error")));
   }, [session, navigate, t]);
 
-  if (loading || !session || session.role !== "super-admin") return null;
+  if (loading || !session || !isSuperAdminRole(session.role)) return null;
 
   return (
     <AppShell session={session}>

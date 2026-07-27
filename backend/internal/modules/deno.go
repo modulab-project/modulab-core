@@ -617,7 +617,7 @@ const defaultConnPoolSize = 4
 // 0 would make every module request block forever). See
 // adminapi.AdminLimitsHandler for where this is admin-editable.
 func ConnPoolSize(ctx context.Context, pool *db.Pool) int {
-	val, ok, err := pool.GetSetting(ctx, "deno_conn_pool_size")
+	val, ok, err := pool.GetSetting(ctx, SettingKeyConnPoolSize)
 	if err != nil || !ok || val == "" {
 		return defaultConnPoolSize
 	}

@@ -41,12 +41,20 @@ const (
 	defaultGithubAPITimeoutSeconds = 15
 )
 
+// SettingKeyGithubAPITimeoutSeconds names the core_settings key
+// GithubAPITimeoutSeconds below reads. Exported so adminapi.
+// AdminLimitsHandler's PATCH handler writes through this instead of a
+// second, independently-hardcoded string literal - found 2026-07-27 as the
+// same "two copies, one of which can drift" pattern as the
+// __Host-modulab_session cookie-name bug.
+const SettingKeyGithubAPITimeoutSeconds = "store_github_api_timeout_seconds"
+
 // GithubAPITimeoutSeconds reads the GitHub API/raw-content fetch timeout
 // (seconds) from core_settings ("store_github_api_timeout_seconds"), same
 // pattern as modules.MaxUploadBodyBytes. Defaults to
 // defaultGithubAPITimeoutSeconds if unset.
 func GithubAPITimeoutSeconds(ctx context.Context, pool *db.Pool) int {
-	val, ok, err := pool.GetSetting(ctx, "store_github_api_timeout_seconds")
+	val, ok, err := pool.GetSetting(ctx, SettingKeyGithubAPITimeoutSeconds)
 	if err != nil || !ok || val == "" {
 		return defaultGithubAPITimeoutSeconds
 	}

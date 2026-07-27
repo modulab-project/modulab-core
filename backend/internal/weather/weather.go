@@ -514,13 +514,20 @@ type GeoConfigResponse struct {
 	GeoTimeoutMS int `json:"geo_timeout_ms"`
 }
 
+// SettingKeyGeoTimeoutMS names the core_settings key GeoTimeoutMS below
+// reads. Exported so adminapi.AdminLimitsHandler's PATCH handler writes
+// through this instead of a second, independently-hardcoded string literal -
+// found 2026-07-27 as the same "two copies, one of which can drift" pattern
+// as the __Host-modulab_session cookie-name bug.
+const SettingKeyGeoTimeoutMS = "geo_timeout_ms"
+
 // GeoTimeoutMS reads the browser geolocation timeout (milliseconds) from
 // core_settings ("geo_timeout_ms"), same pattern as
 // modules.MaxUploadBodyBytes. Defaults to defaultGeoTimeoutMS if unset;
 // admin.AdminLimitsHandler validates the stored value is always > 0, so a
 // zero/negative value here only happens for an unset or corrupted key.
 func GeoTimeoutMS(ctx context.Context, pool *db.Pool) int {
-	val, ok, err := pool.GetSetting(ctx, "geo_timeout_ms")
+	val, ok, err := pool.GetSetting(ctx, SettingKeyGeoTimeoutMS)
 	if err != nil || !ok || val == "" {
 		return defaultGeoTimeoutMS
 	}

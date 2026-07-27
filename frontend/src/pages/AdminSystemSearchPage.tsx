@@ -13,6 +13,7 @@ import {
 import { useAuthenticatedSession } from "../lib/useSession";
 import { useLoginRedirect } from "../lib/useLoginRedirect";
 import { isReauthRequiredError } from "../lib/authErrors";
+import { isSuperAdminRole } from "../lib/roles";
 import { AppShell } from "../components/AppShell";
 import { ReauthBanner } from "../components/ReauthBanner";
 
@@ -68,7 +69,7 @@ export default function AdminSystemSearchPage() {
 
   useEffect(() => {
     if (!session) return;
-    if (session.role !== "super-admin") { navigate("/", { replace: true }); return; }
+    if (!isSuperAdminRole(session.role)) { navigate("/", { replace: true }); return; }
     if (hasFetched.current) return;
     hasFetched.current = true;
     Promise.all([adminListSearchProviders(), adminGetSearchSettings()])
@@ -77,7 +78,7 @@ export default function AdminSystemSearchPage() {
       .finally(() => setFetching(false));
   }, [session, navigate]);
 
-  if (loading || !session || session.role !== "super-admin") return null;
+  if (loading || !session || !isSuperAdminRole(session.role)) return null;
 
   // A provider "has a key" in the AI-page sense: for SearXNG that means a
   // base URL is set (its only credential), for everything else (Serper)

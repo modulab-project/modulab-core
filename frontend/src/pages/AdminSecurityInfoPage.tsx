@@ -21,6 +21,7 @@ import {
   type SystemInfoRateLimit,
 } from "../lib/api";
 import { useAuthenticatedSession } from "../lib/useSession";
+import { isSuperAdminRole } from "../lib/roles";
 import { useLoginRedirect } from "../lib/useLoginRedirect";
 import { isReauthRequiredError } from "../lib/authErrors";
 import { queryClient } from "../lib/queryClient";
@@ -38,7 +39,7 @@ export default function AdminSecurityInfoPage() {
 
   useEffect(() => {
     if (!session) return;
-    if (session.role !== "super-admin") {
+    if (!isSuperAdminRole(session.role)) {
       navigate("/", { replace: true });
       return;
     }
@@ -140,7 +141,7 @@ export default function AdminSecurityInfoPage() {
       });
   }
 
-  if (loading || !session || session.role !== "super-admin") return null;
+  if (loading || !session || !isSuperAdminRole(session.role)) return null;
 
   return (
     <AppShell session={session}>

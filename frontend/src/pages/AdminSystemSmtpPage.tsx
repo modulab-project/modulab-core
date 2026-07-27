@@ -5,6 +5,7 @@ import { smtpStatus as fetchSmtpStatus, configureSmtp, deleteSmtpConfig, testSmt
 import { useAuthenticatedSession } from "../lib/useSession";
 import { useLoginRedirect } from "../lib/useLoginRedirect";
 import { isReauthRequiredError } from "../lib/authErrors";
+import { isSuperAdminRole } from "../lib/roles";
 import { AppShell } from "../components/AppShell";
 import { ReauthBanner } from "../components/ReauthBanner";
 
@@ -39,7 +40,7 @@ export default function AdminSystemSmtpPage() {
 
   useEffect(() => {
     if (!session) return;
-    if (session.role !== "super-admin") { navigate("/", { replace: true }); return; }
+    if (!isSuperAdminRole(session.role)) { navigate("/", { replace: true }); return; }
     if (hasFetched.current) return;
     hasFetched.current = true;
     fetchSmtpStatus()
@@ -56,7 +57,7 @@ export default function AdminSystemSmtpPage() {
       .catch(() => setMsg({ ok: false, text: t("admin.smtp.load_error") }));
   }, [session, navigate, t]);
 
-  if (loading || !session || session.role !== "super-admin") return null;
+  if (loading || !session || !isSuperAdminRole(session.role)) return null;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();

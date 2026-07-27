@@ -84,12 +84,24 @@ var (
 // the fixed value this replaced.
 const defaultProviderTimeoutSeconds = 30
 
+// SettingKeyProviderTimeoutSeconds/SettingKeyChatRPMLimit/SettingKeyMaxBodyBytes
+// name the core_settings keys ProviderTimeoutSeconds/ChatRPMLimit/MaxBodyBytes
+// below read. Exported so adminapi.AdminLimitsHandler's PATCH handler writes
+// through these instead of a second, independently-hardcoded string literal -
+// found 2026-07-27 as the same "two copies, one of which can drift" pattern
+// as the __Host-modulab_session cookie-name bug.
+const (
+	SettingKeyProviderTimeoutSeconds = "ai_provider_timeout_seconds"
+	SettingKeyChatRPMLimit           = "ai_chat_rpm_limit"
+	SettingKeyMaxBodyBytes           = "max_body_bytes"
+)
+
 // ProviderTimeoutSeconds reads the fetchModels HTTP timeout (seconds) from
 // core_settings ("ai_provider_timeout_seconds"), same pattern as
 // modules.MaxUploadBodyBytes. Defaults to defaultProviderTimeoutSeconds if
 // unset. See AdminLimitsHandler's doc comment.
 func ProviderTimeoutSeconds(ctx context.Context, pool *db.Pool) int {
-	val, ok, err := pool.GetSetting(ctx, "ai_provider_timeout_seconds")
+	val, ok, err := pool.GetSetting(ctx, SettingKeyProviderTimeoutSeconds)
 	if err != nil || !ok || val == "" {
 		return defaultProviderTimeoutSeconds
 	}
@@ -200,7 +212,7 @@ func rowToResponse(r db.AIProviderRow) ProviderResponse {
 // own. See adminapi/limits.go's package doc comment for the underlying
 // "hardcoded, undiscoverable, wrong place" pattern this consolidation fixes.
 func ChatRPMLimit(ctx context.Context, pool *db.Pool) int {
-	val, ok, err := pool.GetSetting(ctx, "ai_chat_rpm_limit")
+	val, ok, err := pool.GetSetting(ctx, SettingKeyChatRPMLimit)
 	if err != nil || !ok || val == "" {
 		return 60 // default: 60 RPM
 	}
@@ -215,7 +227,7 @@ func ChatRPMLimit(ctx context.Context, pool *db.Pool) int {
 // Returns 1 MB (1<<20) as the default when the key is absent or unparseable;
 // 0 means unlimited. Exported so main.go's middleware can use it.
 func MaxBodyBytes(ctx context.Context, pool *db.Pool) int64 {
-	val, ok, err := pool.GetSetting(ctx, "max_body_bytes")
+	val, ok, err := pool.GetSetting(ctx, SettingKeyMaxBodyBytes)
 	if err != nil || !ok || val == "" {
 		return 1 << 20 // default: 1 MB
 	}

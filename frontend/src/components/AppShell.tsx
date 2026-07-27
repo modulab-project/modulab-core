@@ -23,7 +23,7 @@ import {
 import { queryClient } from "../lib/queryClient";
 import { useNotificationEvents, type ServerEvent } from "../lib/useEvents";
 import { useNow } from "../lib/useNow";
-import { isAdminRole } from "../lib/roles";
+import { isAdminRole, isSuperAdminRole } from "../lib/roles";
 import { useToasts } from "../lib/toasts";
 import { ToastStack } from "./Toast";
 import { Logo } from "./AuthShell";
@@ -278,7 +278,7 @@ export function AppShell({
   }
 
   const isAdmin = isAdminRole(session.role);
-  const isSuperAdmin = session.role === "super-admin";
+  const isSuperAdmin = isSuperAdminRole(session.role);
   const [chatOpen, setChatOpen] = useState(false);
   const installPrompt = useInstallPrompt();
   const [iosInstallHelpOpen, setIosInstallHelpOpen] = useState(false);
@@ -1033,7 +1033,7 @@ function ProfilePanelContent({
           >
             <i className="ti ti-puzzle text-[15px] text-gray-500" /> {t("shell.modules_link")}
           </Link>
-          {session.role === "super-admin" && (
+          {isSuperAdminRole(session.role) && (
             <>
               <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />
               <Link

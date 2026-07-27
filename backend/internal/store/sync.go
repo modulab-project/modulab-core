@@ -15,13 +15,20 @@ import (
 // fixed 1h value this replaced.
 const defaultSyncIntervalSeconds = 3600
 
+// SettingKeySyncIntervalSeconds names the core_settings key
+// SyncIntervalSeconds below reads. Exported so adminapi.AdminLimitsHandler's
+// PATCH handler writes through this instead of a second, independently-
+// hardcoded string literal - found 2026-07-27 as the same "two copies, one
+// of which can drift" pattern as the __Host-modulab_session cookie-name bug.
+const SettingKeySyncIntervalSeconds = "store_sync_interval_seconds"
+
 // SyncIntervalSeconds reads the registry-sync interval (seconds) from
 // core_settings ("store_sync_interval_seconds"), same pattern as
 // modules.MaxUploadBodyBytes. Defaults to defaultSyncIntervalSeconds if
 // unset. Exposed to callers outside this package (e.g. a future
 // GET /v1/admin/system/info countdown) via SyncInterval below.
 func SyncIntervalSeconds(ctx context.Context, pool *db.Pool) int {
-	val, ok, err := pool.GetSetting(ctx, "store_sync_interval_seconds")
+	val, ok, err := pool.GetSetting(ctx, SettingKeySyncIntervalSeconds)
 	if err != nil || !ok || val == "" {
 		return defaultSyncIntervalSeconds
 	}

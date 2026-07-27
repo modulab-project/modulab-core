@@ -10,6 +10,7 @@ import {
   type AuditVerifyResult,
 } from "../lib/api";
 import { useAuthenticatedSession } from "../lib/useSession";
+import { isSuperAdminRole } from "../lib/roles";
 import { AppShell } from "../components/AppShell";
 
 // Known event types for the filter dropdown, grouped by category — matches
@@ -298,7 +299,7 @@ export default function AdminAuditPage() {
 
   useEffect(() => {
     if (!session) return;
-    if (session.role !== "super-admin") {
+    if (!isSuperAdminRole(session.role)) {
       navigate("/", { replace: true });
       return;
     }
@@ -328,7 +329,7 @@ export default function AdminAuditPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchInput]);
 
-  if (loading || !session || session.role !== "super-admin") return null;
+  if (loading || !session || !isSuperAdminRole(session.role)) return null;
 
   function handleEventTypeChange(value: string) {
     setEventTypeFilter(value);

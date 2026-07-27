@@ -25,7 +25,7 @@ import { isReauthRequiredError } from "../lib/authErrors";
 import { AppShell } from "../components/AppShell";
 import { ReauthBanner } from "../components/ReauthBanner";
 import { Logo } from "../components/AuthShell";
-import { isAdminRole } from "../lib/roles";
+import { isAdminRole, isSuperAdminRole } from "../lib/roles";
 import { safeHref } from "../lib/url";
 
 type SourceFilter = "all" | "official" | "community" | "custom";
@@ -62,7 +62,7 @@ export default function StorePage() {
   // code is a higher-value target than typical org-admin-level config.
   // isAdmin above still gates the rest of this page (browsing/installing
   // from the Store), which org-admins keep unrestricted access to.
-  const isSuperAdmin = !!session && session.role === "super-admin";
+  const isSuperAdmin = !!session && isSuperAdminRole(session.role);
 
   // Redirect stays an effect (imperative router call, not a setState the
   // render-time-adjustment pattern applies to) - kept separate from the

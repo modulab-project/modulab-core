@@ -27,6 +27,7 @@
 package adminapi
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -45,19 +46,35 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/weather"
 )
 
-// The default* constants below intentionally mirror the unexported
-// defaultAuthRateLimitMax/defaultAIChatRateLimitMax/defaultGlobalRateLimitMax
-// constants in cmd/core/main.go: a Go "main" package cannot be imported by
-// any other package, so both the fallback values and the read logic
-// (readRateLimitInt below) are declared once more here rather than shared.
-// The two places are kept in sync by both reading and writing the exact
-// same core_settings keys (named in the GetSetting/SetSetting calls below)
-// - if you change a default here, change the matching one in main.go too,
-// and vice versa.
+// DefaultAuthRateLimitMax/DefaultAIChatRateLimitMax/DefaultGlobalRateLimitMax
+// are the fallbacks used when the matching core_settings key has never been
+// set - see AuthRateLimitMax/AIChatIPRateLimitMax/GlobalRateLimitMax below.
+// Exported (2026-07-27, alongside SettingKeyAuthRateLimitMax etc.) so
+// cmd/core/main.go's authRateLimitMax/aiChatRateLimitMax/globalRateLimitMax
+// - the actual rate-limit-middleware maxFn callbacks, which this package
+// cannot itself provide since main wires up rateLimitMiddleware - can
+// delegate to AuthRateLimitMax/AIChatIPRateLimitMax/GlobalRateLimitMax below
+// instead of each keeping its own copy of the default and the
+// "auth_rate_limit_max"/etc. key string. Before this export, those were two
+// independently-hardcoded copies kept in sync only by a doc-comment
+// admonition ("if you change a default here, change the matching one in
+// main.go too") - the same drift risk as the __Host-modulab_session cookie
+// name bug, just not yet actually triggered.
 const (
-	defaultAuthRateLimitMax   = 20
-	defaultAIChatRateLimitMax = 30
-	defaultGlobalRateLimitMax = 600
+	DefaultAuthRateLimitMax   = 20
+	DefaultAIChatRateLimitMax = 30
+	DefaultGlobalRateLimitMax = 600
+)
+
+// SettingKeyAuthRateLimitMax/SettingKeyAIChatIPRateLimitMax/
+// SettingKeyGlobalRateLimitMax name the core_settings keys AuthRateLimitMax/
+// AIChatIPRateLimitMax/GlobalRateLimitMax below read, and are also what this
+// file's own PATCH validation/write logic keys off of - one definition each,
+// not a literal repeated at every call site.
+const (
+	SettingKeyAuthRateLimitMax     = "auth_rate_limit_max"
+	SettingKeyAIChatIPRateLimitMax = "ai_chat_ip_rate_limit_max"
+	SettingKeyGlobalRateLimitMax   = "global_rate_limit_max"
 )
 
 // LimitsSettings is the shape of GET/PATCH /v1/admin/system/limits.
@@ -170,14 +187,14 @@ type LimitsSettings struct {
 	CoreUpdateCheckTime               string `json:"core_update_check_time"`
 }
 
-// readRateLimitInt is a copy of main.go's readRateLimitSetting (see this
-// file's doc comment for why it can't just be imported instead). 0 or an
+// readRateLimitInt is the shared GetSetting/parse/fallback logic behind
+// AuthRateLimitMax/AIChatIPRateLimitMax/GlobalRateLimitMax below. 0 or an
 // unparseable value falls back to def — a rate limit of 0 would trip on
 // literally the first request of every window, which is never a sensible
 // admin intent, so it's treated as "not configured" rather than as a real
-// value, same as main.go's version.
-func readRateLimitInt(pool *db.Pool, r *http.Request, key string, def int64) int64 {
-	val, ok, err := pool.GetSetting(r.Context(), key)
+// value.
+func readRateLimitInt(ctx context.Context, pool *db.Pool, key string, def int64) int64 {
+	val, ok, err := pool.GetSetting(ctx, key)
 	if err != nil || !ok || val == "" {
 		return def
 	}
@@ -186,6 +203,31 @@ func readRateLimitInt(pool *db.Pool, r *http.Request, key string, def int64) int
 		return def
 	}
 	return n
+}
+
+// AuthRateLimitMax reads the configured auth-endpoint (login/callback/
+// logout) rate limit ceiling from core_settings. Exported so
+// cmd/core/main.go's authRateLimitMax can delegate here instead of keeping
+// its own copy of SettingKeyAuthRateLimitMax/DefaultAuthRateLimitMax.
+func AuthRateLimitMax(ctx context.Context, pool *db.Pool) int64 {
+	return readRateLimitInt(ctx, pool, SettingKeyAuthRateLimitMax, DefaultAuthRateLimitMax)
+}
+
+// AIChatIPRateLimitMax reads the configured AI-chat per-IP rate limit
+// ceiling from core_settings. Exported so cmd/core/main.go's
+// aiChatRateLimitMax can delegate here instead of keeping its own copy of
+// SettingKeyAIChatIPRateLimitMax/DefaultAIChatRateLimitMax.
+func AIChatIPRateLimitMax(ctx context.Context, pool *db.Pool) int64 {
+	return readRateLimitInt(ctx, pool, SettingKeyAIChatIPRateLimitMax, DefaultAIChatRateLimitMax)
+}
+
+// GlobalRateLimitMax reads the configured global (all-routes-except-
+// /healthz) rate limit ceiling from core_settings. Exported so
+// cmd/core/main.go's globalRateLimitMax can delegate here instead of
+// keeping its own copy of SettingKeyGlobalRateLimitMax/
+// DefaultGlobalRateLimitMax.
+func GlobalRateLimitMax(ctx context.Context, pool *db.Pool) int64 {
+	return readRateLimitInt(ctx, pool, SettingKeyGlobalRateLimitMax, DefaultGlobalRateLimitMax)
 }
 
 // currentLimitsSettings resolves every field in LimitsSettings from
@@ -200,9 +242,9 @@ func currentLimitsSettings(r *http.Request, pool *db.Pool) LimitsSettings {
 		MaxUploadBodyBytes:   modules.MaxUploadBodyBytes(ctx, pool),
 		MaxModuleZIPBytes:    modules.MaxModuleZIPBytes(ctx, pool),
 		MaxOPMLUploadBytes:   news.MaxOPMLUploadBytes(ctx, pool),
-		AuthRateLimitMax:     readRateLimitInt(pool, r, "auth_rate_limit_max", defaultAuthRateLimitMax),
-		AIChatIPRateLimitMax: readRateLimitInt(pool, r, "ai_chat_ip_rate_limit_max", defaultAIChatRateLimitMax),
-		GlobalRateLimitMax:   readRateLimitInt(pool, r, "global_rate_limit_max", defaultGlobalRateLimitMax),
+		AuthRateLimitMax:     AuthRateLimitMax(ctx, pool),
+		AIChatIPRateLimitMax: AIChatIPRateLimitMax(ctx, pool),
+		GlobalRateLimitMax:   GlobalRateLimitMax(ctx, pool),
 		DenoConnPoolSize:     modules.ConnPoolSize(ctx, pool),
 		GeoTimeoutMS:         weather.GeoTimeoutMS(ctx, pool),
 
@@ -297,26 +339,34 @@ func AdminLimitsHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 				return
 			}
 
+			// Every key below is the owning package's exported
+			// SettingKey* constant, not a literal - see this file's
+			// doc comment history (2026-07-27): these used to be
+			// hardcoded a second time here, independently of the
+			// identical literal inside each package's own reader
+			// (ai.MaxBodyBytes, modules.ConnPoolSize, etc.), the same
+			// "two copies, one of which can drift" shape as the
+			// __Host-modulab_session cookie-name bug.
 			settings := map[string]string{
-				"max_body_bytes":                           strconv.FormatInt(body.MaxBodyBytes, 10),
-				"max_upload_body_bytes":                    strconv.FormatInt(body.MaxUploadBodyBytes, 10),
-				"max_module_zip_bytes":                     strconv.FormatInt(body.MaxModuleZIPBytes, 10),
-				"max_opml_upload_bytes":                    strconv.FormatInt(body.MaxOPMLUploadBytes, 10),
-				"auth_rate_limit_max":                      strconv.FormatInt(body.AuthRateLimitMax, 10),
-				"ai_chat_ip_rate_limit_max":                strconv.FormatInt(body.AIChatIPRateLimitMax, 10),
-				"global_rate_limit_max":                    strconv.FormatInt(body.GlobalRateLimitMax, 10),
-				"deno_conn_pool_size":                      strconv.Itoa(body.DenoConnPoolSize),
-				"geo_timeout_ms":                           strconv.Itoa(body.GeoTimeoutMS),
-				"ai_provider_timeout_seconds":              strconv.Itoa(body.AIProviderTimeoutSeconds),
-				"search_timeout_seconds":                   strconv.Itoa(body.SearchTimeoutSeconds),
-				"search_fallback_timeout_seconds":          strconv.Itoa(body.SearchFallbackTimeoutSeconds),
-				"news_fetch_timeout_seconds":               strconv.Itoa(body.NewsFetchTimeoutSeconds),
-				"store_sync_interval_seconds":              strconv.Itoa(body.StoreSyncIntervalSeconds),
-				"store_github_api_timeout_seconds":         strconv.Itoa(body.StoreGithubAPITimeoutSeconds),
-				"modules_install_download_timeout_seconds": strconv.Itoa(body.ModulesInstallDownloadTimeoutSecs),
-				"ai_chat_rpm_limit":                        strconv.Itoa(body.ChatRPMLimit),
-				"core_update_check_weekdays":               body.CoreUpdateCheckWeekdays,
-				"core_update_check_time":                   body.CoreUpdateCheckTime,
+				ai.SettingKeyMaxBodyBytes:                       strconv.FormatInt(body.MaxBodyBytes, 10),
+				modules.SettingKeyMaxUploadBodyBytes:            strconv.FormatInt(body.MaxUploadBodyBytes, 10),
+				modules.SettingKeyMaxModuleZIPBytes:             strconv.FormatInt(body.MaxModuleZIPBytes, 10),
+				news.SettingKeyMaxOPMLUploadBytes:               strconv.FormatInt(body.MaxOPMLUploadBytes, 10),
+				SettingKeyAuthRateLimitMax:                      strconv.FormatInt(body.AuthRateLimitMax, 10),
+				SettingKeyAIChatIPRateLimitMax:                  strconv.FormatInt(body.AIChatIPRateLimitMax, 10),
+				SettingKeyGlobalRateLimitMax:                    strconv.FormatInt(body.GlobalRateLimitMax, 10),
+				modules.SettingKeyConnPoolSize:                  strconv.Itoa(body.DenoConnPoolSize),
+				weather.SettingKeyGeoTimeoutMS:                  strconv.Itoa(body.GeoTimeoutMS),
+				ai.SettingKeyProviderTimeoutSeconds:             strconv.Itoa(body.AIProviderTimeoutSeconds),
+				search.SettingKeyTimeout:                        strconv.Itoa(body.SearchTimeoutSeconds),
+				search.SettingKeyFallbackTimeout:                strconv.Itoa(body.SearchFallbackTimeoutSeconds),
+				news.SettingKeyFetchTimeoutSeconds:              strconv.Itoa(body.NewsFetchTimeoutSeconds),
+				store.SettingKeySyncIntervalSeconds:             strconv.Itoa(body.StoreSyncIntervalSeconds),
+				store.SettingKeyGithubAPITimeoutSeconds:         strconv.Itoa(body.StoreGithubAPITimeoutSeconds),
+				modules.SettingKeyInstallDownloadTimeoutSeconds: strconv.Itoa(body.ModulesInstallDownloadTimeoutSecs),
+				ai.SettingKeyChatRPMLimit:                       strconv.Itoa(body.ChatRPMLimit),
+				coreupdate.SettingKeyCheckWeekdays:              body.CoreUpdateCheckWeekdays,
+				coreupdate.SettingKeyCheckTime:                  body.CoreUpdateCheckTime,
 			}
 			for key, val := range settings {
 				if err := pool.SetSetting(ctx, key, val); err != nil {

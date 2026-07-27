@@ -80,11 +80,22 @@ const (
 // "unreachable" reports for feeds that just needed a bit longer.
 var safeFeedClient = netguard.SafeHTTPClient(0)
 
+// SettingKeyFetchTimeoutSeconds/SettingKeyMaxOPMLUploadBytes name the
+// core_settings keys FetchTimeoutSeconds/MaxOPMLUploadBytes below read.
+// Exported so adminapi.AdminLimitsHandler's PATCH handler writes through
+// these instead of a second, independently-hardcoded string literal - found
+// 2026-07-27 as the same "two copies, one of which can drift" pattern as
+// the __Host-modulab_session cookie-name bug.
+const (
+	SettingKeyFetchTimeoutSeconds = "news_fetch_timeout_seconds"
+	SettingKeyMaxOPMLUploadBytes  = "max_opml_upload_bytes"
+)
+
 // FetchTimeoutSeconds reads the feed-fetch HTTP timeout (seconds) from
 // core_settings ("news_fetch_timeout_seconds"). Defaults to
 // defaultFetchTimeoutSeconds if unset.
 func FetchTimeoutSeconds(ctx context.Context, pool *db.Pool) int {
-	val, ok, err := pool.GetSetting(ctx, "news_fetch_timeout_seconds")
+	val, ok, err := pool.GetSetting(ctx, SettingKeyFetchTimeoutSeconds)
 	if err != nil || !ok || val == "" {
 		return defaultFetchTimeoutSeconds
 	}
@@ -455,7 +466,7 @@ const defaultMaxOPMLUploadBytes = 2 << 20 // 2 MB
 // convention as the other size settings. See adminapi.AdminLimitsHandler
 // for where this is admin-editable.
 func MaxOPMLUploadBytes(ctx context.Context, pool *db.Pool) int64 {
-	val, ok, err := pool.GetSetting(ctx, "max_opml_upload_bytes")
+	val, ok, err := pool.GetSetting(ctx, SettingKeyMaxOPMLUploadBytes)
 	if err != nil || !ok || val == "" {
 		return defaultMaxOPMLUploadBytes
 	}

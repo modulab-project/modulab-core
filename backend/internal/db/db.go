@@ -1243,6 +1243,18 @@ func (p *Pool) EnsureSearchSchema(ctx context.Context) error {
 	return nil
 }
 
+// DefaultSearchProviderID is the id (and provider type) of the built-in
+// SearXNG search provider row MigrateSearchProviders seeds below, and the
+// fallback search.PrimaryProviderID returns when no primary is configured.
+// Exported (2026-07-27) so every other reader of this same "searxng" value
+// - search.go's PrimaryProviderID default and fetchFromProvider's type
+// switch, plus cmd/core/main.go's healthz/systemInfoHandler
+// GetSearchProviderBaseURL calls - shares one definition instead of each
+// hardcoding its own "searxng" string literal. db is the right home for it
+// (not search) since search already imports db, and db seeds the row in
+// the first place; the reverse import would be a cycle.
+const DefaultSearchProviderID = "searxng"
+
 // MigrateSearchProviders performs the one-time move from the old
 // single-provider SearXNG settings (searxng_url_enc, searxng_max_results,
 // searxng_fetch_pages, searxng_search_timeout_seconds in core_settings) into
@@ -1253,7 +1265,7 @@ func (p *Pool) EnsureSearchSchema(ctx context.Context) error {
 //
 // Called once at startup, after EnsureCoreSchema/MigrateToEncryptedStorage.
 func (p *Pool) MigrateSearchProviders(ctx context.Context) error {
-	_, found, err := p.GetSearchProvider(ctx, "searxng")
+	_, found, err := p.GetSearchProvider(ctx, DefaultSearchProviderID)
 	if err != nil {
 		return fmt.Errorf("db: migrate search providers: check existing: %w", err)
 	}
@@ -1277,9 +1289,9 @@ func (p *Pool) MigrateSearchProviders(ctx context.Context) error {
 	}
 	if _, err := p.Exec(ctx, `
 		INSERT INTO search_providers (id, type, name, base_url_enc, max_results, fetch_pages, user_can_override, enabled, sort_order)
-		VALUES ('searxng', 'searxng', 'SearXNG', $1, $2, $3, false, true, 1)
+		VALUES ($1, $1, 'SearXNG', $2, $3, $4, false, true, 1)
 		ON CONFLICT (id) DO NOTHING
-	`, encBaseURL, maxResults, fetchPages); err != nil {
+	`, DefaultSearchProviderID, encBaseURL, maxResults, fetchPages); err != nil {
 		return fmt.Errorf("db: migrate search providers: seed searxng: %w", err)
 	}
 	// Serper has no admin key yet (nothing to migrate) - seeded disabled so
@@ -1300,7 +1312,7 @@ func (p *Pool) MigrateSearchProviders(ctx context.Context) error {
 		_ = p.SetSetting(ctx, "search_timeout_seconds", val)
 	}
 	if _, ok, _ := p.GetSetting(ctx, "search_primary_provider_id"); !ok {
-		_ = p.SetSetting(ctx, "search_primary_provider_id", "searxng")
+		_ = p.SetSetting(ctx, "search_primary_provider_id", DefaultSearchProviderID)
 	}
 
 	// Clean up the legacy keys now that everything they held has a new home.

@@ -63,6 +63,19 @@ const (
 	settingKeyFallback        = "search_fallback_provider_id"
 )
 
+// SettingKeyTimeout/SettingKeyFallbackTimeout export settingKeyTimeout/
+// settingKeyFallbackTimeout above so adminapi.AdminLimitsHandler's PATCH
+// handler writes through these instead of a second, independently-
+// hardcoded string literal ("search_timeout_seconds"/
+// "search_fallback_timeout_seconds") - found 2026-07-27 as the same "two
+// copies, one of which can drift" pattern as the __Host-modulab_session
+// cookie-name bug. This package's own admin.go already read the unexported
+// versions correctly; adminapi (a different package) could not.
+const (
+	SettingKeyTimeout         = settingKeyTimeout
+	SettingKeyFallbackTimeout = settingKeyFallbackTimeout
+)
+
 func resolveIntSetting(ctx context.Context, pool *db.Pool, key string, def int) int {
 	val, ok, err := pool.GetSetting(ctx, key)
 	if err != nil || !ok || val == "" {
@@ -90,11 +103,12 @@ func FallbackTimeoutSeconds(ctx context.Context, pool *db.Pool) int {
 }
 
 // PrimaryProviderID returns the configured primary provider id, defaulting
-// to "searxng" (the only provider that existed before this feature).
+// to db.DefaultSearchProviderID ("searxng", the only provider that existed
+// before this feature).
 func PrimaryProviderID(ctx context.Context, pool *db.Pool) string {
 	id, ok, err := pool.GetSetting(ctx, settingKeyPrimary)
 	if err != nil || !ok || id == "" {
-		return "searxng"
+		return db.DefaultSearchProviderID
 	}
 	return id
 }
@@ -161,7 +175,7 @@ func Fetch(ctx context.Context, pool *db.Pool, userID, query, category string, s
 // handlers, and Fetch's fallback logic above all stay generic.
 func fetchFromProvider(ctx context.Context, pool *db.Pool, userID string, row db.SearchProviderRow, query, category string, timeoutSeconds int, sp searxng.SearchParams) ([]searxng.WebResult, error) {
 	switch row.Type {
-	case "searxng":
+	case db.DefaultSearchProviderID:
 		if row.BaseURL == "" {
 			return nil, fmt.Errorf("searxng: no base URL configured")
 		}
