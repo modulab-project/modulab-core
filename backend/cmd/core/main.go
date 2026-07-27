@@ -649,6 +649,34 @@ func main() {
 		}
 	})
 
+	// A module asking for network egress its manifest's dynamic_egress_allow
+	// does not cover is worth a durable record, not just a log line: it is
+	// either a manifest that needs widening (benign, and the admin needs to
+	// know which host to add) or a module reaching past the bound it declared
+	// at install time (not benign at all, and the audit log is where that
+	// belongs). Deliberately does NOT mark the module degraded the way the
+	// crash handler above does - the permitted hosts were still applied and
+	// the module is running fine, so degrading it would misreport a policy
+	// refusal as a broken module. Best-effort throughout: the refusal itself
+	// already happened inside ReloadEgress: nothing here can undo or worsen
+	// it, so a failed write must not escalate into anything louder.
+	workerPool.SetEgressDenyHandler(func(name string, rejected []string) {
+		denyCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if masterKey, err := setup.ResolveMasterKey(denyCtx, pool, cfg.MasterKey); err == nil {
+			if err := audit.Log(denyCtx, pool, masterKey, audit.LogParams{
+				EventType: audit.EventModuleEgressDenied,
+				Details:   fmt.Sprintf(`{"module":%q,"rejected_hosts":%q}`, name, strings.Join(rejected, ",")),
+			}); err != nil {
+				log.Printf("main: egress deny handler: audit for %q: %v", name, err)
+			}
+		}
+		ev := notify.Event{Type: "module.egress_denied", Data: map[string]any{"name": name, "hosts": rejected}}
+		if err := notify.Publish(denyCtx, valkeyClient, notify.AdminChannel(), ev); err != nil {
+			log.Printf("main: egress deny handler: publish event for %q: %v", name, err)
+		}
+	})
+
 	moduleDeps := modules.Deps{
 		DB:        pool,
 		DataDir:   cfg.ModuleDataDir,
@@ -752,6 +780,7 @@ func main() {
 					TLSSkipVerify      bool                  `json:"tls_skip_verify"`
 					DynamicEgress      bool                  `json:"dynamic_egress"`
 					EgressHostsHandler string                `json:"egress_hosts_handler"`
+					DynamicEgressAllow []string              `json:"dynamic_egress_allow"`
 				}
 				if row.Manifest != nil {
 					if json.Unmarshal(row.Manifest, &mf) == nil {
@@ -763,6 +792,7 @@ func main() {
 						EgressHosts:   mf.EgressAllowlist,
 						Jobs:          modules.ResolveJobEntrypoints(destDir, mf.Jobs, mf.EgressHostsHandler),
 						SkipTLSVerify: mf.TLSSkipVerify,
+						EgressPolicy:  mf.DynamicEgressAllow,
 					}
 					if err := workerPool.Start(row.Name, entrypoint, opts); err != nil {
 						log.Printf("main: startup: could not start worker for %q: %v", row.Name, err)

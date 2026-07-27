@@ -90,6 +90,16 @@ type WorkerPool struct {
 	// SetCrashHandler's doc comment for why this is deliberately "detect and
 	// surface", not "detect and auto-respawn".
 	onCrash func(name string)
+
+	// onEgressDeny, if set, is called (in its own goroutine, never holding
+	// p.mu — same contract as onCrash above, see ReloadEgress) whenever a
+	// module asks for a runtime egress host its manifest's
+	// dynamic_egress_allow does not cover. Wired up once in main.go to write
+	// an audit entry and notify admins — a module reaching past its declared
+	// bound is either a manifest that needs widening or a module doing
+	// something it should not, and neither should be discoverable only by
+	// reading container logs.
+	onEgressDeny func(name string, rejected []string)
 }
 
 // SetCrashHandler registers fn to run whenever a worker crashes (its Deno
@@ -112,6 +122,19 @@ func (p *WorkerPool) SetCrashHandler(fn func(name string)) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.onCrash = fn
+}
+
+// SetEgressDenyHandler registers fn to run whenever ReloadEgress drops a
+// runtime-requested host for falling outside the module's declared
+// dynamic_egress_allow. Must be called once, right after NewWorkerPool,
+// before any Start — same contract as SetCrashHandler above, and for the
+// same reason: WorkerPool has no *db.Pool or Valkey client of its own, so
+// anything that needs to persist or publish is injected by main.go rather
+// than pulled in as a dependency here.
+func (p *WorkerPool) SetEgressDenyHandler(fn func(name string, rejected []string)) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.onEgressDeny = fn
 }
 
 // NewWorkerPool creates an empty WorkerPool. Call Start for each installed
@@ -173,6 +196,15 @@ type WorkerOptions struct {
 	// public APIs (e.g. recipes' openfoodfacts.org) where cert validation
 	// must stay on.
 	SkipTLSVerify bool
+	// EgressPolicy is manifest.yaml's dynamic_egress_allow: the bound that
+	// ReloadEgress intersects any runtime-requested host list against. It
+	// does NOT filter EgressHosts above - those come from the manifest's own
+	// egress_allowlist, which an admin already reviewed, and are granted as
+	// declared. This only ever constrains what the *module* asks for after
+	// the fact. Empty means no runtime host is acceptable; see
+	// egresspolicy.go for why that fail-closed default is the point rather
+	// than an oversight.
+	EgressPolicy []string
 }
 
 // Start spawns a Deno worker for the given module. entrypoint is the absolute
@@ -248,10 +280,14 @@ func (p *WorkerPool) startLocked(name, entrypoint string, opts WorkerOptions) er
 		// guess which entries were infra vs. module-declared.
 		moduleEgressHosts: append([]string(nil), opts.EgressHosts...),
 		skipTLSVerify:     opts.SkipTLSVerify,
-		jobEntrypoints:    jobs,
-		onCrash:           p.onCrash,
-		poolSize:          p.connPoolSize,
-		connPool:          make(chan net.Conn, p.connPoolSize),
+		// Stored on the worker so ReloadEgress can enforce it without a way
+		// back to the manifest - same reason skipTLSVerify lives here, and
+		// the same carry-over rule applies (see ReloadEgress).
+		egressPolicy:   append([]string(nil), opts.EgressPolicy...),
+		jobEntrypoints: jobs,
+		onCrash:        p.onCrash,
+		poolSize:       p.connPoolSize,
+		connPool:       make(chan net.Conn, p.connPoolSize),
 	}
 	if err := w.start(); err != nil {
 		return fmt.Errorf("worker %q: start: %w", name, err)
@@ -319,26 +355,64 @@ func (p *WorkerPool) CurrentModuleEgressHosts(name string) ([]string, bool) {
 // only known at runtime (e.g. unifi-network gateway base URLs entered by an
 // admin after install) — see WorkerResponse.RestartHosts. No-op if the
 // worker is not currently running.
+//
+// hosts is module-supplied and therefore untrusted: this is the single
+// funnel every runtime egress request passes through (RestartHosts from
+// router.go and jobs.go, and every QueryEgressHosts caller), which is why
+// the dynamic_egress_allow check lives here rather than being repeated at
+// each call site. Hosts outside the module's declared bound are dropped and
+// reported via onEgressDeny; the permitted remainder is still applied, so a
+// module that asks for one host too many keeps the destinations it is
+// entitled to instead of losing all network access over it. See
+// egresspolicy.go for what this is defending against.
 func (p *WorkerPool) ReloadEgress(name string, hosts []string) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	existing, ok := p.workers[name]
 	if !ok {
+		p.mu.Unlock()
 		return ErrWorkerNotFound
 	}
 	entrypoint := existing.entrypoint
-	// SkipTLSVerify must be carried over from the existing worker — it is
-	// manifest-derived, not something ReloadEgress's caller (a module
-	// handler reacting to a gateway create/update) passes in. Losing it on
-	// reload would silently re-enable cert validation for the same private
-	// IPs on every gateway save, breaking exactly the case this option
-	// exists for.
-	opts := WorkerOptions{EgressHosts: hosts, Jobs: existing.jobEntrypoints, SkipTLSVerify: existing.skipTLSVerify}
-	if err := p.startLocked(name, entrypoint, opts); err != nil {
+	policy := existing.egressPolicy
+
+	allowed, rejected := filterEgressHosts(hosts, policy)
+	// SkipTLSVerify and EgressPolicy must both be carried over from the
+	// existing worker — they are manifest-derived, not something
+	// ReloadEgress's caller (a module handler reacting to a gateway
+	// create/update) passes in. Losing SkipTLSVerify on reload would
+	// silently re-enable cert validation for the same private IPs on every
+	// gateway save, breaking exactly the case that option exists for;
+	// losing EgressPolicy would mean the very next reload had no bound left
+	// to check against.
+	opts := WorkerOptions{
+		EgressHosts:   allowed,
+		Jobs:          existing.jobEntrypoints,
+		SkipTLSVerify: existing.skipTLSVerify,
+		EgressPolicy:  policy,
+	}
+	err := p.startLocked(name, entrypoint, opts)
+	onDeny := p.onEgressDeny
+	p.mu.Unlock()
+
+	// Reporting happens after the lock is released, and in its own goroutine
+	// — same contract as onCrash. onEgressDeny is wired to an audit write
+	// plus an SSE publish (main.go) with a 10 s timeout of its own; several
+	// of this function's callers sit on an admin request path
+	// (installer.go, handlers.go), and a policy refusal must not add that
+	// latency to an install or update the admin is waiting on. Reported even
+	// when the restart itself failed — the module asked for something it may
+	// not have, and that is worth surfacing regardless of whether the
+	// restart around it succeeded.
+	if len(rejected) > 0 {
+		log.Printf("modules: deno worker %q: refused egress hosts %v (outside dynamic_egress_allow=%v)", name, rejected, policy)
+		if onDeny != nil {
+			go onDeny(name, rejected)
+		}
+	}
+	if err != nil {
 		return fmt.Errorf("reload egress for %q: %w", name, err)
 	}
-	log.Printf("modules: deno worker %q reloaded with egress=%v", name, hosts)
+	log.Printf("modules: deno worker %q reloaded with egress=%v", name, allowed)
 	return nil
 }
 
@@ -647,8 +721,11 @@ type denoWorker struct {
 	// dnsResolver) — see the field doc comment where this is set in
 	// startLocked.
 	moduleEgressHosts []string
-	skipTLSVerify     bool              // manifest tls_skip_verify: true — see WorkerOptions.SkipTLSVerify
-	jobEntrypoints    map[string]string // job name -> absolute .ts path, from manifest.yaml jobs:
+	skipTLSVerify     bool // manifest tls_skip_verify: true — see WorkerOptions.SkipTLSVerify
+	// egressPolicy is manifest dynamic_egress_allow — the bound ReloadEgress
+	// intersects runtime-requested hosts against. See WorkerOptions.EgressPolicy.
+	egressPolicy   []string
+	jobEntrypoints map[string]string // job name -> absolute .ts path, from manifest.yaml jobs:
 
 	cmd    *exec.Cmd
 	cancel context.CancelFunc

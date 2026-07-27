@@ -149,6 +149,17 @@ const (
 	EventModuleRestarted   = "module.restarted"
 	EventModulePinned      = "module.pinned"
 	EventModuleUnpinned    = "module.unpinned"
+	// EventModuleEgressDenied is the one module event with no admin actor
+	// behind it: a running Tier 2/3 worker asked Core to grant it network
+	// access to a host outside its manifest's dynamic_egress_allow, and Core
+	// refused (see modules/egresspolicy.go). Audited rather than only logged
+	// because the two cases it covers are far apart in severity - a manifest
+	// that needs one more host, versus a module deliberately reaching past
+	// the bound it declared at install time - and telling them apart later
+	// needs a durable record with a timestamp, not a container log line that
+	// has since rotated away. ActorID is left empty: the "actor" is module
+	// code, not a user.
+	EventModuleEgressDenied = "module.egress_denied"
 	// Feed management (org-admin/super-admin), internal/news.
 	EventFeedCreated = "feed.created"
 	EventFeedUpdated = "feed.updated"

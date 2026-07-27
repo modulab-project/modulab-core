@@ -68,6 +68,7 @@ const EVENT_TYPE_CATEGORIES: { category: string; types: string[] }[] = [
       "module.restarted",
       "module.pinned",
       "module.unpinned",
+      "module.egress_denied",
     ],
   },
   { category: "feed", types: ["feed.created", "feed.updated", "feed.deleted"] },

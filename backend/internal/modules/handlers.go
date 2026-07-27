@@ -463,6 +463,7 @@ func UpdateModuleHandler(d Deps, storeDeps store.Deps, authDeps auth.Deps) http.
 				TLSSkipVerify      bool          `json:"tls_skip_verify"`
 				DynamicEgress      bool          `json:"dynamic_egress"`
 				EgressHostsHandler string        `json:"egress_hosts_handler"`
+				DynamicEgressAllow []string      `json:"dynamic_egress_allow"`
 			}
 			if row.Manifest != nil {
 				_ = json.Unmarshal(row.Manifest, &mf)
@@ -472,12 +473,21 @@ func UpdateModuleHandler(d Deps, storeDeps store.Deps, authDeps auth.Deps) http.
 				entrypoint := filepath.Join(destDir, mf.Handler)
 				egressHosts := mf.EgressAllowlist
 				if mf.DynamicEgress && hadRuntimeHosts && len(runtimeEgressHosts) > 0 {
-					egressHosts = runtimeEgressHosts
+					// Runtime hosts carried over from the worker we just
+					// stopped were checked against the OLD manifest's policy
+					// when they were granted. This is a module *update*, so
+					// the policy may have just changed - re-check them
+					// against the version being installed rather than
+					// grandfathering them in, otherwise tightening
+					// dynamic_egress_allow would have no effect until the
+					// next reload happened to come along.
+					egressHosts = carryOverRuntimeEgress(name, runtimeEgressHosts, mf.DynamicEgressAllow, "update")
 				}
 				opts := WorkerOptions{
 					EgressHosts:   egressHosts,
 					Jobs:          ResolveJobEntrypoints(destDir, mf.Jobs, mf.EgressHostsHandler),
 					SkipTLSVerify: mf.TLSSkipVerify,
+					EgressPolicy:  mf.DynamicEgressAllow,
 				}
 				if err := d.Workers.Start(name, entrypoint, opts); err != nil {
 					log.Printf("modules: update %q: restart worker: %v", name, err)
@@ -635,6 +645,7 @@ func RestartModuleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 			TLSSkipVerify      bool          `json:"tls_skip_verify"`
 			DynamicEgress      bool          `json:"dynamic_egress"`
 			EgressHostsHandler string        `json:"egress_hosts_handler"`
+			DynamicEgressAllow []string      `json:"dynamic_egress_allow"`
 		}
 		if row.Manifest != nil {
 			_ = json.Unmarshal(row.Manifest, &mf)
@@ -648,12 +659,18 @@ func RestartModuleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 		entrypoint := filepath.Join(destDir, mf.Handler)
 		egressHosts := mf.EgressAllowlist
 		if mf.DynamicEgress && hadRuntimeHosts && len(runtimeEgressHosts) > 0 {
-			egressHosts = runtimeEgressHosts
+			// Same re-check as the update path above - see its comment. A
+			// plain restart is not expected to change the policy, but it is
+			// also the operation an admin reaches for after editing one, so
+			// silently reapplying unchecked hosts here would be the obvious
+			// way for the update-path check to be worked around.
+			egressHosts = carryOverRuntimeEgress(name, runtimeEgressHosts, mf.DynamicEgressAllow, "restart")
 		}
 		opts := WorkerOptions{
 			EgressHosts:   egressHosts,
 			Jobs:          ResolveJobEntrypoints(destDir, mf.Jobs, mf.EgressHostsHandler),
 			SkipTLSVerify: mf.TLSSkipVerify,
+			EgressPolicy:  mf.DynamicEgressAllow,
 		}
 		if err := d.Workers.Start(name, entrypoint, opts); err != nil {
 			http.Error(w, fmt.Sprintf("failed to restart worker: %v", err), http.StatusInternalServerError)

@@ -572,6 +572,7 @@
         "module_restarted": "Módulo reiniciado",
         "module_pinned": "Versión del módulo fijada",
         "module_unpinned": "Fijación del módulo eliminada",
+        "module_egress_denied": "Solicitud de salida del módulo denegada",
         "feed_created": "Feed de noticias creado",
         "feed_updated": "Feed de noticias modificado",
         "feed_deleted": "Feed de noticias eliminado",

@@ -572,6 +572,7 @@
         "module_restarted": "Module restarted",
         "module_pinned": "Module version pinned",
         "module_unpinned": "Module version unpinned",
+        "module_egress_denied": "Module egress request denied",
         "feed_created": "News feed created",
         "feed_updated": "News feed updated",
         "feed_deleted": "News feed deleted",

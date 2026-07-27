@@ -572,6 +572,7 @@
         "module_restarted": "Module opnieuw gestart",
         "module_pinned": "Moduleversie vastgezet",
         "module_unpinned": "Vastzetten module ongedaan gemaakt",
+        "module_egress_denied": "Egress-verzoek van module geweigerd",
         "feed_created": "Nieuwsfeed aangemaakt",
         "feed_updated": "Nieuwsfeed gewijzigd",
         "feed_deleted": "Nieuwsfeed verwijderd",

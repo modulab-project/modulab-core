@@ -135,6 +135,28 @@ type Manifest struct {
 	// module's own DB state every time, so it can never go stale the way a
 	// Core-side cache of "last known hosts" could.
 	EgressHostsHandler string `yaml:"egress_hosts_handler" json:"egress_hosts_handler,omitempty"`
+	// DynamicEgressAllow bounds what this module may grant itself at runtime
+	// via RestartHosts/EgressHostsHandler. Unlike EgressAllowlist above it
+	// does not list destinations - it lists the *shapes* a destination is
+	// allowed to have, so a module can keep discovering concrete hosts after
+	// install (unifi-network's admin-entered gateways) while an admin can
+	// still see the outer bound before installing:
+	//
+	//	dynamic_egress: true
+	//	dynamic_egress_allow:
+	//	  - 192.168.0.0/16
+	//	  - "*.ui.com"
+	//
+	// Only consulted when DynamicEgress is set. Empty while DynamicEgress is
+	// true means "no runtime host is acceptable" - fail closed - which is
+	// deliberate: before dynamic_egress_allow existed those channels were
+	// unbounded (see egresspolicy.go's package comment for the finding), and
+	// silently keeping that behaviour for manifests written before this
+	// field would leave the hole open exactly where it is least visible.
+	// Entries are validated by validateEgressPolicyPattern at install time.
+	// "*" is a legal entry for a module whose destinations genuinely cannot
+	// be predicted - the point is that it now has to say so.
+	DynamicEgressAllow []string `yaml:"dynamic_egress_allow" json:"dynamic_egress_allow,omitempty"`
 	// Crud is Tier 1 only: the config-driven CRUD definition Core generates
 	// a REST API (and fallback UI) from — see crud.go. Required for Tier 1,
 	// forbidden for Tier 2/3 (validateManifestTier enforces both).
@@ -493,6 +515,7 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 			EgressHosts:   mf.EgressAllowlist,
 			Jobs:          ResolveJobEntrypoints(destDir, mf.Jobs, mf.EgressHostsHandler),
 			SkipTLSVerify: mf.TLSSkipVerify,
+			EgressPolicy:  mf.DynamicEgressAllow,
 		}
 		if err := d.Workers.Start(mf.Name, filepath.Join(destDir, mf.Handler), opts); err != nil {
 			_, _ = d.DB.UpdateModuleStatus(ctx, entry.Name, db.ModuleStatusFailed)
@@ -644,6 +667,7 @@ func InstallManual(ctx context.Context, d Deps, zipPath string) error {
 			EgressHosts:   mf.EgressAllowlist,
 			Jobs:          ResolveJobEntrypoints(destDir, mf.Jobs, mf.EgressHostsHandler),
 			SkipTLSVerify: mf.TLSSkipVerify,
+			EgressPolicy:  mf.DynamicEgressAllow,
 		}
 		if err := d.Workers.Start(mf.Name, filepath.Join(destDir, mf.Handler), opts); err != nil {
 			_, _ = d.DB.UpdateModuleStatus(ctx, mf.Name, db.ModuleStatusFailed)
@@ -1238,6 +1262,24 @@ func validateManifestTier(mf Manifest) error {
 	// since that combination has no hosts to scope it to at all.
 	if mf.TLSSkipVerify && len(mf.EgressAllowlist) == 0 && (!mf.DynamicEgress || mf.EgressHostsHandler == "") {
 		return fmt.Errorf("tls_skip_verify requires a non-empty egress_allowlist or dynamic_egress with an egress_hosts_handler")
+	}
+	for i, p := range mf.DynamicEgressAllow {
+		if err := validateEgressPolicyPattern(p); err != nil {
+			return fmt.Errorf("dynamic_egress_allow[%d]: %w", i, err)
+		}
+	}
+	// Declaring a bound without ever using the runtime channels is a
+	// contradiction worth catching at install time rather than leaving as a
+	// line nobody notices is dead: dynamic_egress is what actually turns
+	// those channels on (see Manifest.DynamicEgress), so a policy without it
+	// grants nothing and almost certainly means the author forgot the flag.
+	// The reverse (dynamic_egress with no policy) is NOT an error here - it
+	// is the fail-closed case every pre-existing manifest lands in, and
+	// ReloadEgress surfaces it per rejected host instead, so an installed
+	// module keeps working for everything except the grant it should never
+	// have had.
+	if len(mf.DynamicEgressAllow) > 0 && !mf.DynamicEgress {
+		return fmt.Errorf("dynamic_egress_allow requires dynamic_egress: true")
 	}
 	return nil
 }

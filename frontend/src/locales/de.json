@@ -572,6 +572,7 @@
         "module_restarted": "Modul neu gestartet",
         "module_pinned": "Modul-Version fixiert",
         "module_unpinned": "Modul-Fixierung aufgehoben",
+        "module_egress_denied": "Egress-Anfrage des Moduls abgelehnt",
         "feed_created": "News-Feed erstellt",
         "feed_updated": "News-Feed geändert",
         "feed_deleted": "News-Feed gelöscht",
