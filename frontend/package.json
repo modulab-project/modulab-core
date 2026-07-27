@@ -43,6 +43,7 @@
     "brace-expansion": "5.0.8"
   },
   "allowScripts": {
-    "fsevents@2.3.3": true
+    "fsevents@2.3.3": true,
+    "ttf2woff2@8.0.1": true
   }
 }
