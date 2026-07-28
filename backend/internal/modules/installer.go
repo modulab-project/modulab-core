@@ -1123,7 +1123,20 @@ func extractZIPEntry(f *zip.File, target string, maxBytes int64) (int64, error) 
 		}
 	}()
 
-	out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+	// 0640 rather than f.Mode() (changed 2026-07-28): the mode in a ZIP
+	// header is attacker-controlled in exactly the same way the entry names
+	// this function already guards against are - a crafted module archive
+	// could ship 0777 files, or set the setuid/setgid bits, and extraction
+	// would apply them verbatim.
+	//
+	// Nothing in a module is executed as a program, so no entry needs the
+	// exec bit: Deno *reads* the handler and job files (--allow-read on
+	// moduleRoot, see deno.go), migrations are .sql read by Core itself, the
+	// UI bundle is .js served over HTTP, and storage holds uploads. The
+	// worker runs as a child of the Core process, i.e. the same uid that owns
+	// these files, so owner-read is all it ever needs. Directories keep the
+	// 0750 extractZIP already gives them.
+	out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o640)
 	if err != nil {
 		return 0, err
 	}

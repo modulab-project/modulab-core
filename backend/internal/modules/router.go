@@ -513,6 +513,38 @@ func checkUploadImageDimensions(width, height int) error {
 	return nil
 }
 
+// validModuleNamePathSegment reports whether name is safe to interpolate
+// into a filesystem path under DataDir.
+//
+// Every handler below joins {name} from the URL into a path, and each used
+// to carry its own inline copy of this loop - except ModuleLocaleHandler,
+// which had none at all (found in the 2026-07-27 security audit). Go's
+// ServeMux does not resolve percent-encoded dot segments inside a path
+// value, so a crafted request could put ".." in {name} and walk out of
+// DataDir. Reaching it also required a module token minted for a module
+// called "..", which cannot exist - so this was defence in depth rather
+// than a live hole, but "the check next door happens to be missing here"
+// is exactly how a live one gets introduced later.
+//
+// Deliberately the same permissive character set the existing inline copies
+// used, not the stricter moduleNameRe that validateManifestTier enforces at
+// install time (lowercase, no underscore): making this a pure extraction
+// keeps it a no-op for the two handlers that already had it. Tightening it
+// to moduleNameRe would be correct and is a safe follow-up - no installable
+// module name can fall outside it - but it is a behaviour change and does
+// not belong in the same commit as closing the gap.
+func validModuleNamePathSegment(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, c := range name {
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '-' && c != '_' {
+			return false
+		}
+	}
+	return true
+}
+
 // ModuleLocaleHandler serves a module's locale file from its installed
 // directory. Path: GET /v1/modules/{name}/locales/{lng}.json
 //
@@ -532,7 +564,14 @@ func ModuleLocaleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 		if _, ok := auth.RequireModuleToken(authDeps, moduleName, w, r, false); !ok {
 			return
 		}
-		// Sanitise: only allow simple language codes like "en", "de", "en-US".
+		// Both path segments are sanitised before either reaches
+		// filepath.Join below - see validModuleNamePathSegment for why the
+		// module-name half was missing here specifically.
+		if !validModuleNamePathSegment(moduleName) {
+			http.Error(w, "invalid module name", http.StatusBadRequest)
+			return
+		}
+		// Only allow simple language codes like "en", "de", "en-US".
 		for _, c := range lng {
 			if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && c != '-' {
 				http.Error(w, "invalid language code", http.StatusBadRequest)
@@ -581,12 +620,9 @@ func ModuleBundleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 		if _, ok := auth.RequireModuleToken(authDeps, moduleName, w, r, false); !ok {
 			return
 		}
-		// Sanitise: only allow simple module names (alphanumeric, dash, underscore).
-		for _, c := range moduleName {
-			if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '-' && c != '_' {
-				http.Error(w, "invalid module name", http.StatusBadRequest)
-				return
-			}
+		if !validModuleNamePathSegment(moduleName) {
+			http.Error(w, "invalid module name", http.StatusBadRequest)
+			return
 		}
 		bundlePath := filepath.Join(d.DataDir, moduleName, "bundle", "bundle.js")
 		info, err := os.Stat(bundlePath)
@@ -632,12 +668,9 @@ func ModuleStorageHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 		if _, ok := auth.RequireModuleToken(authDeps, moduleName, w, r, true); !ok {
 			return
 		}
-		// Sanitise module name.
-		for _, c := range moduleName {
-			if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '-' && c != '_' {
-				http.Error(w, "invalid module name", http.StatusBadRequest)
-				return
-			}
+		if !validModuleNamePathSegment(moduleName) {
+			http.Error(w, "invalid module name", http.StatusBadRequest)
+			return
 		}
 		// Build the absolute path and verify it stays within the storage directory.
 		storageRoot := filepath.Join(d.DataDir, moduleName, "storage")
