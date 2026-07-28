@@ -15,6 +15,11 @@ export function authErrorKey(code: string): string {
     "invalid_or_expired_state",
     "provider_unavailable",
     "exchange_failed",
+    // Kept distinct from exchange_failed on purpose: the backend only emits
+    // this when the IdP's ID token carried the wrong nonce (or none at all),
+    // which points at the identity provider rather than at this login
+    // attempt - see auth.ErrNonceMismatch in backend/internal/auth/oidcclient.go.
+    "nonce_mismatch",
     "group_prefix_unavailable",
     "access_denied",
   ];

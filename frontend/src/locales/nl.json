@@ -5,6 +5,7 @@
       "invalid_or_expired_state": "De inlogpoging is verlopen. Probeer het opnieuw.",
       "provider_unavailable": "OIDC is nog niet volledig geconfigureerd.",
       "exchange_failed": "Aanmelding bij de identiteitsprovider is mislukt.",
+      "nonce_mismatch": "Het antwoord van de identity provider kon niet worden geverifieerd (nonce komt niet overeen). Probeer het opnieuw — raadpleeg bij herhaling het ModuLab-serverlogboek.",
       "group_prefix_unavailable": "Het groepsprefix is nog niet geconfigureerd.",
       "access_denied": "Uw account heeft geen toegang tot ModuLab. Neem contact op met uw beheerder.",
       "unknown": "Er is een onverwachte fout opgetreden tijdens het inloggen."

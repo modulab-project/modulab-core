@@ -5,6 +5,7 @@
       "invalid_or_expired_state": "El intento de inicio de sesión ha caducado. Por favor, inténtelo de nuevo.",
       "provider_unavailable": "OIDC aún no está completamente configurado.",
       "exchange_failed": "El inicio de sesión con el proveedor de identidad falló.",
+      "nonce_mismatch": "No se pudo verificar la respuesta del proveedor de identidad (el nonce no coincide). Inténtalo de nuevo; si vuelve a fallar, revisa el registro del servidor de ModuLab.",
       "group_prefix_unavailable": "El prefijo de grupo aún no está configurado.",
       "access_denied": "Su cuenta no está autorizada para acceder a ModuLab. Contacte a su administrador.",
       "unknown": "Ocurrió un error inesperado durante el inicio de sesión."

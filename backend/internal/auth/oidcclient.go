@@ -13,6 +13,8 @@ package auth
 
 import (
 	"context"
+	"crypto/subtle"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -22,6 +24,20 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 )
+
+// ErrNonceMismatch means the IdP returned an ID token whose nonce claim did
+// not match the one AuthCodeURL sent for this round trip - either because it
+// differs (the replay this check exists to catch) or because the claim is
+// absent entirely (an IdP that accepted the parameter and silently dropped
+// it, i.e. not OIDC-conformant; see AuthCodeURL's doc comment for why the
+// spec leaves no room for that).
+//
+// Distinguished from every other Exchange failure so CallbackHandler can
+// report it as its own frontend error code: the two causes are far apart -
+// one is an attack, the other is an IdP that needs replacing or a bug worth
+// reporting upstream - and neither is diagnosable from a generic
+// "exchange_failed".
+var ErrNonceMismatch = errors.New("auth: id_token nonce does not match the one sent")
 
 // Provider bundles what one OIDC login round-trip (redirect + callback)
 // needs against a single, already-resolved provider configuration.
@@ -114,8 +130,27 @@ func NewProvider(ctx context.Context, issuerURL, clientID, clientSecret, redirec
 // failure - see that call site's doc comment for why locking out the
 // instance's only admin over an IdP's protocol quirk would be worse than
 // the step-up simply providing a weaker guarantee on that particular IdP.
-func (p *Provider) AuthCodeURL(state, codeVerifier string, forceReauth bool) string {
-	opts := []oauth2.AuthCodeOption{oauth2.S256ChallengeOption(codeVerifier)}
+// nonce binds the ID token this round trip produces to this specific
+// authorization request (OIDC Core §3.1.2.1 / §15.5.2). The spec makes it
+// OPTIONAL for the client to send in the authorization-code flow, but
+// REQUIRES any conformant provider that receives one to echo it back
+// unchanged as the id_token's nonce claim - so support is not something an
+// IdP opts into, it follows from implementing OIDC correctly (verified for
+// PocketID, whose authorize endpoint takes an explicit nonce parameter).
+// There is deliberately no way to detect it up front: OIDC Discovery has no
+// nonce_supported field, because the spec leaves no room for a provider that
+// does not.
+//
+// Exchange re-checks the returned claim against this value - go-oidc will
+// NOT do it, by design ("Verify does NOT do nonce validation, which is the
+// callers responsibility"), and sending a nonce without checking it back
+// would be strictly worse than not sending one at all: all of the
+// compatibility risk, none of the protection.
+func (p *Provider) AuthCodeURL(state, codeVerifier, nonce string, forceReauth bool) string {
+	opts := []oauth2.AuthCodeOption{
+		oauth2.S256ChallengeOption(codeVerifier),
+		oidc.Nonce(nonce),
+	}
 	if forceReauth {
 		opts = append(opts,
 			oauth2.SetAuthURLParam("prompt", "login"),
@@ -172,12 +207,28 @@ type Claims struct {
 // (spec section 3.3: "Core validates JWTs statelessly via the IdP's public
 // key") before trusting any claim inside it.
 //
+// expectedNonce is the value AuthCodeURL sent for this same round trip (see
+// its doc comment). A mismatch fails the login outright: that is the entire
+// point of the nonce, and accepting an ID token whose nonce does not match
+// would leave the claim decorative. ErrNonceMismatch is returned for it
+// specifically so CallbackHandler can surface a distinguishable error - a
+// non-conformant IdP that silently drops the parameter would otherwise be an
+// unexplained "login failed", and that failure mode is the whole reason this
+// was deployed on its own rather than alongside other changes.
+//
+// An empty expectedNonce skips the check. That is not a bypass: the value
+// comes from Core's own server-side state entry, never from the request, so
+// it can only be empty for a state created by a Core version that predates
+// this - i.e. a login started in the seconds before a deploy and completed
+// after it. Failing those closed would log out no one and confuse someone;
+// the window is bounded by oauthStateTTL (5 minutes) and self-heals.
+//
 // The second return value is the response's refresh_token, if the IdP
 // issued one (see the "offline_access" scope comment on NewProvider) -
 // empty string if not. CallbackHandler stores it (encrypted) on the new
 // session so RunSessionRevalidateWorker can later re-check this login
 // against the IdP without a fresh interactive login.
-func (p *Provider) Exchange(ctx context.Context, code, codeVerifier string) (Claims, string, error) {
+func (p *Provider) Exchange(ctx context.Context, code, codeVerifier, expectedNonce string) (Claims, string, error) {
 	token, err := p.oauth2Config.Exchange(ctx, code, oauth2.VerifierOption(codeVerifier))
 	if err != nil {
 		return Claims{}, "", fmt.Errorf("auth: exchange code: %w", err)
@@ -191,6 +242,16 @@ func (p *Provider) Exchange(ctx context.Context, code, codeVerifier string) (Cla
 	idToken, err := p.verifier.Verify(ctx, rawIDToken)
 	if err != nil {
 		return Claims{}, "", fmt.Errorf("auth: verify id_token: %w", err)
+	}
+
+	// Constant-time only for tidiness, not because a timing oracle is
+	// plausible here: the comparison happens once per login against a value
+	// the caller already holds. subtle.ConstantTimeCompare returns 0 for
+	// unequal lengths too, which covers the "IdP dropped the parameter
+	// entirely" case (idToken.Nonce == "") alongside a genuine mismatch.
+	if expectedNonce != "" &&
+		subtle.ConstantTimeCompare([]byte(idToken.Nonce), []byte(expectedNonce)) != 1 {
+		return Claims{}, "", fmt.Errorf("%w (got %q)", ErrNonceMismatch, idToken.Nonce)
 	}
 
 	var claims Claims

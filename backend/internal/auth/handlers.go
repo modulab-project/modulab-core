@@ -12,6 +12,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -58,6 +59,18 @@ type oauthStatePayload struct {
 	// triggered requireRecentLogin's 403. Validated by sanitizeReturnPath
 	// before it is ever stored or echoed back to the browser.
 	ReturnPath string `json:"return_path,omitempty"`
+	// Nonce is the OIDC nonce sent with this round trip's authorization
+	// request, kept here so CallbackHandler can check the returned ID
+	// token's nonce claim against it (Provider.Exchange). Stored server-side
+	// alongside the PKCE verifier rather than round-tripped through the
+	// browser for the same reason that one is: the client must never be able
+	// to choose or observe the value it will later be checked against.
+	//
+	// omitempty plus Exchange's skip-on-empty behaviour makes the deploy that
+	// introduced this a non-event: a state written by the previous version
+	// decodes with Nonce == "" and simply keeps working for the remaining
+	// few minutes of its oauthStateTTL.
+	Nonce string `json:"nonce,omitempty"`
 }
 
 // sanitizeReturnPath validates raw (the ?return= query parameter
@@ -247,6 +260,17 @@ func LoginHandler(d Deps) http.HandlerFunc {
 			return
 		}
 		codeVerifier := oauth2.GenerateVerifier()
+		// Same entropy as state and the session token itself - see
+		// randomToken. Deliberately independent of state: the two bind
+		// different things (state binds the callback to this browser's
+		// redirect, nonce binds the ID token to this authorization request),
+		// and deriving one from the other would collapse both into a single
+		// value an attacker only has to learn once.
+		nonce, err := randomToken()
+		if err != nil {
+			httperr.Internal(w, err)
+			return
+		}
 		reauth := r.URL.Query().Get("reauth") == "1"
 		returnPath := sanitizeReturnPath(r.URL.Query().Get("return"))
 
@@ -254,6 +278,7 @@ func LoginHandler(d Deps) http.HandlerFunc {
 			CodeVerifier: codeVerifier,
 			Reauth:       reauth,
 			ReturnPath:   returnPath,
+			Nonce:        nonce,
 		})
 		if err != nil {
 			httperr.Internal(w, err)
@@ -269,7 +294,7 @@ func LoginHandler(d Deps) http.HandlerFunc {
 			return
 		}
 
-		http.Redirect(w, r, provider.AuthCodeURL(state, codeVerifier, reauth), http.StatusFound)
+		http.Redirect(w, r, provider.AuthCodeURL(state, codeVerifier, nonce, reauth), http.StatusFound)
 	}
 }
 
@@ -353,8 +378,20 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 			return
 		}
 
-		claims, refreshToken, err := provider.Exchange(ctx, code, statePayload.CodeVerifier)
+		claims, refreshToken, err := provider.Exchange(ctx, code, statePayload.CodeVerifier, statePayload.Nonce)
 		if err != nil {
+			// A nonce failure gets its own code rather than folding into
+			// exchange_failed: it is the one Exchange error whose likely
+			// cause is the IdP itself being non-conformant rather than
+			// anything about this login attempt, and an operator who has
+			// just deployed the nonce check needs to be able to tell those
+			// apart from the login screen alone. Logged too, since the
+			// fragment only carries the code and not the offending value.
+			if errors.Is(err, ErrNonceMismatch) {
+				log.Printf("auth: callback: %v", err)
+				redirectToFrontend(w, r, target, url.Values{"error": {"nonce_mismatch"}})
+				return
+			}
 			redirectToFrontend(w, r, target, url.Values{"error": {"exchange_failed"}})
 			return
 		}

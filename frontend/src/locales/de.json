@@ -5,6 +5,7 @@
       "invalid_or_expired_state": "Der Anmeldeversuch ist abgelaufen. Bitte versuche es erneut.",
       "provider_unavailable": "OIDC ist noch nicht vollständig konfiguriert.",
       "exchange_failed": "Anmeldung beim Identitätsprovider fehlgeschlagen.",
+      "nonce_mismatch": "Die Antwort des Identity Providers konnte nicht verifiziert werden (Nonce stimmt nicht überein). Bitte erneut versuchen — bei wiederholtem Fehlschlag das ModuLab-Server-Log prüfen.",
       "group_prefix_unavailable": "Das Gruppen-Präfix ist noch nicht konfiguriert.",
       "access_denied": "Dein Konto ist nicht für den Zugriff auf ModuLab autorisiert. Kontaktiere deinen Administrator.",
       "unknown": "Beim Anmelden ist ein unerwarteter Fehler aufgetreten."

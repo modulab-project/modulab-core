@@ -5,6 +5,7 @@
       "invalid_or_expired_state": "The login attempt expired. Please try again.",
       "provider_unavailable": "OIDC is not fully configured yet.",
       "exchange_failed": "Login with the identity provider failed.",
+      "nonce_mismatch": "The identity provider's response could not be verified (nonce mismatch). Please try again — if it keeps failing, check the ModuLab server log.",
       "group_prefix_unavailable": "The group prefix is not configured yet.",
       "access_denied": "Your account is not authorized to access ModuLab. Contact your administrator.",
       "unknown": "An unexpected error occurred during login."

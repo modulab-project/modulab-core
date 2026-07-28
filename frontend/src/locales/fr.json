@@ -5,6 +5,7 @@
       "invalid_or_expired_state": "La tentative de connexion a expiré. Veuillez réessayer.",
       "provider_unavailable": "OIDC n'est pas encore entièrement configuré.",
       "exchange_failed": "La connexion auprès du fournisseur d'identité a échoué.",
+      "nonce_mismatch": "La réponse du fournisseur d'identité n'a pas pu être vérifiée (nonce non concordant). Réessayez — en cas d'échec répété, consultez le journal du serveur ModuLab.",
       "group_prefix_unavailable": "Le préfixe de groupe n'est pas encore configuré.",
       "access_denied": "Votre compte n'est pas autorisé à accéder à ModuLab. Contactez votre administrateur.",
       "unknown": "Une erreur inattendue s'est produite lors de la connexion."
