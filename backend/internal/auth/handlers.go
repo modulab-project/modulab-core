@@ -1231,14 +1231,21 @@ func clientIP(r *http.Request) string {
 }
 
 // BearerTokenAllowQuery is bearerToken plus a ?t= query-parameter fallback,
-// for the small set of routes where an Authorization header genuinely
-// cannot be sent — <img src>/<script src> style browser-initiated GETs
-// (module storage files, UI bundles). Every other endpoint must use
-// RequireActiveSession/RequireAdminSession (header-only), because a token
-// in the URL ends up in access logs, browser history, and any Referer
-// header sent onward — acceptable for a handful of asset-serving GETs,
-// not for the general case. See router.go's ModuleStorageHandler /
-// ModuleBundleHandler for the only two callers.
+// for the one route where an Authorization header genuinely cannot be sent:
+// <img src>-style browser-initiated GETs against module storage files.
+// Every other endpoint must use RequireActiveSession/RequireAdminSession or
+// header-only RequireModuleToken, because a token in the URL ends up in
+// access logs, browser history, and any Referer header sent onward — and a
+// module token is not a read-only asset key, it authenticates against that
+// module's whole API for the rest of its TTL.
+//
+// ModuleBundleHandler used to be a second caller; the fallback was removed
+// there on 2026-07-28 after confirming nothing ever used it (ModulePage.tsx
+// fetches the bundle with a real Authorization header, and a module never
+// loads its own bundle). Adding a third caller here should be treated as a
+// design decision, not a convenience: see router.go's ModuleStorageHandler
+// for the full exposure and for the signed-URL replacement that is meant to
+// retire this function entirely.
 func BearerTokenAllowQuery(r *http.Request) string {
 	if t := bearerToken(r); t != "" {
 		return t

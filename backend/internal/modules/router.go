@@ -560,8 +560,17 @@ func ModuleLocaleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 // must never be fetchable with the caller's full session token either. The
 // frontend fetches it via fetch() with a Bearer header, then loads it via a
 // Blob URL — this avoids the limitation of dynamic import() not being able
-// to send Authorization headers. Query-token fallback kept narrowly scoped
-// to this handler and ModuleStorageHandler. See auth.BearerTokenAllowQuery.
+// to send Authorization headers.
+//
+// Header only: the ?t= query fallback was accepted here too until 2026-07-28,
+// but nothing ever used it. ModulePage.tsx (the only caller, since a module
+// never loads its own bundle) has always sent an Authorization header - the
+// fallback exists for <img src> in ModuleStorageHandler, which genuinely
+// cannot send one, and this route has no such constraint. A module token in a
+// query string is logged by every proxy in front of Core and is a working
+// credential for that module's whole API for its remaining TTL (see
+// ModuleStorageHandler's comment), so an unused acceptance path for one is
+// pure downside.
 func ModuleBundleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		moduleName := r.PathValue("name")
@@ -569,7 +578,7 @@ func ModuleBundleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 			http.Error(w, "missing module name", http.StatusBadRequest)
 			return
 		}
-		if _, ok := auth.RequireModuleToken(authDeps, moduleName, w, r, true); !ok {
+		if _, ok := auth.RequireModuleToken(authDeps, moduleName, w, r, false); !ok {
 			return
 		}
 		// Sanitise: only allow simple module names (alphanumeric, dash, underscore).
@@ -596,10 +605,22 @@ func ModuleBundleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 //
 // Auth is required: a module-scoped token minted for this exact module (see
 // auth/moduletoken.go). <img src="...">-loaded files cannot carry an
-// Authorization header, so this is one of the two places a ?t= query token
-// is accepted — see auth.BearerTokenAllowQuery for why this must stay
-// narrowly scoped. Only files within the module's own storage directory are
-// served; path traversal attempts are rejected by filepath.Clean.
+// Authorization header, so this is now the ONLY place a ?t= query token is
+// accepted (ModuleBundleHandler's unused fallback was removed 2026-07-28) —
+// see auth.BearerTokenAllowQuery for why this must stay narrowly scoped.
+// Only files within the module's own storage directory are served; path
+// traversal attempts are rejected by filepath.Clean.
+//
+// That query token is a real credential, not a read-only image key: the same
+// string presented as an Authorization header also authenticates against this
+// module's whole API (/v1/modules/{name}/api/*) for the rest of its
+// ModuleTokenTTL. A query string is logged in full by Cloudflare, Traefik and
+// nginx alike, ends up in browser history the moment someone opens an image
+// in its own tab, and travels with the URL if they paste it somewhere. That
+// is why Cache-Control below is private rather than public, and why replacing
+// this with a per-file signed URL is the outstanding fix - the security
+// review's Finding 6, deliberately deferred because it needs a matching
+// change in the module SDK and in every module UI that renders an image.
 func ModuleStorageHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		moduleName := r.PathValue("name")
@@ -630,8 +651,17 @@ func ModuleStorageHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
-		// Cache uploaded images for a day; they are content-addressed by filename.
-		w.Header().Set("Cache-Control", "public, max-age=86400")
+		// Cache uploaded images for a day; they are content-addressed by
+		// filename. "private", not "public" (changed 2026-07-28): the URL
+		// carries a module token in its query string, and "public" is an
+		// explicit invitation to every shared cache on the path - including
+		// Cloudflare, which sits in front of this deployment - to store both
+		// the image and the credential that fetched it under a cache key
+		// containing that credential. "private" keeps the browser-side
+		// caching this line exists for (the images still come from local
+		// cache on revisit) while confining it to the one client the token
+		// was issued to.
+		w.Header().Set("Cache-Control", "private, max-age=86400")
 		http.ServeFile(w, r, absPath)
 	}
 }
