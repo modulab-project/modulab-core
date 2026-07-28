@@ -24,6 +24,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -502,15 +503,20 @@ type ActorOption struct {
 // activity first is not tracked here - ordered by name (named actors first,
 // alphabetically) then by ID, so the filter dropdown groups real accounts
 // together ahead of bare IPs/subs from rate-limit entries.
-func ListActors(ctx context.Context, pool *db.Pool) ([]ActorOption, error) {
+func ListActors(ctx context.Context, pool *db.Pool, masterKey string) ([]ActorOption, error) {
+	// users.name is stored encrypted at rest (see internal/db's users-table
+	// migration), so the raw SQL result here is ciphertext, not a name -
+	// unlike queryPage's actor_name resolution, this used to be returned
+	// (and sorted on) without ever calling crypto.Decrypt, so the dropdown
+	// showed the encrypted blob instead of the account's display name for
+	// every actor that resolved to a real user. Sorting also has to happen
+	// in Go, after decryption - sorting ciphertext alphabetically is
+	// meaningless.
 	rows, err := pool.Query(ctx, `
-		SELECT actor_id, name FROM (
-			SELECT DISTINCT a.actor_id, COALESCE(u.name, '') AS name
-			FROM audit_log a
-			LEFT JOIN users u ON u.id = a.actor_id
-			WHERE a.actor_id <> ''
-		) sub
-		ORDER BY (name = '') ASC, name ASC, actor_id ASC
+		SELECT DISTINCT a.actor_id, COALESCE(u.name, '') AS name_enc
+		FROM audit_log a
+		LEFT JOIN users u ON u.id = a.actor_id
+		WHERE a.actor_id <> ''
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("audit: list actors: %w", err)
@@ -520,14 +526,27 @@ func ListActors(ctx context.Context, pool *db.Pool) ([]ActorOption, error) {
 	var actors []ActorOption
 	for rows.Next() {
 		var a ActorOption
-		if err := rows.Scan(&a.ID, &a.Name); err != nil {
+		var nameEnc string
+		if err := rows.Scan(&a.ID, &nameEnc); err != nil {
 			return nil, fmt.Errorf("audit: list actors scan: %w", err)
+		}
+		if nameEnc != "" {
+			a.Name, _ = crypto.Decrypt(masterKey, nameEnc)
 		}
 		actors = append(actors, a)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("audit: list actors rows: %w", err)
 	}
+	sort.Slice(actors, func(i, j int) bool {
+		if (actors[i].Name == "") != (actors[j].Name == "") {
+			return actors[i].Name != "" // named actors first
+		}
+		if actors[i].Name != actors[j].Name {
+			return actors[i].Name < actors[j].Name
+		}
+		return actors[i].ID < actors[j].ID
+	})
 	return actors, nil
 }
 
@@ -566,6 +585,22 @@ func entryHMAC(masterKey, eventType, actorID, targetID, actorEmailEnc, targetEma
 	// never return an error - safe to discard explicitly rather than
 	// thread an error return through a pure hashing helper.
 	_, _ = fmt.Fprintf(mac, "%s|%s|%s|%s|%s|%s|%s", eventType, actorID, targetID, actorEmailEnc, targetEmailEnc, detailsEnc, prevHash)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// legacyEntryHMAC reproduces the pre-2026-07-23 HMAC formula (eventType/
+// actorID/targetID/prevHash only, no ciphertext fields). Every entry written
+// before that security pass (see entryHMAC's doc comment) was hashed this
+// way, so Verify must still be able to recognize them as valid - otherwise
+// every pre-existing audit_log row, including entry #1, permanently reads as
+// "chain broken" even though nothing was tampered with. Rows can't be
+// re-hashed in place to close this gap properly: audit_log's whole point is
+// that nothing, including an internal migration, silently rewrites a stored
+// hash after the fact. New entries are unaffected - Log always uses the
+// current (wider) entryHMAC.
+func legacyEntryHMAC(masterKey, eventType, actorID, targetID, prevHash string) string {
+	mac := hmac.New(sha256.New, []byte(masterKey))
+	_, _ = fmt.Fprintf(mac, "%s|%s|%s|%s", eventType, actorID, targetID, prevHash)
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
@@ -620,7 +655,13 @@ func Verify(ctx context.Context, pool *db.Pool, masterKey string) (VerifyResult,
 			return VerifyResult{OK: false, EntriesChecked: checked, BrokenAtID: id}, nil
 		}
 		first = false
-		if entryHMAC(masterKey, eventType, actorID, targetID, actorEmailEnc, targetEmailEnc, detailsEnc, prevHash) != hash {
+		// Try the current formula first (covers every entry written since
+		// the 2026-07-23 security pass, i.e. virtually all of them at
+		// steady state); fall back to the pre-pass formula so legitimate
+		// older rows aren't flagged as tampered - see legacyEntryHMAC's doc
+		// comment.
+		if entryHMAC(masterKey, eventType, actorID, targetID, actorEmailEnc, targetEmailEnc, detailsEnc, prevHash) != hash &&
+			legacyEntryHMAC(masterKey, eventType, actorID, targetID, prevHash) != hash {
 			return VerifyResult{OK: false, EntriesChecked: checked, BrokenAtID: id}, nil
 		}
 		expected = hash

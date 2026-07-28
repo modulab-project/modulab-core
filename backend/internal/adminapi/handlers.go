@@ -292,9 +292,9 @@ func AuditLogHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 // that has ever produced an audit entry, for the audit page's actor filter
 // dropdown. Cheap at homelab scale (DISTINCT over an indexed column), no
 // pagination needed.
-func AuditActorsHandler(pool *db.Pool) http.HandlerFunc {
+func AuditActorsHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		actors, err := audit.ListActors(r.Context(), pool)
+		actors, err := audit.ListActors(r.Context(), pool, masterKeyEnv)
 		if err != nil {
 			httperr.Internal(w, err)
 			return
