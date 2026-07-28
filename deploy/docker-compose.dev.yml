@@ -14,10 +14,27 @@ services:
     volumes:
       - postgres-dev-data:/var/lib/postgresql/data
 
+  # Password-protected like production (2026-07-28), even though this one is
+  # local-only. Two reasons to keep the shapes identical: the auth path in
+  # internal/valkey/client.go is otherwise never exercised until it reaches
+  # production, and this instance publishes port 6379 to the host - so on a
+  # laptop sharing a café network it is markedly more exposed than the
+  # production one, which has no published port at all.
+  #
+  # Core runs on the host in this setup, so it needs the matching value:
+  #     MODULAB_VALKEY_PASSWORD=modulab-dev
+  # Same throwaway-credential convention as POSTGRES_PASSWORD above.
   valkey:
     image: valkey/valkey:8-alpine
+    command: ["valkey-server", "--requirepass", "modulab-dev"]
     ports:
       - "6379:6379"
+
+  # Own instance, mirroring production - see the searxng-valkey service in
+  # docker-compose.yml for why SearXNG must not share Core's session store.
+  # Not published to the host: nothing outside the compose network talks to it.
+  searxng-valkey:
+    image: valkey/valkey:8-alpine
 
   searxng:
     image: searxng/searxng:latest
@@ -25,7 +42,7 @@ services:
       - "8888:8080"
     environment:
       - SEARXNG_BASE_URL=http://localhost:8888/
-      - SEARXNG_REDIS_URL=redis://valkey:6379/1
+      - SEARXNG_REDIS_URL=redis://searxng-valkey:6379/0
     volumes:
       - ./searxng:/etc/searxng
 

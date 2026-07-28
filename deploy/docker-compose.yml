@@ -147,15 +147,77 @@ services:
       timeout: 5s
       retries: 10
 
-  # ── Valkey ───────────────────────────────────────────────────────────────────
+  # ── Valkey (Core only) ───────────────────────────────────────────────────────
+  # Password-protected since 2026-07-28. What lives in here is not "cache
+  # data": the session keys are named session:<bearer token>, so anyone who
+  # can run SCAN against this instance reads every live session token
+  # straight out of the key names - no decryption needed, despite the
+  # AES-GCM applied to the values. moduletoken: entries additionally carry
+  # the underlying session token in plaintext JSON. Read access here is
+  # equivalent to impersonating every logged-in user, super-admins included.
+  #
+  # The instance has never had a published port and is only reachable over
+  # modulab-internal, but Postgres on that same network has always had a
+  # password while this did not - the protection was distributed exactly
+  # opposite to the sensitivity of what each holds.
+  #
+  # SearXNG deliberately does NOT share this instance anymore (it used to,
+  # via SEARXNG_REDIS_URL=redis://valkey:6379/1) - see searxng-valkey below.
   valkey:
     # Digest-pinned - same reasoning as the traefik service above.
     image: valkey/valkey:8-alpine@sha256:77643d152547b446fc15cbafaff22004545663fcd40c6b28038ad283837baa75
     restart: unless-stopped
+    # --requirepass on the command line rather than a mounted valkey.conf:
+    # one less bind mount for a single directive. VALKEY_PASSWORD is
+    # substituted by Compose from .env at parse time.
+    command: ["valkey-server", "--requirepass", "${VALKEY_PASSWORD:?VALKEY_PASSWORD must be set in .env}"]
+    environment:
+      # Same value again as a container env var, purely so the healthcheck
+      # below can authenticate - the command line above is already resolved
+      # by then and cannot be read back from inside the container.
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD}
     mem_limit: 256m
     cpus: 0.5
     volumes:
       - valkey-data:/data
+    networks:
+      - modulab-internal
+    healthcheck:
+      # MUST authenticate. A bare `valkey-cli ping` answers
+      # "NOAUTH Authentication required" and exits non-zero once
+      # --requirepass is set, so the container would never become healthy -
+      # and core's depends_on: condition: service_healthy means Core would
+      # then never start at all, with an error that looks nothing like a
+      # password problem. $$ escapes the $ so Compose leaves it for the
+      # shell inside the container; --no-auth-warning suppresses valkey-cli's
+      # "using a password on the command line" notice on stderr.
+      test: ["CMD-SHELL", "valkey-cli --no-auth-warning -a \"$$VALKEY_PASSWORD\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── Valkey (SearXNG only) ────────────────────────────────────────────────────
+  # SearXNG used to share Core's Valkey (DB 1). Split out 2026-07-28: it
+  # needs Redis only for its own rate limiting and result caching, none of
+  # which is sensitive, while sharing the instance meant a third-party
+  # application we do not maintain sat one connection away from every
+  # ModuLab session token.
+  #
+  # Note what a shared password would NOT have fixed: SearXNG needs the
+  # credential to do its job, so it would hold it, and a compromise of
+  # SearXNG would still hand over Core's sessions. Separating the instances
+  # is what actually removes the reach - this container has no route to
+  # Core's Valkey and does not know its password.
+  #
+  # No password here on purpose: nothing of value is stored, and the only
+  # client is SearXNG itself. No volume either - a cold cache after a
+  # restart costs one slower search, and persisting it would only mean
+  # keeping other people's search queries on disk for no benefit.
+  searxng-valkey:
+    image: valkey/valkey:8-alpine@sha256:77643d152547b446fc15cbafaff22004545663fcd40c6b28038ad283837baa75
+    restart: unless-stopped
+    mem_limit: 128m
+    cpus: 0.25
     networks:
       - modulab-internal
     healthcheck:
@@ -180,6 +242,11 @@ services:
       MODULAB_DB_PASSWORD: ${POSTGRES_PASSWORD}
       MODULAB_VALKEY_HOST: valkey
       MODULAB_VALKEY_PORT: "6379"
+      # Read by config.Load into Config.ValkeyPassword and passed straight
+      # through to redis.Options.Password (internal/valkey/client.go) - the
+      # client side has supported this all along, only the deployment never
+      # set it.
+      MODULAB_VALKEY_PASSWORD: ${VALKEY_PASSWORD}
     # Higher than the other services on purpose: unlike everything else in
     # this file, core's cgroup also covers every Tier 2/3 module's Deno
     # subprocess (they're spawned as children of this same container, see
@@ -283,13 +350,18 @@ services:
     restart: unless-stopped
     environment:
       SEARXNG_BASE_URL: https://${MODULAB_DOMAIN}/searxng/
-      SEARXNG_REDIS_URL: redis://valkey:6379/1
+      # Points at its own instance (searxng-valkey), not Core's. Was
+      # redis://valkey:6379/1 until 2026-07-28 - see the searxng-valkey
+      # service comment for why sharing an instance with Core's session
+      # store was the actual problem, and why adding a password to the
+      # shared one would not have solved it.
+      SEARXNG_REDIS_URL: redis://searxng-valkey:6379/0
     mem_limit: 256m
     cpus: 0.5
     volumes:
       - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
     depends_on:
-      valkey:
+      searxng-valkey:
         condition: service_healthy
     healthcheck:
       # SearXNG's image is also Alpine-based; hits its own home page rather
