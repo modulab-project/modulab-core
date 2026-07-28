@@ -59,7 +59,16 @@ function csrfHeaders(method?: string): Record<string, string> {
   return { [CSRF_HEADER]: csrfToken };
 }
 
-async function request<T>(
+// Exported so no second HTTP wrapper has to exist anywhere in the app.
+// lib/quicklinks.ts used to hand-roll its own fetch() calls, which meant it
+// silently missed csrfHeaders() below - and once the admin guards started
+// enforcing CSRF (2026-07-27) every admin quick-link create/update/delete
+// began returning 403 with nothing in the UI explaining why. Anything that
+// talks to Core should go through here; the three raw fetch() calls left in
+// this file (adminParseOPML and installModuleManual send FormData, streamAIChat
+// needs the unconsumed response stream) are the documented exceptions, and all
+// three attach csrfHeaders() by hand.
+export async function request<T>(
   path: string,
   options: RequestInit & { bootstrapToken?: string } = {},
 ): Promise<T> {
@@ -1060,6 +1069,12 @@ export interface ChatMessage {
 // or rejects on error. The caller is responsible for aborting via the signal.
 // No token parameter: raw fetch() with credentials: "include" so the
 // browser attaches the __Host-modulab_session cookie, same as request() above.
+// Cannot go through request() itself because that consumes the whole body as
+// JSON, while this needs the raw stream - so csrfHeaders() has to be attached
+// by hand here. That is easy to forget: POST /v1/ai/chat is CSRF-checked as
+// of 2026-07-28 (auth.RequireActiveSession now applies the check to every
+// session-guarded mutation, not just admin ones), so without this header the
+// whole chat feature 403s.
 export function streamAIChat(
   providerId: string,
   model: string,
@@ -1072,6 +1087,7 @@ export function streamAIChat(
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      ...csrfHeaders("POST"),
     },
     body: JSON.stringify({ provider_id: providerId, model, messages }),
     signal,

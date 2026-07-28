@@ -27,6 +27,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
 	"github.com/modulab-project/modulab-core/backend/internal/crypto"
+	"github.com/modulab-project/modulab-core/backend/internal/httperr"
 )
 
 // crudIdentRe restricts crud.table and every crud.fields[].name to safe,
@@ -318,19 +319,19 @@ func listCrudRows(w http.ResponseWriter, r *http.Request, d Deps, schemaName str
 
 	rows, err := d.DB.Query(r.Context(), query, args...)
 	if err != nil {
-		http.Error(w, "query failed: "+err.Error(), http.StatusInternalServerError)
+		httperr.Internal(w, err)
 		return
 	}
 	maps, err := pgx.CollectRows(rows, pgx.RowToMap)
 	if err != nil {
-		http.Error(w, "query failed: "+err.Error(), http.StatusInternalServerError)
+		httperr.Internal(w, err)
 		return
 	}
 
 	out := make([]map[string]any, 0, len(maps))
 	for _, m := range maps {
 		if err := decryptCrudRow(crud, m, d.PIIKey); err != nil {
-			http.Error(w, "decrypt failed: "+err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 		out = append(out, m)
@@ -364,7 +365,7 @@ func createCrudRow(w http.ResponseWriter, r *http.Request, d Deps, schemaName st
 		if f.Encrypted {
 			enc, err := encryptCrudValue(d.PIIKey, val)
 			if err != nil {
-				http.Error(w, "encryption failed: "+err.Error(), http.StatusInternalServerError)
+				httperr.Internal(w, err)
 				return
 			}
 			val = enc
@@ -398,16 +399,16 @@ func createCrudRow(w http.ResponseWriter, r *http.Request, d Deps, schemaName st
 
 	rows, err := d.DB.Query(r.Context(), query, insertVals...)
 	if err != nil {
-		http.Error(w, "insert failed: "+err.Error(), http.StatusInternalServerError)
+		httperr.Internal(w, err)
 		return
 	}
 	m, err := pgx.CollectExactlyOneRow(rows, pgx.RowToMap)
 	if err != nil {
-		http.Error(w, "insert failed: "+err.Error(), http.StatusInternalServerError)
+		httperr.Internal(w, err)
 		return
 	}
 	if err := decryptCrudRow(crud, m, d.PIIKey); err != nil {
-		http.Error(w, "decrypt failed: "+err.Error(), http.StatusInternalServerError)
+		httperr.Internal(w, err)
 		return
 	}
 	writeModuleJSON(w, http.StatusCreated, m)
@@ -448,7 +449,7 @@ func updateCrudRow(w http.ResponseWriter, r *http.Request, d Deps, schemaName st
 		if f.Encrypted {
 			enc, err := encryptCrudValue(d.PIIKey, val)
 			if err != nil {
-				http.Error(w, "encryption failed: "+err.Error(), http.StatusInternalServerError)
+				httperr.Internal(w, err)
 				return
 			}
 			val = enc
@@ -471,7 +472,7 @@ func updateCrudRow(w http.ResponseWriter, r *http.Request, d Deps, schemaName st
 		strings.Join(setClauses, ", "), quoteIdent(idColumn), len(args))
 
 	if _, err := d.DB.Exec(r.Context(), query, args...); err != nil {
-		http.Error(w, "update failed: "+err.Error(), http.StatusInternalServerError)
+		httperr.Internal(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -483,7 +484,7 @@ func deleteCrudRow(w http.ResponseWriter, r *http.Request, d Deps, schemaName st
 	}
 	query := fmt.Sprintf("DELETE FROM %s.%s WHERE %s = $1", quoteIdent(schemaName), quoteIdent(crud.Table), quoteIdent(idColumn))
 	if _, err := d.DB.Exec(r.Context(), query, rowID); err != nil {
-		http.Error(w, "delete failed: "+err.Error(), http.StatusInternalServerError)
+		httperr.Internal(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -505,7 +506,7 @@ func ownsCrudRow(w http.ResponseWriter, r *http.Request, d Deps, schemaName stri
 			if errors.Is(err, pgx.ErrNoRows) {
 				http.Error(w, "not found", http.StatusNotFound)
 			} else {
-				http.Error(w, "lookup failed: "+err.Error(), http.StatusInternalServerError)
+				httperr.Internal(w, err)
 			}
 			return false
 		}
@@ -518,7 +519,7 @@ func ownsCrudRow(w http.ResponseWriter, r *http.Request, d Deps, schemaName stri
 		if errors.Is(err, pgx.ErrNoRows) {
 			http.Error(w, "not found", http.StatusNotFound)
 		} else {
-			http.Error(w, "lookup failed: "+err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 		}
 		return false
 	}

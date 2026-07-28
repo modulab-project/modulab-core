@@ -1269,14 +1269,14 @@ func AdminCatalogHandler(d auth.Deps) http.HandlerFunc {
 		// 2. Parse catalog.
 		var catalog map[string][]catalogPublication
 		if err := json.Unmarshal([]byte(rawJSON), &catalog); err != nil {
-			http.Error(w, "failed to parse catalog: "+err.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, err)
 			return
 		}
 
 		// 3. Load existing DB feeds for AlreadyExists check.
 		existingFeeds, dbErr := d.Pool.ListFeeds(r.Context())
 		if dbErr != nil {
-			http.Error(w, dbErr.Error(), http.StatusInternalServerError)
+			httperr.Internal(w, dbErr)
 			return
 		}
 		existingURLs := make(map[string]bool, len(existingFeeds))

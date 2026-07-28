@@ -420,8 +420,36 @@ func guardAgainstLastSuperAdmin(ctx context.Context, d Deps, targetSubject strin
 // checked only Role == RolePending would pass a session whose revocation
 // failed due to a Valkey hiccup, since Locked is only set to true on a
 // session that was never revoked).
+//
+// Mutating requests also get the Origin/CSRF checks (2026-07-28). When those
+// were introduced they were scoped to the admin guards only, on the reading
+// that a module bug hitting an *admin* route was the risk worth closing. That
+// left every user-facing mutation open to the same thing: an installed
+// module's UI bundle runs in this SPA's own JS realm and its fetches carry
+// the session cookie automatically, so nothing stopped module code from
+// overwriting a user's AI/search provider keys, rewriting their quick links,
+// changing feed subscriptions, ending their sessions, or deleting their
+// account outright. Those are lower-severity than user management, but not
+// low enough to leave as the one unguarded surface once the mechanism to
+// guard them already existed.
+//
+// Costs nothing on the client: lib/api.ts's request() has always attached
+// X-CSRF-Token to every mutating call rather than only admin ones (see the
+// csrfHeaders doc comment there), precisely so this could be tightened
+// without a coordinated frontend change.
 func RequireActiveSession(d Deps, w http.ResponseWriter, r *http.Request) (Session, bool) {
-	return requireActiveSessionWithToken(d, w, r, sessionToken(r))
+	sess, ok := requireActiveSessionWithToken(d, w, r, sessionToken(r))
+	if !ok {
+		return Session{}, false
+	}
+	if !originAllowed(d, r) {
+		http.Error(w, "origin not allowed", http.StatusForbidden)
+		return Session{}, false
+	}
+	if !validateCSRF(w, r, sess) {
+		return Session{}, false
+	}
+	return sess, true
 }
 
 func requireActiveSessionWithToken(d Deps, w http.ResponseWriter, r *http.Request, token string) (Session, bool) {
@@ -448,13 +476,17 @@ func requireActiveSessionWithToken(d Deps, w http.ResponseWriter, r *http.Reques
 }
 
 // RequireAdminSession is RequireActiveSession plus an org-admin/super-admin
-// role check, plus the same Origin/CSRF checks requireAdmin applies above -
-// use for any endpoint that manages users, configuration, or other
-// resources that regular users must not touch. This is the choke point
+// role check - use for any endpoint that manages users, configuration, or
+// other resources that regular users must not touch. This is the choke point
 // every /v1/admin/... handler across every package (store, quicklinks,
-// news, modules, adminapi, search, ...) already calls, which is exactly
-// why the CSRF/Origin checks live here rather than in a second, easy-to-
-// forget middleware layered on top of each individual route registration.
+// news, modules, adminapi, search, ...) already calls.
+//
+// The Origin/CSRF checks used to be repeated here; they now come from
+// RequireActiveSession itself, which applies them to every session-guarded
+// mutation rather than only admin ones (see its doc comment). Repeating them
+// would be harmless but would also suggest admin routes are the only ones
+// covered, which is exactly the assumption that left the user-facing routes
+// unguarded in the first place.
 func RequireAdminSession(d Deps, w http.ResponseWriter, r *http.Request) (Session, bool) {
 	sess, ok := RequireActiveSession(d, w, r)
 	if !ok {
@@ -462,13 +494,6 @@ func RequireAdminSession(d Deps, w http.ResponseWriter, r *http.Request) (Sessio
 	}
 	if sess.Role != RoleOrgAdmin && sess.Role != RoleSuperAdmin {
 		http.Error(w, "forbidden", http.StatusForbidden)
-		return Session{}, false
-	}
-	if !originAllowed(d, r) {
-		http.Error(w, "origin not allowed", http.StatusForbidden)
-		return Session{}, false
-	}
-	if !validateCSRF(w, r, sess) {
 		return Session{}, false
 	}
 	return sess, true

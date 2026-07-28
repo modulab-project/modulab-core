@@ -1,6 +1,15 @@
 // API client for the quick-links / Schnellzugriff-Grid endpoints.
+//
+// Every call goes through lib/api.ts's request(). This file used to make its
+// own fetch() calls instead, duplicating the credentials/error handling - and
+// missing the one thing that duplicate did not replicate: csrfHeaders(). Once
+// the admin guards began enforcing CSRF (2026-07-27), every admin quick-link
+// mutation below started returning 403, with the UI only able to show the
+// bare error text. Fixed 2026-07-28 by removing the second HTTP path
+// entirely rather than adding the header to it, so the same class of drift
+// cannot recur here.
 
-const API = import.meta.env.VITE_API_BASE_URL ?? "";
+import { request } from "./api";
 
 // Tile is one entry in the merged list returned by GET /v1/quick-links.
 export interface Tile {
@@ -30,30 +39,25 @@ export interface TileRef {
 }
 
 // ---- User endpoints ---------------------------------------------------------
-// No token parameter on any function below: every request relies on the
-// browser attaching the httpOnly __Host-modulab_session cookie automatically
-// (credentials: "include"), same as lib/api.ts's request() wrapper - see
-// backend/internal/auth/handlers.go's setSessionCookie.
+// No token parameter on any function below: request() relies on the browser
+// attaching the httpOnly __Host-modulab_session cookie automatically
+// (credentials: "include") - see backend/internal/auth/handlers.go's
+// setSessionCookie.
 
-export async function listQuickLinks(): Promise<Tile[]> {
-  const res = await fetch(`${API}/v1/quick-links`, { credentials: "include" });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+export function listQuickLinks(): Promise<Tile[]> {
+  return request<Tile[]>("/v1/quick-links");
 }
 
-export async function createUserQuickLink(
-  body: { title: string; url: string; icon: string; description: string }
-): Promise<Tile> {
-  const res = await fetch(`${API}/v1/quick-links`, {
+export async function createUserQuickLink(body: {
+  title: string;
+  url: string;
+  icon: string;
+  description: string;
+}): Promise<Tile> {
+  const { id } = await request<{ id: string }>("/v1/quick-links", {
     method: "POST",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-    },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(await res.text());
-  const { id } = (await res.json()) as { id: string };
   // Return the tile immediately so the grid can append it optimistically.
   return {
     id,
@@ -66,68 +70,46 @@ export async function createUserQuickLink(
   };
 }
 
-export async function deleteUserQuickLink(id: string): Promise<void> {
-  const res = await fetch(`${API}/v1/quick-links/${id}`, {
-    method: "DELETE",
-    credentials: "include",
-  });
-  if (!res.ok) throw new Error(await res.text());
+export function deleteUserQuickLink(id: string): Promise<void> {
+  return request<void>(`/v1/quick-links/${id}`, { method: "DELETE" });
 }
 
-export async function saveOrder(order: TileRef[]): Promise<void> {
-  const res = await fetch(`${API}/v1/quick-links/order`, {
+export function saveOrder(order: TileRef[]): Promise<void> {
+  return request<void>("/v1/quick-links/order", {
     method: "PATCH",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-    },
     body: JSON.stringify({ order }),
   });
-  if (!res.ok) throw new Error(await res.text());
 }
 
 // ---- Admin endpoints --------------------------------------------------------
 
-export async function listAdminQuickLinks(): Promise<AdminTile[]> {
-  const res = await fetch(`${API}/v1/admin/quick-links`, { credentials: "include" });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+export function listAdminQuickLinks(): Promise<AdminTile[]> {
+  return request<AdminTile[]>("/v1/admin/quick-links");
 }
 
-export async function createAdminQuickLink(
-  body: { title: string; url: string; icon: string; description: string; sort_order: number }
-): Promise<AdminTile> {
-  const res = await fetch(`${API}/v1/admin/quick-links`, {
+export function createAdminQuickLink(body: {
+  title: string;
+  url: string;
+  icon: string;
+  description: string;
+  sort_order: number;
+}): Promise<AdminTile> {
+  return request<AdminTile>("/v1/admin/quick-links", {
     method: "POST",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-    },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
 }
 
-export async function updateAdminQuickLink(
+export function updateAdminQuickLink(
   id: string,
-  body: { title: string; url: string; icon: string; description: string; sort_order: number }
+  body: { title: string; url: string; icon: string; description: string; sort_order: number },
 ): Promise<void> {
-  const res = await fetch(`${API}/v1/admin/quick-links/${id}`, {
+  return request<void>(`/v1/admin/quick-links/${id}`, {
     method: "PATCH",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-    },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(await res.text());
 }
 
-export async function deleteAdminQuickLink(id: string): Promise<void> {
-  const res = await fetch(`${API}/v1/admin/quick-links/${id}`, {
-    method: "DELETE",
-    credentials: "include",
-  });
-  if (!res.ok) throw new Error(await res.text());
+export function deleteAdminQuickLink(id: string): Promise<void> {
+  return request<void>(`/v1/admin/quick-links/${id}`, { method: "DELETE" });
 }
