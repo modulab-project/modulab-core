@@ -183,68 +183,16 @@ export default function AdminSecurityInfoPage() {
               {!info.active_sessions || info.active_sessions.length === 0 ? (
                 <p className="text-sm text-gray-400 dark:text-gray-500">{t("admin.system_info.no_sessions")}</p>
               ) : (
-                <>
-                  {/* Desktop/tablet: table. Hidden below the sm breakpoint -
-                      eight columns of tabular data does not fit a phone
-                      screen; see the stacked cards below instead. */}
-                  <div className="hidden overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800 sm:block">
-                    <table className="min-w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-gray-200 bg-gray-50 text-left dark:border-gray-800 dark:bg-gray-900">
-                          <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                            {t("admin.system_info.col_name")}
-                          </th>
-                          <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                            {t("admin.system_info.col_role")}
-                          </th>
-                          <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                            {t("admin.system_info.col_login")}
-                          </th>
-                          <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                            {t("admin.system_info.col_ip")}
-                          </th>
-                          <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                            {t("admin.system_info.col_country")}
-                          </th>
-                          <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                            {t("admin.system_info.col_device")}
-                          </th>
-                          <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                            {t("admin.system_info.col_last_active")}
-                          </th>
-                          <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                            {t("admin.system_info.col_expires")}
-                          </th>
-                          <th className="whitespace-nowrap px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">
-                            <span className="sr-only">{t("admin.system_info.col_actions")}</span>
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {info.active_sessions.map((s) => (
-                          <SessionRow
-                            key={s.id}
-                            session={s}
-                            revoking={revokingIds.has(s.id)}
-                            onRevoke={() => handleRevoke(s)}
-                          />
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {/* Phone: stacked cards, same data. */}
-                  <div className="flex flex-col gap-2 sm:hidden">
-                    {info.active_sessions.map((s) => (
-                      <SessionCard
-                        key={s.id}
-                        session={s}
-                        revoking={revokingIds.has(s.id)}
-                        onRevoke={() => handleRevoke(s)}
-                      />
-                    ))}
-                  </div>
-                </>
+                <ul className="flex flex-col gap-2">
+                  {info.active_sessions.map((s) => (
+                    <SessionListItem
+                      key={s.id}
+                      session={s}
+                      revoking={revokingIds.has(s.id)}
+                      onRevoke={() => handleRevoke(s)}
+                    />
+                  ))}
+                </ul>
               )}
             </Section>
 
@@ -331,7 +279,14 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function SessionRow({
+// Single-list-item rendering for one active session - same shape as
+// ProfilePage.tsx's SessionListItem (rounded bordered row, teal/green
+// highlight when current, device+IP+last-active stacked on the left, End
+// button on the right) rather than a separate desktop table + phone card
+// pair. Unlike Profile's version this is admin-facing and shows every
+// column the old table/card split had (name/email, role, login time,
+// country, expires) via a small key/value grid under the device line.
+function SessionListItem({
   session,
   revoking,
   onRevoke,
@@ -343,51 +298,57 @@ function SessionRow({
   const { t } = useTranslation();
   const device = session.user_agent ? parseUserAgent(session.user_agent, t) : null;
   return (
-    <tr className={`border-b border-gray-100 last:border-0 dark:border-gray-800 ${session.current ? "bg-green-50/60 dark:bg-green-950/30" : ""}`}>
-      <td className="whitespace-nowrap px-4 py-2.5 text-gray-700 dark:text-gray-300">
-        <div className="flex flex-col items-start gap-1">
-          <span>{session.name || session.email || <span className="text-gray-300 dark:text-gray-600">—</span>}</span>
+    <li
+      className={`flex flex-col gap-2 rounded-lg border px-3 py-2.5 text-sm sm:flex-row sm:items-start sm:justify-between sm:gap-3 ${
+        session.current
+          ? "border-green-200 bg-green-50/60 dark:border-green-900 dark:bg-green-950/30"
+          : "border-gray-200 dark:border-gray-800"
+      }`}
+    >
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-medium text-gray-700 dark:text-gray-300">
+            {session.name || session.email || <span className="text-gray-300 dark:text-gray-600">—</span>}
+          </span>
           {session.current && (
             <span className="whitespace-nowrap rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:bg-green-900 dark:text-green-300">
               {t("admin.system_info.session_current")}
             </span>
           )}
         </div>
-      </td>
-      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-600 dark:text-gray-400">{session.role}</td>
-      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">
-        {session.created_at ? new Date(session.created_at).toLocaleString() : "—"}
-      </td>
-      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">
-        {session.ip || "—"}
-      </td>
-      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">
-        {session.country || "—"}
-      </td>
-      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500" title={session.user_agent}>
-        {device ? `${device.browser} · ${device.os}` : "—"}
-      </td>
-      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">
-        {session.last_active_seconds_ago !== undefined
-          ? t("admin.system_info.last_active_ago", { duration: formatDuration(session.last_active_seconds_ago) })
-          : "—"}
-      </td>
-      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">
-        {session.expires_in_seconds !== undefined
-          ? t("admin.system_info.expires_in", { duration: formatDuration(session.expires_in_seconds) })
-          : "—"}
-      </td>
-      <td className="whitespace-nowrap px-4 py-2.5 text-right">
-        <button
-          type="button"
-          onClick={onRevoke}
-          disabled={revoking}
-          className="text-xs font-medium text-red-600 hover:text-red-700 disabled:opacity-50 dark:text-red-400 dark:hover:text-red-300"
-        >
-          {revoking ? t("common.loading") : t("admin.system_info.end_session")}
-        </button>
-      </td>
-    </tr>
+        <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400" title={session.user_agent}>
+          {device ? `${device.browser} · ${device.os}` : "—"}
+          {session.ip && <> · {session.ip}</>}
+          {session.country && <> · {session.country}</>}
+        </p>
+        <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+          <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_role")}</dt>
+          <dd>{session.role}</dd>
+          <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_login")}</dt>
+          <dd>{session.created_at ? new Date(session.created_at).toLocaleString() : "—"}</dd>
+          <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_last_active")}</dt>
+          <dd>
+            {session.last_active_seconds_ago !== undefined
+              ? t("admin.system_info.last_active_ago", { duration: formatDuration(session.last_active_seconds_ago) })
+              : "—"}
+          </dd>
+          <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_expires")}</dt>
+          <dd>
+            {session.expires_in_seconds !== undefined
+              ? t("admin.system_info.expires_in", { duration: formatDuration(session.expires_in_seconds) })
+              : "—"}
+          </dd>
+        </dl>
+      </div>
+      <button
+        type="button"
+        onClick={onRevoke}
+        disabled={revoking}
+        className="self-start text-xs font-medium text-red-600 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-400 dark:hover:text-red-300 sm:flex-shrink-0"
+      >
+        {revoking ? t("common.loading") : t("admin.system_info.end_session")}
+      </button>
+    </li>
   );
 }
 
@@ -437,77 +398,9 @@ function RateLimitRow({
   );
 }
 
-// Phone counterpart of SessionRow - same fields, stacked instead of in
-// table columns so nothing needs whitespace-nowrap/horizontal scroll on a
-// narrow viewport. Same pattern as AdminAuditPage's EntryCard.
-function SessionCard({
-  session,
-  revoking,
-  onRevoke,
-}: {
-  session: ActiveSession;
-  revoking: boolean;
-  onRevoke: () => void;
-}) {
-  const { t } = useTranslation();
-  const device = session.user_agent ? parseUserAgent(session.user_agent, t) : null;
-  return (
-    <div
-      className={`rounded-lg border p-3 text-sm ${
-        session.current
-          ? "border-green-200 bg-green-50/60 dark:border-green-900 dark:bg-green-950/30"
-          : "border-gray-200 dark:border-gray-800"
-      }`}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-medium text-gray-700 dark:text-gray-300">
-            {session.name || session.email || <span className="text-gray-300 dark:text-gray-600">—</span>}
-          </span>
-          {session.current && (
-            <span className="whitespace-nowrap rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:bg-green-900 dark:text-green-300">
-              {t("admin.system_info.session_current")}
-            </span>
-          )}
-        </div>
-        <button
-          type="button"
-          onClick={onRevoke}
-          disabled={revoking}
-          className="flex-shrink-0 text-xs font-medium text-red-600 hover:text-red-700 disabled:opacity-50 dark:text-red-400 dark:hover:text-red-300"
-        >
-          {revoking ? t("common.loading") : t("admin.system_info.end_session")}
-        </button>
-      </div>
-      <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
-        <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_role")}</dt>
-        <dd>{session.role}</dd>
-        <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_login")}</dt>
-        <dd>{session.created_at ? new Date(session.created_at).toLocaleString() : "—"}</dd>
-        <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_ip")}</dt>
-        <dd className="break-all">{session.ip || "—"}</dd>
-        <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_country")}</dt>
-        <dd>{session.country || "—"}</dd>
-        <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_device")}</dt>
-        <dd title={session.user_agent}>{device ? `${device.browser} · ${device.os}` : "—"}</dd>
-        <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_last_active")}</dt>
-        <dd>
-          {session.last_active_seconds_ago !== undefined
-            ? t("admin.system_info.last_active_ago", { duration: formatDuration(session.last_active_seconds_ago) })
-            : "—"}
-        </dd>
-        <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_expires")}</dt>
-        <dd>
-          {session.expires_in_seconds !== undefined
-            ? t("admin.system_info.expires_in", { duration: formatDuration(session.expires_in_seconds) })
-            : "—"}
-        </dd>
-      </dl>
-    </div>
-  );
-}
-
-// Phone counterpart of RateLimitRow - same reasoning as SessionCard above.
+// Phone counterpart of RateLimitRow - same table/card split the sessions
+// section used to have, kept as-is here since only "Aktive Sitzungen" was
+// asked to match Profile's list style.
 function RateLimitCard({
   entry,
   resetting,
