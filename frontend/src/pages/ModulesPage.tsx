@@ -232,7 +232,7 @@ export default function ModulesPage() {
 
                 {/* Right: actions (admin only) */}
                 {isAdmin && (
-                  <div className="flex flex-none items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     {mod.tier >= 2 && (mod.status === "degraded" || mod.status === "failed") && (
                       <button
                         type="button"

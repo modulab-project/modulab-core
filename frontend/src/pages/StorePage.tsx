@@ -204,7 +204,7 @@ export default function StorePage() {
             )}
           </div>
           {isAdmin && (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {isSuperAdmin && (
                 <button
                   type="button"

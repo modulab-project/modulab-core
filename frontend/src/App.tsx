@@ -125,7 +125,7 @@ export default function App() {
 
 function WithFooter({ children }: { children: ReactNode }) {
   return (
-    <div className="flex min-h-screen flex-col bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100">
+    <div className="flex min-h-dvh flex-col bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100">
       <div className="flex-1">{children}</div>
       <Footer />
     </div>

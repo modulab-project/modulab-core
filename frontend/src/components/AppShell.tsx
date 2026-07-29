@@ -551,7 +551,7 @@ export function AppShell({
   }
 
   return (
-    <div className="flex h-screen flex-col bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100">
+    <div className="flex h-dvh flex-col bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100">
       {!hideChrome && (
         <Header
           session={session}
@@ -1605,7 +1605,7 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
     // to no margin on one side and could clip on the other. From sm up,
     // reverts to the original floating box anchored bottom-right.
     <div className="fixed inset-x-4 bottom-[52px] z-40 flex flex-col rounded-2xl border border-gray-200 bg-white shadow-xl dark:border-gray-800 dark:bg-gray-950 sm:inset-x-auto sm:right-4 sm:w-[340px]"
-      style={{ maxHeight: "calc(100vh - 120px)" }}
+      style={{ maxHeight: "calc(100dvh - 120px)" }}
     >
       {/* Header */}
       <div className="flex flex-none items-center justify-between border-b border-gray-100 px-4 py-3 dark:border-gray-800">

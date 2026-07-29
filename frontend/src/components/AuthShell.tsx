@@ -31,7 +31,7 @@ export function AuthShell({
   children: ReactNode;
 }) {
   return (
-    <div className="flex min-h-[calc(100vh-77px)] items-center justify-center px-4 py-10">
+    <div className="flex min-h-[calc(100dvh-77px)] items-center justify-center px-4 py-10">
       <div className="w-full max-w-md">
         <div className="mb-8 flex flex-col items-center gap-2.5">
           <Logo />

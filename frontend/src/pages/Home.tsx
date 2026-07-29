@@ -603,7 +603,7 @@ function Hero({
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleSearchKeyDown}
           placeholder={t("home.search_placeholder")}
-          className="w-full flex-1 bg-transparent text-base outline-none placeholder:text-gray-400 md:text-sm"
+          className="w-full flex-1 bg-transparent text-base outline-none placeholder:text-gray-400 lg:text-sm"
         />
         {value && (
           <button

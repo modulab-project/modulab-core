@@ -478,8 +478,17 @@ export default function AdminAuditPage() {
               past that intrinsic width even when told to. Without min-w-0,
               the two date inputs push past their 1/3-width grid column and
               visually overlap the search field next to them, most visibly
-              in Edge. */}
-          <div className="flex min-w-0 gap-2">
+              in Edge.
+
+              On top of that, iOS Safari renders the date value as a spelled-
+              out native pill (e.g. "29. Juli 2026" in German) that ignores
+              min-w-0/flex-shrink and keeps its own intrinsic width, so
+              cramming both date fields side by side on a phone still
+              overlaps there even with min-w-0 in place. Fix: stack the two
+              date inputs vertically below sm (each gets the full row width)
+              and only place them side by side from sm up, where there's
+              enough room. */}
+          <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
             <div className="min-w-0 flex-1">
               <label className="sr-only" htmlFor="audit-filter-since">
                 {t("admin.audit.filter_since_label")}
