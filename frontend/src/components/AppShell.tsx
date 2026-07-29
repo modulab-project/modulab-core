@@ -599,7 +599,7 @@ export function AppShell({
       <SlidePanel open={openPanel === "profile"} onClose={() => setOpenPanel(null)} title={t("profile.title")}>
         <ProfilePanelContent
           session={session}
-          isAdmin={isAdmin}
+          isSuperAdmin={isSuperAdmin}
           theme={theme}
           setTheme={setTheme}
           onLogout={handleLogout}
@@ -915,9 +915,68 @@ function IOSInstallInstructions({ onClose }: { onClose: () => void }) {
   );
 }
 
+// One collapsible group in the profile panel (Meine Module/Einstellungen/
+// System) - only one group is open at a time (accordion behavior), height
+// animated via a CSS grid-template-rows 0fr/1fr trick rather than a fixed
+// max-height or a ResizeObserver, so it works for any content length
+// without measuring anything.
+function AccordionGroup({
+  icon,
+  label,
+  caption,
+  open,
+  onToggle,
+  children,
+}: {
+  icon: string;
+  label: string;
+  caption?: string;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between rounded-lg px-2.5 py-2.5 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
+      >
+        <span className="flex flex-col items-start">
+          <span className="flex items-center gap-2.5">
+            <i className={`ti ${icon} text-[15px] text-gray-500`} />
+            {label}
+          </span>
+          {caption && (
+            <span className="ml-[26px] text-[10px] text-gray-400 dark:text-gray-500">{caption}</span>
+          )}
+        </span>
+        <i
+          className={`ti ti-chevron-down text-[15px] text-gray-400 transition-transform duration-200 ${
+            open ? "rotate-180" : ""
+          }`}
+        />
+      </button>
+      <div
+        className="grid transition-[grid-template-rows] duration-200"
+        style={{ gridTemplateRows: open ? "1fr" : "0fr" }}
+      >
+        <div className="overflow-hidden">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+// Shared class for every sub-item inside an AccordionGroup - indented past
+// the group's own icon so it reads as nested, same treatment whether it's
+// a real Link (navigates + closes the panel) or a button (drill-in trigger,
+// stays inside the panel).
+const SUB_ITEM_CLASS =
+  "flex w-full items-center justify-between gap-2.5 rounded-lg py-2.5 pl-[34px] pr-2.5 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-900";
+
 function ProfilePanelContent({
   session,
-  isAdmin,
+  isSuperAdmin,
   theme,
   setTheme,
   onLogout,
@@ -927,7 +986,7 @@ function ProfilePanelContent({
   onShowIOSInstallHelp,
 }: {
   session: Session;
-  isAdmin: boolean;
+  isSuperAdmin: boolean;
   theme: Theme;
   setTheme: (t: Theme) => void;
   onLogout: () => void;
@@ -939,57 +998,44 @@ function ProfilePanelContent({
   const { t, i18n: i18nInstance } = useTranslation();
   const displayName = session.name.trim() || session.email;
 
+  // Which of the three groups (if any) is open - only one at a time.
+  const [openGroup, setOpenGroup] = useState<"modules" | "settings" | "system" | null>(null);
+  // Within the open System group, whether the "Module" row has been drilled
+  // into (showing Modul-Store/Installierte Module instead of the flat list)
+  // - mirrors the Instagram dropdown reference's back-arrow submenu instead
+  // of yet another nested accordion.
+  const [systemDrill, setSystemDrill] = useState(false);
+
+  function toggleGroup(group: "modules" | "settings" | "system") {
+    setOpenGroup((prev) => (prev === group ? null : group));
+    if (group !== "system") setSystemDrill(false);
+  }
+
   return (
     <div>
-      <div className="flex items-center gap-3 px-2.5 py-2">
-        <Avatar session={session} className="h-9 w-9 text-xs" />
-        <div>
-          <p className="text-sm font-semibold">{displayName}</p>
-        </div>
-      </div>
-      <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />
+      {/* Name/avatar is itself the link to /profile (identity + sessions +
+          account deletion) - no separate "view profile" row underneath. */}
       <Link
         to="/profile"
         onClick={onClose}
-        className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
+        className="flex items-center gap-3 rounded-lg px-2.5 py-2 hover:bg-gray-50 dark:hover:bg-gray-900"
       >
-        <i className="ti ti-user text-[15px] text-gray-500" /> {t("shell.view_profile")}
+        <Avatar session={session} className="h-9 w-9 text-xs" />
+        <p className="flex-1 text-sm font-semibold">{displayName}</p>
+        <i className="ti ti-chevron-right text-[14px] text-gray-300 dark:text-gray-600" />
       </Link>
-      <Link
-        to="/user/feeds"
-        onClick={onClose}
-        className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
-      >
-        <i className="ti ti-rss text-[15px] text-gray-500" /> {t("shell.my_feeds")}
-      </Link>
-      <Link
-        to="/user/search-prefs"
-        onClick={onClose}
-        className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
-      >
-        <i className="ti ti-search text-[15px] text-gray-500" /> {t("shell.search_settings")}
-      </Link>
-      <Link
-        to="/user/ai-keys"
-        onClick={onClose}
-        className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
-      >
-        <i className="ti ti-sparkles text-[15px] text-gray-500" /> {t("shell.ai_providers")}
-      </Link>
+
+      <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />
+
       {activeModules.length > 0 && (
-        <>
-          <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />
-          <p className="px-2.5 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-            {t("shell.modules_section")}
-          </p>
+        <AccordionGroup
+          icon="ti-apps"
+          label={t("shell.modules_section")}
+          open={openGroup === "modules"}
+          onToggle={() => toggleGroup("modules")}
+        >
           {activeModules.map((mod) => (
-            <Link
-              key={mod.name}
-              to={`/modules/${mod.name}`}
-              onClick={onClose}
-              className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
-            >
-              <i className="ti ti-puzzle text-[15px] text-gray-500" />
+            <Link key={mod.name} to={`/modules/${mod.name}`} onClick={onClose} className={SUB_ITEM_CLASS}>
               {(() => {
                 const mf = mod.manifest as { display_name?: Record<string, string>; name?: string } | null;
                 const lng = i18nInstance.language?.slice(0, 2) ?? "en";
@@ -997,63 +1043,106 @@ function ProfilePanelContent({
               })()}
             </Link>
           ))}
-        </>
+        </AccordionGroup>
       )}
-      {isAdmin && (
-        <>
-          <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />
-          <p className="px-2.5 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-            {t("shell.admin_section")}
-          </p>
-          <Link
-            to="/admin/users"
-            onClick={onClose}
-            className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
-          >
-            <i className="ti ti-users text-[15px] text-gray-500" /> {t("shell.users_link")}
-          </Link>
-          <Link
-            to="/admin/feeds"
-            onClick={onClose}
-            className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
-          >
-            <i className="ti ti-rss text-[15px] text-gray-500" /> {t("shell.news_feeds_link")}
-          </Link>
-          <Link
-            to="/admin/quick-links"
-            onClick={onClose}
-            className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
-          >
-            <i className="ti ti-layout-grid text-[15px] text-gray-500" /> {t("shell.quick_links_link")}
-          </Link>
-          <Link
-            to="/admin/modules"
-            onClick={onClose}
-            className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
-          >
-            <i className="ti ti-puzzle text-[15px] text-gray-500" /> {t("shell.modules_link")}
-          </Link>
-          {isSuperAdminRole(session.role) && (
-            <>
-              <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />
-              <Link
-                to="/admin/audit"
-                onClick={onClose}
-                className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
-              >
-                <i className="ti ti-shield-check text-[15px] text-gray-500" /> {t("shell.audit_link")}
-              </Link>
-              <Link
-                to="/admin/system"
-                onClick={onClose}
-                className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
-              >
-                <i className="ti ti-settings text-[15px] text-gray-500" /> {t("shell.system_link")}
-              </Link>
-            </>
-          )}
-        </>
+
+      <AccordionGroup
+        icon="ti-adjustments-horizontal"
+        label={t("shell.settings_section")}
+        open={openGroup === "settings"}
+        onToggle={() => toggleGroup("settings")}
+      >
+        <Link to="/user/feeds" onClick={onClose} className={SUB_ITEM_CLASS}>
+          {t("shell.my_feeds")}
+        </Link>
+        <Link to="/user/search-prefs" onClick={onClose} className={SUB_ITEM_CLASS}>
+          {t("shell.search_settings")}
+        </Link>
+        <Link to="/user/ai-keys" onClick={onClose} className={SUB_ITEM_CLASS}>
+          {t("shell.ai_providers")}
+        </Link>
+      </AccordionGroup>
+
+      {/* Superadmin-only - org-admin has no reachable capability left here
+          (users/feeds/quick-links/modules all moved up), so there is no
+          separate "Admin" group anymore, just this one. */}
+      {isSuperAdmin && (
+        <AccordionGroup
+          icon="ti-server-cog"
+          label={t("shell.system_section")}
+          caption={t("shell.system_superadmin_only")}
+          open={openGroup === "system"}
+          onToggle={() => toggleGroup("system")}
+        >
+          {/* Horizontal drill-in: two panes side by side inside a clipped
+              viewport, slid left/right with translateX instead of navigating
+              away - only the "Module" row leads here, everything else in
+              System is a flat, direct link. */}
+          <div className="overflow-hidden">
+            <div
+              className="flex transition-transform duration-200"
+              style={{ width: "200%", transform: systemDrill ? "translateX(-50%)" : "translateX(0)" }}
+            >
+              <div className="flex w-1/2 flex-none flex-col">
+                <Link to="/admin/users" onClick={onClose} className={SUB_ITEM_CLASS}>
+                  {t("shell.system_users")}
+                </Link>
+                <Link to="/admin/system/oidc" onClick={onClose} className={SUB_ITEM_CLASS}>
+                  {t("admin.system.oidc_title")}
+                </Link>
+                <Link to="/admin/system/smtp" onClick={onClose} className={SUB_ITEM_CLASS}>
+                  {t("shell.smtp_link")}
+                </Link>
+                <Link to="/admin/system/search" onClick={onClose} className={SUB_ITEM_CLASS}>
+                  {t("admin.search.title")}
+                </Link>
+                <Link to="/admin/system/ai" onClick={onClose} className={SUB_ITEM_CLASS}>
+                  {t("admin.ai.title")}
+                </Link>
+                <Link to="/admin/system/limits" onClick={onClose} className={SUB_ITEM_CLASS}>
+                  {t("admin.system_limits.title")}
+                </Link>
+                <Link to="/admin/feeds" onClick={onClose} className={SUB_ITEM_CLASS}>
+                  {t("shell.feed_sources_link")}
+                </Link>
+                <Link to="/admin/quick-links" onClick={onClose} className={SUB_ITEM_CLASS}>
+                  {t("shell.quick_links_link")}
+                </Link>
+                <button type="button" onClick={() => setSystemDrill(true)} className={SUB_ITEM_CLASS}>
+                  <span>{t("shell.module_management_link")}</span>
+                  <i className="ti ti-chevron-right text-[13px] text-gray-400" />
+                </button>
+                <Link to="/admin/system/info" onClick={onClose} className={SUB_ITEM_CLASS}>
+                  {t("admin.system_info.title")}
+                </Link>
+                <Link to="/admin/security/info" onClick={onClose} className={SUB_ITEM_CLASS}>
+                  {t("admin.security_info.title")}
+                </Link>
+                <Link to="/admin/audit" onClick={onClose} className={SUB_ITEM_CLASS}>
+                  {t("shell.audit_link")}
+                </Link>
+              </div>
+              <div className="flex w-1/2 flex-none flex-col">
+                <button
+                  type="button"
+                  onClick={() => setSystemDrill(false)}
+                  className={`${SUB_ITEM_CLASS} justify-start gap-2 pl-2.5 font-medium text-gray-800 dark:text-gray-200`}
+                >
+                  <i className="ti ti-chevron-left text-[14px]" />
+                  {t("shell.module_management_link")}
+                </button>
+                <Link to="/admin/modules/store" onClick={onClose} className={SUB_ITEM_CLASS}>
+                  {t("admin.modules.store_title")}
+                </Link>
+                <Link to="/admin/modules/installed" onClick={onClose} className={SUB_ITEM_CLASS}>
+                  {t("admin.modules.installed_title")}
+                </Link>
+              </div>
+            </div>
+          </div>
+        </AccordionGroup>
       )}
+
       {installPrompt.visible && (
         <>
           <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />
@@ -1127,7 +1216,7 @@ function ProfilePanelContent({
             // Best-effort: a failed save leaves the in-browser change intact.
             updateUserPrefs({ ui_language: lang }).catch(() => {});
           }}
-          className="rounded-md border border-gray-300 bg-white px-2 py-0.5 text-xs font-medium text-gray-700 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
+          className="rounded-md border border-gray-300 bg-white px-2 py-0.5 text-base font-medium text-gray-700 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
         >
           {/* Native endonyms intentionally hardcoded, not run through t() -
               a language switcher must show each option in its own language

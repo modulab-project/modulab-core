@@ -24,14 +24,12 @@ const AdminSystemSearchPage = lazy(() => import("./pages/AdminSystemSearchPage")
 const AdminAIPage = lazy(() => import("./pages/AdminAIPage"));
 const AdminSystemLimitsPage = lazy(() => import("./pages/AdminSystemLimitsPage"));
 const AdminQuickLinksPage = lazy(() => import("./pages/AdminQuickLinksPage"));
-const AdminSystemPage = lazy(() => import("./pages/AdminSystemPage"));
 const AdminSystemInfoPage = lazy(() => import("./pages/AdminSystemInfoPage"));
 const AdminSecurityInfoPage = lazy(() => import("./pages/AdminSecurityInfoPage"));
 const AdminAuditPage = lazy(() => import("./pages/AdminAuditPage"));
 const UserAIKeysPage = lazy(() => import("./pages/UserAIKeysPage"));
 const StorePage = lazy(() => import("./pages/StorePage"));
 const ModulesPage = lazy(() => import("./pages/ModulesPage"));
-const AdminModulesPage = lazy(() => import("./pages/AdminModulesPage"));
 const ModulePage = lazy(() => import("./pages/ModulePage"));
 
 // Two different page shapes share this router:
@@ -63,7 +61,6 @@ export default function App() {
         <Route path="/user/ai-keys" element={<UserAIKeysPage />} />
         {/* Installed module pages — one route per module, using the module name */}
         <Route path="/modules/:moduleName" element={<ModulePage />} />
-        <Route path="/admin/modules" element={<AdminModulesPage />} />
         <Route path="/admin/modules/store" element={<StorePage />} />
         <Route path="/admin/modules/installed" element={<ModulesPage />} />
         <Route path="/admin/users" element={<AdminUsersPage />} />
@@ -75,7 +72,6 @@ export default function App() {
         <Route path="/admin/system/ai" element={<AdminAIPage />} />
         <Route path="/admin/system/limits" element={<AdminSystemLimitsPage />} />
         <Route path="/admin/quick-links" element={<AdminQuickLinksPage />} />
-        <Route path="/admin/system" element={<AdminSystemPage />} />
         <Route path="/admin/system/info" element={<AdminSystemInfoPage />} />
         <Route path="/admin/security/info" element={<AdminSecurityInfoPage />} />
         <Route path="/admin/system/oidc" element={<AdminSystemOIDCPage />} />
