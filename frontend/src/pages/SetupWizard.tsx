@@ -17,7 +17,7 @@ import { isSuperAdminRole } from "../lib/roles";
 import { AuthButton, AuthField, AuthSecondaryButton, AuthShell } from "../components/AuthShell";
 
 // Persisted in sessionStorage, not React state alone, because the
-// super-admin login step sends the whole tab away to the IdP and back
+// admin login step sends the whole tab away to the IdP and back
 // (LoginHandler's redirect) - plain component state would not survive that
 // round-trip, but sessionStorage does as long as it's the same tab.
 const TOKEN_KEY = "modulab_bootstrap_token";
@@ -40,13 +40,13 @@ function saveStep(step: StepNumber) {
 //   1. Bootstrap token
 //   2. OIDC credentials
 //   3. Group prefix
-//   4. Super-admin login
+//   4. Admin login
 //   5. SMTP (optional, skippable, with test-send)
 //   6. Complete
-// SMTP is deliberately placed *after* step 4's super-admin login: those
+// SMTP is deliberately placed *after* step 4's admin login: those
 // earlier steps are gated by the bootstrap token (bootstrap.Manager's
 // middleware, no session exists yet), but SMTP configuration lives behind
-// auth.RequireSuperAdminMiddleware - reusing that same endpoint needs an
+// auth.RequireAdminMiddleware - reusing that same endpoint needs an
 // actual session token, which only exists once step 4's OIDC login has
 // completed. Skippable and fully editable afterwards from /admin/system/smtp.
 //
@@ -65,7 +65,7 @@ export default function SetupWizard() {
   // see lib/useLoginRedirect.ts. If another tab already completed this
   // step's OIDC login (e.g. the wizard was accidentally opened twice),
   // reuse its resolved role instead of running a second round-trip: step 5
-  // on success, or the "not a super-admin" message step 4 already shows
+  // on success, or the "not an admin" message step 4 already shows
   // for the ordinary (single-tab) failure case.
   const { waiting: loginWaiting, startLogin } = useLoginRedirect((session) => {
     setLoginRole(session.role);
@@ -91,7 +91,7 @@ export default function SetupWizard() {
   }, []);
 
   // Runs once on mount - if we just got redirected back from step 4's
-  // super-admin login OIDC round trip (via AuthComplete), pick up the
+  // admin login OIDC round trip (via AuthComplete), pick up the
   // result here. AuthComplete only ever sends the browser to /setup while
   // the wizard is still incomplete, so unlike before /login existed, this
   // no longer needs to handle an ordinary post-setup login landing here.
@@ -165,7 +165,7 @@ export default function SetupWizard() {
         />
       )}
       {step === 4 && (
-        <StepSuperAdminLogin
+        <StepAdminLogin
           role={loginRole}
           error={loginError ? t(loginError) : null}
           waiting={loginWaiting}
@@ -374,9 +374,9 @@ function StepGroupPrefix({
   );
 }
 
-// --- Step 4: Super-Admin login ----------------------------------------------
+// --- Step 4: Admin login ----------------------------------------------------
 
-function StepSuperAdminLogin({
+function StepAdminLogin({
   role,
   error,
   waiting,
@@ -392,16 +392,16 @@ function StepSuperAdminLogin({
   onRetry: () => void;
 }) {
   const { t } = useTranslation();
-  const notSuperAdmin = role !== null && !isSuperAdminRole(role);
+  const notAdmin = role !== null && !isSuperAdminRole(role);
   return (
     <div className="space-y-4">
       <p className="text-sm text-gray-600 dark:text-gray-400">
         {t("setup.step4.hint")}
       </p>
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
-      {notSuperAdmin && (
+      {notAdmin && (
         <p className="text-sm text-red-600 dark:text-red-400">
-          {t("setup.step4.not_super_admin")}
+          {t("setup.step4.not_admin")}
         </p>
       )}
       <AuthButton onClick={onRetry} type="button" disabled={waiting} className="w-full">
@@ -414,7 +414,7 @@ function StepSuperAdminLogin({
 // --- Step 5: SMTP (optional, skippable, with test-send) --------------------
 
 // Unlike every earlier step, this one authenticates with the httpOnly
-// session cookie step 4's super-admin login set (see
+// session cookie step 4's admin login set (see
 // backend/internal/auth/handlers.go's setSessionCookie), not the bootstrap
 // token - see the top-of-file comment for why. It calls the same
 // configureSmtp() the standalone /admin/system/smtp page uses, so anything
@@ -623,7 +623,7 @@ function StepComplete({ bootstrapToken }: { bootstrapToken: string }) {
   );
 }
 
-// The super-admin login in step 4 already set the session cookie (see
+// The admin login in step 4 already set the session cookie (see
 // backend/internal/auth/handlers.go's setSessionCookie, applied on
 // CallbackHandler's redirect), so there is no need to send them through
 // /login again - straight to / works immediately.

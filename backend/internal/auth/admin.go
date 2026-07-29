@@ -276,8 +276,8 @@ func requireAdmin(d Deps, w http.ResponseWriter, r *http.Request) (Session, bool
 	// Pending sessions never reach here in practice (the frontend bounces
 	// them to /pending before they could call this), but checked
 	// explicitly anyway rather than relying on that: RoleUser is also not
-	// enough - managing users is org-admin/super-admin territory only.
-	if sess.Role != RoleOrgAdmin && sess.Role != RoleSuperAdmin {
+	// enough - managing users is admin territory only.
+	if sess.Role != RoleAdmin {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return Session{}, false
 	}
@@ -291,24 +291,21 @@ func requireAdmin(d Deps, w http.ResponseWriter, r *http.Request) (Session, bool
 	return sess, true
 }
 
-// RequireSuperAdminMiddleware behaves like requireAdmin (above) but as
-// reusable net/http middleware for routes that live outside this file's
-// own handlers and need the stricter super-admin-only gate - today, only
-// SMTP configuration (main.go wires setup.SMTPStatusHandler/
-// SMTPConfigureHandler through this), matching the "Vollzugriff auf
-// Systemebene: Infrastruktur, OIDC-Konfiguration" framing spec section
-// 3.3's role table gives Super-Admin: SMTP credentials are exactly that
-// kind of system-level infrastructure config, not something an org-admin
-// (who only manages users day to day) needs to touch.
-func RequireSuperAdminMiddleware(d Deps) func(http.Handler) http.Handler {
+// RequireAdminMiddleware behaves like requireAdmin (above) but as reusable
+// net/http middleware for routes that live outside this file's own
+// handlers - today, SMTP/OIDC configuration, system info, audit log, and
+// other system-level settings (main.go wires these through it). Named
+// RequireAdminMiddleware before 2026-07-29's role-model change, back
+// when a separate org-admin tier existed and this gate was reserved for
+// the stricter super-admin-only role; now that org-admin is gone and
+// super-admin was renamed to plain "admin", this is functionally the same
+// check as requireAdmin, kept as its own middleware only because it also
+// stores the session in context for downstream handlers.
+func RequireAdminMiddleware(d Deps) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			sess, ok := requireAdmin(d, w, r)
 			if !ok {
-				return
-			}
-			if sess.Role != RoleSuperAdmin {
-				http.Error(w, "forbidden", http.StatusForbidden)
 				return
 			}
 			// Store the validated session in the context so downstream
@@ -319,17 +316,17 @@ func RequireSuperAdminMiddleware(d Deps) func(http.Handler) http.Handler {
 	}
 }
 
-// RequireSuperAdminReauthMiddleware layers the same step-up gate as
+// RequireAdminReauthMiddleware layers the same step-up gate as
 // LockUserHandler/DeleteUserHandler/ApproveUserHandler (requireRecentLogin)
-// on top of RequireSuperAdminMiddleware, for the handful of super-admin
-// actions consequential enough to warrant it even though they live outside
-// this package (adminapi.OIDCUpdateHandler/OIDCDeleteHandler,
+// on top of RequireAdminMiddleware, for the handful of admin actions
+// consequential enough to warrant it even though they live outside this
+// package (adminapi.OIDCUpdateHandler/OIDCDeleteHandler,
 // setup.SMTPConfigureHandler/the SMTP delete handler in cmd/core, and -
 // since 2026-07-22 - ending another user's active session, main.go's
-// revokeSessionHandler) - see main.go's superAdminReauthOnly for exactly
-// which routes use this instead of the plain superAdminOnly.
+// revokeSessionHandler) - see main.go's adminReauthOnly for exactly
+// which routes use this instead of the plain adminOnly.
 //
-// Deliberately NOT applied to every super-admin route: read-only endpoints
+// Deliberately NOT applied to every admin route: read-only endpoints
 // (system info, audit log, status/test checks) have nothing to step up
 // for, and rate limits/AI/search provider keys are excluded on purpose -
 // reversible, low-stakes settings, unlike the credential/trust-root actions
@@ -345,12 +342,12 @@ func RequireSuperAdminMiddleware(d Deps) func(http.Handler) http.Handler {
 // another user's session was added later: it has the same immediate,
 // hard-to-undo-for-them effect as locking their account, which already got
 // this treatment - see main.go's route registration comment.
-func RequireSuperAdminReauthMiddleware(d Deps) func(http.Handler) http.Handler {
+func RequireAdminReauthMiddleware(d Deps) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		return RequireSuperAdminMiddleware(d)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		return RequireAdminMiddleware(d)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			sess, ok := SessionFromContext(r.Context())
 			if !ok {
-				// Unreachable in practice - RequireSuperAdminMiddleware
+				// Unreachable in practice - RequireAdminMiddleware
 				// always calls ContextWithSession before invoking next.
 				// Handled explicitly anyway rather than assuming it, same
 				// principle as requireAdmin's own belt-and-suspenders
@@ -370,41 +367,41 @@ func RequireSuperAdminReauthMiddleware(d Deps) func(http.Handler) http.Handler {
 	}
 }
 
-// guardAgainstSelfOrLastSuperAdmin blocks an admin action (lock or delete)
+// guardAgainstSelfOrLastAdmin blocks an admin action (lock or delete)
 // that would either act on the caller's own account, or strip the
-// instance's last remaining super-admin of their elevated status, leaving
+// instance's last remaining admin of their elevated status, leaving
 // no one able to manage it. blocked = true means the caller must not
 // proceed; reason is a user-facing explanation for that case. A non-nil
 // err means the safety check itself failed (a real DB error) and the
 // caller should treat it as 500, not as a guard violation.
-func guardAgainstSelfOrLastSuperAdmin(ctx context.Context, d Deps, actingSubject, targetSubject string) (blocked bool, reason string, err error) {
+func guardAgainstSelfOrLastAdmin(ctx context.Context, d Deps, actingSubject, targetSubject string) (blocked bool, reason string, err error) {
 	if targetSubject == actingSubject {
 		return true, "cannot perform this action on your own account", nil
 	}
-	return guardAgainstLastSuperAdmin(ctx, d, targetSubject)
+	return guardAgainstLastAdmin(ctx, d, targetSubject)
 }
 
-// guardAgainstLastSuperAdmin is guardAgainstSelfOrLastSuperAdmin's
-// last-remaining-super-admin check on its own, without the self-action
+// guardAgainstLastAdmin is guardAgainstSelfOrLastAdmin's
+// last-remaining-admin check on its own, without the self-action
 // block above it - shared with handlers.go's DeleteSelfHandler, which acts
 // on the caller's own account *by definition* (that is the entire point of
 // a self-delete endpoint) but must still not be allowed to delete the
-// instance's only super-admin out from under it, leaving no one able to
+// instance's only admin out from under it, leaving no one able to
 // manage it afterward.
-func guardAgainstLastSuperAdmin(ctx context.Context, d Deps, targetSubject string) (blocked bool, reason string, err error) {
+func guardAgainstLastAdmin(ctx context.Context, d Deps, targetSubject string) (blocked bool, reason string, err error) {
 	role, exists, err := d.Pool.UserRole(ctx, targetSubject)
 	if err != nil {
 		return false, "", err
 	}
-	if !exists || role != RoleSuperAdmin {
+	if !exists || role != RoleAdmin {
 		return false, "", nil
 	}
-	count, err := d.Pool.SuperAdminCount(ctx)
+	count, err := d.Pool.AdminCount(ctx)
 	if err != nil {
 		return false, "", err
 	}
 	if count <= 1 {
-		return true, "cannot lock or delete the last remaining super-admin", nil
+		return true, "cannot lock or delete the last remaining admin", nil
 	}
 	return false, "", nil
 }
@@ -475,7 +472,7 @@ func requireActiveSessionWithToken(d Deps, w http.ResponseWriter, r *http.Reques
 	return sess, true
 }
 
-// RequireAdminSession is RequireActiveSession plus an org-admin/super-admin
+// RequireAdminSession is RequireActiveSession plus an admin
 // role check - use for any endpoint that manages users, configuration, or
 // other resources that regular users must not touch. This is the choke point
 // every /v1/admin/... handler across every package (store, quicklinks,
@@ -492,7 +489,7 @@ func RequireAdminSession(d Deps, w http.ResponseWriter, r *http.Request) (Sessio
 	if !ok {
 		return Session{}, false
 	}
-	if sess.Role != RoleOrgAdmin && sess.Role != RoleSuperAdmin {
+	if sess.Role != RoleAdmin {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return Session{}, false
 	}
@@ -514,7 +511,7 @@ type UserResponse struct {
 }
 
 // UsersHandler is GET /v1/admin/users: every user row (db.Pool.ListUsers),
-// for an org-admin/super-admin to review. Deliberately not filtered down
+// for an admin to review. Deliberately not filtered down
 // to just pending users (as an earlier version of this endpoint was) - one
 // list covering everyone means there is exactly one place an admin needs
 // to look to approve, lock, unlock, or delete anyone.
@@ -630,7 +627,7 @@ func ApproveUserHandler(d Deps) http.HandlerFunc {
 // LockUserHandler is POST /v1/admin/users/{id}/lock: revokes an
 // already-approved user's access without forgetting who they are (unlike
 // DeleteUserHandler below). Guarded against locking your own account or the
-// last remaining super-admin (guardAgainstSelfOrLastSuperAdmin). Unlike
+// last remaining admin (guardAgainstSelfOrLastAdmin). Unlike
 // approval, this takes effect immediately, not just on the target's next
 // login attempt: RevokeUserSessions (session.go) kills every session token
 // already issued to them, so a tab they currently have open stops working
@@ -650,7 +647,7 @@ func LockUserHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "missing user id", http.StatusBadRequest)
 			return
 		}
-		blocked, reason, err := guardAgainstSelfOrLastSuperAdmin(r.Context(), d, sess.UserID, subject)
+		blocked, reason, err := guardAgainstSelfOrLastAdmin(r.Context(), d, sess.UserID, subject)
 		if err != nil {
 			httperr.Internal(w, err)
 			return
@@ -750,7 +747,7 @@ func UnlockUserHandler(d Deps) http.HandlerFunc {
 // DeleteUserHandler is DELETE /v1/admin/users/{id}: forgets the user row
 // entirely (db.Pool.DeleteUser) - see that method's doc comment for why
 // this does not blocklist the OIDC subject itself. Same self/last-
-// super-admin guard as LockUserHandler, and same immediate-effect session
+// admin guard as LockUserHandler, and same immediate-effect session
 // revocation: deleting someone should not leave their already-open tab
 // working until SessionTTL runs out either.
 func DeleteUserHandler(d Deps) http.HandlerFunc {
@@ -767,7 +764,7 @@ func DeleteUserHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "missing user id", http.StatusBadRequest)
 			return
 		}
-		blocked, reason, err := guardAgainstSelfOrLastSuperAdmin(r.Context(), d, sess.UserID, subject)
+		blocked, reason, err := guardAgainstSelfOrLastAdmin(r.Context(), d, sess.UserID, subject)
 		if err != nil {
 			httperr.Internal(w, err)
 			return

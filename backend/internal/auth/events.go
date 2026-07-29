@@ -65,10 +65,10 @@ func EventsHandler(d Deps) http.HandlerFunc {
 		// approval the instant it happens rather than waiting up to
 		// useAuthenticatedSession/Pending.tsx's POLL_INTERVAL_MS. It is
 		// still safe: the channel selection below gives a pending session
-		// only its own UserChannel, never AdminChannel (that requires
-		// org-admin/super-admin, which a pending session's role never is),
-		// so this grants no visibility into anything pending wasn't already
-		// going to learn about by signing back in.
+		// only its own UserChannel, never AdminChannel (that requires the
+		// admin role, which a pending session's role never is), so this
+		// grants no visibility into anything pending wasn't already going
+		// to learn about by signing back in.
 		flusher, ok := w.(http.Flusher)
 		if !ok {
 			// Should not happen with net/http's own ResponseWriter, but
@@ -79,20 +79,17 @@ func EventsHandler(d Deps) http.HandlerFunc {
 		}
 
 		// Every session subscribes to its own channel (user.approved and
-		// any future per-user event); org-admin/super-admin sessions
-		// additionally get the shared admin channel (new pending user,
-		// eventually module health/install events too). super-admin sessions
-		// further get SuperAdminChannel (core.update_available) - narrower
-		// than AdminChannel on purpose, since Core/system settings are
-		// already a super-admin-exclusive concern elsewhere in this app; an
-		// org-admin session never subscribes to it at all, see
-		// notify.SuperAdminChannel's doc comment.
+		// any future per-user event); admin sessions additionally get the
+		// shared admin channel (new pending user, core.update_available,
+		// eventually module health/install events too). Before
+		// 2026-07-29's role-model change there was a narrower
+		// SuperAdminChannel reserved for core.update_available, excluding
+		// org-admin sessions - removed along with the org-admin tier
+		// itself, since there is now only one admin role and no one left
+		// to exclude.
 		channels := []string{notify.UserChannel(sess.UserID)}
-		if sess.Role == RoleOrgAdmin || sess.Role == RoleSuperAdmin {
+		if sess.Role == RoleAdmin {
 			channels = append(channels, notify.AdminChannel())
-		}
-		if sess.Role == RoleSuperAdmin {
-			channels = append(channels, notify.SuperAdminChannel())
 		}
 		sub := d.Valkey.Subscribe(ctx, channels...)
 		defer func() {

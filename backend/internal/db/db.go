@@ -113,7 +113,7 @@ func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
 			id TEXT PRIMARY KEY,
 			email TEXT NOT NULL,
 			name TEXT NOT NULL DEFAULT '',
-			role TEXT NOT NULL CHECK (role IN ('super-admin', 'org-admin', 'user', 'pending')),
+			role TEXT NOT NULL CHECK (role IN ('admin', 'user', 'pending')),
 			approved BOOLEAN NOT NULL DEFAULT false,
 			locked BOOLEAN NOT NULL DEFAULT false,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -167,6 +167,44 @@ func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS theme TEXT NOT NULL DEFAULT ''
 	`); err != nil {
 		return fmt.Errorf("db: ensure users.theme: %w", err)
+	}
+
+	// Role model collapsed from four tiers to three on 2026-07-29: the
+	// org-admin tier was removed entirely, and super-admin was renamed to
+	// plain "admin" (single admin tier going forward). Existing rows are
+	// backfilled *before* the CHECK constraint is tightened below, since
+	// PostgreSQL validates all existing rows against a newly-added
+	// constraint - any row still carrying the old values at migration time
+	// (e.g. an account not yet re-synced from the IdP's group change) would
+	// otherwise make the ALTER TABLE itself fail. org-admin accounts
+	// downgrade to plain 'user' (the operator's own choice - see the
+	// migration plan discussion: existing org-admins are being moved to
+	// the IdP's _user group by hand, not promoted to full admin).
+	if _, err := p.Exec(ctx, `
+		UPDATE users SET role = 'user' WHERE role = 'org-admin'
+	`); err != nil {
+		return fmt.Errorf("db: migrate org-admin roles to user: %w", err)
+	}
+	if _, err := p.Exec(ctx, `
+		UPDATE users SET role = 'admin' WHERE role = 'super-admin'
+	`); err != nil {
+		return fmt.Errorf("db: migrate super-admin roles to admin: %w", err)
+	}
+	// Idempotent drop-then-recreate, same pattern as
+	// installed_modules_source_check/module_registry_source_check below:
+	// PostgreSQL has no ADD CONSTRAINT IF NOT EXISTS, so a constraint whose
+	// definition changed has to be dropped and recreated on every boot
+	// rather than only added once.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check
+	`); err != nil {
+		return fmt.Errorf("db: drop users_role_check: %w", err)
+	}
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE users ADD CONSTRAINT users_role_check
+		    CHECK (role IN ('admin', 'user', 'pending'))
+	`); err != nil {
+		return fmt.Errorf("db: ensure users_role_check: %w", err)
 	}
 
 	if err := p.EnsureNewsSchema(ctx); err != nil {
@@ -429,9 +467,9 @@ func (p *Pool) UserLocked(ctx context.Context, subject string) (bool, error) {
 }
 
 // UserRole returns subject's current role and whether a row exists at all -
-// used by the admin lock/delete handlers to decide whether the target is a
-// super-admin before allowing an action that could otherwise strand the
-// instance with zero super-admins.
+// used by the admin lock/delete handlers to decide whether the target is an
+// admin before allowing an action that could otherwise strand the
+// instance with zero admins.
 func (p *Pool) UserRole(ctx context.Context, subject string) (string, bool, error) {
 	var role string
 	err := p.QueryRow(ctx, `SELECT role FROM users WHERE id = $1`, subject).Scan(&role)
@@ -444,32 +482,35 @@ func (p *Pool) UserRole(ctx context.Context, subject string) (string, bool, erro
 	return role, true, nil
 }
 
-// HasSuperAdmin reports whether at least one user with role 'super-admin'
+// HasAdmin reports whether at least one user with role 'admin'
 // exists. Used by setup.CompleteHandler to verify the wizard's step 6
-// (spec section 6.5: "Super-Admin binden") actually succeeded before
+// (spec section 6.5: "Admin binden") actually succeeded before
 // allowing step 7 to invalidate the bootstrap token - a user merely
 // attempting login is not enough, since spec section 3.3's Dynamic Prefix
-// Hard Gate can still leave them as RolePending.
-func (p *Pool) HasSuperAdmin(ctx context.Context) (bool, error) {
+// Hard Gate can still leave them as RolePending. Named HasSuperAdmin before
+// 2026-07-29's role-model change (org-admin tier removed, super-admin
+// renamed to plain "admin").
+func (p *Pool) HasAdmin(ctx context.Context) (bool, error) {
 	var exists bool
-	err := p.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE role = 'super-admin')`).Scan(&exists)
+	err := p.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE role = 'admin')`).Scan(&exists)
 	if err != nil {
-		return false, fmt.Errorf("db: check super-admin existence: %w", err)
+		return false, fmt.Errorf("db: check admin existence: %w", err)
 	}
 	return exists, nil
 }
 
-// SuperAdminCount returns how many user rows currently have role =
-// 'super-admin', regardless of approved/locked state. Used by the admin
-// lock/delete handlers' last-super-admin guard - unlike HasSuperAdmin
+// AdminCount returns how many user rows currently have role =
+// 'admin', regardless of approved/locked state. Used by the admin
+// lock/delete handlers' last-admin guard - unlike HasAdmin
 // (a yes/no check used once during setup), this needs the actual count to
 // tell "locking/deleting this one is fine, there are others" apart from
-// "this is the only one left".
-func (p *Pool) SuperAdminCount(ctx context.Context) (int, error) {
+// "this is the only one left". Named SuperAdminCount before 2026-07-29's
+// role-model change.
+func (p *Pool) AdminCount(ctx context.Context) (int, error) {
 	var count int
-	err := p.QueryRow(ctx, `SELECT COUNT(*) FROM users WHERE role = 'super-admin'`).Scan(&count)
+	err := p.QueryRow(ctx, `SELECT COUNT(*) FROM users WHERE role = 'admin'`).Scan(&count)
 	if err != nil {
-		return 0, fmt.Errorf("db: count super-admins: %w", err)
+		return 0, fmt.Errorf("db: count admins: %w", err)
 	}
 	return count, nil
 }
@@ -526,17 +567,17 @@ func (p *Pool) ListUsers(ctx context.Context) ([]UserRow, error) {
 	return out, nil
 }
 
-// ListAdmins returns every user row with role org-admin or super-admin,
-// oldest first - used by CallbackHandler (handlers.go) to email every
-// current admin when a brand-new pending signup needs review, alongside
-// the "user.pending" SSE event (notify.AdminChannel) it already
-// publishes: SSE only reaches whoever happens to be connected at that
-// exact moment, mail still reaches everyone else afterwards.
+// ListAdmins returns every user row with role admin, oldest first - used
+// by CallbackHandler (handlers.go) to email every current admin when a
+// brand-new pending signup needs review, alongside the "user.pending" SSE
+// event (notify.AdminChannel) it already publishes: SSE only reaches
+// whoever happens to be connected at that exact moment, mail still reaches
+// everyone else afterwards.
 func (p *Pool) ListAdmins(ctx context.Context) ([]UserRow, error) {
 	rows, err := p.Query(ctx, `
 		SELECT id, email, name, role, approved, locked, created_at
 		FROM users
-		WHERE role IN ('org-admin', 'super-admin')
+		WHERE role = 'admin'
 		ORDER BY created_at ASC
 	`)
 	if err != nil {
@@ -2000,7 +2041,7 @@ type TileRef struct {
 // EnsureQuickLinksSchema creates the three quick-links tables if they do not
 // exist yet. Called from EnsureCoreSchema after EnsureAISchema.
 //
-// admin_quick_links: global shortcuts an org-admin/super-admin creates.
+// admin_quick_links: global shortcuts an admin creates.
 // user_quick_links: personal shortcuts each user creates for themselves.
 // user_tile_order: stores each user's custom tile ordering as a JSON array of
 // TileRef values. A missing row means "use default order" (admin tiles first

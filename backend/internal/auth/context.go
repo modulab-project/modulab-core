@@ -8,7 +8,7 @@ type sessionContextKey struct{}
 
 // ContextWithSession returns a child of ctx carrying sess, so downstream
 // handlers can call SessionFromContext without re-validating the token.
-// Called by RequireSuperAdminMiddleware so any handler it wraps can retrieve
+// Called by RequireAdminMiddleware so any handler it wraps can retrieve
 // the validated session (e.g. for audit logging) without needing to import
 // the auth package or re-parse the bearer token.
 func ContextWithSession(ctx context.Context, sess Session) context.Context {
@@ -17,7 +17,7 @@ func ContextWithSession(ctx context.Context, sess Session) context.Context {
 
 // SessionFromContext retrieves the Session stored by ContextWithSession.
 // ok is false when no session has been stored - any handler that has not
-// been wrapped by RequireSuperAdminMiddleware or an equivalent that calls
+// been wrapped by RequireAdminMiddleware or an equivalent that calls
 // ContextWithSession will see ok = false.
 func SessionFromContext(ctx context.Context) (Session, bool) {
 	sess, ok := ctx.Value(sessionContextKey{}).(Session)

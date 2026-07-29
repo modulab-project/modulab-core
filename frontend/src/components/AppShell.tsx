@@ -187,10 +187,10 @@ export function AppShell({
   const [moduleUpdateCount, setModuleUpdateCount] = useState<number | null>(null);
   // Whether a newer modulab-core release is known (GET /v1/admin/system/info's
   // cached coreupdate result, see coreupdate.CachedResult's doc comment) -
-  // super-admin only, unlike moduleUpdateCount above: Core/system settings
-  // are already a super-admin-exclusive concern elsewhere in this app (see
-  // AdminSystemPage's own super-admin gate), so this deliberately does not
-  // fetch or show for a plain org-admin session.
+  // admin only, unlike moduleUpdateCount above: Core/system settings are
+  // already an admin-exclusive concern elsewhere in this app (see
+  // AdminSystemPage's own admin gate), so this deliberately does not fetch
+  // or show for a plain user session.
   const [coreUpdateAvailable, setCoreUpdateAvailable] = useState(false);
   const [latestCoreVersion, setLatestCoreVersion] = useState<string | undefined>(undefined);
 
@@ -357,7 +357,7 @@ export function AppShell({
 
   // Spec section 3.5's real-time notifications: every authenticated page
   // using AppShell gets one SSE connection (lib/useEvents.ts), but only
-  // org-admin/super-admin sessions ever actually receive anything on
+  // admin sessions ever actually receive anything on
   // it today - "user.pending" and "module.updates_available" are both
   // published exclusively to notify.AdminChannel() (backend/internal/
   // auth/handlers.go and backend/internal/modules/status.go respectively),
@@ -403,9 +403,10 @@ export function AppShell({
     }
     if (event.type === "core.update_available" && isSuperAdmin) {
       // Published by coreupdate.CheckNow (backend/internal/coreupdate) to
-      // notify.SuperAdminChannel - narrower than the AdminChannel events
-      // above, see that channel's doc comment for why org-admin sessions
-      // never receive this one at all. Fires at most once per newer
+      // notify.AdminChannel, same as the other events above (before
+      // 2026-07-29's role-model change this used a narrower
+      // SuperAdminChannel, since org-admin sessions were excluded - both
+      // are gone now). Fires at most once per newer
       // version (dedup lives server-side), so this toast/feed entry is a
       // "look, something changed" nudge, not something that repeats on
       // every scheduled tick while the same version is still current.
@@ -1063,9 +1064,10 @@ function ProfilePanelContent({
         </Link>
       </AccordionGroup>
 
-      {/* Superadmin-only - org-admin has no reachable capability left here
-          (users/feeds/quick-links/modules all moved up), so there is no
-          separate "Admin" group anymore, just this one. */}
+      {/* Admin-only. Before 2026-07-29's role-model change there was a
+          separate, less-privileged org-admin tier with no reachable
+          capability left in this group; that tier is gone now, and this is
+          simply the one admin group. */}
       {isSuperAdmin && (
         <AccordionGroup
           icon="ti-server-cog"

@@ -337,8 +337,8 @@ func LoginHandler(d Deps) http.HandlerFunc {
 // failure a machine-readable error code is sent the same way so the SPA
 // can show a message without parsing a plaintext HTTP error body. The SPA route
 // handling this path is responsible for spec section 6.5 step 6's
-// specific UX: if role is not "super-admin" during initial setup, show
-// the "not a member of {prefix}super_admin" message and offer to retry
+// specific UX: if role is not "admin" during initial setup, show
+// the "not a member of {prefix}admin" message and offer to retry
 // login, rather than treating RolePending as a hard failure (ordinary end
 // users legitimately land here as RolePending too, outside the wizard).
 func CallbackHandler(d Deps) http.HandlerFunc {
@@ -692,10 +692,10 @@ func MeHandler(d Deps) http.HandlerFunc {
 // user remove their own account entirely (db.Pool.DeleteUser) - the
 // self-service counterpart to admin.go's DeleteUserHandler, which
 // explicitly refuses to act on the caller's own account
-// (guardAgainstSelfOrLastSuperAdmin) - without this endpoint there was no
+// (guardAgainstSelfOrLastAdmin) - without this endpoint there was no
 // way at all for someone to remove themselves short of an admin doing it
 // for them, or a manual DELETE FROM users. Still guarded against deleting
-// the instance's last remaining super-admin (guardAgainstLastSuperAdmin,
+// the instance's last remaining admin (guardAgainstLastAdmin,
 // admin.go) - someone has to be left who can manage the instance
 // afterward. Works regardless of the caller's session role (including a
 // RolePending session - a pending user has just as much right to delete
@@ -731,7 +731,7 @@ func DeleteSelfHandler(d Deps) http.HandlerFunc {
 			return
 		}
 
-		blocked, reason, err := guardAgainstLastSuperAdmin(ctx, d, sess.UserID)
+		blocked, reason, err := guardAgainstLastAdmin(ctx, d, sess.UserID)
 		if err != nil {
 			httperr.Internal(w, err)
 			return

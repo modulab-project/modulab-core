@@ -728,7 +728,7 @@
     "modules_section": "Mijn modules",
     "settings_section": "Instellingen",
     "system_section": "Systeem",
-    "system_superadmin_only": "Alleen super admin",
+    "system_superadmin_only": "Alleen admin",
     "system_users": "Gebruikers (goedkeuren, vergrendelen, verwijderen)",
     "feed_sources_link": "Feedbronnen (globale pool)",
     "module_management_link": "Modules (store & installatie)",
@@ -827,13 +827,13 @@
       "back": "Terug",
       "saving": "Opslaan…",
       "save": "Opslaan",
-      "groups_intro": "Maak deze drie groepen aan in uw OIDC-provider en wijs uw account toe aan de super-admin-groep voordat u doorgaat:",
+      "groups_intro": "Maak deze twee groepen aan in uw OIDC-provider en wijs uw account toe aan de admin-groep voordat u doorgaat:",
       "continue": "Doorgaan naar aanmelding",
       "missing": "Nog niet volledig, ontbrekend: {{items}}"
     },
     "step4": {
-      "hint": "Log nu in met uw OIDC-account om het als super-admin te koppelen.",
-      "not_super_admin": "Deze gebruiker is geen lid van de super-admin-groep. Wijs het toe in uw OIDC-provider en log opnieuw in.",
+      "hint": "Log nu in met uw OIDC-account om het als admin te koppelen.",
+      "not_admin": "Deze gebruiker is geen lid van de admin-groep. Wijs het toe in uw OIDC-provider en log opnieuw in.",
       "login_button": "Inloggen met OIDC"
     },
     "step5": {

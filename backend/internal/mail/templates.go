@@ -110,7 +110,7 @@ func DeletedMessage(to, name string) Message {
 	}
 }
 
-// PendingApprovalMessage is sent to every current org-admin/super-admin
+// PendingApprovalMessage is sent to every current admin
 // (db.Pool.ListAdmins) once a brand-new pending signup is created -
 // CallbackHandler's wasNew && !approved case in handlers.go, the same
 // moment that publishes the "user.pending" SSE event. to/name identify

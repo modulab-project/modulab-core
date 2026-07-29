@@ -1,12 +1,11 @@
 // This file implements the self-service counterpart to cmd/core's
 // systemInfoHandler active-sessions table / session.go's RevokeSessionByID: any
-// approved user (not just a super-admin) can see their own
+// approved user (not just an admin) can see their own
 // currently-logged-in devices and end one of them, from their own Profile
 // page. Motivation: before this, "I lost my phone, is my session on it
-// still valid?" or "kill that session" had exactly one answer - ask a
-// super-admin to look it up and revoke it via System Info. Ordinary users
-// and org-admins (not super-admin) had no self-service option at all
-// beyond waiting out SessionAbsoluteMaxAge.
+// still valid?" or "kill that session" had exactly one answer - ask an
+// admin to look it up and revoke it via System Info. Ordinary users had no
+// self-service option at all beyond waiting out SessionAbsoluteMaxAge.
 package auth
 
 import (

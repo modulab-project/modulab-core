@@ -1,7 +1,7 @@
 // Package coreupdate checks GitHub for a newer modulab-core release than the
 // one currently running, on an admin-configurable weekday+time schedule
 // (rather than a fixed interval, like store.RunSync's registry sync), and
-// notifies every connected super-admin session over SSE the first time a
+// notifies every connected admin session over SSE the first time a
 // new version is seen.
 //
 // Kept separate from internal/store (which already has FetchLatestRelease,
@@ -159,14 +159,14 @@ func CachedResult(ctx context.Context, pool *db.Pool) CheckResult {
 
 // CheckNow performs one live GitHub lookup, caches the result for
 // CachedResult, and - the first time a given newer version is seen -
-// publishes a "core.update_available" event to notify.SuperAdminChannel so
-// every currently-connected super-admin session's SSE stream picks it up
-// live (auth/events.go), the same delivery path modules.RunUpdateCheckOnce
-// already uses for "module.updates_available", just scoped to super-admin
-// only rather than org-admin too: Core/system settings (unlike installed
-// modules) are a super-admin-exclusive concern in this app already (see
-// /admin/system's own super-admin gate), so org-admins are deliberately
-// left out of this one notification rather than reusing notify.AdminChannel.
+// publishes a "core.update_available" event to notify.AdminChannel so
+// every currently-connected admin session's SSE stream picks it up live
+// (auth/events.go), the same delivery path modules.RunUpdateCheckOnce
+// already uses for "module.updates_available". Before 2026-07-29's
+// role-model change this was scoped to a narrower SuperAdminChannel,
+// deliberately excluding org-admin sessions; both the separate channel and
+// the org-admin tier are gone now, so this reuses the one admin channel
+// like everything else.
 //
 // The "first time seen" dedup (core_update_last_notified_version) matters
 // because this runs on every scheduled tick that happens to land after a
@@ -200,7 +200,7 @@ func CheckNow(ctx context.Context, pool *db.Pool, vk *valkey.Client) (CheckResul
 		lastNotified, _, _ := pool.GetSetting(ctx, "core_update_last_notified_version")
 		if lastNotified != normalized {
 			ev := notify.Event{Type: "core.update_available", Data: map[string]any{"version": normalized}}
-			if err := notify.Publish(ctx, vk, notify.SuperAdminChannel(), ev); err != nil {
+			if err := notify.Publish(ctx, vk, notify.AdminChannel(), ev); err != nil {
 				log.Printf("coreupdate: publish event: %v", err)
 			} else if err := pool.SetSetting(ctx, "core_update_last_notified_version", normalized); err != nil {
 				log.Printf("coreupdate: record last-notified version: %v", err)

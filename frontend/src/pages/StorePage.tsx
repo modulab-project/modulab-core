@@ -1,6 +1,6 @@
 // Module Store browse page (/admin/modules/store).
 // Admin-only. Shows all known modules from the registry cache (official + community).
-// Only org-admin/super-admin can access, install, or sync.
+// Only admins can access, install, or sync.
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
@@ -56,12 +56,14 @@ export default function StorePage() {
   const [uploadMsg, setUploadMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const isAdmin = !!session && isAdminRole(session.role);
-  // Custom module sources were elevated to super-admin-only on the backend
+  // Custom module sources were elevated to admin-only on the backend
   // (2026-07-22, alongside adding step-up reauth for edit/delete) - a
   // GitHub token plus the ability to point Core at arbitrary third-party
-  // code is a higher-value target than typical org-admin-level config.
-  // isAdmin above still gates the rest of this page (browsing/installing
-  // from the Store), which org-admins keep unrestricted access to.
+  // code is a higher-value target than typical config change. isSuperAdmin
+  // and isAdmin are identical checks now (single admin tier since
+  // 2026-07-29) - kept as two names since this page has always
+  // distinguished "can browse/install" from "can manage custom sources"
+  // even though both currently gate on the same role.
   const isSuperAdmin = !!session && isSuperAdminRole(session.role);
 
   // Redirect stays an effect (imperative router call, not a setState the

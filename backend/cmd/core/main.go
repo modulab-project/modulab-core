@@ -280,7 +280,7 @@ func main() {
 	// unauthenticated. Do not register a new route here expecting a session
 	// check further in, and do not add an "authenticated escape hatch" back
 	// into the wizard - the ongoing equivalents already exist in the admin
-	// panel (PATCH/DELETE /v1/admin/oidc, super-admin + step-up reauth).
+	// panel (PATCH/DELETE /v1/admin/oidc, admin + step-up reauth).
 	mux.Handle("/v1/setup/status", bootstrapMgr.Middleware(setup.StatusHandler(pool)))
 	mux.Handle("/v1/setup/init", bootstrapMgr.Middleware(setup.InitHandler(pool)))
 
@@ -346,7 +346,7 @@ func main() {
 	mux.HandleFunc("GET /v1/auth/me/export", auth.ExportSelfHandler(authDeps))
 	// Self-service "my devices" (Profile page) - any approved session can
 	// list and end its OWN active sessions, no admin role required. Distinct
-	// from the super-admin-only GET /v1/admin/system/info active-sessions
+	// from the admin-only GET /v1/admin/system/info active-sessions
 	// table and DELETE /v1/admin/sessions/{id} below: those can act on
 	// anyone's session, these two are scoped to the caller's own by
 	// RevokeOwnSessionByID's ownership check (see auth/mysessions.go).
@@ -388,21 +388,21 @@ func main() {
 	// ongoing Admin Panel, not the Setup Wizard - see setup/smtp.go's doc
 	// comment for why this is deliberately NOT wrapped in
 	// bootstrapMgr.Middleware the way OIDC below is.
-	// Super-admin only (auth.RequireSuperAdminMiddleware), same level as
+	// Admin only (auth.RequireAdminMiddleware), same level as
 	// OIDC configuration. The configure handler resolves the master key
 	// per-request, same reasoning as the OIDC configure handler above: it
 	// can't actually fail in practice (no DB fallback left to resolve),
 	// kept this shape purely for consistency.
-	superAdminOnly := auth.RequireSuperAdminMiddleware(authDeps)
-	// Step-up variant (auth.RequireSuperAdminReauthMiddleware): same role
-	// check as superAdminOnly, plus requireRecentLogin's reauth gate - see
+	adminOnly := auth.RequireAdminMiddleware(authDeps)
+	// Step-up variant (auth.RequireAdminReauthMiddleware): same role
+	// check as adminOnly, plus requireRecentLogin's reauth gate - see
 	// that middleware's doc comment for exactly why these particular
 	// routes (SMTP write/delete, OIDC write/delete below) get it and the
-	// read-only/reversible super-admin routes around them do not.
-	superAdminReauthOnly := auth.RequireSuperAdminReauthMiddleware(authDeps)
-	mux.Handle("GET /v1/admin/smtp/status", superAdminOnly(setup.SMTPStatusHandler(pool, cfg.MasterKey)))
-	mux.Handle("POST /v1/admin/smtp/test", superAdminOnly(setup.SMTPTestHandler(pool, cfg.MasterKey)))
-	mux.Handle("POST /v1/admin/smtp/configure", superAdminReauthOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// read-only/reversible admin routes around them do not.
+	adminReauthOnly := auth.RequireAdminReauthMiddleware(authDeps)
+	mux.Handle("GET /v1/admin/smtp/status", adminOnly(setup.SMTPStatusHandler(pool, cfg.MasterKey)))
+	mux.Handle("POST /v1/admin/smtp/test", adminOnly(setup.SMTPTestHandler(pool, cfg.MasterKey)))
+	mux.Handle("POST /v1/admin/smtp/configure", adminReauthOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		masterKey, err := setup.ResolveMasterKey(r.Context(), pool, cfg.MasterKey)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusPreconditionFailed)
@@ -446,7 +446,7 @@ func main() {
 			}
 		}
 	})))
-	mux.Handle("DELETE /v1/admin/smtp", superAdminReauthOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("DELETE /v1/admin/smtp", adminReauthOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rw := &responseRecorder{ResponseWriter: w, code: http.StatusOK}
 		setup.SMTPDeleteHandler(pool)(rw, r)
 		if rw.code < 400 {
@@ -464,18 +464,18 @@ func main() {
 	})))
 
 	// Admin system page + OIDC post-wizard config + audit log.
-	// All super-admin only (same tier as SMTP above).
-	mux.Handle("GET /v1/admin/system", superAdminOnly(adminapi.SystemStatusHandler(pool, cfg.MasterKey)))
-	mux.Handle("PATCH /v1/admin/oidc", superAdminReauthOnly(adminapi.OIDCUpdateHandler(pool, cfg.MasterKey)))
-	mux.Handle("DELETE /v1/admin/oidc", superAdminReauthOnly(adminapi.OIDCDeleteHandler(pool, cfg.MasterKey)))
-	mux.Handle("GET /v1/audit-log", superAdminOnly(adminapi.AuditLogHandler(pool, cfg.MasterKey)))
-	mux.Handle("GET /v1/audit-log/verify", superAdminOnly(adminapi.AuditVerifyHandler(pool, cfg.MasterKey)))
-	mux.Handle("GET /v1/audit-log/actors", superAdminOnly(adminapi.AuditActorsHandler(pool, cfg.MasterKey)))
+	// All admin only (same tier as SMTP above).
+	mux.Handle("GET /v1/admin/system", adminOnly(adminapi.SystemStatusHandler(pool, cfg.MasterKey)))
+	mux.Handle("PATCH /v1/admin/oidc", adminReauthOnly(adminapi.OIDCUpdateHandler(pool, cfg.MasterKey)))
+	mux.Handle("DELETE /v1/admin/oidc", adminReauthOnly(adminapi.OIDCDeleteHandler(pool, cfg.MasterKey)))
+	mux.Handle("GET /v1/audit-log", adminOnly(adminapi.AuditLogHandler(pool, cfg.MasterKey)))
+	mux.Handle("GET /v1/audit-log/verify", adminOnly(adminapi.AuditVerifyHandler(pool, cfg.MasterKey)))
+	mux.Handle("GET /v1/audit-log/actors", adminOnly(adminapi.AuditActorsHandler(pool, cfg.MasterKey)))
 	// Cross-cutting operational limits (upload/body size caps, rate limits,
 	// Deno worker pool size) - see adminapi.AdminLimitsHandler's package doc
 	// comment for why these were consolidated into one endpoint.
-	mux.Handle("GET /v1/admin/system/limits", superAdminOnly(adminapi.AdminLimitsHandler(pool, cfg.MasterKey)))
-	mux.Handle("PATCH /v1/admin/system/limits", superAdminOnly(adminapi.AdminLimitsHandler(pool, cfg.MasterKey)))
+	mux.Handle("GET /v1/admin/system/limits", adminOnly(adminapi.AdminLimitsHandler(pool, cfg.MasterKey)))
+	mux.Handle("PATCH /v1/admin/system/limits", adminOnly(adminapi.AdminLimitsHandler(pool, cfg.MasterKey)))
 
 	// Widget endpoints (spec section 8 / Home page). Not wrapped in any
 	// auth middleware: weather data is not sensitive, and the 15-minute
@@ -496,19 +496,19 @@ func main() {
 
 	// Web-search proxy (spec section 6.4, search widget). Backed by one or
 	// more configurable providers (SearXNG, Serper.dev, ...) - see
-	// internal/search's package doc comment. Admin configuration: super-admin
+	// internal/search's package doc comment. Admin configuration: admin
 	// only (same tier as SMTP/AI providers). Search endpoint: any approved
 	// session - resolves the active provider(s) and returns normalized JSON
 	// results regardless of which one answered.
-	mux.Handle("GET /v1/admin/search/providers", superAdminOnly(search.AdminListProvidersHandler(authDeps)))
+	mux.Handle("GET /v1/admin/search/providers", adminOnly(search.AdminListProvidersHandler(authDeps)))
 	// Providers are pre-seeded, not admin-created (see patchProviderRequest's
 	// doc comment) - so unlike AI providers there's no separate reauth-free
 	// "create" case here; PATCH can touch the stored key, so it and the
 	// dedicated key-clear route are both reauth-gated (2026-07-22).
-	mux.Handle("PATCH /v1/admin/search/providers/{id}", superAdminReauthOnly(search.AdminPatchProviderHandler(authDeps)))
-	mux.Handle("DELETE /v1/admin/search/providers/{id}/key", superAdminReauthOnly(search.AdminClearProviderKeyHandler(authDeps)))
-	mux.Handle("GET /v1/admin/search/settings", superAdminOnly(search.AdminSettingsHandler(authDeps)))
-	mux.Handle("PATCH /v1/admin/search/settings", superAdminOnly(search.AdminSettingsHandler(authDeps)))
+	mux.Handle("PATCH /v1/admin/search/providers/{id}", adminReauthOnly(search.AdminPatchProviderHandler(authDeps)))
+	mux.Handle("DELETE /v1/admin/search/providers/{id}/key", adminReauthOnly(search.AdminClearProviderKeyHandler(authDeps)))
+	mux.Handle("GET /v1/admin/search/settings", adminOnly(search.AdminSettingsHandler(authDeps)))
+	mux.Handle("PATCH /v1/admin/search/settings", adminOnly(search.AdminSettingsHandler(authDeps)))
 	mux.HandleFunc("GET /v1/search/web", search.SearchHandler(authDeps))
 	mux.HandleFunc("GET /v1/search/providers", search.UserProvidersHandler(authDeps))
 	mux.HandleFunc("PUT /v1/user/search/keys/{id}", search.UserSetKeyHandler(authDeps))
@@ -517,7 +517,7 @@ func main() {
 	mux.HandleFunc("POST /v1/user/search-prefs", search.SearchPrefsHandler(authDeps))
 
 	// News feed management (internal/news):
-	//   Admin CRUD: org-admin and super-admin can manage the global feed pool.
+	//   Admin CRUD: any admin can manage the global feed pool.
 	//   User endpoints: every approved session can list feeds, toggle their own
 	//   subscriptions, and fetch aggregated articles. The aggregator caches
 	//   each feed's articles in Valkey for 15 minutes per feed.
@@ -536,7 +536,7 @@ func main() {
 	mux.HandleFunc("GET /v1/admin/news/settings", news.AdminNewsSettingsHandler(authDeps))
 	mux.HandleFunc("PATCH /v1/admin/news/settings", news.AdminNewsSettingsHandler(authDeps))
 
-	// AI provider management (internal/ai): admin CRUD is super-admin only
+	// AI provider management (internal/ai): admin CRUD is admin-tier only
 	// (same tier as SMTP/SearXNG); user key management and chat streaming
 	// require any approved session. The chat endpoint streams SSE, so
 	// Traefik/Nginx buffering is suppressed via X-Accel-Buffering: no inside
@@ -546,17 +546,17 @@ func main() {
 	// (ai.AdminSettingsHandler) for chat_rpm_limit — removed once that single
 	// field moved to GET/PATCH /v1/admin/system/limits alongside its sibling
 	// ai_chat_ip_rate_limit_max (see adminapi.AdminLimitsHandler).
-	mux.Handle("GET /v1/admin/ai/providers", superAdminOnly(ai.AdminListHandler(authDeps)))
+	mux.Handle("GET /v1/admin/ai/providers", adminOnly(ai.AdminListHandler(authDeps)))
 	// Create stays reauth-free ("anlegen" case) - PATCH/DELETE/clear-key are
 	// reauth-gated (2026-07-22): adding a new provider is lower-risk than
 	// changing or removing an already-trusted one's stored API key, same
 	// create-vs-change/delete split as the custom module sources below.
-	mux.Handle("POST /v1/admin/ai/providers", superAdminOnly(ai.AdminCreateHandler(authDeps)))
-	mux.Handle("PATCH /v1/admin/ai/providers/{id}", superAdminReauthOnly(ai.AdminPatchHandler(authDeps)))
-	mux.Handle("DELETE /v1/admin/ai/providers/{id}", superAdminReauthOnly(ai.AdminDeleteHandler(authDeps)))
-	mux.Handle("DELETE /v1/admin/ai/providers/{id}/key", superAdminReauthOnly(ai.AdminClearKeyHandler(authDeps)))
-	mux.Handle("GET /v1/admin/ai/providers/{id}/models", superAdminOnly(ai.AdminListModelsHandler(authDeps)))
-	mux.Handle("GET /v1/admin/ai/providers/{id}/balance", superAdminOnly(ai.AdminBalanceHandler(authDeps)))
+	mux.Handle("POST /v1/admin/ai/providers", adminOnly(ai.AdminCreateHandler(authDeps)))
+	mux.Handle("PATCH /v1/admin/ai/providers/{id}", adminReauthOnly(ai.AdminPatchHandler(authDeps)))
+	mux.Handle("DELETE /v1/admin/ai/providers/{id}", adminReauthOnly(ai.AdminDeleteHandler(authDeps)))
+	mux.Handle("DELETE /v1/admin/ai/providers/{id}/key", adminReauthOnly(ai.AdminClearKeyHandler(authDeps)))
+	mux.Handle("GET /v1/admin/ai/providers/{id}/models", adminOnly(ai.AdminListModelsHandler(authDeps)))
+	mux.Handle("GET /v1/admin/ai/providers/{id}/balance", adminOnly(ai.AdminBalanceHandler(authDeps)))
 	mux.HandleFunc("GET /v1/ai/providers", ai.UserProvidersHandler(authDeps))
 	mux.HandleFunc("PUT /v1/ai/keys/{id}", ai.UserSetKeyHandler(authDeps))
 	mux.HandleFunc("DELETE /v1/ai/keys/{id}", ai.UserDeleteKeyHandler(authDeps))
@@ -572,7 +572,7 @@ func main() {
 	// Quick links / Schnellzugriff-Grid (internal/quicklinks):
 	//   User endpoints: any approved session can list merged tiles, create or
 	//   delete personal tiles, and save their custom ordering.
-	//   Admin CRUD: org-admin / super-admin only.
+	//   Admin CRUD: admin only.
 	mux.HandleFunc("GET /v1/quick-links", quicklinks.ListHandler(authDeps))
 	mux.HandleFunc("POST /v1/quick-links", quicklinks.CreateUserLinkHandler(authDeps))
 	mux.HandleFunc("DELETE /v1/quick-links/{id}", quicklinks.DeleteUserLinkHandler(authDeps))
@@ -591,7 +591,7 @@ func main() {
 
 	// Store browse endpoints (spec section 4.10).
 	// GET /v1/store and GET /v1/store/{name} require any active session.
-	// POST /v1/store/sync requires org-admin or super-admin.
+	// POST /v1/store/sync requires admin.
 	mux.HandleFunc("GET /v1/store", store.ListHandler(storeDeps, authDeps))
 	mux.HandleFunc("GET /v1/store/{name}", store.DetailHandler(storeDeps, authDeps))
 
@@ -601,20 +601,21 @@ func main() {
 	// unlike GET /v1/store above, the source list itself (repo URLs, who
 	// added them) is not exposed to plain active sessions.
 	//
-	// Elevated from org-admin/super-admin to super-admin-only (2026-07-22):
-	// a GitHub token plus the ability to point Core at arbitrary third-party
-	// code is a higher-value target than typical org-admin-level config.
+	// Elevated to admin-only (2026-07-22, back when a separate, less-privileged
+	// org-admin tier still existed): a GitHub token plus the ability to point
+	// Core at arbitrary third-party code is a higher-value target than
+	// typical admin-level config.
 	// GET/POST stay reauth-free (listing, and "anlegen" per the same policy
 	// as the AI provider create route above); PATCH (edit - e.g. rotating a
 	// Cosign key) and DELETE are reauth-gated, same reasoning as locking a
 	// user or deleting an AI provider's key.
-	mux.Handle("GET /v1/admin/store/custom-sources", superAdminOnly(store.ListCustomSourcesHandler(storeDeps, authDeps)))
-	mux.Handle("POST /v1/admin/store/custom-sources", superAdminOnly(store.AddCustomSourceHandler(storeDeps, authDeps)))
-	mux.Handle("PATCH /v1/admin/store/custom-sources/{id}", superAdminReauthOnly(store.UpdateCustomSourceHandler(storeDeps, authDeps)))
-	mux.Handle("DELETE /v1/admin/store/custom-sources/{id}", superAdminReauthOnly(store.DeleteCustomSourceHandler(storeDeps, authDeps)))
+	mux.Handle("GET /v1/admin/store/custom-sources", adminOnly(store.ListCustomSourcesHandler(storeDeps, authDeps)))
+	mux.Handle("POST /v1/admin/store/custom-sources", adminOnly(store.AddCustomSourceHandler(storeDeps, authDeps)))
+	mux.Handle("PATCH /v1/admin/store/custom-sources/{id}", adminReauthOnly(store.UpdateCustomSourceHandler(storeDeps, authDeps)))
+	mux.Handle("DELETE /v1/admin/store/custom-sources/{id}", adminReauthOnly(store.DeleteCustomSourceHandler(storeDeps, authDeps)))
 
 	// Module management endpoints (spec section 4.6–4.9).
-	// List/detail: any active session. Install/uninstall/update/pin: org-admin+.
+	// List/detail: any active session. Install/uninstall/update/pin: admin.
 	// Note: GET /v1/modules/updates is registered before GET /v1/modules/{name}
 	// so the literal path wins over the wildcard in Go's 1.22 ServeMux.
 	// dbURL for Deno workers: no sslmode param here because postgres.js
@@ -709,9 +710,11 @@ func main() {
 	// the registry sync above (fixed interval), this runs on an
 	// admin-configurable weekday+time schedule (core_update_check_weekdays/
 	// _time, default every day at 03:00 - see coreupdate's doc comments),
-	// and notifies only super-admin sessions (notify.SuperAdminChannel), not
-	// every org-admin, since Core/system settings are a super-admin-only
-	// concern elsewhere in this app already. The manual "check now" route
+	// and notifies every connected admin session (notify.AdminChannel) -
+	// before 2026-07-29's role-model change this used a narrower
+	// SuperAdminChannel excluding org-admin sessions, since Core/system
+	// settings were a super-admin-only concern; both the separate channel
+	// and the org-admin tier are gone now. The manual "check now" route
 	// below (adjacent to systemInfoHandler's registration further down)
 	// lets an admin trigger the same check on demand instead of waiting for
 	// the next scheduled tick.
@@ -734,7 +737,7 @@ func main() {
 	// next module-update check, see above), so "I published a release, why
 	// hasn't ModuLab noticed yet" has a concrete answer instead of "wait and
 	// see".
-	mux.Handle("GET /v1/admin/system/info", superAdminOnly(systemInfoHandler(pool, valkeyClient, cfg, startTime, storeDeps, authDeps)))
+	mux.Handle("GET /v1/admin/system/info", adminOnly(systemInfoHandler(pool, valkeyClient, cfg, startTime, storeDeps, authDeps)))
 
 	// POST /v1/admin/system/core-update-check — manual trigger for
 	// coreupdate.CheckNow, alongside the scheduled weekday+time check
@@ -742,7 +745,7 @@ func main() {
 	// immediate answer (and, if a new version just shipped, the SSE
 	// notification) right after changing the schedule, instead of waiting
 	// for the next scheduled tick.
-	mux.Handle("POST /v1/admin/system/core-update-check", superAdminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("POST /v1/admin/system/core-update-check", adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		result, err := coreupdate.CheckNow(r.Context(), pool, valkeyClient)
 		if err != nil {
 			http.Error(w, "check failed: "+err.Error(), http.StatusBadGateway)
@@ -751,14 +754,14 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(result)
 	})))
-	// Reauth-gated (not just superAdminOnly, 2026-07-22): forcibly ending
+	// Reauth-gated (not just adminOnly, 2026-07-22): forcibly ending
 	// another user's session has the same immediate, hard-to-undo-for-them
 	// effect as locking their account, which already gets this step-up
 	// treatment - a compromised-but-still-within-SessionTTL admin session
 	// shouldn't be able to kick people off any more than it should be able
 	// to lock them.
-	mux.Handle("DELETE /v1/admin/sessions/{id}", superAdminReauthOnly(revokeSessionHandler(authDeps)))
-	mux.Handle("DELETE /v1/admin/system/rate-limits", superAdminOnly(resetRateLimitHandler(valkeyClient)))
+	mux.Handle("DELETE /v1/admin/sessions/{id}", adminReauthOnly(revokeSessionHandler(authDeps)))
+	mux.Handle("DELETE /v1/admin/system/rate-limits", adminOnly(resetRateLimitHandler(valkeyClient)))
 
 	// At startup, restart Deno workers for all Tier 2/3 modules that were
 	// active before the last shutdown.
@@ -1542,7 +1545,7 @@ func activeRateLimits(ctx context.Context, vk *valkey.Client, pool *db.Pool) []s
 }
 
 // resetRateLimitHandler serves DELETE /v1/admin/system/rate-limits
-// (super-admin only) - the reset button next to each row in System Info's
+// (admin only) - the reset button next to each row in System Info's
 // live rate-limit table, for the rare case a client gets stuck (e.g. the
 // counter-never-resets bug IncrExpire's doc comment describes) or an admin
 // just wants to manually clear a legitimate trip early. Takes the exact
@@ -1728,7 +1731,7 @@ func sessionToken(r *http.Request) string {
 	return c.Value
 }
 
-// systemInfoHandler serves GET /v1/admin/system/info (super-admin only).
+// systemInfoHandler serves GET /v1/admin/system/info (admin only).
 // Reuses the same best-effort checks as /healthz for the shared fields
 // (dependency reachability, NTP drift, SearXNG) rather than duplicating a
 // second, subtly-different implementation of each — the difference here is
@@ -1854,7 +1857,7 @@ func systemInfoHandler(pool *db.Pool, valkeyClient *valkey.Client, cfg config.Co
 	}
 }
 
-// revokeSessionHandler serves DELETE /v1/admin/sessions/{id} (super-admin
+// revokeSessionHandler serves DELETE /v1/admin/sessions/{id} (admin
 // only) - the System Info page's per-row "end session" button. id is
 // auth.SessionID(token), never the token itself (see ActiveSession's doc
 // comment), so ending a session an admin can see in that table never

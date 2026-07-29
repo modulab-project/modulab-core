@@ -45,7 +45,7 @@ export default function AdminAIPage() {
   const [modal, setModal] = useState<ModalState>({ kind: "closed" });
   const [balances, setBalances] = useState<Record<string, AIBalanceResult & { loading?: boolean }>>({});
   // Backend now gates PATCH/DELETE /v1/admin/ai/providers/{id} and
-  // DELETE .../key behind requireRecentLogin (RequireSuperAdminReauthMiddleware,
+  // DELETE .../key behind requireRecentLogin (RequireAdminReauthMiddleware,
   // 2026-07-22) - create (POST) stays reauth-free, see main.go's route
   // registration comment. Page-level actions (toggle enabled, clear key,
   // delete) use this; the two edit modals below each have their own

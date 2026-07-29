@@ -728,7 +728,7 @@
     "modules_section": "My modules",
     "settings_section": "Settings",
     "system_section": "System",
-    "system_superadmin_only": "Super admin only",
+    "system_superadmin_only": "Admin only",
     "system_users": "Users (approve, lock, delete)",
     "feed_sources_link": "Feed sources (global pool)",
     "module_management_link": "Modules (store & installation)",
@@ -827,13 +827,13 @@
       "back": "Back",
       "saving": "Saving…",
       "save": "Save",
-      "groups_intro": "Create these three groups in your OIDC provider and assign your account to the super-admin group before continuing:",
+      "groups_intro": "Create these two groups in your OIDC provider and assign your account to the admin group before continuing:",
       "continue": "Continue to login",
       "missing": "Not yet complete, missing: {{items}}"
     },
     "step4": {
-      "hint": "Log in now with your OIDC account to bind it as super-admin.",
-      "not_super_admin": "This user is not a member of the super-admin group. Please assign it in your OIDC provider and log in again.",
+      "hint": "Log in now with your OIDC account to bind it as admin.",
+      "not_admin": "This user is not a member of the admin group. Please assign it in your OIDC provider and log in again.",
       "login_button": "Log in with OIDC"
     },
     "step5": {

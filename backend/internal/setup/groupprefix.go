@@ -24,10 +24,10 @@ const groupPrefixSettingKey = "group_prefix"
 // validGroupPrefix matches the conservative charset spec section 3.3's
 // examples use for OIDC groups-claim values: letters, digits, underscore,
 // and hyphen. This is deliberately stricter than "anything non-empty" since
-// the prefix is concatenated directly onto "super_admin", "org_admin", and
-// "user" to form the literal group names operators must create in their
-// OIDC provider - a stray space or control character would silently break
-// that match at login time.
+// the prefix is concatenated directly onto "admin" and "user" to form the
+// literal group names operators must create in their OIDC provider - a
+// stray space or control character would silently break that match at
+// login time.
 var validGroupPrefix = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 // GroupPrefixConfigRequest is the body of POST /v1/setup/group-prefix/configure.
@@ -35,7 +35,7 @@ type GroupPrefixConfigRequest struct {
 	Prefix string `json:"prefix"`
 }
 
-// GroupPrefixStatusResponse reports the configured prefix and the three
+// GroupPrefixStatusResponse reports the configured prefix and the two
 // resulting group names, exactly as the wizard shows the operator (spec
 // section 6.5 step 5) so they know what to create in their OIDC provider.
 type GroupPrefixStatusResponse struct {
@@ -76,7 +76,7 @@ func ResolveGroupPrefix(ctx context.Context, pool *db.Pool) (string, error) {
 }
 
 // GroupPrefixStatusHandler reports the currently persisted group prefix, if
-// any, and the three group names derived from it.
+// any, and the two group names derived from it.
 func GroupPrefixStatusHandler(pool *db.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		prefix, exists, err := pool.GetSetting(r.Context(), groupPrefixSettingKey)
@@ -97,8 +97,8 @@ func GroupPrefixStatusHandler(pool *db.Pool) http.HandlerFunc {
 }
 
 // GroupPrefixConfigureHandler validates and persists the group prefix.
-// Spec section 6.5 step 5 frames this as a one-time definition that only a
-// Super-Admin can later change - that restriction depends on the auth/role
+// Spec section 6.5 step 5 frames this as a one-time definition that only an
+// Admin can later change - that restriction depends on the auth/role
 // system (spec section 3.1), which has not landed yet, so it is not
 // enforced here. The bootstrap-token gate (see bootstrap.Manager) is the
 // only access control in front of this endpoint for now.
@@ -154,16 +154,17 @@ func GroupPrefixConfigureHandler(pool *db.Pool, masterKey string) http.HandlerFu
 	}
 }
 
-// groupNames derives the three group names operators must create in their
+// groupNames derives the two group names operators must create in their
 // OIDC provider (spec section 6.5 step 5 / section 3.3's example table).
-// Lowercase snake_case suffixes (changed from the spec's original
-// Title-Case-with-hyphen form on the user's request, to match their IdP's
-// naming convention) - see the matching change in internal/auth/role.go's
-// DeriveRole, which must stay in sync with this.
+// Collapsed from three to two on 2026-07-29 (org-admin tier removed,
+// super-admin renamed to plain "admin"). Lowercase snake_case suffixes
+// (changed from the spec's original Title-Case-with-hyphen form on the
+// user's request, to match their IdP's naming convention) - see the
+// matching change in internal/auth/role.go's DeriveRole, which must stay
+// in sync with this.
 func groupNames(prefix string) []string {
 	return []string{
-		prefix + "super_admin",
-		prefix + "org_admin",
+		prefix + "admin",
 		prefix + "user",
 	}
 }

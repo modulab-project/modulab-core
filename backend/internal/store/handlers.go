@@ -115,8 +115,8 @@ func DetailHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 // ── POST /v1/store/sync ───────────────────────────────────────────────────────
 
 // SyncHandler serves POST /v1/store/sync. Triggers an immediate registry sync
-// and waits for it to complete before responding. Requires org-admin or
-// super-admin role. onSynced (may be nil) is forwarded to TriggerSync — see
+// and waits for it to complete before responding. Requires the admin
+// role. onSynced (may be nil) is forwarded to TriggerSync — see
 // onSyncedFunc's doc comment; main.go wires it to modules.RunUpdateCheckOnce
 // so a manual sync also surfaces any newly-available module update right
 // away instead of waiting for the next background tick.

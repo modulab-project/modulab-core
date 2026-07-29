@@ -45,7 +45,7 @@ export default function AdminSystemSearchPage() {
   const [modal, setModal] = useState<ModalState>({ kind: "closed" });
   const hasFetched = useRef(false);
   // Backend now gates PATCH /v1/admin/search/providers/{id} and
-  // DELETE .../key behind requireRecentLogin (RequireSuperAdminReauthMiddleware,
+  // DELETE .../key behind requireRecentLogin (RequireAdminReauthMiddleware,
   // 2026-07-22) - same step-up pattern as SMTP/OIDC. Page-level actions
   // (toggle enabled, clear key) use this; EditProviderModal below has its
   // own separate instance so its banner renders inside the modal overlay,

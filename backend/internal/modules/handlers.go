@@ -62,7 +62,7 @@ func ListInstalledHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 
 // CheckUpdatesHandler triggers an immediate update check against the registry
 // cache and returns the list of modules with newer versions available.
-// Requires org-admin or super-admin.
+// Requires admin.
 func CheckUpdatesHandler(d Deps, storeDeps store.Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := auth.RequireAdminSession(authDeps, w, r); !ok {
@@ -159,7 +159,7 @@ func GetModuleEgressHostsHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 
 // InstallHandler installs a module from the registry.
 // Body: {"name": "module-name"}
-// Requires org-admin or super-admin.
+// Requires admin.
 //
 // Note: Install runs synchronously. For large modules (approaching the 100 MB
 // cap) this can take several seconds. The client should show a loading state.
@@ -221,7 +221,7 @@ func InstallHandler(d Deps, storeDeps store.Deps, authDeps auth.Deps) http.Handl
 // which module this is), not by any query param the client would have to
 // get right.
 //
-// Requires org-admin or super-admin, same as InstallHandler/UpdateModuleHandler.
+// Requires admin, same as InstallHandler/UpdateModuleHandler.
 func InstallManualHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := auth.RequireAdminSession(authDeps, w, r)
@@ -362,7 +362,7 @@ func peekManualUploadModule(ctx context.Context, d Deps, zipPath string, maxZIPB
 // ── DELETE /v1/modules/{name} ─────────────────────────────────────────────────
 
 // UninstallHandler removes an installed module.
-// Requires org-admin or super-admin.
+// Requires admin.
 func UninstallHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := auth.RequireAdminSession(authDeps, w, r)
@@ -401,7 +401,7 @@ func UninstallHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 
 // UpdateModuleHandler triggers an immediate update of an installed module.
 // The module must have an available_version set (run CheckUpdates first, or
-// rely on the daily sync). Requires org-admin or super-admin.
+// rely on the daily sync). Requires admin.
 func UpdateModuleHandler(d Deps, storeDeps store.Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := auth.RequireAdminSession(authDeps, w, r)
@@ -520,7 +520,7 @@ func UpdateModuleHandler(d Deps, storeDeps store.Deps, authDeps auth.Deps) http.
 // ── POST /v1/modules/{name}/pin ───────────────────────────────────────────────
 
 // PinHandler pins a module, preventing automatic updates and uninstallation.
-// Requires org-admin or super-admin.
+// Requires admin.
 func PinHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := auth.RequireAdminSession(authDeps, w, r)
@@ -553,7 +553,7 @@ func PinHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 // ── DELETE /v1/modules/{name}/pin ─────────────────────────────────────────────
 
 // UnpinHandler removes the pin from a module.
-// Requires org-admin or super-admin.
+// Requires admin.
 func UnpinHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := auth.RequireAdminSession(authDeps, w, r)
@@ -587,7 +587,7 @@ func UnpinHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 
 // RestartModuleHandler restarts a Tier 2/3 module's Deno worker from its
 // currently-installed manifest, without touching version/source/registry at
-// all. Requires org-admin or super-admin.
+// all. Requires admin.
 //
 // Exists specifically for the "degraded" recovery gap: WorkerPool's crash
 // handler (deno.go's SetCrashHandler) deliberately never auto-restarts a

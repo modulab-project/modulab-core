@@ -12,7 +12,7 @@
 // Keeping notify auth-agnostic - it only ever sees channel name strings
 // and JSON-able event payloads - avoids that import cycle; auth.go's own
 // SSE handler is the one place that translates "this session has role
-// org-admin" into "subscribe to AdminChannel() too".
+// admin" into "subscribe to AdminChannel() too".
 package notify
 
 import (
@@ -31,26 +31,16 @@ import (
 // TCP-level keepalive tuning.
 const HeartbeatInterval = 30 * time.Second
 
-// AdminChannel is where events meant for every currently-connected
-// org-admin/super-admin are published - spec section 3.5's "Neuer
-// Pending-User" row today; "Modul-Health-Statuswechsel" and "Modul-
-// Installation" rows once the module pipeline (Phase 3) exists to trigger
-// them.
+// AdminChannel is where events meant for every currently-connected admin
+// are published - spec section 3.5's "Neuer Pending-User" row today;
+// "Modul-Health-Statuswechsel", "Modul-Installation", and (since
+// 2026-07-29) "core.update_available" too, once a narrower SuperAdminChannel
+// carried that last one on its own, back when a separate super-admin tier
+// existed alongside org-admin. Both are gone now (org-admin removed,
+// super-admin renamed to plain "admin"), so every admin event lives on
+// this one channel.
 func AdminChannel() string {
 	return "notify:admin"
-}
-
-// SuperAdminChannel is where events meant only for currently-connected
-// super-admin sessions are published - narrower than AdminChannel above,
-// which also reaches org-admin. Used for "core.update_available"
-// (internal/coreupdate): Core/system-level settings are already a
-// super-admin-exclusive concern elsewhere in this app (see /admin/system's
-// own super-admin gate), so an org-admin session deliberately does not
-// subscribe to this channel at all (see auth.EventsHandler's channel
-// selection) rather than receiving and having to ignore an event about
-// something it can't act on anyway.
-func SuperAdminChannel() string {
-	return "notify:super-admin"
 }
 
 // UserChannel is where events meant for exactly one subject are

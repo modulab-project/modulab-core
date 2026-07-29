@@ -30,7 +30,7 @@ export default function AdminSystemSmtpPage() {
   const [reauthRequired, setReauthRequired] = useState(false);
   const hasFetched = useRef(false);
   // Backend now gates POST /v1/admin/smtp/configure and DELETE /v1/admin/smtp
-  // behind requireRecentLogin (RequireSuperAdminReauthMiddleware) - not the
+  // behind requireRecentLogin (RequireAdminReauthMiddleware) - not the
   // test-send endpoint, which changes nothing. Same step-up pattern as
   // AdminSystemOIDCPage.tsx/AdminUsersPage.tsx.
   const { waiting: reauthWaiting, startLogin } = useLoginRedirect(() => {

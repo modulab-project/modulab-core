@@ -288,8 +288,8 @@ export function logoutRequest(): Promise<void> {
 // DELETE /v1/auth/me - lets the signed-in user remove their own account
 // entirely, the self-service counterpart to deleteUser below (which is
 // admin-only and explicitly refuses to act on the caller's own account -
-// see backend/internal/auth/admin.go's guardAgainstSelfOrLastSuperAdmin).
-// The backend still refuses this for the last remaining super-admin (400,
+// see backend/internal/auth/admin.go's guardAgainstSelfOrLastAdmin).
+// The backend still refuses this for the last remaining admin (400,
 // surfaced here as an ApiError with that message in .message).
 export function deleteSelf(): Promise<void> {
   return request<void>("/v1/auth/me", { method: "DELETE" });
@@ -312,7 +312,7 @@ export interface AdminUser {
   last_login_at: string;
 }
 
-// GET /v1/admin/users - every user, org-admin/super-admin only (enforced
+// GET /v1/admin/users - every user, admin only (enforced
 // server-side by requireAdmin in backend/internal/auth/admin.go; a
 // non-admin caller gets a 403, surfaced here as an ApiError).
 export function listUsers(): Promise<AdminUser[]> {
@@ -330,7 +330,7 @@ export function approveUser(subject: string): Promise<void> {
 
 // POST /v1/admin/users/{subject}/lock - revokes an already-approved user's
 // access without forgetting who they are. The backend refuses this for
-// your own account or the last remaining super-admin (400) - surfaced here
+// your own account or the last remaining admin (400) - surfaced here
 // as an ApiError with that message in .message.
 export function lockUser(subject: string): Promise<void> {
   return request<void>(`/v1/admin/users/${encodeURIComponent(subject)}/lock`, {
@@ -339,7 +339,7 @@ export function lockUser(subject: string): Promise<void> {
 }
 
 // POST /v1/admin/users/{subject}/unlock - restores access for a locked
-// user. No self/last-super-admin restriction (unlocking can't strand the
+// user. No self/last-admin restriction (unlocking can't strand the
 // instance the way locking or deleting could).
 export function unlockUser(subject: string): Promise<void> {
   return request<void>(`/v1/admin/users/${encodeURIComponent(subject)}/unlock`, {
@@ -348,7 +348,7 @@ export function unlockUser(subject: string): Promise<void> {
 }
 
 // DELETE /v1/admin/users/{subject} - forgets the user row entirely. Same
-// self/last-super-admin guard as lockUser. If this person logs in again
+// self/last-admin guard as lockUser. If this person logs in again
 // later, they are JIT-provisioned as a brand-new pending user, exactly as
 // if they had never logged in before.
 export function deleteUser(subject: string): Promise<void> {
@@ -390,14 +390,14 @@ export interface SMTPConfigRequest {
   encryption: string;
 }
 
-// GET /v1/admin/smtp/status - super-admin only (enforced server-side by
-// auth.RequireSuperAdminMiddleware; an org-admin or below gets a 403,
-// surfaced here as an ApiError).
+// GET /v1/admin/smtp/status - admin only (enforced server-side by
+// auth.RequireAdminMiddleware; a non-admin gets a 403, surfaced here as
+// an ApiError).
 export function smtpStatus(): Promise<SMTPStatus> {
   return request<SMTPStatus>("/v1/admin/smtp/status");
 }
 
-// POST /v1/admin/smtp/configure - super-admin only, same gate as
+// POST /v1/admin/smtp/configure - admin only, same gate as
 // smtpStatus above.
 export function configureSmtp(body: SMTPConfigRequest): Promise<SMTPStatus> {
   return request<SMTPStatus>("/v1/admin/smtp/configure", {
@@ -423,7 +423,7 @@ export interface SMTPTestRequest extends SMTPConfigRequest {
   to: string;
 }
 
-// POST /v1/admin/smtp/test — super-admin only. Sends a single test message
+// POST /v1/admin/smtp/test — admin only. Sends a single test message
 // using the supplied configuration. Returns {ok: true} on success; throws
 // ApiError (502) if the SMTP connection or delivery failed.
 export function testSmtp(body: SMTPTestRequest): Promise<{ ok: boolean }> {
@@ -454,7 +454,7 @@ export interface NewsArticle {
   image_url?: string;
 }
 
-// GET /v1/admin/feeds — org-admin/super-admin only.
+// GET /v1/admin/feeds — admin only.
 export interface FeedImportResult {
   url: string;
   label: string;
@@ -697,12 +697,12 @@ export interface SearchProvider {
   sort_order: number;
 }
 
-// GET /v1/admin/search/providers — super-admin only.
+// GET /v1/admin/search/providers — admin only.
 export function adminListSearchProviders(): Promise<SearchProvider[]> {
   return request<SearchProvider[]>("/v1/admin/search/providers");
 }
 
-// PATCH /v1/admin/search/providers/{id} — super-admin only. Only send
+// PATCH /v1/admin/search/providers/{id} — admin only. Only send
 // admin_key when the admin actually typed a new one - omitting it (or
 // sending "") leaves the stored key untouched, matching UpdateSearchProvider's
 // COALESCE-on-conflict behavior on the backend.
@@ -724,7 +724,7 @@ export function adminPatchSearchProvider(
   });
 }
 
-// DELETE /v1/admin/search/providers/{id}/key — super-admin only. Clears the
+// DELETE /v1/admin/search/providers/{id}/key — admin only. Clears the
 // admin key without touching the rest of the provider row.
 export function adminClearSearchProviderKey(id: string): Promise<void> {
   return request<void>(`/v1/admin/search/providers/${encodeURIComponent(id)}/key`, {
@@ -740,12 +740,12 @@ export interface SearchSettings {
   fallback_timeout_seconds: number;
 }
 
-// GET /v1/admin/search/settings — super-admin only.
+// GET /v1/admin/search/settings — admin only.
 export function adminGetSearchSettings(): Promise<SearchSettings> {
   return request<SearchSettings>("/v1/admin/search/settings");
 }
 
-// PATCH /v1/admin/search/settings — super-admin only.
+// PATCH /v1/admin/search/settings — admin only.
 export function adminPatchSearchSettings(settings: SearchSettings): Promise<SearchSettings> {
   return request<SearchSettings>("/v1/admin/search/settings", {
     method: "PATCH",
@@ -868,12 +868,12 @@ export interface AIUserProvider {
   can_override: boolean;
 }
 
-// GET /v1/admin/ai/providers — super-admin only.
+// GET /v1/admin/ai/providers — admin only.
 export function adminListAIProviders(): Promise<AIProvider[]> {
   return request<AIProvider[]>("/v1/admin/ai/providers");
 }
 
-// POST /v1/admin/ai/providers — super-admin only.
+// POST /v1/admin/ai/providers — admin only.
 export function adminCreateAIProvider(body: {
   id: string;
   type: string;
@@ -891,7 +891,7 @@ export function adminCreateAIProvider(body: {
   });
 }
 
-// PATCH /v1/admin/ai/providers/{id} — super-admin only.
+// PATCH /v1/admin/ai/providers/{id} — admin only.
 export function adminPatchAIProvider(
   id: string,
   body: Partial<{
@@ -910,7 +910,7 @@ export function adminPatchAIProvider(
   });
 }
 
-// DELETE /v1/admin/ai/providers/{id} — super-admin only.
+// DELETE /v1/admin/ai/providers/{id} — admin only.
 export function adminDeleteAIProvider(id: string): Promise<void> {
   return request<void>(`/v1/admin/ai/providers/${encodeURIComponent(id)}`, {
     method: "DELETE",
@@ -980,12 +980,12 @@ export interface LimitsSettings {
   core_update_check_time: string;
 }
 
-// GET /v1/admin/system/limits — super-admin only.
+// GET /v1/admin/system/limits — admin only.
 export function adminGetLimitsSettings(): Promise<LimitsSettings> {
   return request<LimitsSettings>("/v1/admin/system/limits");
 }
 
-// PATCH /v1/admin/system/limits — super-admin only. Always sends the full
+// PATCH /v1/admin/system/limits — admin only. Always sends the full
 // object (unlike adminPatchAISettings' Partial<>) since the backend
 // validates and rewrites every field on each PATCH — see
 // AdminLimitsHandler's doc comment.
@@ -996,7 +996,7 @@ export function adminPatchLimitsSettings(settings: LimitsSettings): Promise<Limi
   });
 }
 
-// POST /v1/admin/system/core-update-check — super-admin only. Manually
+// POST /v1/admin/system/core-update-check — admin only. Manually
 // triggers coreupdate.CheckNow instead of waiting for the next scheduled
 // (core_update_check_weekdays/_time) tick — used by the "check now" button
 // on both AdminSystemLimitsPage (next to the schedule fields) and
@@ -1457,7 +1457,7 @@ export function listStore(source?: string, category?: string): Promise<StoreList
   return request<StoreListResponse>(`/v1/store${qs ? `?${qs}` : ""}`);
 }
 
-// POST /v1/store/sync — org-admin/super-admin only; triggers registry refresh.
+// POST /v1/store/sync — admin only; triggers registry refresh.
 export function syncStore(): Promise<{ ok: boolean; error?: string }> {
   return request<{ ok: boolean; error?: string }>("/v1/store/sync", { method: "POST" });
 }
@@ -1482,13 +1482,14 @@ export interface CustomSource {
   added_at: string;
 }
 
-// GET /v1/admin/store/custom-sources — super-admin only (elevated from
-// org-admin/super-admin 2026-07-22).
+// GET /v1/admin/store/custom-sources — admin only (elevated from a lower
+// bar to admin-exclusive on 2026-07-22, back when a separate org-admin
+// tier still existed).
 export function listCustomSources(): Promise<CustomSource[]> {
   return request<CustomSource[]>("/v1/admin/store/custom-sources");
 }
 
-// POST /v1/admin/store/custom-sources — super-admin only, reauth-free (the
+// POST /v1/admin/store/custom-sources — admin only, reauth-free (the
 // "anlegen" case - see main.go's route registration comment).
 // pubkey and token are both optional; leave pubkey empty for an
 // unsigned/unverified custom source, and token empty for a public repo.
@@ -1504,7 +1505,7 @@ export function addCustomSource(
   });
 }
 
-// PATCH /v1/admin/store/custom-sources/{id} — super-admin only, step-up
+// PATCH /v1/admin/store/custom-sources/{id} — admin only, step-up
 // reauth-gated. token is omitted entirely (not sent as "") when the admin
 // left it blank in the edit form - that means "keep the existing token",
 // matching the SMTP/OIDC secret-field convention; sending an empty string
@@ -1521,7 +1522,7 @@ export function updateCustomSource(
   });
 }
 
-// DELETE /v1/admin/store/custom-sources/{id} — super-admin only, step-up
+// DELETE /v1/admin/store/custom-sources/{id} — admin only, step-up
 // reauth-gated (2026-07-22 - same reasoning as locking a user or deleting
 // an AI provider's key).
 export function deleteCustomSource(id: string): Promise<void> {
@@ -1535,12 +1536,12 @@ export function listInstalledModules(): Promise<InstalledModule[]> {
   return request<InstalledModule[]>("/v1/modules");
 }
 
-// GET /v1/modules/updates — org-admin/super-admin only; runs a fresh update check.
+// GET /v1/modules/updates — admin only; runs a fresh update check.
 export function checkModuleUpdates(): Promise<{ updates: ModuleUpdateInfo[]; count: number }> {
   return request<{ updates: ModuleUpdateInfo[]; count: number }>("/v1/modules/updates");
 }
 
-// POST /v1/modules/install — org-admin/super-admin only.
+// POST /v1/modules/install — admin only.
 export function installModule(name: string): Promise<InstalledModule> {
   return request<InstalledModule>("/v1/modules/install", {
     method: "POST",
@@ -1548,7 +1549,7 @@ export function installModule(name: string): Promise<InstalledModule> {
   });
 }
 
-// POST /v1/modules/install-manual — org-admin/super-admin only. Multipart
+// POST /v1/modules/install-manual — admin only. Multipart
 // upload of a module ZIP with no registry entry behind it (see
 // modules.InstallManualHandler in the backend) — installs it fresh, or
 // updates it in place if a module with the same name (read from the ZIP's
@@ -1572,19 +1573,19 @@ export async function installManualModule(file: File): Promise<InstalledModule> 
   return res.json();
 }
 
-// DELETE /v1/modules/{name} — org-admin/super-admin only.
+// DELETE /v1/modules/{name} — admin only.
 export function uninstallModule(name: string): Promise<void> {
   return request<void>(`/v1/modules/${encodeURIComponent(name)}`, { method: "DELETE" });
 }
 
-// POST /v1/modules/{name}/update — org-admin/super-admin only.
+// POST /v1/modules/{name}/update — admin only.
 export function updateModule(name: string): Promise<InstalledModule> {
   return request<InstalledModule>(`/v1/modules/${encodeURIComponent(name)}/update`, {
     method: "POST",
   });
 }
 
-// POST /v1/modules/{name}/restart — org-admin/super-admin only. Restarts the
+// POST /v1/modules/{name}/restart — admin only. Restarts the
 // Deno worker from the currently-installed manifest (no version/registry
 // change). Exists so a "degraded" module (crashed worker, see
 // WorkerPool.SetCrashHandler in deno.go) can be recovered without an
@@ -1597,14 +1598,14 @@ export function restartModule(name: string): Promise<InstalledModule> {
   });
 }
 
-// POST /v1/modules/{name}/pin — org-admin/super-admin only.
+// POST /v1/modules/{name}/pin — admin only.
 export function pinModule(name: string): Promise<{ name: string; pinned: boolean }> {
   return request<{ name: string; pinned: boolean }>(`/v1/modules/${encodeURIComponent(name)}/pin`, {
     method: "POST",
   });
 }
 
-// DELETE /v1/modules/{name}/pin — org-admin/super-admin only.
+// DELETE /v1/modules/{name}/pin — admin only.
 export function unpinModule(name: string): Promise<{ name: string; pinned: boolean }> {
   return request<{ name: string; pinned: boolean }>(`/v1/modules/${encodeURIComponent(name)}/pin`, {
     method: "DELETE",

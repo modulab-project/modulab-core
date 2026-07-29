@@ -99,7 +99,7 @@ export default function ProfilePage() {
   // AdminUsersPage.tsx has it for its own Delete button: this page only
   // ever acts on the signed-in user's own account, so there is nothing to
   // distinguish. The backend still enforces the last-remaining-super-admin
-  // guard (guardAgainstLastSuperAdmin, admin.go) - that 400 surfaces below
+  // guard (guardAgainstLastAdmin, admin.go) - that 400 surfaces below
   // as deleteError, same as AdminUsersPage's runAction does for its own
   // guard violations.
   async function handleExportData() {

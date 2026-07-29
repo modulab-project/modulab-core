@@ -728,7 +728,7 @@
     "modules_section": "Meine Module",
     "settings_section": "Einstellungen",
     "system_section": "System",
-    "system_superadmin_only": "Nur Superadmin",
+    "system_superadmin_only": "Nur Admin",
     "system_users": "Benutzer (freigeben, sperren, löschen)",
     "feed_sources_link": "Feed-Quellen (globaler Pool)",
     "module_management_link": "Module (Store & Installation)",
@@ -827,13 +827,13 @@
       "back": "Zurück",
       "saving": "Wird gespeichert…",
       "save": "Speichern",
-      "groups_intro": "Erstelle diese drei Gruppen in deinem OIDC-Provider und weise deinen Account der Super-Admin-Gruppe zu, bevor du fortfährst:",
+      "groups_intro": "Erstelle diese zwei Gruppen in deinem OIDC-Provider und weise deinen Account der Admin-Gruppe zu, bevor du fortfährst:",
       "continue": "Weiter zur Anmeldung",
       "missing": "Noch nicht vollständig, fehlend: {{items}}"
     },
     "step4": {
-      "hint": "Melde dich jetzt mit deinem OIDC-Konto an, um es als Super-Admin zu registrieren.",
-      "not_super_admin": "Dieser Benutzer ist kein Mitglied der Super-Admin-Gruppe. Weise ihn in deinem OIDC-Provider zu und melde dich erneut an.",
+      "hint": "Melde dich jetzt mit deinem OIDC-Konto an, um es als Admin zu registrieren.",
+      "not_admin": "Dieser Benutzer ist kein Mitglied der Admin-Gruppe. Weise ihn in deinem OIDC-Provider zu und melde dich erneut an.",
       "login_button": "Mit OIDC anmelden"
     },
     "step5": {

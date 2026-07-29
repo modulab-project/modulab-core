@@ -23,11 +23,11 @@ type CompleteResponse struct {
 
 // CompleteHandler checks every wizard step's persisted state directly
 // (rather than trusting that the client called each configure endpoint in
-// order) before calling mgr.Complete. This matters most for step 6 ("Super-
-// Admin binden"): a user can call /v1/auth/login and complete an OIDC
-// round-trip without ever landing in the configured Super-Admin group
+// order) before calling mgr.Complete. This matters most for step 6 ("Admin
+// binden"): a user can call /v1/auth/login and complete an OIDC
+// round-trip without ever landing in the configured Admin group
 // (spec section 3.3's Dynamic Prefix Hard Gate leaves them RolePending
-// instead) - db.Pool.HasSuperAdmin is what actually verifies step 6
+// instead) - db.Pool.HasAdmin is what actually verifies step 6
 // succeeded, not just that login was attempted.
 //
 // masterKeyEnv is the raw MODULAB_MASTER_KEY value, forwarded here so the
@@ -86,7 +86,7 @@ func WizardComplete(ctx context.Context, pool *db.Pool) (bool, error) {
 }
 
 // missingSteps reports which of the three prerequisites for completing the
-// wizard (OIDC, group prefix, a bound Super-Admin) have not actually been
+// wizard (OIDC, group prefix, a bound Admin) have not actually been
 // persisted yet, using each step's own *Configured helper so this stays in
 // sync with them automatically.
 //
@@ -114,12 +114,12 @@ func missingSteps(ctx context.Context, pool *db.Pool) ([]string, error) {
 		missing = append(missing, "group_prefix")
 	}
 
-	hasSuperAdmin, err := pool.HasSuperAdmin(ctx)
+	hasAdmin, err := pool.HasAdmin(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if !hasSuperAdmin {
-		missing = append(missing, "super_admin_login")
+	if !hasAdmin {
+		missing = append(missing, "admin_login")
 	}
 
 	return missing, nil

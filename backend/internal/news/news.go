@@ -5,7 +5,7 @@
 //
 // All three user-facing endpoints are protected by a valid, non-pending
 // session (requireActiveSession). The admin CRUD endpoints additionally
-// require org-admin or super-admin role (requireAdminSession), matching
+// require the admin role (requireAdminSession), matching
 // the role model used elsewhere in the backend (auth/admin.go).
 //
 // Valkey is used as a per-feed article cache (key "news:feed:{id}",
@@ -1096,7 +1096,7 @@ func NewsConfigHandler(d auth.Deps) http.HandlerFunc {
 }
 
 // AdminNewsSettingsHandler serves GET and PATCH /v1/admin/news/settings.
-// Requires org-admin or super-admin role.
+// Requires the admin role.
 //
 //	GET  → returns current settings (with defaults for unset keys).
 //	PATCH → partial update; only provided fields are changed.

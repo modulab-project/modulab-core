@@ -57,7 +57,7 @@ export default function AdminSecurityInfoPage() {
   const [revokingIds, setRevokingIds] = useState<Set<string>>(new Set());
   const [revokeError, setRevokeError] = useState<string | null>(null);
   // Backend now gates DELETE /v1/admin/sessions/{id} behind requireRecentLogin
-  // (RequireSuperAdminReauthMiddleware) - forcibly ending someone else's
+  // (RequireAdminReauthMiddleware) - forcibly ending someone else's
   // session has the same immediate effect as locking their account, which
   // already got this step-up treatment. Same pattern as AdminUsersPage.tsx.
   const [reauthRequired, setReauthRequired] = useState(false);

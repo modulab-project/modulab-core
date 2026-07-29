@@ -7,7 +7,7 @@
 // (added since the order was last saved) are appended at the end. User order
 // is persisted via PATCH /v1/quick-links/order.
 //
-// Admin CRUD (POST/PATCH/DELETE /v1/admin/quick-links/*) requires org-admin
+// Admin CRUD (POST/PATCH/DELETE /v1/admin/quick-links/*) requires admin
 // or super-admin role. All other endpoints require any approved session.
 package quicklinks
 

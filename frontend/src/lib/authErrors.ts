@@ -38,7 +38,7 @@ export function authErrorKey(code: string): string {
 // this raw string.
 //
 // .trim() matters here: Go's http.Error (what requireRecentLogin/
-// RequireSuperAdminReauthMiddleware actually call) writes the body via
+// RequireAdminReauthMiddleware actually call) writes the body via
 // fmt.Fprintln, which always appends a trailing "\n" - so the real response
 // body is "reauth_required\n", not "reauth_required". Without trimming,
 // this strict-equality check silently never matched, and every caller fell

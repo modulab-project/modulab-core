@@ -139,7 +139,7 @@ const (
 	// every config write after setup completes.
 	EventSetupOIDCConfigured        = "setup.oidc_configured"
 	EventSetupGroupPrefixConfigured = "setup.group_prefix_configured"
-	// Module lifecycle events (org-admin/super-admin driven, spec section
+	// Module lifecycle events (admin driven, spec section
 	// 4.6-4.9). Installing a module runs arbitrary code (Tier 2/3 modules
 	// spawn a Deno subprocess with DB + scoped network access) - previously
 	// none of install/uninstall/update/pin/unpin produced any audit trail
@@ -161,7 +161,7 @@ const (
 	// has since rotated away. ActorID is left empty: the "actor" is module
 	// code, not a user.
 	EventModuleEgressDenied = "module.egress_denied"
-	// Feed management (org-admin/super-admin), internal/news.
+	// Feed management (admin), internal/news.
 	EventFeedCreated = "feed.created"
 	EventFeedUpdated = "feed.updated"
 	EventFeedDeleted = "feed.deleted"
@@ -171,17 +171,17 @@ const (
 	// EventConfigAISettings above, both of which are audited; this one was
 	// simply missed when feed CRUD got its audit calls.
 	EventNewsSettings = "config.news_settings"
-	// Quick-link management (org-admin/super-admin), internal/quicklinks.
+	// Quick-link management (admin), internal/quicklinks.
 	EventQuickLinkCreated = "quicklink.created"
 	EventQuickLinkUpdated = "quicklink.updated"
 	EventQuickLinkDeleted = "quicklink.deleted"
 	// Manual Module Store registry sync trigger, internal/store.
 	EventStoreSyncTriggered = "store.sync_triggered"
-	// Custom module source management. Super-admin only since 2026-07-22
-	// (previously org-admin/super-admin - elevated alongside adding the
-	// step-up reauth gate on update/delete below: a GitHub token plus the
-	// ability to point Core at arbitrary third-party code is a higher-
-	// value target than typical org-admin-level config). Details includes
+	// Custom module source management. Admin-only since 2026-07-22
+	// (elevated alongside adding the step-up reauth gate on update/delete
+	// below: a GitHub token plus the ability to point Core at arbitrary
+	// third-party code is a higher-value target than typical config
+	// change). Details includes
 	// the repo URL so a later audit review can see exactly which third-
 	// party source was trusted/changed/removed and when - unlike most
 	// audited resources, custom_sources has no separate "list" UI of its own

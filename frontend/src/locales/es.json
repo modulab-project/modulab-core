@@ -728,7 +728,7 @@
     "modules_section": "Mis módulos",
     "settings_section": "Configuración",
     "system_section": "Sistema",
-    "system_superadmin_only": "Solo superadministrador",
+    "system_superadmin_only": "Solo administrador",
     "system_users": "Usuarios (aprobar, bloquear, eliminar)",
     "feed_sources_link": "Fuentes de feeds (grupo global)",
     "module_management_link": "Módulos (tienda e instalación)",
@@ -827,13 +827,13 @@
       "back": "Atrás",
       "saving": "Guardando…",
       "save": "Guardar",
-      "groups_intro": "Cree estos tres grupos en su proveedor OIDC y asigne su cuenta al grupo super-admin antes de continuar:",
+      "groups_intro": "Cree estos dos grupos en su proveedor OIDC y asigne su cuenta al grupo admin antes de continuar:",
       "continue": "Continuar al inicio de sesión",
       "missing": "Aún no está completo, faltan: {{items}}"
     },
     "step4": {
-      "hint": "Inicie sesión ahora con su cuenta OIDC para vincularlo como super-admin.",
-      "not_super_admin": "Este usuario no es miembro del grupo super-admin. Por favor, asígnelo en su proveedor OIDC e inicie sesión de nuevo.",
+      "hint": "Inicie sesión ahora con su cuenta OIDC para vincularlo como admin.",
+      "not_admin": "Este usuario no es miembro del grupo admin. Por favor, asígnelo en su proveedor OIDC e inicie sesión de nuevo.",
       "login_button": "Iniciar sesión con OIDC"
     },
     "step5": {

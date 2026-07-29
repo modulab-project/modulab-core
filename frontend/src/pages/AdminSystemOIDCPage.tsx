@@ -29,7 +29,7 @@ export default function AdminSystemOIDCPage() {
   const [reauthRequired, setReauthRequired] = useState(false);
   const hasFetched = useRef(false);
   // Backend now gates PATCH/DELETE /v1/admin/oidc behind requireRecentLogin
-  // (RequireSuperAdminReauthMiddleware) - this is the trust root for every
+  // (RequireAdminReauthMiddleware) - this is the trust root for every
   // login on the instance, so changing it gets the same step-up treatment
   // as locking/deleting a user (AdminUsersPage.tsx). See that page's
   // identical pattern for why reauth/returnPath are passed to startLogin.

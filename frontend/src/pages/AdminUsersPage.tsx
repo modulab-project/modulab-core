@@ -19,7 +19,7 @@ import { ReauthBanner } from "../components/ReauthBanner";
 // "/admin/users" - replaces the manual "UPDATE users SET approved = true"
 // (and, before this page, no way at all to lock or delete someone) with a
 // real admin UI on top of backend/internal/auth/admin.go's endpoints.
-// org-admin/super-admin only, same role check the backend itself enforces
+// Admin only, same role check the backend itself enforces
 // (requireAdmin) - a non-admin hitting this URL directly gets bounced
 // home rather than shown a dead-end error screen.
 //
@@ -73,7 +73,7 @@ export default function AdminUsersPage() {
     if (!session) {
       return;
     }
-    // Not an org-admin/super-admin - this page isn't for them. Bounced
+    // Not an admin - this page isn't for them. Bounced
     // home rather than shown a dead-end error screen, same as how
     // useAuthenticatedSession itself handles "pending" by bouncing to
     // /pending instead of rendering anything here first.
@@ -101,7 +101,7 @@ export default function AdminUsersPage() {
       } else {
         // lockUser/deleteUser's self- and last-super-admin guards surface
         // here as a 400 with a human-readable message (see admin.go's
-        // guardAgainstSelfOrLastSuperAdmin) - shown as-is rather than a
+        // guardAgainstSelfOrLastAdmin) - shown as-is rather than a
         // generic "something went wrong".
         const message = err instanceof Error ? err.message : t("admin.users.action_error");
         setError(message);

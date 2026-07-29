@@ -7,7 +7,7 @@
 //	GET  /v1/audit-log/actors      — distinct actors for the audit log's filter dropdown
 //
 // All three require a super-admin session (enforced by the
-// auth.RequireSuperAdminMiddleware wrapper that main.go applies to each
+// auth.RequireAdminMiddleware wrapper that main.go applies to each
 // route). OIDC changes are also written to the audit log.
 //
 // Relationship to the Setup Wizard: oidc.go in the setup package handles the
