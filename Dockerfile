@@ -33,7 +33,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /modulab-core ./cmd/co
 # ── Stage 3: Final image ──────────────────────────────────────────────────────
 # Same digest-pinning reasoning as the frontend-builder stage above - this
 # is the base of the image that actually ships, so it matters most here.
-FROM debian:bookworm-slim@sha256:0104b334637a5f19aa9c983a91b54c89887c0984081f2068983107a6f6c21eeb
+FROM debian:bookworm-slim@sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818
 
 # Install Deno (required for Tier 2/3 module handlers) and cosign (required by
 # VerifyCosign, backend/internal/modules/verifier.go, to check official/community
