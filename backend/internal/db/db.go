@@ -171,15 +171,26 @@ func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
 
 	// Role model collapsed from four tiers to three on 2026-07-29: the
 	// org-admin tier was removed entirely, and super-admin was renamed to
-	// plain "admin" (single admin tier going forward). Existing rows are
-	// backfilled *before* the CHECK constraint is tightened below, since
-	// PostgreSQL validates all existing rows against a newly-added
-	// constraint - any row still carrying the old values at migration time
-	// (e.g. an account not yet re-synced from the IdP's group change) would
-	// otherwise make the ALTER TABLE itself fail. org-admin accounts
-	// downgrade to plain 'user' (the operator's own choice - see the
-	// migration plan discussion: existing org-admins are being moved to
-	// the IdP's _user group by hand, not promoted to full admin).
+	// plain "admin" (single admin tier going forward). The pre-existing
+	// CHECK constraint (from the original CREATE TABLE, still in force on
+	// an upgraded database - CREATE TABLE IF NOT EXISTS above is a no-op
+	// against it) only permits 'super-admin'/'org-admin'/'user'/'pending' -
+	// it has never heard of 'admin' at all. So the constraint has to be
+	// dropped *before* the backfill UPDATEs below, not after: backfilling
+	// role='admin' while the old constraint is still in force fails with
+	// "violates check constraint users_role_check" (23514), exactly the
+	// bug this ordering fixes (found 2026-07-29, first deploy of this
+	// migration). Only once every row has been rewritten to one of the two
+	// remaining values does the tightened constraint get added back.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check
+	`); err != nil {
+		return fmt.Errorf("db: drop users_role_check: %w", err)
+	}
+	// org-admin accounts downgrade to plain 'user' (the operator's own
+	// choice - see the migration plan discussion: existing org-admins are
+	// being moved to the IdP's _user group by hand, not promoted to full
+	// admin).
 	if _, err := p.Exec(ctx, `
 		UPDATE users SET role = 'user' WHERE role = 'org-admin'
 	`); err != nil {
@@ -190,16 +201,13 @@ func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
 	`); err != nil {
 		return fmt.Errorf("db: migrate super-admin roles to admin: %w", err)
 	}
-	// Idempotent drop-then-recreate, same pattern as
+	// Idempotent add-back, same pattern as
 	// installed_modules_source_check/module_registry_source_check below:
 	// PostgreSQL has no ADD CONSTRAINT IF NOT EXISTS, so a constraint whose
 	// definition changed has to be dropped and recreated on every boot
-	// rather than only added once.
-	if _, err := p.Exec(ctx, `
-		ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check
-	`); err != nil {
-		return fmt.Errorf("db: drop users_role_check: %w", err)
-	}
+	// rather than only added once. The DROP above already makes this
+	// idempotent across restarts (a later boot's DROP IF EXISTS is a no-op
+	// once this ADD has already run).
 	if _, err := p.Exec(ctx, `
 		ALTER TABLE users ADD CONSTRAINT users_role_check
 		    CHECK (role IN ('admin', 'user', 'pending'))
