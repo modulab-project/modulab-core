@@ -46,6 +46,7 @@
     "sessions_load_error": "Impossible de charger les connexions actives.",
     "sessions_empty": "Aucune connexion active.",
     "sessions_current": "Cet appareil",
+    "sessions_ip": "IP",
     "sessions_last_active": "dernière activité il y a {{duration}}",
     "sessions_end": "Terminer",
     "sessions_end_self_hint": "Pour vous déconnecter de cet appareil, utilisez le bouton de déconnexion ci-dessus.",

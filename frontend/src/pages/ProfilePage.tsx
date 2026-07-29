@@ -326,7 +326,8 @@ function SessionListItem({
           <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{session.country}</p>
         )}
         {session.ip && (
-          <p className="mt-0.5 break-all text-xs text-gray-500 dark:text-gray-400">
+          <p className="mt-0.5 break-all pl-3 text-xs text-gray-500 dark:text-gray-400">
+            <span className="text-gray-400 dark:text-gray-500">{t("profile.sessions_ip")}: </span>
             {session.ip}
             {session.hostname && <> · {session.hostname}</>}
           </p>

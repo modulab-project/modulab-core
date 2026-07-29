@@ -46,6 +46,7 @@
     "sessions_load_error": "Aktive Anmeldungen konnten nicht geladen werden.",
     "sessions_empty": "Keine aktiven Anmeldungen.",
     "sessions_current": "Dieses Gerät",
+    "sessions_ip": "IP",
     "sessions_last_active": "zuletzt aktiv vor {{duration}}",
     "sessions_end": "Beenden",
     "sessions_end_self_hint": "Zum Abmelden dieses Geräts bitte oben abmelden.",
