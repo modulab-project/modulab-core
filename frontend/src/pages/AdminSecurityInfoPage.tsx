@@ -318,9 +318,14 @@ function SessionListItem({
         </div>
         <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400" title={session.user_agent}>
           {device ? `${device.browser} · ${device.os}` : "—"}
-          {session.ip && <> · {session.ip}</>}
           {session.country && <> · {session.country}</>}
         </p>
+        {session.ip && (
+          <p className="mt-0.5 break-all text-xs text-gray-500 dark:text-gray-400">
+            {session.ip}
+            {session.hostname && <> · {session.hostname}</>}
+          </p>
+        )}
         <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
           <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_role")}</dt>
           <dd>{session.role}</dd>

@@ -1166,6 +1166,11 @@ export interface ActiveSession {
   role: string;
   created_at?: string;
   ip?: string;
+  // Reverse-DNS (PTR) name for ip, resolved and cached server-side
+  // (resolveHostname in backend/internal/auth/session.go). Absent whenever
+  // ip has no PTR record, is empty, or the lookup failed/timed out - same
+  // "just omit it" treatment as country below.
+  hostname?: string;
   user_agent?: string;
   // Cloudflare's CF-IPCountry header, captured once at login - absent for
   // sessions created before this field existed, or for logins that never

@@ -322,10 +322,15 @@ function SessionListItem({
             </span>
           )}
         </div>
-        <p className="mt-0.5 break-all text-xs text-gray-500 dark:text-gray-400">
-          {session.ip || "—"}
-          {session.country && <> · {session.country}</>}
-        </p>
+        {session.country && (
+          <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{session.country}</p>
+        )}
+        {session.ip && (
+          <p className="mt-0.5 break-all text-xs text-gray-500 dark:text-gray-400">
+            {session.ip}
+            {session.hostname && <> · {session.hostname}</>}
+          </p>
+        )}
         {session.last_active_seconds_ago !== undefined && (
           <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
             {t("profile.sessions_last_active", { duration: formatDuration(session.last_active_seconds_ago) })}

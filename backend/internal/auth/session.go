@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"strings"
 	"time"
 
@@ -584,17 +585,73 @@ func ValidateSession(ctx context.Context, d Deps, token string) (Session, bool, 
 // asking" - only whoever holds the incoming request's own token can know
 // that.
 type ActiveSession struct {
-	ID                   string `json:"id"`
-	Name                 string `json:"name,omitempty"`
-	Email                string `json:"email,omitempty"`
-	Role                 string `json:"role"`
-	CreatedAt            string `json:"created_at,omitempty"`
-	IP                   string `json:"ip,omitempty"`
+	ID        string `json:"id"`
+	Name      string `json:"name,omitempty"`
+	Email     string `json:"email,omitempty"`
+	Role      string `json:"role"`
+	CreatedAt string `json:"created_at,omitempty"`
+	IP        string `json:"ip,omitempty"`
+	// Hostname is IP's reverse-DNS (PTR) name, if any - resolveHostname's
+	// result. Omitted (empty) whenever IP has no PTR record, IP is empty
+	// (local dev with no real client address), or the lookup itself failed;
+	// the frontend falls back to showing just the IP in that case, same as
+	// Country already does when Cloudflare didn't supply one.
+	Hostname             string `json:"hostname,omitempty"`
 	UserAgent            string `json:"user_agent,omitempty"`
 	Country              string `json:"country,omitempty"`
 	LastActiveSecondsAgo int64  `json:"last_active_seconds_ago,omitempty"`
 	ExpiresInSeconds     int64  `json:"expires_in_seconds,omitempty"`
 	Current              bool   `json:"current,omitempty"`
+}
+
+// rdnsCacheKeyPrefix namespaces resolveHostname's Valkey cache entries from
+// every other "prefix:" key this package uses (sessionKeyPrefix,
+// userSessionsKeyPrefix, oauthStateKeyPrefix, ...).
+const rdnsCacheKeyPrefix = "rdns:"
+
+// rdnsCacheTTL bounds how long a resolved (or negative) reverse-DNS result
+// is trusted before resolveHostname looks it up again. An hour is generous
+// enough that ListActiveSessions/ListActiveSessionsForUser - both called on
+// every page load of System Info / Profile - essentially never re-resolve
+// the same IP twice in a row, while still picking up rDNS changes (a
+// residential IP getting reassigned, a reverse zone being fixed) well
+// within a day.
+const rdnsCacheTTL = time.Hour
+
+// rdnsLookupTimeout bounds a single uncached net.LookupAddr call. Reverse
+// DNS for a dead/unreachable resolver can otherwise hang for many seconds;
+// this is a best-effort display field, not something worth blocking (or
+// failing) either sessions endpoint over, so a slow lookup degrades to
+// "no hostname" rather than delaying the whole response.
+const rdnsLookupTimeout = 2 * time.Second
+
+// resolveHostname returns ip's reverse-DNS name (PTR record), or "" if ip is
+// empty, has no PTR record, or the lookup fails/times out. Results -
+// including the negative "no hostname" case, so a PTR-less IP is not
+// re-looked-up on every single request - are cached in Valkey under
+// rdnsCacheKeyPrefix+ip for rdnsCacheTTL. Best-effort throughout: a Valkey
+// error reading or writing the cache just means this call falls back to (or
+// skips) caching, it never fails the caller.
+func resolveHostname(ctx context.Context, d Deps, ip string) string {
+	if ip == "" {
+		return ""
+	}
+	key := rdnsCacheKeyPrefix + ip
+	if cached, exists, err := d.Valkey.Get(ctx, key); err == nil && exists {
+		return cached
+	}
+
+	lookupCtx, cancel := context.WithTimeout(ctx, rdnsLookupTimeout)
+	defer cancel()
+	var hostname string
+	if names, err := net.DefaultResolver.LookupAddr(lookupCtx, ip); err == nil && len(names) > 0 {
+		hostname = strings.TrimSuffix(names[0], ".")
+	}
+
+	if err := d.Valkey.SetWithTTL(ctx, key, hostname, rdnsCacheTTL); err != nil {
+		log.Printf("auth: resolve hostname for %s: cache set: %v", ip, err)
+	}
+	return hostname
 }
 
 // SessionID returns a stable, non-reversible identifier for token (the hex
@@ -649,6 +706,7 @@ func ListActiveSessions(ctx context.Context, d Deps) ([]ActiveSession, error) {
 			Email:     sess.Email,
 			Role:      sess.Role,
 			IP:        sess.IP,
+			Hostname:  resolveHostname(ctx, d, sess.IP),
 			UserAgent: sess.UserAgent,
 			Country:   sess.Country,
 		}
@@ -735,6 +793,7 @@ func ListActiveSessionsForUser(ctx context.Context, d Deps, subject string) ([]A
 			Email:     sess.Email,
 			Role:      sess.Role,
 			IP:        sess.IP,
+			Hostname:  resolveHostname(ctx, d, sess.IP),
 			UserAgent: sess.UserAgent,
 			Country:   sess.Country,
 		}
