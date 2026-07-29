@@ -320,14 +320,16 @@ function SessionListItem({
           {device ? `${device.browser} · ${device.os}` : "—"}
           {session.country && <> · {session.country}</>}
         </p>
-        {session.ip && (
-          <p className="mt-0.5 break-all pl-3 text-xs text-gray-500 dark:text-gray-400">
-            <span className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_ip")}: </span>
-            {session.ip}
-            {session.hostname && <> · {session.hostname}</>}
-          </p>
-        )}
         <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+          {session.ip && (
+            <>
+              <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_ip")}</dt>
+              <dd className="break-all">
+                {session.ip}
+                {session.hostname && <> · {session.hostname}</>}
+              </dd>
+            </>
+          )}
           <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_role")}</dt>
           <dd>{session.role}</dd>
           <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_login")}</dt>
