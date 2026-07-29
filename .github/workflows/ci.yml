@@ -93,7 +93,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: 24
+          # Matches the Dockerfile's frontend-builder stage (node:26-alpine)
+          # - keeps the lint/test/build steps here running on the same Node
+          # major version that actually builds the shipped image, instead of
+          # letting the two drift silently.
+          node-version: 26
           # Caches npm's download cache keyed on package-lock.json - saves
           # the npm ci step on every PR/push, separate from the Docker layer
           # cache in publish-image-build below.
@@ -272,7 +276,7 @@ jobs:
         env:
           PLATFORM: ${{ matrix.platform }}
       - name: Upload digest
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v7.0.1
         with:
           name: digests-core-${{ env.PLATFORM_PAIR }}
           path: /tmp/digests/*
