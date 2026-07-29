@@ -1070,7 +1070,6 @@ function ProfilePanelContent({
         <AccordionGroup
           icon="ti-server-cog"
           label={t("shell.system_section")}
-          caption={t("shell.system_superadmin_only")}
           open={openGroup === "system"}
           onToggle={() => toggleGroup("system")}
         >
