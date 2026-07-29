@@ -326,11 +326,13 @@ function SessionListItem({
           <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{session.country}</p>
         )}
         {session.ip && (
-          <p className="mt-0.5 break-all pl-3 text-xs text-gray-500 dark:text-gray-400">
-            <span className="text-gray-400 dark:text-gray-500">{t("profile.sessions_ip")}: </span>
-            {session.ip}
-            {session.hostname && <> · {session.hostname}</>}
-          </p>
+          <div className="mt-0.5 break-all pl-3 text-xs text-gray-500 dark:text-gray-400">
+            <p>
+              <span className="text-gray-400 dark:text-gray-500">{t("profile.sessions_ip")}: </span>
+              {session.ip}
+            </p>
+            {session.hostname && <p>{session.hostname}</p>}
+          </div>
         )}
         {session.last_active_seconds_ago !== undefined && (
           <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">

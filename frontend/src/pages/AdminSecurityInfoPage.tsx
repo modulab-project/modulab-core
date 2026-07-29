@@ -325,8 +325,8 @@ function SessionListItem({
             <>
               <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_ip")}</dt>
               <dd className="break-all">
-                {session.ip}
-                {session.hostname && <> · {session.hostname}</>}
+                <div>{session.ip}</div>
+                {session.hostname && <div>{session.hostname}</div>}
               </dd>
             </>
           )}
