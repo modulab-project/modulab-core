@@ -142,6 +142,11 @@ jobs:
   docker-build-check:
     runs-on: ubuntu-latest
     needs: [backend, frontend]
+    # Skipped on the release event: publish-image-build below already does
+    # the real (multi-arch, pushed) build at that point, so running this
+    # amd64-only, no-push build alongside it would just burn runner minutes
+    # on a redundant check.
+    if: github.event_name != 'release'
     permissions:
       contents: read
     steps:
