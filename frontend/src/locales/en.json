@@ -1005,16 +1005,20 @@
       "remove_error": "Could not remove source",
       "private": "Private repository (token on file)",
       "signed": "signable",
-      "signed_hint": "This custom source has a public key on file — its release signature can be verified.",
+      "signed_hint": "This module has a public key on file — its release signature can be verified.",
       "unverified": "unverified",
-      "unverified_hint": "This custom source has no public key on file — it installs without signature verification."
+      "unverified_hint": "This module has no public key on file — it installs without signature verification."
     },
     "manual": {
       "upload": "Upload ZIP",
       "uploading": "Uploading…",
       "upload_ok": "Installed {{name}} {{version}} from the uploaded ZIP (unverified).",
       "upload_error": "Manual install failed",
-      "view_installed": "View in installed modules"
+      "view_installed": "View in installed modules",
+      "confirm_title": "Confirm unverified install",
+      "confirm_body": "“{{filename}}” will be installed or updated without signature verification (Cosign is not checked for manual uploads). Only install ZIPs you trust.",
+      "confirm_proceed": "Install anyway",
+      "confirm_cancel": "Cancel"
     }
   },
   "modules": {

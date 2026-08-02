@@ -129,8 +129,11 @@ func Update(ctx context.Context, d Deps, entry store.Entry) error {
 	}
 
 	// ── 5. Cosign verification ─────────────────────────────────────────────
-	// entry.CosignSigURL (official modules) points at a Sigstore bundle (JSON,
-	// see build-module.sh / VerifyCosign doc comment), not a legacy raw signature.
+	// entry.CosignSigURL points at a Sigstore bundle (JSON, see build-module.sh
+	// / VerifyCosign doc comment), not a legacy raw signature - always for
+	// official modules, and for community/custom modules whenever the
+	// author/admin declared one (see Entry.CosignPubKey's doc comment in
+	// store/registry.go for where each source's key comes from).
 	//
 	// cosignVerified (added 2026-07-05, same as installer.go's install path)
 	// is threaded through to updateInstalledModuleRecord below so the result
@@ -147,9 +150,11 @@ func Update(ctx context.Context, d Deps, entry store.Entry) error {
 		}
 		cosignVerified = ok
 	} else if entry.Source != "official" {
-		// Community/custom: best-effort with conventional .sig path.
-		// entry.CosignPubKey is only set for source="custom" (admin-entered
-		// key) - see installer.go's Install for the matching comment.
+		// Community/custom with no cosign_sig_url declared at all: best-effort
+		// with the conventional .sig path. entry.CosignPubKey is empty here
+		// too (a non-empty pubkey always comes paired with a non-empty
+		// CosignSigURL, handled above) - see installer.go's Install for the
+		// matching comment.
 		if dlErr := downloadFile(dlCtx, sigURL, sigPath, maxSigFileBytes, cred); dlErr == nil {
 			ok, err := VerifyCosign(zipPath, sigPath, entry.CosignPubKey, d.CosignBin)
 			if err == nil {

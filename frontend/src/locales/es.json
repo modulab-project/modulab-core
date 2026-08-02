@@ -1005,16 +1005,20 @@
       "remove_error": "No se pudo eliminar la fuente",
       "private": "Repositorio privado (token guardado)",
       "signed": "verificable",
-      "signed_hint": "Esta fuente propia tiene una clave pública guardada — su firma de versión puede verificarse.",
+      "signed_hint": "Este módulo tiene una clave pública guardada — su firma de versión puede verificarse.",
       "unverified": "sin verificar",
-      "unverified_hint": "Esta fuente propia no tiene una clave pública guardada — se instala sin verificación de firma."
+      "unverified_hint": "Este módulo no tiene una clave pública guardada — se instala sin verificación de firma."
     },
     "manual": {
       "upload": "Subir ZIP",
       "uploading": "Subiendo…",
       "upload_ok": "{{name}} {{version}} instalado desde el ZIP subido (sin verificar).",
       "upload_error": "Fallo la instalación manual",
-      "view_installed": "Ver en módulos instalados"
+      "view_installed": "Ver en módulos instalados",
+      "confirm_title": "Confirmar instalación sin verificar",
+      "confirm_body": "“{{filename}}” se instalará o actualizará sin verificación de firma (Cosign no se comprueba en cargas manuales). Instala solo archivos ZIP en los que confíes.",
+      "confirm_proceed": "Instalar de todos modos",
+      "confirm_cancel": "Cancelar"
     }
   },
   "modules": {

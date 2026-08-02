@@ -55,6 +55,15 @@ export default function StorePage() {
   const [showCustomDialog, setShowCustomDialog] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  // A manually uploaded ZIP bypasses Cosign entirely (see handleManualUpload's
+  // doc comment and installer.go's InstallManual/UpdateManual) - unlike the
+  // registry-driven install button, there's no reviewed source vouching for
+  // this file at all. Holding the selected File here (instead of uploading
+  // immediately on file-picker change) lets a confirm modal sit between
+  // "picked a file" and "actually sent it to the backend", so this is a
+  // deliberate step the admin has to take, not something a stray double-click
+  // triggers (L-5, audit 2026-08-02).
+  const [pendingManualUpload, setPendingManualUpload] = useState<File | null>(null);
 
   const isAdmin = !!session && isAdminRole(session.role);
   // Custom module sources were elevated to admin-only on the backend
@@ -242,7 +251,7 @@ export default function StorePage() {
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     e.target.value = ""; // allow re-selecting the same file next time
-                    if (file) void handleManualUpload(file);
+                    if (file) setPendingManualUpload(file);
                   }}
                 />
               </label>
@@ -280,6 +289,40 @@ export default function StorePage() {
             }}
           />
         )}
+
+        <Modal
+          open={!!pendingManualUpload}
+          onClose={() => setPendingManualUpload(null)}
+          titleId="manual-upload-confirm-title"
+        >
+          <h2 id="manual-upload-confirm-title" className="mb-2 text-base font-semibold text-amber-700 dark:text-amber-300">
+            <i className="ti ti-alert-triangle mr-1.5 text-[16px]" />
+            {t("store.manual.confirm_title")}
+          </h2>
+          <p className="mb-5 text-sm text-gray-600 dark:text-gray-300">
+            {t("store.manual.confirm_body", { filename: pendingManualUpload?.name ?? "" })}
+          </p>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setPendingManualUpload(null)}
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-900"
+            >
+              {t("store.manual.confirm_cancel")}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const file = pendingManualUpload;
+                setPendingManualUpload(null);
+                if (file) void handleManualUpload(file);
+              }}
+              className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm text-amber-800 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200 dark:hover:bg-amber-900"
+            >
+              {t("store.manual.confirm_proceed")}
+            </button>
+          </div>
+        </Modal>
 
         {syncMsg && (
           <div className="mb-4 rounded-lg border border-teal-200 bg-teal-50 px-4 py-2 text-sm text-teal-700 dark:border-teal-800 dark:bg-teal-950 dark:text-teal-300">
@@ -390,7 +433,9 @@ export default function StorePage() {
                       </span>
                     )}
                     <SourceBadge source={entry.source} />
-                    {entry.source === "custom" && <UnverifiedBadge hasPubKey={!!entry.cosign_pubkey} />}
+                    {(entry.source === "custom" || entry.source === "community") && (
+                      <UnverifiedBadge hasPubKey={!!entry.cosign_pubkey} />
+                    )}
                     {entry.category && <CategoryBadge category={entry.category} />}
                   </div>
 

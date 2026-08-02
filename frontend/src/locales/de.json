@@ -1005,16 +1005,20 @@
       "remove_error": "Quelle konnte nicht entfernt werden",
       "private": "Privates Repository (Token hinterlegt)",
       "signed": "signierbar",
-      "signed_hint": "Für diese eigene Quelle ist ein Public Key hinterlegt – die Release-Signatur kann geprüft werden.",
+      "signed_hint": "Für dieses Modul ist ein Public Key hinterlegt – die Release-Signatur kann geprüft werden.",
       "unverified": "unverifiziert",
-      "unverified_hint": "Für diese eigene Quelle ist kein Public Key hinterlegt – Installation ohne Signaturprüfung."
+      "unverified_hint": "Für dieses Modul ist kein Public Key hinterlegt – Installation ohne Signaturprüfung."
     },
     "manual": {
       "upload": "ZIP hochladen",
       "uploading": "Wird hochgeladen…",
       "upload_ok": "{{name}} {{version}} aus der hochgeladenen ZIP installiert (unverifiziert).",
       "upload_error": "Manuelle Installation fehlgeschlagen",
-      "view_installed": "In installierten Modulen ansehen"
+      "view_installed": "In installierten Modulen ansehen",
+      "confirm_title": "Ungeprüfte Installation bestätigen",
+      "confirm_body": "„{{filename}}“ wird ohne Signaturprüfung installiert oder aktualisiert (Cosign wird bei manuellen Uploads nicht geprüft). Installiere nur ZIPs, denen du vertraust.",
+      "confirm_proceed": "Trotzdem installieren",
+      "confirm_cancel": "Abbrechen"
     }
   },
   "modules": {

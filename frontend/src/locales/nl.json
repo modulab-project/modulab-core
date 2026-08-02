@@ -1005,16 +1005,20 @@
       "remove_error": "Bron kon niet worden verwijderd",
       "private": "Privérepository (token opgeslagen)",
       "signed": "verifieerbaar",
-      "signed_hint": "Voor deze eigen bron is een publieke sleutel opgeslagen — de release-handtekening kan worden geverifieerd.",
+      "signed_hint": "Voor deze module is een publieke sleutel opgeslagen — de release-handtekening kan worden geverifieerd.",
       "unverified": "niet geverifieerd",
-      "unverified_hint": "Voor deze eigen bron is geen publieke sleutel opgeslagen — installatie zonder handtekeningverificatie."
+      "unverified_hint": "Voor deze module is geen publieke sleutel opgeslagen — installatie zonder handtekeningverificatie."
     },
     "manual": {
       "upload": "ZIP uploaden",
       "uploading": "Bezig met uploaden…",
       "upload_ok": "{{name}} {{version}} geïnstalleerd vanuit de geüploade ZIP (niet geverifieerd).",
       "upload_error": "Handmatige installatie mislukt",
-      "view_installed": "Bekijken bij geïnstalleerde modules"
+      "view_installed": "Bekijken bij geïnstalleerde modules",
+      "confirm_title": "Niet-geverifieerde installatie bevestigen",
+      "confirm_body": "“{{filename}}” wordt geïnstalleerd of bijgewerkt zonder handtekeningcontrole (Cosign wordt niet gecontroleerd bij handmatige uploads). Installeer alleen ZIP's die je vertrouwt.",
+      "confirm_proceed": "Toch installeren",
+      "confirm_cancel": "Annuleren"
     }
   },
   "modules": {

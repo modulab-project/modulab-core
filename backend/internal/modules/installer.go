@@ -415,11 +415,15 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 
 	// ── 5. Cosign verification ────────────────────────────────────────────
 	// VerifyCosign expects a Sigstore bundle (JSON, `cosign sign-blob --bundle`),
-	// not a legacy raw signature. entry.CosignSigURL (official modules) always
-	// points at a real bundle. The community best-effort `.sig` convention path
-	// below may still be a legacy raw signature from an older tool — that's
-	// fine, VerifyCosign returning an error there just falls through to
-	// cosignSkipped, same as if no sig existed at all.
+	// not a legacy raw signature. entry.CosignSigURL points at a real bundle
+	// for official modules always, and for community/custom modules whenever
+	// the author/admin declared one (see Entry.CosignPubKey's doc comment in
+	// store/registry.go for where each source's key actually comes from - it
+	// is never read from the module's own release repo directly). The
+	// community best-effort `.sig` convention path below (no cosign_sig_url
+	// declared at all) may still be a legacy raw signature from an older tool
+	// — that's fine, VerifyCosign returning an error there just falls through
+	// to cosignSkipped, same as if no sig existed at all.
 	cosignVerified := false
 	cosignSkipped := false
 	if entry.CosignSigURL != "" {
@@ -433,12 +437,13 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 		}
 		cosignVerified = ok
 	} else if entry.Source != "official" {
-		// Community/custom modules without explicit sig URL: try the
-		// conventional .sig path as a best-effort, proceed even if absent.
-		// entry.CosignPubKey is only ever non-empty for source="custom" (the
-		// admin-entered key for that repo); empty for community, which falls
-		// back to the embedded official key inside VerifyCosign and - as
-		// expected - will not verify against it, ending up cosignSkipped.
+		// Community/custom modules with no cosign_sig_url declared at all:
+		// try the conventional .sig path as a best-effort, proceed even if
+		// absent. entry.CosignPubKey is empty here too (a non-empty pubkey
+		// always comes paired with a non-empty CosignSigURL, handled above),
+		// so this falls back to the embedded official key inside
+		// VerifyCosign and - as expected - will not verify against it,
+		// ending up cosignSkipped.
 		if dlErr := downloadFile(dlCtx, sigURL, sigPath, maxSigFileBytes, cred); dlErr == nil {
 			ok, err := VerifyCosign(zipPath, sigPath, entry.CosignPubKey, d.CosignBin)
 			if err == nil {

@@ -36,12 +36,20 @@ type Entry struct {
 	// no signature is available and Cosign verification should be skipped.
 	CosignSigURL string `json:"cosign_sig_url,omitempty"`
 	// CosignPubKey is the Cosign public key (PEM text) to verify this entry's
-	// signature against. Only ever set for source="custom" - the admin
-	// manually enters it when adding the custom source (see
-	// db.CreateCustomSource; deliberately NOT auto-read from the repo itself,
-	// to avoid trust-on-first-use - a repo compromise that swaps its key
-	// can't silently take over verification). Empty for official/community,
-	// which always verify against the embedded key in modules.VerifyCosign.
+	// signature against, when non-empty. Set for source="custom" (the admin
+	// manually enters it when adding the custom source, see
+	// db.CreateCustomSource) and, since L-5 (audit 2026-08-02), optionally for
+	// source="community" (the module author declares it in their
+	// modulab-community discovery entry - see FetchCommunityRegistry and
+	// modulab-community's CONTRIBUTING.md "Signing your release"). Neither
+	// case reads the key from the module's own release repo directly - both
+	// go through a separate, out-of-band trust step (an admin entering it, or
+	// a maintainer reviewing the PR that adds it) specifically so a
+	// compromised release repo can't silently swap the key alongside the
+	// artifact. Empty for official, and for community/custom entries that
+	// don't declare one - both verify against the embedded key in
+	// modules.VerifyCosign instead (official modules) or skip verification
+	// entirely (unsigned community/custom).
 	CosignPubKey  string `json:"cosign_pubkey,omitempty"`
 	Category      string `json:"category"`
 	LatestVersion string `json:"latest_version,omitempty"`

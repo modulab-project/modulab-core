@@ -131,6 +131,21 @@ type communityManifest struct {
 	// modulab-community (e.g. "logo.png"), resolved to an absolute raw URL
 	// below via communityFileRawURLFmt.
 	Logo string `yaml:"logo"`
+	// CosignSigURL/CosignPubKey are optional (L-5, audit 2026-08-02): an
+	// author who signs their release with `cosign sign-blob --bundle`
+	// declares both here, in modulab-community's own manifest.yaml, rather
+	// than in their module's own manifest.yaml inside their own repo. That
+	// placement is the actual security property, not a style choice - this
+	// repo's PR review is what a compromised release repo cannot silently
+	// bypass, so it's the only place a public key can live and still mean
+	// something (see CONTRIBUTING.md's "Signing your release" section for
+	// the full reasoning). Wired straight through to Entry.CosignSigURL/
+	// CosignPubKey below, which installer.go/updater.go already know how to
+	// verify against - no new verification code path needed, community
+	// entries just start reaching the same branch official/custom entries
+	// already use once these are non-empty.
+	CosignSigURL string `yaml:"cosign_sig_url"`
+	CosignPubKey string `yaml:"cosign_pubkey"`
 }
 
 // githubRelease is the subset of fields the GitHub Releases API returns that
@@ -240,6 +255,8 @@ func FetchCommunityRegistry(ctx context.Context, pool *db.Pool) ([]Entry, error)
 			Source:        "community",
 			SourceRepo:    m.SourceRepo,
 			ReleaseAsset:  m.ReleaseURL,
+			CosignSigURL:  m.CosignSigURL,
+			CosignPubKey:  m.CosignPubKey,
 			Category:      m.Category,
 			LatestVersion: m.Version,
 			Description:   m.Description,
