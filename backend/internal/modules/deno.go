@@ -370,20 +370,38 @@ func (p *WorkerPool) buildWorker(name, entrypoint string, opts WorkerOptions) (*
 	// "" (unset in .env, same meaning as before: PII encryption simply
 	// isn't available to any module yet), in which case there is nothing to
 	// derive and both keys below stay empty.
-	var derivedPIIKey, legacyPIIKey string
+	//
+	// CRITICAL (2026-08-02 postmortem, found within hours of shipping the
+	// first version of this): MODULAB_MODULE_PII_KEY must stay the RAW
+	// shared key - identical to every request before this rotation feature
+	// existed - for every module that hasn't actually completed migration
+	// yet. An earlier version of this handed out the derived key
+	// unconditionally and only gated the raw key behind PIIMigrated, which
+	// broke decryption of every already-stored PII value (AI provider keys,
+	// gateway configs, my-place spot names, ...) the moment Core restarted
+	// with this code, for every module regardless of whether its own
+	// handler code had been updated to know about legacyCrypto at all - a
+	// module never opted into this by installing new code, Core just
+	// silently started handing it a key that didn't match its own stored
+	// ciphertext. The derived key is only ever exposed via
+	// MODULAB_MODULE_PII_LEGACY_KEY pre-migration, purely so an updated
+	// module's own migrate-pii-key handler can use it as the re-encryption
+	// target while still reading existing data via the (still-primary) raw
+	// key - see docs/Modul-DB-Sandbox_Plan_2026-08-02.md Part B. Once
+	// PIIMigrated is true (the module's migrate-pii-key handler has
+	// confirmed every row is re-encrypted), MODULAB_MODULE_PII_KEY switches
+	// to the derived key and the legacy grant disappears entirely.
+	var currentPIIKey, legacyPIIKey string
 	if p.piiKey != "" {
 		derived, err := crypto.DeriveModuleKey(p.piiKey, name)
 		if err != nil {
 			return nil, fmt.Errorf("worker %q: derive pii key: %w", name, err)
 		}
-		derivedPIIKey = derived
-		if !opts.PIIMigrated {
-			// Not yet migrated (or the caller couldn't determine that, and
-			// fail-safe defaulted to false - see PIIMigrated's doc comment):
-			// grant the raw shared key too, so this module's own
-			// migrate-pii-key handler can decrypt data still encrypted
-			// under it and re-encrypt under derivedPIIKey.
-			legacyPIIKey = p.piiKey
+		if opts.PIIMigrated {
+			currentPIIKey = derived
+		} else {
+			currentPIIKey = p.piiKey
+			legacyPIIKey = derived
 		}
 	}
 
@@ -402,7 +420,7 @@ func (p *WorkerPool) buildWorker(name, entrypoint string, opts WorkerOptions) (*
 		// when it rebuilds WorkerOptions for a restart - see ReloadEgress's
 		// use of existing.dbRolePassword.
 		dbRolePassword: opts.DBRolePassword,
-		piiKey:         derivedPIIKey,
+		piiKey:         currentPIIKey,
 		legacyPIIKey:   legacyPIIKey,
 		piiMigrated:    opts.PIIMigrated,
 		// moduleRoot is {dataDir}/{name} — the common parent of both the
@@ -869,16 +887,21 @@ type denoWorker struct {
 	// carry it forward into the WorkerOptions it rebuilds for a restart.
 	// See WorkerOptions.DBRolePassword.
 	dbRolePassword string
-	// piiKey is this module's own derived PII key (crypto.DeriveModuleKey of
-	// the owning WorkerPool's raw p.piiKey), or "" if p.piiKey is unset. Not
-	// the raw shared key itself as of the 2026-08-02 security audit (M-1) -
-	// see buildWorker's derivation and WorkerOptions.PIIMigrated.
+	// piiKey is granted to the module as MODULAB_MODULE_PII_KEY - the raw,
+	// pre-rotation shared key (WorkerPool's own p.piiKey) while this
+	// module's PII migration is not yet complete, or this module's derived
+	// key (crypto.DeriveModuleKey) once it is. "" if p.piiKey is unset.
+	// Deliberately NOT always the derived key - see buildWorker's doc
+	// comment on the 2026-08-02 postmortem this reflects.
 	piiKey string
-	// legacyPIIKey is the raw, pre-derivation shared key, granted to the
-	// worker alongside piiKey only while this module's PII migration is not
-	// yet complete (WorkerOptions.PIIMigrated false) - "" once it is. Kept
-	// on the worker, like dbRolePassword and piiMigrated below, purely so
-	// ReloadEgress can carry it forward across a restart.
+	// legacyPIIKey is granted as MODULAB_MODULE_PII_LEGACY_KEY - this
+	// module's derived key, made available only while migration is not yet
+	// complete (WorkerOptions.PIIMigrated false) so an updated module's own
+	// migrate-pii-key handler can use it as its re-encryption target. ""
+	// once migration is done (piiKey has switched to the derived key by
+	// then, so there's nothing left to migrate into). Kept on the worker,
+	// like dbRolePassword and piiMigrated below, purely so ReloadEgress can
+	// carry it forward across a restart.
 	legacyPIIKey string
 	// piiMigrated mirrors WorkerOptions.PIIMigrated, carried over the same
 	// way for the same reason.
@@ -981,14 +1004,23 @@ const db = {
 // rotation is a one-line change in this file, with zero module changes or
 // releases required - module code never sees an env var name at all anymore.
 //
-// As of the 2026-08-02 security audit (M-1), MODULAB_MODULE_PII_KEY is this
-// module's own key, derived by Go (crypto.DeriveModuleKey) from what used
-// to be handed to every module verbatim - a compromised module can no
-// longer decrypt another module's PII with it. MODULAB_MODULE_PII_LEGACY_KEY
-// is that old, still-shared raw key, granted only until this module's own
-// migrate-pii-key handler has re-encrypted its data under the new key (see
-// db.Pool.IsModulePIIMigrated/SetModulePIIMigrated on the Go side) - null
-// once that's done, same as if it were never configured.
+// As of the 2026-08-02 security audit (M-1), this module is moving to its
+// own derived key (crypto.DeriveModuleKey on the Go side) instead of the one
+// raw key every module used to receive verbatim - a compromised module can
+// no longer decrypt another module's PII with it. The switchover happens
+// per module, not globally: MODULAB_MODULE_PII_KEY stays the OLD raw shared
+// key - unchanged from before this rotation feature existed - until this
+// module's own migrate-pii-key handler has re-encrypted its data and Core
+// recorded that (db.Pool.IsModulePIIMigrated/SetModulePIIMigrated on the Go
+// side). MODULAB_MODULE_PII_LEGACY_KEY carries the NEW derived key during
+// that same pre-migration window, purely as the re-encryption target for
+// the migrate-pii-key handler - nothing else in this module should ever
+// read it. Once migration is done, MODULAB_MODULE_PII_KEY becomes the
+// derived key and MODULAB_MODULE_PII_LEGACY_KEY is empty/unset, same as if
+// it were never configured. (Found within hours of first shipping this: an
+// earlier version handed out the derived key unconditionally, which broke
+// decrypting every already-stored PII value the moment Core restarted -
+// see buildWorker's doc comment in deno.go for the full postmortem.)
 //
 // .key / .hashKey are null if the corresponding env var is unset or
 // malformed - module code must treat that the same as "not configured"
