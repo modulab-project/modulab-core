@@ -458,6 +458,68 @@ func provisionSchema(ctx context.Context, d Deps, moduleName, schemaName, roleNa
 	if _, err := d.DB.Exec(ctx, fmt.Sprintf("GRANT ALL ON ALL SEQUENCES IN SCHEMA %s TO %s", quoteIdent(schemaName), quoteIdent(roleName))); err != nil {
 		return "", fmt.Errorf("grant all sequences in %s to %s: %w", schemaName, roleName, err)
 	}
+
+	// Reassign ownership of any pre-existing tables/sequences in this schema
+	// to the module's own role - found 2026-08-03 chasing "must be owner of
+	// table coupons" on payback-coupons' first update after this DB-role
+	// system shipped. A module installed before this feature existed had its
+	// tables/sequences created under Core's own DB user; the GRANTs above
+	// only grant privileges (SELECT/INSERT/UPDATE/DELETE/...), never
+	// ownership. Any migration statement that needs ownership - CREATE
+	// INDEX, ALTER TABLE ADD COLUMN, DROP INDEX, COMMENT ON, and so on -
+	// then fails with exactly that error, even though the statement itself
+	// is wrapped in IF NOT EXISTS/IF EXISTS and would otherwise be a safe
+	// no-op re-run. Runs via d.DB (Core's own connection): only an object's
+	// current owner or a superuser can reassign its ownership, so the
+	// module's own role has no privilege to do this to itself. Safe to
+	// re-run on every call - ALTER TABLE/SEQUENCE ... OWNER TO an owner the
+	// object already has is a harmless no-op.
+	tableRows, err := d.DB.Query(ctx, `SELECT tablename FROM pg_tables WHERE schemaname = $1`, schemaName)
+	if err != nil {
+		return "", fmt.Errorf("list tables in %s: %w", schemaName, err)
+	}
+	var tableNames []string
+	for tableRows.Next() {
+		var name string
+		if err := tableRows.Scan(&name); err != nil {
+			tableRows.Close()
+			return "", fmt.Errorf("scan table name in %s: %w", schemaName, err)
+		}
+		tableNames = append(tableNames, name)
+	}
+	tableRows.Close()
+	if err := tableRows.Err(); err != nil {
+		return "", fmt.Errorf("list tables in %s: %w", schemaName, err)
+	}
+	for _, name := range tableNames {
+		if _, err := d.DB.Exec(ctx, fmt.Sprintf("ALTER TABLE %s.%s OWNER TO %s", quoteIdent(schemaName), quoteIdent(name), quoteIdent(roleName))); err != nil {
+			return "", fmt.Errorf("reassign owner of table %s.%s to %s: %w", schemaName, name, roleName, err)
+		}
+	}
+
+	seqRows, err := d.DB.Query(ctx, `SELECT sequencename FROM pg_sequences WHERE schemaname = $1`, schemaName)
+	if err != nil {
+		return "", fmt.Errorf("list sequences in %s: %w", schemaName, err)
+	}
+	var seqNames []string
+	for seqRows.Next() {
+		var name string
+		if err := seqRows.Scan(&name); err != nil {
+			seqRows.Close()
+			return "", fmt.Errorf("scan sequence name in %s: %w", schemaName, err)
+		}
+		seqNames = append(seqNames, name)
+	}
+	seqRows.Close()
+	if err := seqRows.Err(); err != nil {
+		return "", fmt.Errorf("list sequences in %s: %w", schemaName, err)
+	}
+	for _, name := range seqNames {
+		if _, err := d.DB.Exec(ctx, fmt.Sprintf("ALTER SEQUENCE %s.%s OWNER TO %s", quoteIdent(schemaName), quoteIdent(name), quoteIdent(roleName))); err != nil {
+			return "", fmt.Errorf("reassign owner of sequence %s.%s to %s: %w", schemaName, name, roleName, err)
+		}
+	}
+
 	// The actual access boundary: without this, the role would inherit
 	// PUBLIC's default USAGE grant on the public schema (every role does,
 	// by default, in Postgres) and could resolve/reference anything else
