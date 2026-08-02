@@ -307,38 +307,59 @@ function SessionListItem({
   const device = session.user_agent ? parseUserAgent(session.user_agent, t) : t("profile.sessions_unknown_device");
   return (
     <li
-      className={`flex flex-col gap-2 rounded-lg border px-3 py-2.5 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-3 ${
+      className={`flex flex-col gap-2 rounded-lg border px-3 py-2.5 text-sm sm:flex-row sm:items-start sm:justify-between sm:gap-3 ${
         session.current
           ? "border-teal-200 bg-teal-50/60 dark:border-teal-900 dark:bg-teal-950/30"
           : "border-gray-200 dark:border-gray-800"
       }`}
     >
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="font-medium">{device}</span>
+          <span className="font-medium">
+            {device}
+            {session.country && <> · {session.country}</>}
+          </span>
           {session.current && (
             <span className="whitespace-nowrap rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-medium text-teal-700 dark:bg-teal-900 dark:text-teal-300">
               {t("profile.sessions_current")}
             </span>
           )}
         </div>
-        {session.country && (
-          <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{session.country}</p>
-        )}
-        {session.ip && (
-          <div className="mt-0.5 break-all pl-3 text-xs text-gray-500 dark:text-gray-400">
-            <p>
-              <span className="text-gray-400 dark:text-gray-500">{t("profile.sessions_ip")}: </span>
-              {session.ip}
-            </p>
-            {session.hostname && <p>{session.hostname}</p>}
-          </div>
-        )}
-        {session.last_active_seconds_ago !== undefined && (
-          <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-            {t("profile.sessions_last_active", { duration: formatDuration(session.last_active_seconds_ago) })}
-          </p>
-        )}
+        {/* Same dt/dd grid as AdminSecurityInfoPage.tsx's SessionListItem -
+            same fields (IP+hostname, login time, last active, expires) as
+            that admin-only view already showed for this exact session, just
+            without Name/Role (this list is always "you", so both are
+            redundant here - see the ClaimValue-adjacent reasoning further
+            up this file for why Profile already omits IdP-role-only
+            fields). Kept as one shared grid shape rather than each row's
+            own indentation so the two pages' session cards read the same
+            way - see feedback that flagged the previous pl-3-per-row
+            version here for drifting out of alignment with the admin page. */}
+        <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+          {session.ip && (
+            <>
+              <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_ip")}</dt>
+              <dd className="break-all">
+                <div>{session.ip}</div>
+                {session.hostname && <div>{session.hostname}</div>}
+              </dd>
+            </>
+          )}
+          <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_login")}</dt>
+          <dd>{session.created_at ? new Date(session.created_at).toLocaleString() : "—"}</dd>
+          <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_last_active")}</dt>
+          <dd>
+            {session.last_active_seconds_ago !== undefined
+              ? t("admin.system_info.last_active_ago", { duration: formatDuration(session.last_active_seconds_ago) })
+              : "—"}
+          </dd>
+          <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_expires")}</dt>
+          <dd>
+            {session.expires_in_seconds !== undefined
+              ? t("admin.system_info.expires_in", { duration: formatDuration(session.expires_in_seconds) })
+              : "—"}
+          </dd>
+        </dl>
       </div>
       <button
         type="button"

@@ -46,8 +46,6 @@
     "sessions_load_error": "Could not load active sign-ins.",
     "sessions_empty": "No active sign-ins.",
     "sessions_current": "This device",
-    "sessions_ip": "IP",
-    "sessions_last_active": "last active {{duration}} ago",
     "sessions_end": "End",
     "sessions_end_self_hint": "To sign out this device, use the sign-out button above.",
     "sessions_end_confirm": "End the sign-in on {{device}}?",

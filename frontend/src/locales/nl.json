@@ -46,8 +46,6 @@
     "sessions_load_error": "Actieve aanmeldingen konden niet worden geladen.",
     "sessions_empty": "Geen actieve aanmeldingen.",
     "sessions_current": "Dit apparaat",
-    "sessions_ip": "IP",
-    "sessions_last_active": "laatst actief {{duration}} geleden",
     "sessions_end": "Beëindigen",
     "sessions_end_self_hint": "Gebruik de afmeldknop hierboven om dit apparaat af te melden.",
     "sessions_end_confirm": "Aanmelding op {{device}} beëindigen?",

@@ -46,8 +46,6 @@
     "sessions_load_error": "No se pudieron cargar las sesiones activas.",
     "sessions_empty": "No hay sesiones activas.",
     "sessions_current": "Este dispositivo",
-    "sessions_ip": "IP",
-    "sessions_last_active": "activo por última vez hace {{duration}}",
     "sessions_end": "Finalizar",
     "sessions_end_self_hint": "Para cerrar sesión en este dispositivo, usa el botón de cerrar sesión de arriba.",
     "sessions_end_confirm": "¿Finalizar la sesión en {{device}}?",
