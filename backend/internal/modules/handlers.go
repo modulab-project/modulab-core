@@ -3,6 +3,7 @@ package modules
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -631,65 +632,13 @@ func RestartModuleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 			return
 		}
 
-		// Same runtime-egress-preservation dance as UpdateModuleHandler above
-		// (see CurrentModuleEgressHosts's doc comment in deno.go): a plain
-		// Stop/Start would otherwise silently drop hosts a dynamic_egress
-		// module discovered at runtime (e.g. unifi-network's configured
-		// gateway IPs) back down to just the manifest's static allowlist.
-		runtimeEgressHosts, hadRuntimeHosts := d.Workers.CurrentModuleEgressHosts(name)
-
-		_ = d.Workers.Stop(name)
-
-		var mf struct {
-			Handler            string        `json:"handler"`
-			EgressAllowlist    []string      `json:"egress_allowlist"`
-			Jobs               []ManifestJob `json:"jobs"`
-			TLSSkipVerify      bool          `json:"tls_skip_verify"`
-			DynamicEgress      bool          `json:"dynamic_egress"`
-			EgressHostsHandler string        `json:"egress_hosts_handler"`
-			DynamicEgressAllow []string      `json:"dynamic_egress_allow"`
-		}
-		if row.Manifest != nil {
-			_ = json.Unmarshal(row.Manifest, &mf)
-		}
-		if mf.Handler == "" {
-			http.Error(w, "module manifest has no handler", http.StatusUnprocessableEntity)
-			return
-		}
-
-		destDir := filepath.Join(d.DataDir, name)
-		entrypoint := filepath.Join(destDir, mf.Handler)
-		egressHosts := mf.EgressAllowlist
-		if mf.DynamicEgress && hadRuntimeHosts && len(runtimeEgressHosts) > 0 {
-			// Same re-check as the update path above - see its comment. A
-			// plain restart is not expected to change the policy, but it is
-			// also the operation an admin reaches for after editing one, so
-			// silently reapplying unchecked hosts here would be the obvious
-			// way for the update-path check to be worked around.
-			egressHosts = carryOverRuntimeEgress(name, runtimeEgressHosts, mf.DynamicEgressAllow, "restart")
-		}
-		opts := WorkerOptions{
-			EgressHosts:    egressHosts,
-			Jobs:           ResolveJobEntrypoints(destDir, mf.Jobs, mf.EgressHostsHandler),
-			SkipTLSVerify:  mf.TLSSkipVerify,
-			EgressPolicy:   mf.DynamicEgressAllow,
-			DBRolePassword: moduleDBRolePassword(r.Context(), d, name),
-			PIIMigrated:    modulePIIMigrated(r.Context(), d, name),
-		}
-		if err := d.Workers.Start(name, entrypoint, opts); err != nil {
-			http.Error(w, fmt.Sprintf("failed to restart worker: %v", err), http.StatusInternalServerError)
-			return
-		}
-		if mf.DynamicEgress && mf.EgressHostsHandler != "" {
-			if hosts, ok := d.Workers.QueryEgressHosts(r.Context(), name); ok {
-				if err := d.Workers.ReloadEgress(name, hosts); err != nil {
-					log.Printf("modules: restart %q: egress hosts reload failed: %v", name, err)
-				}
+		if err := restartModuleWorker(r.Context(), d, name); err != nil {
+			if errors.Is(err, errModuleManifestNoHandler) {
+				http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+			} else {
+				http.Error(w, fmt.Sprintf("failed to restart worker: %v", err), http.StatusInternalServerError)
 			}
-		}
-
-		if _, err := d.DB.UpdateModuleStatus(r.Context(), name, db.ModuleStatusActive); err != nil {
-			log.Printf("modules: restart %q: set status active: %v", name, err)
+			return
 		}
 		row, _, _ = d.DB.GetInstalledModule(r.Context(), name)
 
@@ -813,6 +762,29 @@ func MigratePIIKeyHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 			TargetID:   name,
 		})
 
+		// Restart the worker so it picks up PIIMigrated=true fresh from the
+		// DB and switches its ambient MODULAB_MODULE_PII_KEY over to the
+		// derived key (see buildWorker's doc comment in deno.go). Without
+		// this, the worker that just ran the migration keeps running with
+		// its pre-migration env (raw key as primary) even though every row
+		// it touched is now re-encrypted under the derived key - every
+		// decrypt on that still-running process fails until *something*
+		// eventually restarts it (found 2026-08-02: this exact gap, on
+		// my-place, right after a successful migration - GET /config's
+		// maptiler_api_key decrypt started failing with "OperationError:
+		// Decryption failed" because the running worker was still handing
+		// decrypt() the old raw key against now-derived-key ciphertext).
+		// Best-effort: the migration itself already succeeded and is
+		// durably recorded by this point, so a restart hiccup here must not
+		// turn that success into an HTTP error the admin would feel
+		// compelled to retry - it just means restartModule (or the next
+		// natural restart/update) picks up the correct key instead. (No
+		// Tier check here - this handler already refused Tier < 2 modules
+		// earlier, before ever dispatching to a worker.)
+		if err := restartModuleWorker(r.Context(), d, name); err != nil {
+			log.Printf("modules: migrate-pii-key %q: post-migration restart failed: %v - restart the module manually to pick up the derived key", name, err)
+		}
+
 		// Return the updated InstalledModuleRow (pii_migrated_at now set),
 		// same response shape as RestartModuleHandler/UpdateModuleHandler -
 		// lets the frontend update its local module list the same way it
@@ -821,6 +793,83 @@ func MigratePIIKeyHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 		row, _, _ = d.DB.GetInstalledModule(r.Context(), name)
 		writeModuleJSON(w, http.StatusOK, row)
 	}
+}
+
+// errModuleManifestNoHandler lets restartModuleWorker's callers distinguish
+// "this module's manifest is malformed" (422, RestartModuleHandler) from
+// any other restart failure (500) without string-matching an error message.
+var errModuleManifestNoHandler = errors.New("module manifest has no handler")
+
+// restartModuleWorker stops and restarts name's Deno worker from its
+// current installed manifest, preserving any runtime-discovered egress
+// hosts (see CurrentModuleEgressHosts's doc comment) and reading a fresh
+// DBRolePassword/PIIMigrated state from the DB - the same steps
+// RestartModuleHandler used to perform inline, pulled out so
+// MigratePIIKeyHandler can trigger the same restart after a successful
+// migration without duplicating this block. Fetches its own fresh
+// InstalledModuleRow rather than taking one from the caller, so it always
+// restarts from the current manifest/status even if the caller's own copy
+// is momentarily stale (e.g. MigratePIIKeyHandler calling this right after
+// SetModulePIIMigrated). RestartModuleHandler still does its own
+// tier/status/lookup checks before calling this, unchanged from before this
+// was extracted.
+func restartModuleWorker(ctx context.Context, d Deps, name string) error {
+	row, found, err := d.DB.GetInstalledModule(ctx, name)
+	if err != nil {
+		return fmt.Errorf("look up module: %w", err)
+	}
+	if !found {
+		return fmt.Errorf("module not installed")
+	}
+
+	runtimeEgressHosts, hadRuntimeHosts := d.Workers.CurrentModuleEgressHosts(name)
+
+	_ = d.Workers.Stop(name)
+
+	var mf struct {
+		Handler            string        `json:"handler"`
+		EgressAllowlist    []string      `json:"egress_allowlist"`
+		Jobs               []ManifestJob `json:"jobs"`
+		TLSSkipVerify      bool          `json:"tls_skip_verify"`
+		DynamicEgress      bool          `json:"dynamic_egress"`
+		EgressHostsHandler string        `json:"egress_hosts_handler"`
+		DynamicEgressAllow []string      `json:"dynamic_egress_allow"`
+	}
+	if row.Manifest != nil {
+		_ = json.Unmarshal(row.Manifest, &mf)
+	}
+	if mf.Handler == "" {
+		return errModuleManifestNoHandler
+	}
+
+	destDir := filepath.Join(d.DataDir, name)
+	entrypoint := filepath.Join(destDir, mf.Handler)
+	egressHosts := mf.EgressAllowlist
+	if mf.DynamicEgress && hadRuntimeHosts && len(runtimeEgressHosts) > 0 {
+		egressHosts = carryOverRuntimeEgress(name, runtimeEgressHosts, mf.DynamicEgressAllow, "restart")
+	}
+	opts := WorkerOptions{
+		EgressHosts:    egressHosts,
+		Jobs:           ResolveJobEntrypoints(destDir, mf.Jobs, mf.EgressHostsHandler),
+		SkipTLSVerify:  mf.TLSSkipVerify,
+		EgressPolicy:   mf.DynamicEgressAllow,
+		DBRolePassword: moduleDBRolePassword(ctx, d, name),
+		PIIMigrated:    modulePIIMigrated(ctx, d, name),
+	}
+	if err := d.Workers.Start(name, entrypoint, opts); err != nil {
+		return fmt.Errorf("start worker: %w", err)
+	}
+	if mf.DynamicEgress && mf.EgressHostsHandler != "" {
+		if hosts, ok := d.Workers.QueryEgressHosts(ctx, name); ok {
+			if err := d.Workers.ReloadEgress(name, hosts); err != nil {
+				log.Printf("modules: restart %q: egress hosts reload failed: %v", name, err)
+			}
+		}
+	}
+	if _, err := d.DB.UpdateModuleStatus(ctx, name, db.ModuleStatusActive); err != nil {
+		log.Printf("modules: restart %q: set status active: %v", name, err)
+	}
+	return nil
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
