@@ -9,12 +9,16 @@ import {
   checkModuleUpdates,
   updateModule,
   restartModule,
+  migratePiiKey,
   uninstallModule,
   pinModule,
   unpinModule,
   type InstalledModule,
 } from "../lib/api";
 import { useAuthenticatedSession } from "../lib/useSession";
+import { useLoginRedirect } from "../lib/useLoginRedirect";
+import { isReauthRequiredError } from "../lib/authErrors";
+import { ReauthBanner } from "../components/ReauthBanner";
 import { AppShell } from "../components/AppShell";
 import { isAdminRole } from "../lib/roles";
 
@@ -29,6 +33,15 @@ export default function ModulesPage() {
   const [busyName, setBusyName] = useState<string | null>(null);
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [updatesMsg, setUpdatesMsg] = useState<string | null>(null);
+  // Same reauth pattern as AdminUsersPage.tsx's lock/delete actions -
+  // migrate-pii-key is the one module action gated by adminReauthOnly
+  // (backend/internal/modules/handlers.go's MigratePIIKeyHandler), since
+  // withholding the legacy key afterwards is hard to undo for any row the
+  // module failed to re-encrypt.
+  const [reauthRequired, setReauthRequired] = useState(false);
+  const { waiting: reauthWaiting, startLogin } = useLoginRedirect(() => {
+    setReauthRequired(false);
+  });
 
   const isAdmin = !!session && isAdminRole(session.role);
 
@@ -103,6 +116,24 @@ export default function ModulesPage() {
     }
   }
 
+  async function handleMigratePiiKey(name: string) {
+    if (!confirm(t("modules.migrate_pii_key_confirm", { name }))) return;
+    setBusyName(name);
+    setReauthRequired(false);
+    try {
+      const updated = await migratePiiKey(name);
+      setModules((prev) => prev.map((m) => (m.name === name ? updated : m)));
+    } catch (e) {
+      if (isReauthRequiredError(e)) {
+        setReauthRequired(true);
+      } else {
+        alert(`${t("modules.migrate_pii_key_error")}: ${(e as Error).message}`);
+      }
+    } finally {
+      setBusyName(null);
+    }
+  }
+
   async function handleUninstall(name: string, pinned: boolean) {
     if (pinned) {
       alert(t("modules.pinned_uninstall_blocked"));
@@ -168,6 +199,14 @@ export default function ModulesPage() {
           <div className="mb-4 rounded-lg border border-teal-200 bg-teal-50 px-4 py-2 text-sm text-teal-700 dark:border-teal-800 dark:bg-teal-950 dark:text-teal-300">
             {updatesMsg}
           </div>
+        )}
+
+        {reauthRequired && (
+          <ReauthBanner
+            waiting={reauthWaiting}
+            onReauth={() => startLogin({ reauth: true, returnPath: window.location.pathname })}
+            onDismiss={() => setReauthRequired(false)}
+          />
         )}
 
         {error && (
@@ -254,6 +293,22 @@ export default function ModulesPage() {
                           <i className="ti ti-arrow-up text-[13px]" />
                         )}
                         {t("modules.update")}
+                      </button>
+                    )}
+                    {mod.tier >= 2 && !mod.pii_migrated_at && (
+                      <button
+                        type="button"
+                        onClick={() => handleMigratePiiKey(mod.name)}
+                        disabled={isBusy || mod.status !== "active"}
+                        title={t("modules.migrate_pii_key_hint")}
+                        className="flex items-center gap-1 rounded-lg border border-amber-300 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50 dark:border-amber-800 dark:text-amber-400 dark:hover:bg-amber-950"
+                      >
+                        {isBusy ? (
+                          <i className="ti ti-loader-2 animate-spin text-[13px]" />
+                        ) : (
+                          <i className="ti ti-key text-[13px]" />
+                        )}
+                        {t("modules.migrate_pii_key")}
                       </button>
                     )}
                     <button

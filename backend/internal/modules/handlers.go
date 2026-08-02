@@ -813,9 +813,13 @@ func MigratePIIKeyHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 			TargetID:   name,
 		})
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(resp.Body)
+		// Return the updated InstalledModuleRow (pii_migrated_at now set),
+		// same response shape as RestartModuleHandler/UpdateModuleHandler -
+		// lets the frontend update its local module list the same way it
+		// already does for those actions, instead of a one-off body shape
+		// it would have to special-case.
+		row, _, _ = d.DB.GetInstalledModule(r.Context(), name)
+		writeModuleJSON(w, http.StatusOK, row)
 	}
 }
 

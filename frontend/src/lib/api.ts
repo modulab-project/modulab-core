@@ -1449,6 +1449,11 @@ export interface InstalledModule {
   logo_url?: string;
   installed_at: string;
   updated_at: string;
+  // Absent/undefined for a Tier 2/3 module that still needs its
+  // migrate-pii-key handler run (see docs/Modul-DB-Sandbox_Plan_2026-08-02.md
+  // Part B) - ModulesPage.tsx uses this to show the "Migrate PII key" action.
+  // Always absent for a Tier 1 module (no worker, nothing to migrate).
+  pii_migrated_at?: string;
 }
 
 export interface ModuleUpdateInfo {
@@ -1605,6 +1610,21 @@ export function updateModule(name: string): Promise<InstalledModule> {
 // DB update.
 export function restartModule(name: string): Promise<InstalledModule> {
   return request<InstalledModule>(`/v1/modules/${encodeURIComponent(name)}/restart`, {
+    method: "POST",
+  });
+}
+
+// POST /v1/admin/modules/{name}/migrate-pii-key — admin only, reauth-gated
+// (backend/internal/auth's RequireAdminReauthMiddleware, same as SMTP/OIDC
+// config and session revoke - a one-time, hard-to-undo action). Triggers the
+// module's own migrate-pii-key handler and, on success, returns the updated
+// InstalledModule with pii_migrated_at now set - see
+// docs/Modul-DB-Sandbox_Plan_2026-08-02.md Part B. Rejects with an ApiError
+// callers should check via lib/authErrors.ts's isReauthRequiredError if the
+// caller's own login is too old, same as AdminUsersPage.tsx's lock/delete
+// actions do.
+export function migratePiiKey(name: string): Promise<InstalledModule> {
+  return request<InstalledModule>(`/v1/admin/modules/${encodeURIComponent(name)}/migrate-pii-key`, {
     method: "POST",
   });
 }

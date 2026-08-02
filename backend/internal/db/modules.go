@@ -592,6 +592,12 @@ type InstalledModuleRow struct {
 	LogoURL          *string         `json:"logo_url,omitempty"`
 	InstalledAt      time.Time       `json:"installed_at"`
 	UpdatedAt        time.Time       `json:"updated_at"`
+	// PIIMigratedAt is nil for a Tier 2/3 module that still needs its
+	// migrate-pii-key handler run (see docs/Modul-DB-Sandbox_Plan_2026-08-02.md
+	// Part B) - the frontend's ModulesPage uses this to show the "Migrate PII
+	// key" action button. Always nil for a Tier 1 module (no worker, nothing
+	// to migrate).
+	PIIMigratedAt *time.Time `json:"pii_migrated_at,omitempty"`
 }
 
 // InsertInstalledModule writes a new module row with status "installing".
@@ -637,12 +643,12 @@ func (p *Pool) GetInstalledModule(ctx context.Context, name string) (InstalledMo
 	err := p.QueryRow(ctx, `
 		SELECT name, version, tier, source, release_url, sha256, manifest,
 		       status, pinned, cosign_verified, cached_zip_path, available_version, last_update_check,
-		       logo_url, installed_at, updated_at
+		       logo_url, installed_at, updated_at, pii_migrated_at
 		FROM installed_modules WHERE name = $1
 	`, name).Scan(
 		&r.Name, &r.Version, &r.Tier, &r.Source, &r.ReleaseURL, &r.SHA256, &r.Manifest,
 		&r.Status, &r.Pinned, &r.CosignVerified, &r.CachedZipPath, &r.AvailableVersion, &r.LastUpdateCheck,
-		&r.LogoURL, &r.InstalledAt, &r.UpdatedAt,
+		&r.LogoURL, &r.InstalledAt, &r.UpdatedAt, &r.PIIMigratedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -658,7 +664,7 @@ func (p *Pool) ListInstalledModules(ctx context.Context) ([]InstalledModuleRow, 
 	rows, err := p.Query(ctx, `
 		SELECT name, version, tier, source, release_url, sha256, manifest,
 		       status, pinned, cosign_verified, cached_zip_path, available_version, last_update_check,
-		       logo_url, installed_at, updated_at
+		       logo_url, installed_at, updated_at, pii_migrated_at
 		FROM installed_modules ORDER BY name ASC
 	`)
 	if err != nil {
@@ -673,7 +679,7 @@ func (p *Pool) ListInstalledModules(ctx context.Context) ([]InstalledModuleRow, 
 			&r.Name, &r.Version, &r.Tier, &r.Source, &r.ReleaseURL, &r.SHA256, &r.Manifest,
 			&r.Status, &r.Pinned, &r.CosignVerified, &r.CachedZipPath, &r.AvailableVersion, &r.LastUpdateCheck,
 			&r.LogoURL,
-			&r.InstalledAt, &r.UpdatedAt,
+			&r.InstalledAt, &r.UpdatedAt, &r.PIIMigratedAt,
 		); err != nil {
 			return nil, fmt.Errorf("db: scan installed_module: %w", err)
 		}
