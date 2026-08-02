@@ -42,7 +42,10 @@ services:
   # volumes, networks, swarm, etc.) is denied by default. Runs on its own
   # network that nothing else in this stack can reach.
   docker-socket-proxy:
-    image: tecnativa/docker-socket-proxy:latest
+    # Pinned to a version tag rather than "latest" (2026-08-02 ops pass) -
+    # same mutable-tag risk as the other images in this file.
+    # TODO: pin to a specific digest like the other images below once verified (see commented images for the pattern)
+    image: tecnativa/docker-socket-proxy:0.2
     restart: unless-stopped
     environment:
       # Read-only, GET-only endpoints Traefik's Docker provider needs:

@@ -684,7 +684,7 @@ func MeHandler(d Deps) http.HandlerFunc {
 		if issuer, exists, err := setup.IssuerURL(ctx, d.Pool, d.MasterKeyEnv); err == nil && exists {
 			resp.AccountSettingsURL = strings.TrimRight(issuer, "/") + "/settings/account"
 		}
-		writeJSON(w, http.StatusOK, resp)
+		httperr.JSON(w, http.StatusOK, resp)
 	}
 }
 
@@ -727,6 +727,22 @@ func DeleteSelfHandler(d Deps) http.HandlerFunc {
 		}
 		// Same sliding-cookie reasoning as MeHandler above.
 		setSessionCookie(w, token)
+		// Same Origin/CSRF checks as RequireActiveSession (admin.go). This
+		// handler validates the session itself rather than going through
+		// RequireActiveSession because that helper also rejects RolePending
+		// sessions, and DeleteSelf deliberately does not - see the doc
+		// comment above. The CSRF/Origin guard is independent of that role
+		// exception, so it is inlined here rather than skipped: without it,
+		// an installed module's JS (same realm, no iframe isolation) could
+		// delete the calling user's account via a same-origin fetch that
+		// carries the session cookie automatically.
+		if !originAllowed(d, r) {
+			http.Error(w, "origin not allowed", http.StatusForbidden)
+			return
+		}
+		if !validateCSRF(w, r, sess) {
+			return
+		}
 		if !requireRecentLogin(ctx, d, w, sess, "delete_self") {
 			return
 		}
@@ -824,6 +840,21 @@ func UserPrefsHandler(d Deps) http.HandlerFunc {
 		}
 		// Same sliding-cookie reasoning as MeHandler above.
 		setSessionCookie(w, token)
+		// Same Origin/CSRF checks as RequireActiveSession (admin.go), inlined
+		// rather than delegated because this handler validates the session
+		// itself instead of going through RequireActiveSession. validateCSRF
+		// is a no-op for GET (csrfProtectedMethod), so this is safe to call
+		// unconditionally for both methods this handler serves. Without it,
+		// an installed module's JS (same realm, no iframe isolation) could
+		// silently rewrite the calling user's UI language/theme via a
+		// same-origin PATCH that carries the session cookie automatically.
+		if !originAllowed(d, r) {
+			http.Error(w, "origin not allowed", http.StatusForbidden)
+			return
+		}
+		if !validateCSRF(w, r, sess) {
+			return
+		}
 
 		switch r.Method {
 		case http.MethodGet:
@@ -837,7 +868,7 @@ func UserPrefsHandler(d Deps) http.HandlerFunc {
 				http.Error(w, "internal error", http.StatusInternalServerError)
 				return
 			}
-			writeJSON(w, http.StatusOK, UserPrefsResponse{UILanguage: lang, Theme: theme})
+			httperr.JSON(w, http.StatusOK, UserPrefsResponse{UILanguage: lang, Theme: theme})
 
 		case http.MethodPatch:
 			// Pointer fields, not plain strings: the frontend now sends a
@@ -1216,18 +1247,46 @@ func clearSessionCookie(w http.ResponseWriter) {
 // for every login) - duplicated here rather than exported from main,
 // since main imports this package and not the other way around, and it's
 // a handful of lines.
+//
+// X-Forwarded-For is only trusted when the immediate peer (r.RemoteAddr) is
+// itself a private/loopback address (same fix as cmd/core/main.go and
+// internal/bootstrap/manager.go's identical helpers, 2026-07-05/2026-07-23
+// security passes) - i.e. the request arrived over the internal Docker
+// network from Traefik, not from a client that reached Core directly.
+// Without this check, anyone able to connect to Core's port directly could
+// put any value they like in X-Forwarded-For and have it recorded as the
+// session's IP, defeating IP-based auditing/anomaly checks entirely. A
+// client that connects directly always falls through to its real
+// RemoteAddr instead.
 func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" && isTrustedProxyPeer(host) {
 		if i := strings.IndexByte(xff, ','); i != -1 {
 			return strings.TrimSpace(xff[:i])
 		}
 		return strings.TrimSpace(xff)
 	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
+	if host != "" {
+		return host
 	}
-	return host
+	return r.RemoteAddr
+}
+
+// isTrustedProxyPeer reports whether host (the immediate TCP peer, before
+// any X-Forwarded-For is considered) is a loopback or private-range
+// address - Traefik reaches Core over the Docker-internal network, which
+// uses exactly these ranges. Duplicated from cmd/core/main.go /
+// internal/bootstrap/manager.go rather than exported, same reasoning as
+// clientIP above.
+func isTrustedProxyPeer(host string) bool {
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate()
 }
 
 // BearerTokenAllowQuery is bearerToken plus a ?t= query-parameter fallback,
@@ -1251,10 +1310,4 @@ func BearerTokenAllowQuery(r *http.Request) string {
 		return t
 	}
 	return r.URL.Query().Get("t")
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
 }

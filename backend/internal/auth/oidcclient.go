@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
@@ -342,6 +343,14 @@ func (p *Provider) Revoke(ctx context.Context, refreshToken string) error {
 	if !ok {
 		return nil
 	}
+	// Bounded independently of ctx: the session-revalidate worker (see this
+	// method's callers) runs on the process-lifetime context with no
+	// deadline of its own, so a hung/unreachable IdP revocation endpoint
+	// would otherwise stall that worker's tick indefinitely instead of just
+	// logging a best-effort failure and moving on.
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
 	form := url.Values{
 		"token":           {refreshToken},
 		"token_type_hint": {"refresh_token"},

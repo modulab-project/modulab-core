@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/modulab-project/modulab-core/backend/internal/db"
@@ -78,6 +79,14 @@ type JobRunner struct {
 	// is nil rather than requiring every JobRunner construction site to
 	// have a Valkey client available.
 	valkey *valkey.Client
+	// running tracks which "module/job" keys currently have a dispatchJob
+	// goroutine in flight, so tick (below) can skip a job that is still
+	// running from a previous tick instead of piling up overlapping
+	// invocations against the same worker - a job that legitimately takes
+	// longer than jobTickInterval (e.g. a gateway that stopped responding,
+	// each retry blocking for up to jobTimeout) would otherwise accumulate
+	// one new goroutine per minute indefinitely.
+	running sync.Map // key: "module/job" (string) -> struct{}
 }
 
 // NewJobRunner creates a JobRunner. Call Start to begin ticking.
@@ -153,7 +162,12 @@ func (r *JobRunner) tick(ctx context.Context, now time.Time) {
 			if !cronMatchesMinute(job.Schedule, now) {
 				continue
 			}
-			go r.dispatchJob(row.Name, job.Name)
+			key := row.Name + "/" + job.Name
+			if _, alreadyRunning := r.running.LoadOrStore(key, struct{}{}); alreadyRunning {
+				log.Printf("modules: job %s still running, skipping tick", key)
+				continue
+			}
+			go r.dispatchJob(row.Name, job.Name, key)
 		}
 	}
 }
@@ -161,7 +175,13 @@ func (r *JobRunner) tick(ctx context.Context, now time.Time) {
 // dispatchJob sends a single job invocation to the module's worker and logs
 // the outcome. Errors here are operational (worker crashed, job threw) and
 // intentionally do not propagate further — the next tick will try again.
-func (r *JobRunner) dispatchJob(moduleName, jobName string) {
+// runningKey is the same "module/job" key tick already stored in r.running
+// before launching this goroutine; it is removed here once the invocation
+// finishes (success or failure) so the next due tick is free to dispatch
+// again.
+func (r *JobRunner) dispatchJob(moduleName, jobName, runningKey string) {
+	defer r.running.Delete(runningKey)
+
 	ctx, cancel := context.WithTimeout(context.Background(), jobTimeout)
 	defer cancel()
 

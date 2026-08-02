@@ -30,7 +30,7 @@
 // further down already warn about. Suppressed with a targeted
 // eslint-disable instead.
 import { useEffect, useRef, useState } from "react";
-import { useParams, useNavigate, useSearchParams } from "react-router";
+import { useParams, useSearchParams, Navigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import i18n from "../lib/i18n";
 import { useAuthenticatedSession } from "../lib/useSession";
@@ -72,7 +72,6 @@ export default function ModulePage() {
   const { moduleName } = useParams<{ moduleName: string }>();
   const { t } = useTranslation();
   const { session, loading } = useAuthenticatedSession();
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
   const [mod, setMod] = useState<InstalledModule | null>(null);
@@ -321,8 +320,7 @@ export default function ModulePage() {
       // fallback.
       return;
     }
-    const token = moduleTokenRef.current;
-    if (!token) {
+    if (!moduleTokenRef.current) {
       setBundleLoading(false);
       return;
     }
@@ -337,8 +335,12 @@ export default function ModulePage() {
     setBundleLoading(true);
 
     function attempt(attemptNum: number) {
+      // Re-read the token fresh on every attempt (including retries) rather
+      // than closing over a single value from effect-start: the module-
+      // scoped token can be re-minted while a retry loop is in flight, and a
+      // stale closed-over token would keep failing auth on later attempts.
       fetch(`/v1/modules/${encodeURIComponent(mod!.name)}/ui/bundle.js`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${moduleTokenRef.current}` },
       })
         .then((r) => {
           if (cancelled) return null;
@@ -391,8 +393,7 @@ export default function ModulePage() {
 
   if (loading || !session) return null;
   if (!moduleName) {
-    navigate("/", { replace: true });
-    return null;
+    return <Navigate to="/" replace />;
   }
 
   // Module-scoped token (see the metadata effect above), NOT the caller's

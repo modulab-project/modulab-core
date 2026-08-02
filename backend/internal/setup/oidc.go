@@ -136,7 +136,7 @@ func OIDCStatusHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 			return
 		}
 		if !exists {
-			writeJSON(w, http.StatusOK, OIDCStatusResponse{Configured: false})
+			httperr.JSON(w, http.StatusOK, OIDCStatusResponse{Configured: false})
 			return
 		}
 		issuer, err := crypto.Decrypt(masterKey, encIssuer)
@@ -156,7 +156,7 @@ func OIDCStatusHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 			return
 		}
 
-		writeJSON(w, http.StatusOK, OIDCStatusResponse{
+		httperr.JSON(w, http.StatusOK, OIDCStatusResponse{
 			Configured: true,
 			IssuerURL:  issuer,
 			ClientID:   clientID,
@@ -244,7 +244,7 @@ func OIDCConfigureHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 			log.Printf("setup: audit oidc configure: %v", err)
 		}
 
-		writeJSON(w, http.StatusOK, OIDCStatusResponse{
+		httperr.JSON(w, http.StatusOK, OIDCStatusResponse{
 			Configured: true,
 			IssuerURL:  req.IssuerURL,
 			ClientID:   req.ClientID,

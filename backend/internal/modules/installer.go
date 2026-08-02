@@ -19,10 +19,24 @@ import (
 	"time"
 
 	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/netguard"
 	"github.com/modulab-project/modulab-core/backend/internal/store"
 	"github.com/modulab-project/modulab-core/backend/internal/valkey"
 	"gopkg.in/yaml.v3"
 )
+
+// safeDownloadClient is the SSRF-guarded HTTP client used for every
+// custom-source download in this file (module ZIPs, .sha256/.sig sidecars,
+// and the GitHub release-asset API lookup below) - same guard already used
+// for news feeds, AI provider calls, and SearXNG (see netguard's doc
+// comment). registry.json for a custom source is attacker-influenced input
+// (anyone who controls that repo controls zipURL/sigURL), so without this a
+// malicious custom source could point Core at an internal service or cloud
+// metadata endpoint and have Core fetch it on the admin's behalf. Timeout is
+// 0 (no client-level deadline) because callers already run under ctx's own
+// deadline; the guard itself is what matters here, not an additional
+// timeout layer.
+var safeDownloadClient = netguard.SafeHTTPClient(0)
 
 // Deps bundles what the modules package needs from the outside world.
 // Constructed once in main.go and shared by Install, Uninstall, and Updater.
@@ -886,7 +900,7 @@ func resolveGithubAssetURL(ctx context.Context, rawURL string, cred githubCreden
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("Authorization", "Bearer "+cred.token)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := safeDownloadClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -966,7 +980,7 @@ func downloadFile(ctx context.Context, rawURL, path string, maxBytes int64, cred
 		req.Header.Set("Accept", "application/octet-stream")
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := safeDownloadClient.Do(req)
 	if err != nil {
 		return err
 	}

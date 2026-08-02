@@ -7,6 +7,7 @@ import { listInstalledModules, type InstalledModule } from "../lib/api";
 import { safeHref } from "../lib/url";
 import { ACTIVE_MODULES_QUERY_KEY } from "../lib/queryKeys";
 import { Logo } from "./AuthShell";
+import { Modal } from "./Modal";
 
 // ---- Drag-and-drop ----------------------------------------------------------
 //
@@ -128,22 +129,10 @@ function AddTileModal({
     }`;
 
   return (
-    // Click-outside-to-close backdrop; the inner div below only stops
-    // propagation so clicking the dialog itself doesn't also close it -
-    // neither has real keyboard-actionable semantics of its own.
-    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
-    >
-      {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
-      <div
-        className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl border border-gray-200 bg-white p-6 shadow-xl dark:border-gray-700 dark:bg-gray-900"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">
-          {t("home.quick_links_add_modal_title")}
-        </h2>
+    <Modal open onClose={onClose} titleId="quick-links-add-modal-title">
+      <h2 id="quick-links-add-modal-title" className="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">
+        {t("home.quick_links_add_modal_title")}
+      </h2>
 
         {/* Mode toggle */}
         <div className="mb-4 flex rounded-xl bg-gray-100 p-1 dark:bg-gray-800">
@@ -265,9 +254,8 @@ function AddTileModal({
               {saving ? t("home.quick_links_saving") : t("home.quick_links_add_submit")}
             </button>
           </div>
-        </form>
-      </div>
-    </div>
+      </form>
+    </Modal>
   );
 }
 

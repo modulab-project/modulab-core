@@ -40,7 +40,7 @@ func MySessionsHandler(d Deps) http.HandlerFunc {
 				}
 			}
 		}
-		writeJSON(w, http.StatusOK, sessions)
+		httperr.JSON(w, http.StatusOK, sessions)
 	}
 }
 

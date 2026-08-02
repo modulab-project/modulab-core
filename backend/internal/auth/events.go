@@ -104,7 +104,7 @@ func EventsHandler(d Deps) http.HandlerFunc {
 		w.WriteHeader(http.StatusOK)
 		flusher.Flush()
 
-		messages := sub.Messages()
+		messages := sub.Messages(ctx)
 		heartbeat := time.NewTicker(notify.HeartbeatInterval)
 		defer heartbeat.Stop()
 

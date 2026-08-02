@@ -700,6 +700,13 @@ func AdminBalanceHandler(deps auth.Deps) http.HandlerFunc {
 // fetchDeepSeekBalance calls https://api.deepseek.com/user/balance and returns
 // the total available balance in USD.
 func fetchDeepSeekBalance(ctx context.Context, apiKey string) (float64, string, error) {
+	// Bounded independently of the caller's context: this runs on r.Context()
+	// from the admin balance-check handler, which has no deadline of its own,
+	// so a slow/hung DeepSeek API call would otherwise hold the request (and
+	// the underlying connection) open indefinitely.
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.deepseek.com/user/balance", nil)
 	if err != nil {
 		return 0, "", err

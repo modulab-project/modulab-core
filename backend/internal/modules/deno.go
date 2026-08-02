@@ -35,18 +35,18 @@ type WorkerPool struct {
 
 	// piiKey is MODULAB_MODULE_PII_KEY (config.Config.ModulePIIKey), passed
 	// in once at construction time rather than read from os.Getenv inside
-	// startLocked. Keeping it here means the value that reaches a worker's
+	// buildWorker. Keeping it here means the value that reaches a worker's
 	// environment is always the one config.Load already validated (hex,
 	// exactly 32 bytes) at Core startup - a malformed value now fails fast
 	// with a clear error instead of silently reaching a module worker later.
 	// May be empty (unset in .env) if no installed module needs PII
-	// encryption; see WorkerPool.piiKey's use in startLocked.
+	// encryption; see WorkerPool.piiKey's use in buildWorker.
 	piiKey string
 	// dbHost is the host:port parsed out of dbURL once at construction time.
 	// Every worker's --allow-net always includes this, on top of whatever
 	// the module's own manifest egress_allowlist grants: the DB connection
 	// is Core-managed infrastructure (schema-isolated per module via
-	// search_path, see startLocked below — that's the real access boundary
+	// search_path, see buildWorker below — that's the real access boundary
 	// for the database, not the OS-level network permission), not a module
 	// choosing an external destination, so it doesn't belong in the
 	// module-authored egress allowlist. Without this, npm:postgres's own
@@ -75,6 +75,18 @@ type WorkerPool struct {
 
 	mu      sync.RWMutex
 	workers map[string]*denoWorker
+
+	// startMu serializes Start/ReloadEgress calls per module name (module
+	// name -> *sync.Mutex, lazily created). Needed because Start's own spawn
+	// no longer runs under p.mu (see Start's doc comment): without a
+	// per-module lock, two concurrent restarts of the SAME module (e.g. an
+	// admin clicking "restart" while ReloadEgress fires from a job response
+	// at the same moment) could each spawn their own Deno process and race
+	// to insert into p.workers - the loser's process would never make it
+	// into the map and leak, running forever with no reference to stop it.
+	// Different modules never contend with each other here, only two calls
+	// racing for the same name do.
+	startMu sync.Map
 
 	// connPoolSize is resolved once at construction time (see NewWorkerPool)
 	// from the deno_conn_pool_size setting and copied onto every worker this
@@ -217,19 +229,72 @@ type WorkerOptions struct {
 // host discovery) overrides EgressHosts after the fact.
 //
 // If a worker for this module is already running, it is stopped first.
+//
+// The old worker (if any) is removed from the map and stopped under a brief
+// write lock, but the actual spawn — buildWorker below, which calls
+// denoWorker.start and can block for up to 10 s in waitForSocket while the
+// Deno process comes up — runs with no lock held at all. Before this, the
+// entire spawn ran inside p.mu.Lock(), which meant one slow-starting module
+// blocked every other module's Start/Stop/Dispatch call (Dispatch takes
+// p.mu.RLock, which a pending writer starves) for the same up-to-10s window,
+// even though those other workers had nothing to do with this one starting
+// up (M-6, performance review 2026-08). The only state that actually needs
+// mutual exclusion is the p.workers map itself, so that's the only part
+// still behind the lock.
 func (p *WorkerPool) Start(name, entrypoint string, opts WorkerOptions) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.startLocked(name, entrypoint, opts)
-}
+	// Per-module lock (see startMu's doc comment) — held across the whole
+	// pop/build/insert sequence so two concurrent restarts of the same
+	// module can't both spawn a process and race to claim the map slot.
+	// Different modules' Start calls use different *sync.Mutex values here
+	// and never block each other.
+	lockAny, _ := p.startMu.LoadOrStore(name, &sync.Mutex{})
+	moduleLock := lockAny.(*sync.Mutex)
+	moduleLock.Lock()
+	defer moduleLock.Unlock()
 
-// startLocked does the actual spawn. Caller must hold p.mu.
-func (p *WorkerPool) startLocked(name, entrypoint string, opts WorkerOptions) error {
-	if existing, ok := p.workers[name]; ok {
-		existing.stop()
-		delete(p.workers, name)
+	p.popAndStop(name)
+
+	w, err := p.buildWorker(name, entrypoint, opts)
+	if err != nil {
+		return fmt.Errorf("worker %q: start: %w", name, err)
 	}
 
+	p.mu.Lock()
+	p.workers[name] = w
+	p.mu.Unlock()
+
+	log.Printf("modules: deno worker %q started (pid %d, socket %s, egress=%v)",
+		name, w.cmd.Process.Pid, w.sockPath, w.egressHosts)
+	return nil
+}
+
+// popAndStop removes and stops the currently-running worker for name, if
+// any, under a short write lock. Split out of Start (and reused by
+// ReloadEgress via Start) so the map mutation and the worker's own stop()
+// (fast: kills the process, drains pooled connections — see denoWorker.stop)
+// stay behind the lock, while the potentially slow spawn that replaces it
+// does not.
+func (p *WorkerPool) popAndStop(name string) {
+	p.mu.Lock()
+	existing, ok := p.workers[name]
+	if ok {
+		delete(p.workers, name)
+	}
+	p.mu.Unlock()
+	if ok {
+		existing.stop()
+	}
+}
+
+// buildWorker constructs and starts (denoWorker.start) a new worker for name
+// without touching p.workers or p.mu — callers are responsible for inserting
+// the result into the map under lock. Reads p.onCrash, p.dbHost,
+// p.dnsResolver, p.dbURL, p.piiKey, p.dataDir and p.connPoolSize without a
+// lock: all of these are fixed at NewWorkerPool construction time except
+// onCrash, which SetCrashHandler's doc comment requires be set once, before
+// any Start call — so by the time any goroutine can reach here, none of
+// these fields are being concurrently written anymore.
+func (p *WorkerPool) buildWorker(name, entrypoint string, opts WorkerOptions) (*denoWorker, error) {
 	sockPath := filepath.Join(p.dataDir, name, "worker.sock")
 	// Remove stale socket file from a previous crash.
 	_ = os.Remove(sockPath)
@@ -290,13 +355,9 @@ func (p *WorkerPool) startLocked(name, entrypoint string, opts WorkerOptions) er
 		connPool:       make(chan net.Conn, p.connPoolSize),
 	}
 	if err := w.start(); err != nil {
-		return fmt.Errorf("worker %q: start: %w", name, err)
+		return nil, err
 	}
-
-	p.workers[name] = w
-	log.Printf("modules: deno worker %q started (pid %d, socket %s, egress=%v)",
-		name, w.cmd.Process.Pid, sockPath, egressHosts)
-	return nil
+	return w, nil
 }
 
 // effectiveEgressHosts prepends dbHost (if known) to manifestHosts and
@@ -324,7 +385,7 @@ func (p *WorkerPool) effectiveEgressHosts(manifestHosts []string) []string {
 // running worker for name currently has — i.e. what the manifest's
 // egress_allowlist said at last start, PLUS whatever a later ReloadEgress
 // call added at runtime (e.g. unifi-network gateway IPs), but WITHOUT the
-// infra hosts (DB, DNS resolver) that startLocked always adds on top.
+// infra hosts (DB, DNS resolver) that buildWorker always adds on top.
 //
 // Exists so a module-code update (UpdateModuleHandler in handlers.go) can
 // restart the worker without silently discarding runtime-discovered egress
@@ -366,10 +427,14 @@ func (p *WorkerPool) CurrentModuleEgressHosts(name string) ([]string, bool) {
 // entitled to instead of losing all network access over it. See
 // egresspolicy.go for what this is defending against.
 func (p *WorkerPool) ReloadEgress(name string, hosts []string) error {
-	p.mu.Lock()
+	// Read-lock only to snapshot the existing worker's manifest-derived
+	// settings - the restart itself (Start below) no longer needs the lock
+	// held for its whole duration, same reasoning as Start's own doc comment
+	// (M-6, performance review 2026-08).
+	p.mu.RLock()
 	existing, ok := p.workers[name]
+	p.mu.RUnlock()
 	if !ok {
-		p.mu.Unlock()
 		return ErrWorkerNotFound
 	}
 	entrypoint := existing.entrypoint
@@ -390,13 +455,16 @@ func (p *WorkerPool) ReloadEgress(name string, hosts []string) error {
 		SkipTLSVerify: existing.skipTLSVerify,
 		EgressPolicy:  policy,
 	}
-	err := p.startLocked(name, entrypoint, opts)
+	err := p.Start(name, entrypoint, opts)
+	// onEgressDeny is read without a lock here, same as buildWorker reading
+	// p.onCrash: SetEgressDenyHandler's own doc comment requires it be set
+	// once, before any Start/ReloadEgress call, so it is never concurrently
+	// written by the time any goroutine reaches here.
 	onDeny := p.onEgressDeny
-	p.mu.Unlock()
 
-	// Reporting happens after the lock is released, and in its own goroutine
-	// — same contract as onCrash. onEgressDeny is wired to an audit write
-	// plus an SSE publish (main.go) with a 10 s timeout of its own; several
+	// Reporting happens in its own goroutine, same as onCrash's contract.
+	// onEgressDeny is wired to an audit write plus an SSE publish (main.go)
+	// with a 10 s timeout of its own; several
 	// of this function's callers sit on an admin request path
 	// (installer.go, handlers.go), and a policy refusal must not add that
 	// latency to an install or update the admin is waiting on. Reported even
@@ -709,7 +777,7 @@ type denoWorker struct {
 	sockPath   string
 	dbURL      string
 	// piiKey is copied from the owning WorkerPool at construction time (see
-	// startLocked) - the already-validated MODULAB_MODULE_PII_KEY value, or
+	// buildWorker) - the already-validated MODULAB_MODULE_PII_KEY value, or
 	// "" if unset. See WorkerPool.piiKey's doc comment.
 	piiKey string
 	// moduleRoot is {dataDir}/{name} — the --allow-read/--allow-write scope.
@@ -719,7 +787,7 @@ type denoWorker struct {
 	egressHosts []string // hostnames granted via --allow-net (includes dbHost/dnsResolver); empty = no network
 	// moduleEgressHosts is egressHosts minus the infra hosts (dbHost,
 	// dnsResolver) — see the field doc comment where this is set in
-	// startLocked.
+	// buildWorker.
 	moduleEgressHosts []string
 	skipTLSVerify     bool // manifest tls_skip_verify: true — see WorkerOptions.SkipTLSVerify
 	// egressPolicy is manifest dynamic_egress_allow — the bound ReloadEgress
@@ -731,7 +799,7 @@ type denoWorker struct {
 	cancel context.CancelFunc
 
 	// onCrash is copied from the owning WorkerPool at construction time (see
-	// startLocked) so the Wait goroutine in start() can call it without
+	// buildWorker) so the Wait goroutine in start() can call it without
 	// needing a back-reference to the pool itself.
 	onCrash func(name string)
 
@@ -744,7 +812,7 @@ type denoWorker struct {
 	// connections to the worker (see ConnPoolSize's doc comment). numConns
 	// tracks how many have been dialed so far so getConn knows when to dial
 	// a new one vs. wait for one to be released back into the pool. poolSize
-	// is resolved once, when the worker starts (see startLocked) — the
+	// is resolved once, when the worker starts (see buildWorker) — the
 	// channel's capacity can't change after creation, so a setting change
 	// only takes effect on this module's next restart.
 	connPool chan net.Conn
@@ -1214,6 +1282,14 @@ func (w *denoWorker) releaseConn(conn net.Conn) {
 	}
 }
 
+// maxWorkerResponseBytes bounds how much a single Deno worker response
+// (roundTrip below) is allowed to be. Without this, a module returning a
+// runaway or malicious response (no closing newline, or just very large)
+// would have bufio.NewReader's ReadString('\n') buffer an unbounded amount
+// of memory per in-flight request - 50 MiB comfortably covers any legitimate
+// module API response while still capping the worst case.
+const maxWorkerResponseBytes = 50 * 1024 * 1024
+
 // roundTrip writes reqBytes to conn and reads a single newline-terminated
 // JSON response, applying ctx's deadline (or a 30s default) to the
 // connection first.
@@ -1228,7 +1304,7 @@ func (w *denoWorker) roundTrip(ctx context.Context, conn net.Conn, reqBytes []by
 		return WorkerResponse{}, fmt.Errorf("write request: %w", err)
 	}
 
-	line, err := bufio.NewReader(conn).ReadString('\n')
+	line, err := bufio.NewReader(io.LimitReader(conn, maxWorkerResponseBytes)).ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
 		return WorkerResponse{}, fmt.Errorf("read response: %w", err)
 	}

@@ -1,4 +1,7 @@
 {
+  "errors": {
+    "server_error": "Une erreur interne s'est produite. Veuillez réessayer plus tard."
+  },
   "auth": {
     "error": {
       "missing_state_or_code": "La tentative de connexion était incomplète. Veuillez réessayer.",
@@ -135,7 +138,8 @@
         "loading": "Interrogation…",
         "label": "Solde",
         "fetch_error": "Impossible de récupérer le solde.",
-        "not_supported": "Ce fournisseur ne prend pas en charge la consultation du solde."
+        "not_supported": "Ce fournisseur ne prend pas en charge la consultation du solde.",
+        "refresh": "Actualiser le solde"
       }
     },
     "feeds": {
@@ -799,7 +803,9 @@
       "placeholder": "Message… (Entrée pour envoyer)",
       "own_key": "clé personnelle",
       "managed_by": "· géré par ModuLab",
-      "error": "Erreur — impossible d'atteindre le fournisseur IA."
+      "error": "Erreur — impossible d'atteindre le fournisseur IA.",
+      "stop": "Arrêter la génération",
+      "send": "Envoyer le message"
     }
   },
   "setup": {

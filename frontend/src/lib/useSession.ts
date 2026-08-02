@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { getMe, getHealth, ApiError, type Session } from "./api";
 
@@ -48,7 +48,10 @@ export function useAuthenticatedSession(): { session: Session | null; loading: b
   // Tracks whether the very first getMe() call has ever succeeded. Used to
   // decide whether a transient error on a subsequent poll should trigger a
   // short retry (initial load) or just be silently skipped (already loaded).
-  const [initialLoadDone, setInitialLoadDone] = useState(false);
+  // A ref, not state: it's only read inside the effect below, so turning it
+  // into state would just make the effect (poll interval + listeners)
+  // needlessly re-run every time the initial load completes.
+  const initialLoadDone = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -85,7 +88,7 @@ export function useAuthenticatedSession(): { session: Session | null; loading: b
             }
             return s;
           });
-          setInitialLoadDone(true);
+          initialLoadDone.current = true;
           setLoading(false);
         })
         .catch((err) => {
@@ -110,7 +113,7 @@ export function useAuthenticatedSession(): { session: Session | null; loading: b
             return;
           }
           // Transient error — only retry once on initial load.
-          if (!initialLoadDone && !isRetry) {
+          if (!initialLoadDone.current && !isRetry) {
             retryTimer = setTimeout(() => {
               if (!cancelled) check(true);
             }, INITIAL_RETRY_DELAY_MS);
@@ -146,7 +149,7 @@ export function useAuthenticatedSession(): { session: Session | null; loading: b
       if (retryTimer !== null) clearTimeout(retryTimer);
       window.removeEventListener("pageshow", handlePageShow);
     };
-  }, [navigate, initialLoadDone]);
+  }, [navigate]);
 
   return { session, loading };
 }

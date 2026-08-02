@@ -1,4 +1,7 @@
 {
+  "errors": {
+    "server_error": "An internal error occurred. Please try again later."
+  },
   "auth": {
     "error": {
       "missing_state_or_code": "The login attempt was incomplete. Please try again.",
@@ -135,7 +138,8 @@
         "loading": "Fetching…",
         "label": "Balance",
         "fetch_error": "Failed to fetch balance.",
-        "not_supported": "This provider does not support balance queries."
+        "not_supported": "This provider does not support balance queries.",
+        "refresh": "Refresh balance"
       }
     },
     "feeds": {
@@ -799,7 +803,9 @@
       "placeholder": "Message… (Enter to send)",
       "own_key": "own key",
       "managed_by": "· managed by ModuLab",
-      "error": "Error — could not reach the AI provider."
+      "error": "Error — could not reach the AI provider.",
+      "stop": "Stop generating",
+      "send": "Send message"
     }
   },
   "setup": {

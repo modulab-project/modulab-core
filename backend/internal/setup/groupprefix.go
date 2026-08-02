@@ -85,10 +85,10 @@ func GroupPrefixStatusHandler(pool *db.Pool) http.HandlerFunc {
 			return
 		}
 		if !exists {
-			writeJSON(w, http.StatusOK, GroupPrefixStatusResponse{Configured: false})
+			httperr.JSON(w, http.StatusOK, GroupPrefixStatusResponse{Configured: false})
 			return
 		}
-		writeJSON(w, http.StatusOK, GroupPrefixStatusResponse{
+		httperr.JSON(w, http.StatusOK, GroupPrefixStatusResponse{
 			Configured: true,
 			Prefix:     prefix,
 			Groups:     groupNames(prefix),
@@ -146,7 +146,7 @@ func GroupPrefixConfigureHandler(pool *db.Pool, masterKey string) http.HandlerFu
 			log.Printf("setup: audit group-prefix configure: %v", err)
 		}
 
-		writeJSON(w, http.StatusOK, GroupPrefixStatusResponse{
+		httperr.JSON(w, http.StatusOK, GroupPrefixStatusResponse{
 			Configured: true,
 			Prefix:     prefix,
 			Groups:     groupNames(prefix),

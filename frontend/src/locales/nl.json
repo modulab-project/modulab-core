@@ -1,4 +1,7 @@
 {
+  "errors": {
+    "server_error": "Er is een interne fout opgetreden. Probeer het later opnieuw."
+  },
   "auth": {
     "error": {
       "missing_state_or_code": "De inlogpoging was onvolledig. Probeer het opnieuw.",
@@ -135,7 +138,8 @@
         "loading": "Opvragen…",
         "label": "Saldo",
         "fetch_error": "Saldo kon niet worden opgehaald.",
-        "not_supported": "Deze provider ondersteunt geen saldo-opvraag."
+        "not_supported": "Deze provider ondersteunt geen saldo-opvraag.",
+        "refresh": "Saldo vernieuwen"
       }
     },
     "feeds": {
@@ -799,7 +803,9 @@
       "placeholder": "Bericht… (Enter om te verzenden)",
       "own_key": "eigen sleutel",
       "managed_by": "· beheerd door ModuLab",
-      "error": "Fout — kan de AI-provider niet bereiken."
+      "error": "Fout — kan de AI-provider niet bereiken.",
+      "stop": "Genereren stoppen",
+      "send": "Bericht verzenden"
     }
   },
   "setup": {

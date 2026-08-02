@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useNavigate, Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import i18n from "../lib/i18n";
+import i18n, { ensureLanguage } from "../lib/i18n";
 import {
   getHealth,
   getUserPrefs,
@@ -248,7 +248,9 @@ export function AppShell({
     getUserPrefs()
       .then((prefs) => {
         if (prefs.ui_language && !i18n.language.startsWith(prefs.ui_language)) {
-          i18n.changeLanguage(prefs.ui_language);
+          ensureLanguage(prefs.ui_language).finally(() => {
+            i18n.changeLanguage(prefs.ui_language);
+          });
         }
         if (prefs.theme === "light" || prefs.theme === "dark" || prefs.theme === "system") {
           setTheme(prefs.theme);
@@ -1212,7 +1214,9 @@ function ProfilePanelContent({
           value={i18nInstance.language.slice(0, 2)}
           onChange={(e) => {
             const lang = e.target.value;
-            i18n.changeLanguage(lang);
+            ensureLanguage(lang).finally(() => {
+              i18n.changeLanguage(lang);
+            });
             // Persist to DB so the preference survives across devices.
             // Best-effort: a failed save leaves the in-browser change intact.
             updateUserPrefs({ ui_language: lang }).catch(() => {});
@@ -1819,6 +1823,7 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
           <button
             type="button"
             onClick={() => abortRef.current?.abort()}
+            aria-label={t("shell.chat.stop")}
             className="flex h-8 w-8 flex-none items-center justify-center rounded-full border border-red-200 text-red-500 hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-950"
           >
             <i className="ti ti-square text-[14px]" />
@@ -1828,6 +1833,7 @@ function ChatPanel({ onClose }: { onClose: () => void }) {
             type="button"
             onClick={handleSend}
             disabled={!input.trim() || providers.length === 0}
+            aria-label={t("shell.chat.send")}
             className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-40"
           >
             <i className="ti ti-send text-[14px]" />

@@ -1,4 +1,7 @@
 {
+  "errors": {
+    "server_error": "Ein interner Fehler ist aufgetreten. Bitte versuche es später erneut."
+  },
   "auth": {
     "error": {
       "missing_state_or_code": "Der Anmeldeversuch war unvollständig. Bitte versuche es erneut.",
@@ -135,7 +138,8 @@
         "loading": "Wird abgefragt…",
         "label": "Guthaben",
         "fetch_error": "Guthaben konnte nicht abgefragt werden.",
-        "not_supported": "Dieser Anbieter unterstützt keine Guthaben-Abfrage."
+        "not_supported": "Dieser Anbieter unterstützt keine Guthaben-Abfrage.",
+        "refresh": "Guthaben aktualisieren"
       }
     },
     "feeds": {
@@ -799,7 +803,9 @@
       "placeholder": "Nachricht… (Enter zum Senden)",
       "own_key": "eigener Key",
       "managed_by": "· von ModuLab verwaltet",
-      "error": "Fehler – KI-Anbieter nicht erreichbar."
+      "error": "Fehler – KI-Anbieter nicht erreichbar.",
+      "stop": "Generierung stoppen",
+      "send": "Nachricht senden"
     }
   },
   "setup": {

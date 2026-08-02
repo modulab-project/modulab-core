@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthenticatedSession } from "../lib/useSession";
+import { useNow } from "../lib/useNow";
 import { safeHref } from "../lib/url";
 import { USER_FEEDS_QUERY_KEY } from "../lib/queryKeys";
 import {
@@ -202,6 +203,7 @@ export default function Home() {
       return;
     }
     geoRequestedRef.current = true;
+    let cancelled = false;
     if (!navigator.geolocation) {
       // Not migrated to TanStack Query: this effect's entire point is to
       // ask the browser's geolocation permission prompt at most once ever
@@ -239,26 +241,37 @@ export default function Home() {
           };
           getWeather(coords.latitude, coords.longitude)
             .then((w) => {
+              if (cancelled) return;
               setWeather(w);
               setWeatherLoading(false);
               writeCache(w, weatherLocationRef.current);
             })
-            .catch(() => setWeatherLoading(false));
+            .catch(() => {
+              if (cancelled) return;
+              setWeatherLoading(false);
+            });
           // Independent request, independent failure mode: if Nominatim is
           // slow/unreachable the temperature above still renders fine, just
           // without a place-name caption.
           getWeatherLocation(coords.latitude, coords.longitude)
             .then((loc) => {
+              if (cancelled) return;
               const resolved = loc.city ? loc : null;
               setWeatherLocation(resolved);
               writeCache(weatherRef.current, resolved);
             })
             .catch(() => {});
         },
-        () => setWeatherLoading(false),
+        () => {
+          if (cancelled) return;
+          setWeatherLoading(false);
+        },
         { enableHighAccuracy: false, timeout: geoTimeoutMs },
       );
     });
+    return () => {
+      cancelled = true;
+    };
   }, [session]);
 
   const loadNews = useCallback(() => {
@@ -479,16 +492,6 @@ export default function Home() {
 
 // --- Hero (clock, greeting, weather inline, search) ----------------------
 
-function useClock() {
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(new Date()), 30_000);
-    return () => window.clearInterval(id);
-  }, []);
-  return now;
-}
-
-
 function Hero({
   name,
   weather,
@@ -507,7 +510,7 @@ function Hero({
   initialQuery: string;
 }) {
   const { t, i18n: i18nInstance } = useTranslation();
-  const now = useClock();
+  const now = new Date(useNow(30_000));
   const hours = String(now.getHours()).padStart(2, "0");
   const minutes = String(now.getMinutes()).padStart(2, "0");
   const hour = now.getHours();
@@ -595,7 +598,7 @@ function Hero({
           search position. */}
       {!weather && !weatherLoading && <div className="mb-6" />}
 
-      <div className="flex h-11 w-full max-w-[440px] items-center gap-2.5 rounded-full border border-teal-600/35 px-[18px]">
+      <div className="flex h-11 w-full max-w-[440px] items-center gap-2.5 rounded-full border border-teal-600/35 px-[18px] focus-within:border-teal-500 focus-within:ring-1 focus-within:ring-teal-500">
         <i className="ti ti-search text-[16px] text-teal-600 dark:text-teal-400" aria-hidden="true" />
         <input
           type="text"

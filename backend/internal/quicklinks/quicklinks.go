@@ -92,19 +92,6 @@ func isValidTileURL(raw string) bool {
 	return u.Scheme == "http" || u.Scheme == "https"
 }
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	data, err := json.Marshal(v)
-	if err != nil {
-		httperr.Internal(w, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if _, err := w.Write(data); err != nil {
-		log.Printf("quicklinks: write response: %v", err)
-	}
-}
-
 // ---- Merge helper -----------------------------------------------------------
 
 // mergedTiles combines admin and user tiles in the user's saved order.
@@ -198,7 +185,7 @@ func ListHandler(d auth.Deps) http.HandlerFunc {
 		if tiles == nil {
 			tiles = []Tile{}
 		}
-		writeJSON(w, http.StatusOK, tiles)
+		httperr.JSON(w, http.StatusOK, tiles)
 	}
 }
 
@@ -234,7 +221,7 @@ func CreateUserLinkHandler(d auth.Deps) http.HandlerFunc {
 			httperr.Internal(w, err)
 			return
 		}
-		writeJSON(w, http.StatusCreated, map[string]string{"id": id})
+		httperr.JSON(w, http.StatusCreated, map[string]string{"id": id})
 	}
 }
 
@@ -309,7 +296,7 @@ func AdminListHandler(d auth.Deps) http.HandlerFunc {
 				CreatedBy:   l.CreatedBy,
 			})
 		}
-		writeJSON(w, http.StatusOK, resp)
+		httperr.JSON(w, http.StatusOK, resp)
 	}
 }
 
@@ -353,7 +340,7 @@ func AdminCreateHandler(d auth.Deps) http.HandlerFunc {
 			TargetID:   link.ID,
 			Details:    fmt.Sprintf(`{"title":%q,"url":%q}`, link.Title, link.URL),
 		})
-		writeJSON(w, http.StatusCreated, AdminTile{
+		httperr.JSON(w, http.StatusCreated, AdminTile{
 			ID:          link.ID,
 			Title:       link.Title,
 			URL:         link.URL,

@@ -38,6 +38,21 @@ func New(addr, password string) *Client {
 	return &Client{rdb: redis.NewClient(&redis.Options{
 		Addr:     addr,
 		Password: password,
+		// Explicit pool/timeout settings rather than go-redis's defaults:
+		// the library default PoolSize is 10×GOMAXPROCS, which on a
+		// multi-core homelab host is far more concurrent Valkey connections
+		// than this single-node, Docker-internal-network deployment ever
+		// needs - 20 comfortably covers session lookups, rate limiting,
+		// SSE Pub/Sub, and the mail queue's BLPop loop all running at once.
+		// DialTimeout/ReadTimeout/WriteTimeout are set so a hung or
+		// unreachable Valkey fails a call within a few seconds instead of
+		// blocking the calling goroutine indefinitely (go-redis's own
+		// defaults are similar, but pinning them here makes the behavior
+		// explicit rather than implicit/library-version-dependent).
+		PoolSize:     20,
+		DialTimeout:  5 * time.Second,
+		ReadTimeout:  3 * time.Second,
+		WriteTimeout: 3 * time.Second,
 	})}
 }
 
@@ -171,13 +186,35 @@ func (c *Client) Subscribe(ctx context.Context, channels ...string) *Subscriptio
 // discarded - a caller that subscribed to several channels and needs to
 // tell them apart should encode that in the payload itself, which
 // internal/notify's Event.Type already does). The returned channel closes
-// once the subscription is closed or the connection drops.
-func (s *Subscription) Messages() <-chan string {
+// once the subscription is closed, the connection drops, or ctx is
+// cancelled.
+//
+// ctx guards the send into the unbuffered out channel: without it, a
+// caller that stops reading (e.g. an SSE handler whose request context is
+// cancelled mid-send, between the select's ctx.Done() and message cases)
+// would leave this goroutine parked forever on out <- msg.Payload - a
+// goroutine leak per abandoned subscription. Callers should pass the same
+// context they select on for their own cancellation (typically the HTTP
+// request's r.Context()).
+func (s *Subscription) Messages(ctx context.Context) <-chan string {
 	out := make(chan string)
 	go func() {
 		defer close(out)
-		for msg := range s.ps.Channel() {
-			out <- msg.Payload
+		ch := s.ps.Channel()
+		for {
+			select {
+			case msg, open := <-ch:
+				if !open {
+					return
+				}
+				select {
+				case out <- msg.Payload:
+				case <-ctx.Done():
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
 		}
 	}()
 	return out

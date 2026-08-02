@@ -16,6 +16,7 @@ import { useAuthenticatedSession } from "../lib/useSession";
 import { useLoginRedirect } from "../lib/useLoginRedirect";
 import { isReauthRequiredError } from "../lib/authErrors";
 import { AppShell } from "../components/AppShell";
+import { Modal } from "../components/Modal";
 import { ReauthBanner } from "../components/ReauthBanner";
 import { isAdminRole } from "../lib/roles";
 
@@ -217,7 +218,7 @@ export default function AdminAIPage() {
                       return (
                         <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
                           {t("admin.ai.balance.label")}: <span className="font-medium text-gray-700 dark:text-gray-300">{bal.amount?.toFixed(2)} {bal.currency}</span>
-                          <button type="button" onClick={() => handleFetchBalance(def.id)} className="ml-1.5 text-teal-600 hover:underline dark:text-teal-400">↺</button>
+                          <button type="button" onClick={() => handleFetchBalance(def.id)} aria-label={t("admin.ai.balance.refresh")} className="ml-1.5 text-teal-600 hover:underline dark:text-teal-400">↺</button>
                         </p>
                       );
                     })()}
@@ -516,9 +517,9 @@ function EditBuiltinModal({
   }
 
   return (
-    <Overlay onClose={onClose}>
+    <Overlay onClose={onClose} titleId="ai-edit-builtin-title">
       <form onSubmit={handleSubmit} className="space-y-4">
-        <h2 className="text-base font-semibold">{t("admin.ai.modal.edit_builtin_title", { name: provider.name })}</h2>
+        <h2 id="ai-edit-builtin-title" className="text-base font-semibold">{t("admin.ai.modal.edit_builtin_title", { name: provider.name })}</h2>
         {reauthRequired && (
           <ReauthBanner
             waiting={reauthWaiting}
@@ -693,9 +694,9 @@ function CustomProviderModal({
   }
 
   return (
-    <Overlay onClose={onClose}>
+    <Overlay onClose={onClose} titleId="ai-custom-provider-title">
       <form onSubmit={handleSubmit} className="space-y-4">
-        <h2 className="text-base font-semibold">
+        <h2 id="ai-custom-provider-title" className="text-base font-semibold">
           {existing ? t("admin.ai.modal.custom_title_edit") : t("admin.ai.modal.custom_title_add")}
         </h2>
         {reauthRequired && (
@@ -823,20 +824,24 @@ function Field({ label, required, children }: { label: string; required?: boolea
   );
 }
 
-function Overlay({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
+function Overlay({
+  onClose,
+  titleId,
+  children,
+}: {
+  onClose: () => void;
+  titleId: string;
+  children: React.ReactNode;
+}) {
   return (
-    // Click-outside-to-close backdrop; the inner div only stops
-    // propagation so clicking the dialog itself doesn't also close it.
-    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
-    <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
-      <div
-        className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl border border-gray-200 bg-white p-6 shadow-xl dark:border-gray-800 dark:bg-gray-950"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {children}
-      </div>
-    </div>
+    <Modal
+      open
+      onClose={onClose}
+      titleId={titleId}
+      className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl border border-gray-200 bg-white p-6 shadow-xl dark:border-gray-800 dark:bg-gray-950"
+    >
+      {children}
+    </Modal>
   );
 }
 

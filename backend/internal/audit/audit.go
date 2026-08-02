@@ -21,9 +21,11 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"time"
@@ -239,16 +241,32 @@ type LogParams struct {
 	Details     string // JSON string with extra context, "" if not applicable
 }
 
+// auditChainLockKey is the fixed pg_advisory_xact_lock key used to serialize
+// every audit_log write across the whole instance (see Log's doc comment on
+// the race this closes). Derived from a stable string rather than a literal
+// magic number so its origin is obvious to anyone grepping the DB logs for
+// this lock ID; the truncation to int64 is safe/expected for
+// pg_advisory_xact_lock's bigint key parameter.
+var auditChainLockKey = func() int64 {
+	sum := sha256.Sum256([]byte("audit_log_chain"))
+	return int64(binary.BigEndian.Uint64(sum[:8]))
+}()
+
 // Log appends one entry to the audit log. It reads the last entry's hash to
 // build the chain link, then encrypts PII and writes the new row atomically.
 // Best-effort from the caller's perspective: if Log fails, the admin action
 // itself should not be rolled back - callers log the error and continue.
+//
+// The prev_hash read and the INSERT run inside one transaction, additionally
+// serialized by pg_advisory_xact_lock(auditChainLockKey): without this, two
+// concurrent Log calls (e.g. two admins acting at the same instant) could
+// each read the same latestHash() before either had inserted, then both
+// write rows claiming that same prev_hash - a real, if narrow, hash-chain
+// race. The advisory lock is instance-wide (one fixed key, not per-row), so
+// audit writes are already infrequent enough for this to add no meaningful
+// contention; pg_advisory_xact_lock auto-releases at COMMIT/ROLLBACK, no
+// separate unlock call needed.
 func Log(ctx context.Context, pool *db.Pool, masterKey string, p LogParams) error {
-	prevHash, err := latestHash(ctx, pool)
-	if err != nil {
-		return fmt.Errorf("audit: read prev_hash: %w", err)
-	}
-
 	actorEmailEnc, err := crypto.Encrypt(masterKey, p.ActorEmail)
 	if err != nil {
 		return fmt.Errorf("audit: encrypt actor_email: %w", err)
@@ -268,19 +286,43 @@ func Log(ctx context.Context, pool *db.Pool, masterKey string, p LogParams) erro
 		}
 	}
 
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("audit: begin tx: %w", err)
+	}
+	defer func() {
+		// No-op if the transaction was already committed below - Rollback on
+		// an already-committed/closed tx returns pgx.ErrTxClosed, which is
+		// expected here and not worth surfacing.
+		_ = tx.Rollback(ctx)
+	}()
+
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, auditChainLockKey); err != nil {
+		return fmt.Errorf("audit: advisory lock: %w", err)
+	}
+
+	var prevHash string
+	err = tx.QueryRow(ctx, `SELECT hash FROM audit_log ORDER BY id DESC LIMIT 1`).Scan(&prevHash)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("audit: read prev_hash: %w", err)
+	}
+
 	// Compute this entry's hash over all fields plus prev_hash, using the
 	// master key as the HMAC secret so the chain is tied to this instance.
 	h := entryHMAC(masterKey, p.EventType, p.ActorID, p.TargetID, actorEmailEnc, targetEmailEnc, detailsEnc, prevHash)
 
-	_, err = pool.Exec(ctx, `
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO audit_log
 		    (event_type, actor_id, actor_email_enc, target_id, target_email_enc,
 		     details_enc, prev_hash, hash)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	`, p.EventType, p.ActorID, actorEmailEnc,
-		p.TargetID, targetEmailEnc, detailsEnc, prevHash, h)
-	if err != nil {
+		p.TargetID, targetEmailEnc, detailsEnc, prevHash, h); err != nil {
 		return fmt.Errorf("audit: insert: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("audit: commit: %w", err)
 	}
 	return nil
 }
@@ -467,21 +509,39 @@ func queryPage(ctx context.Context, pool *db.Pool, masterKey string, p ListParam
 		return nil, fmt.Errorf("audit: rows: %w", err)
 	}
 
+	const decryptFailedMarker = "<decryption failed>"
+
 	entries := make([]Entry, 0, len(raws))
 	for _, raw := range raws {
 		e := raw.entry
-		e.ActorEmail, _ = crypto.Decrypt(masterKey, raw.actorEmailEnc)
+		var err error
+		if e.ActorEmail, err = crypto.Decrypt(masterKey, raw.actorEmailEnc); err != nil {
+			log.Printf("audit: decrypt failed for row id=%v field=actor_email: %v", e.ID, err)
+			e.ActorEmail = decryptFailedMarker
+		}
 		if raw.targetEmailEnc != "" {
-			e.TargetEmail, _ = crypto.Decrypt(masterKey, raw.targetEmailEnc)
+			if e.TargetEmail, err = crypto.Decrypt(masterKey, raw.targetEmailEnc); err != nil {
+				log.Printf("audit: decrypt failed for row id=%v field=target_email: %v", e.ID, err)
+				e.TargetEmail = decryptFailedMarker
+			}
 		}
 		if raw.detailsEnc != "" {
-			e.Details, _ = crypto.Decrypt(masterKey, raw.detailsEnc)
+			if e.Details, err = crypto.Decrypt(masterKey, raw.detailsEnc); err != nil {
+				log.Printf("audit: decrypt failed for row id=%v field=details: %v", e.ID, err)
+				e.Details = decryptFailedMarker
+			}
 		}
 		if raw.actorNameEnc != "" {
-			e.ActorName, _ = crypto.Decrypt(masterKey, raw.actorNameEnc)
+			if e.ActorName, err = crypto.Decrypt(masterKey, raw.actorNameEnc); err != nil {
+				log.Printf("audit: decrypt failed for row id=%v field=actor_name: %v", e.ID, err)
+				e.ActorName = decryptFailedMarker
+			}
 		}
 		if raw.targetNameEnc != "" {
-			e.TargetName, _ = crypto.Decrypt(masterKey, raw.targetNameEnc)
+			if e.TargetName, err = crypto.Decrypt(masterKey, raw.targetNameEnc); err != nil {
+				log.Printf("audit: decrypt failed for row id=%v field=target_name: %v", e.ID, err)
+				e.TargetName = decryptFailedMarker
+			}
 		}
 		entries = append(entries, e)
 	}
@@ -512,11 +572,18 @@ func ListActors(ctx context.Context, pool *db.Pool, masterKey string) ([]ActorOp
 	// every actor that resolved to a real user. Sorting also has to happen
 	// in Go, after decryption - sorting ciphertext alphabetically is
 	// meaningless.
+	// Bounded to the last 90 days (H-3, performance review 2026-08): without
+	// this, ListActors was a full table scan of the whole audit_log history
+	// on every load of the admin audit-log page's actor filter dropdown - a
+	// distinct-actor list only needs to be "who has acted recently", not
+	// every actor ever recorded since day one. idx_audit_log_created_at
+	// (db.go's EnsureAuditSchema) makes this an index-range scan instead of
+	// a full scan.
 	rows, err := pool.Query(ctx, `
 		SELECT DISTINCT a.actor_id, COALESCE(u.name, '') AS name_enc
 		FROM audit_log a
 		LEFT JOIN users u ON u.id = a.actor_id
-		WHERE a.actor_id <> ''
+		WHERE a.actor_id <> '' AND a.created_at > now() - interval '90 days'
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("audit: list actors: %w", err)
@@ -531,7 +598,11 @@ func ListActors(ctx context.Context, pool *db.Pool, masterKey string) ([]ActorOp
 			return nil, fmt.Errorf("audit: list actors scan: %w", err)
 		}
 		if nameEnc != "" {
-			a.Name, _ = crypto.Decrypt(masterKey, nameEnc)
+			var err error
+			if a.Name, err = crypto.Decrypt(masterKey, nameEnc); err != nil {
+				log.Printf("audit: decrypt failed for actor_id=%s field=name: %v", a.ID, err)
+				a.Name = "<decryption failed>"
+			}
 		}
 		actors = append(actors, a)
 	}
@@ -548,20 +619,6 @@ func ListActors(ctx context.Context, pool *db.Pool, masterKey string) ([]ActorOp
 		return actors[i].ID < actors[j].ID
 	})
 	return actors, nil
-}
-
-// latestHash returns the hash of the most recent audit_log entry, or ""
-// if the table is empty. Used by Log to chain the next entry.
-func latestHash(ctx context.Context, pool *db.Pool) (string, error) {
-	var h string
-	err := pool.QueryRow(ctx, `SELECT hash FROM audit_log ORDER BY id DESC LIMIT 1`).Scan(&h)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return "", nil
-		}
-		return "", fmt.Errorf("audit: latestHash: %w", err)
-	}
-	return h, nil
 }
 
 // entryHMAC computes HMAC-SHA256 of every stored field (including the
@@ -604,7 +661,7 @@ func legacyEntryHMAC(masterKey, eventType, actorID, targetID, prevHash string) s
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// VerifyResult reports the outcome of walking the whole hash chain.
+// VerifyResult reports the outcome of walking the hash chain.
 type VerifyResult struct {
 	OK             bool  `json:"ok"`
 	EntriesChecked int64 `json:"entries_checked"`
@@ -612,23 +669,52 @@ type VerifyResult struct {
 	// match its recomputed value, or whose prev_hash does not match the
 	// previous entry's hash - 0 if OK is true.
 	BrokenAtID int64 `json:"broken_at_id,omitempty"`
+	// Complete is true if every row in audit_log was examined (i.e. the
+	// table has fewer rows than the limit Verify was called with), false if
+	// the walk stopped early after hitting that limit. A caller that gets
+	// Complete: false and OK: true should not read that as "the whole chain
+	// is intact" - only the first EntriesChecked rows were actually checked.
+	Complete bool `json:"complete"`
 }
 
-// Verify walks every audit_log row in insertion order (oldest first) and
-// recomputes each entry's HMAC from its own fields and the previous row's
-// hash, comparing it against what's stored. Any mismatch - a tampered field,
-// a hash edited in place, or a row deleted/inserted out of band - breaks the
-// chain from that point forward, since every later entry's prev_hash was
-// computed against the untampered original. Read-only: this never writes
-// anything, purely a diagnostic for the Security Info page's "verify
-// integrity" action.
-func Verify(ctx context.Context, pool *db.Pool, masterKey string) (VerifyResult, error) {
+// defaultVerifyLimit is the row cap Verify uses when called with limit <= 0.
+// Verify reads and HMAC-recomputes every row up to this cap in a single
+// request/response cycle (H-3, performance review 2026-08) - unbounded, this
+// was a full-table read-and-recompute per call with no pagination, which at
+// large enough audit_log sizes could tie up the request (and the connection
+// serving it) for a long time. 50,000 rows keeps a single Verify call fast
+// at any realistic homelab-scale audit_log size while still covering years
+// of typical activity in one pass; a caller that legitimately has more than
+// that can re-run Verify starting from BrokenAtID's neighborhood, or this
+// can grow a real cursor-based continuation later if that ever becomes
+// necessary — deliberately not built now, see this fix's own review notes.
+const defaultVerifyLimit = 50_000
+
+// Verify walks up to limit audit_log rows in insertion order (oldest first)
+// and recomputes each entry's HMAC from its own fields and the previous
+// row's hash, comparing it against what's stored. Any mismatch - a tampered
+// field, a hash edited in place, or a row deleted/inserted out of band -
+// breaks the chain from that point forward, since every later entry's
+// prev_hash was computed against the untampered original. Read-only: this
+// never writes anything, purely a diagnostic for the Security Info page's
+// "verify integrity" action.
+//
+// limit <= 0 falls back to defaultVerifyLimit. See VerifyResult.Complete for
+// how a caller tells a full walk apart from one that stopped at the limit.
+func Verify(ctx context.Context, pool *db.Pool, masterKey string, limit int64) (VerifyResult, error) {
+	if limit <= 0 {
+		limit = defaultVerifyLimit
+	}
+	// Ask for one row more than limit so we can tell "exactly limit rows in
+	// the table" (Complete: true) apart from "more than limit rows, stopped
+	// early" (Complete: false) without a separate COUNT(*) round-trip.
 	rows, err := pool.Query(ctx, `
 		SELECT id, event_type, actor_id, target_id,
 		       actor_email_enc, target_email_enc, details_enc, prev_hash, hash
 		FROM audit_log
 		ORDER BY id ASC
-	`)
+		LIMIT $1
+	`, limit+1)
 	if err != nil {
 		return VerifyResult{}, fmt.Errorf("audit: verify query: %w", err)
 	}
@@ -640,6 +726,12 @@ func Verify(ctx context.Context, pool *db.Pool, masterKey string) (VerifyResult,
 		first    = true
 	)
 	for rows.Next() {
+		if checked >= limit {
+			// This is the "one extra row" fetched above - its presence means
+			// the table has more rows than limit, so the walk is incomplete.
+			// Stop without examining it (it hasn't been chain-verified).
+			return VerifyResult{OK: true, EntriesChecked: checked, Complete: false}, nil
+		}
 		var (
 			id                                        int64
 			eventType, actorID, targetID              string
@@ -652,7 +744,7 @@ func Verify(ctx context.Context, pool *db.Pool, masterKey string) (VerifyResult,
 		}
 		checked++
 		if !first && prevHash != expected {
-			return VerifyResult{OK: false, EntriesChecked: checked, BrokenAtID: id}, nil
+			return VerifyResult{OK: false, EntriesChecked: checked, BrokenAtID: id, Complete: false}, nil
 		}
 		first = false
 		// Try the current formula first (covers every entry written since
@@ -662,12 +754,12 @@ func Verify(ctx context.Context, pool *db.Pool, masterKey string) (VerifyResult,
 		// comment.
 		if entryHMAC(masterKey, eventType, actorID, targetID, actorEmailEnc, targetEmailEnc, detailsEnc, prevHash) != hash &&
 			legacyEntryHMAC(masterKey, eventType, actorID, targetID, prevHash) != hash {
-			return VerifyResult{OK: false, EntriesChecked: checked, BrokenAtID: id}, nil
+			return VerifyResult{OK: false, EntriesChecked: checked, BrokenAtID: id, Complete: false}, nil
 		}
 		expected = hash
 	}
 	if err := rows.Err(); err != nil {
 		return VerifyResult{}, fmt.Errorf("audit: verify rows: %w", err)
 	}
-	return VerifyResult{OK: true, EntriesChecked: checked}, nil
+	return VerifyResult{OK: true, EntriesChecked: checked, Complete: true}, nil
 }

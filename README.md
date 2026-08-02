@@ -42,6 +42,12 @@ On first start, the backend prints a one-time bootstrap token to its log. The en
 
 See `.env.example` for required environment variables (`MODULAB_MASTER_KEY`, DB/Valkey connection strings, and so on).
 
+## Backups
+
+`scripts/backup.sh` creates a compressed `pg_dump -Fc` backup of the Postgres database via `docker exec` against the `postgres` container from `deploy/docker-compose.yml`. Container name, database name, user, and output directory are all configurable via environment variables (see the script header for defaults).
+
+This backup is worthless without `MODULAB_MASTER_KEY`: every credential, secret, and piece of PII (OIDC client secret, SMTP credentials, AI provider keys, module gateway credentials, audit log PII, user email/name, ...) is stored AES-256-GCM-encrypted under that single key. Restoring the database to a new instance with a different or missing master key leaves every encrypted column permanently unrecoverable - there is no way to fix this after the fact. `scripts/backup.sh` never reads, copies, or otherwise touches `MODULAB_MASTER_KEY`; back it up yourself, separately and out-of-band, and never store it alongside the database backup.
+
 ## License
 
 AGPLv3, see LICENSE. Modules retain their own license; this Core repository is AGPLv3.

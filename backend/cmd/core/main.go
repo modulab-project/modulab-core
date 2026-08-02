@@ -23,6 +23,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -50,6 +51,60 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/version"
 	"github.com/modulab-project/modulab-core/backend/internal/weather"
 )
+
+// healthzCacheTTL is how long the NTP drift check and the SearXNG reachability
+// ping (both outbound network calls) are cached for /healthz. Postgres/Valkey
+// pings stay live on every call - those are cheap, same-network round trips,
+// unlike the NTP UDP round-trip to pool.ntp.org and the SearXNG HTTP ping
+// which can each add real latency (and, if a monitoring system polls
+// /healthz every few seconds, real load) with no benefit to checking more
+// often than this.
+const healthzCacheTTL = 10 * time.Minute
+
+// healthzCache holds the last NTP/SearXNG check results behind a mutex so
+// concurrent /healthz requests within the TTL window reuse the same result
+// instead of each firing their own outbound check.
+var healthzCache struct {
+	mu         sync.RWMutex
+	checkedAt  time.Time
+	ntpDriftOK *bool
+	searxngUp  *bool
+}
+
+// checkNTPAndSearXNGCached returns the cached NTP drift / SearXNG reachability
+// results if they are still within healthzCacheTTL, otherwise runs both
+// checks fresh and caches the new results. baseURL/configured come from the
+// caller's own (fast, per-request) DB lookup since which SearXNG instance to
+// ping can change at runtime.
+func checkNTPAndSearXNGCached(ctx context.Context, baseURL string, searxngConfigured bool) (ntpDriftOK *bool, searxngUp *bool) {
+	healthzCache.mu.RLock()
+	fresh := time.Since(healthzCache.checkedAt) < healthzCacheTTL
+	if fresh {
+		ntpDriftOK, searxngUp = healthzCache.ntpDriftOK, healthzCache.searxngUp
+	}
+	healthzCache.mu.RUnlock()
+	if fresh {
+		return ntpDriftOK, searxngUp
+	}
+
+	// NTP drift check: best-effort, 3 s timeout. If pool.ntp.org is not
+	// reachable (firewalled UDP 123), NTPDriftOK stays nil - callers treat
+	// nil as "unknown", not "bad".
+	if ok, err := ntpcheck.DriftOK(30 * time.Second); err == nil {
+		ntpDriftOK = &ok
+	}
+	if searxngConfigured {
+		up := searxng.Ping(ctx, baseURL)
+		searxngUp = &up
+	}
+
+	healthzCache.mu.Lock()
+	healthzCache.checkedAt = time.Now()
+	healthzCache.ntpDriftOK = ntpDriftOK
+	healthzCache.searxngUp = searxngUp
+	healthzCache.mu.Unlock()
+	return ntpDriftOK, searxngUp
+}
 
 type healthStatus struct {
 	Status            string `json:"status"`
@@ -114,7 +169,12 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable",
+	// sslmode=prefer (not disable): opportunistically use TLS if
+	// PgBouncer/Postgres offers it, falling back to plaintext only if it
+	// doesn't - not a breaking change for the current unencrypted homelab
+	// setup, but stops Core from actively refusing an encrypted connection
+	// if TLS is ever enabled on that hop.
+	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=prefer",
 		cfg.DBUser, cfg.DBPassword, cfg.DBHost, cfg.DBPort, cfg.DBName)
 	pool, err := db.Connect(ctx, dsn, cfg.MasterKey)
 	if err != nil {
@@ -223,20 +283,16 @@ func main() {
 		// generalized to "any configured search provider") since SearXNG is
 		// the only provider type with an admin-chosen network address worth
 		// probing this way - Serper is a fixed public API host.
-		if baseURL, configured, err := pool.GetSearchProviderBaseURL(r.Context(), db.DefaultSearchProviderID); err == nil {
+		var baseURL string
+		var searxngConfigured bool
+		if u, configured, err := pool.GetSearchProviderBaseURL(r.Context(), db.DefaultSearchProviderID); err == nil {
 			status.SearXNGConfigured = configured
-			if configured {
-				up := searxng.Ping(r.Context(), baseURL)
-				status.SearXNGUp = &up
-			}
+			baseURL, searxngConfigured = u, configured
 		}
-		// NTP drift check: best-effort, 3 s timeout. If pool.ntp.org is not
-		// reachable (firewalled UDP 123), NTPDriftOK stays nil — callers treat
-		// nil as "unknown", not "bad". The 3-second deadline is the only extra
-		// latency /healthz adds beyond the SearXNG ping above.
-		if ok, err := ntpcheck.DriftOK(30 * time.Second); err == nil {
-			status.NTPDriftOK = &ok
-		}
+		// NTP drift and SearXNG reachability are both outbound network calls,
+		// so they're cached for healthzCacheTTL (see checkNTPAndSearXNGCached's
+		// doc comment) instead of re-checked on every /healthz request.
+		status.NTPDriftOK, status.SearXNGUp = checkNTPAndSearXNGCached(r.Context(), baseURL, searxngConfigured)
 		// Module worker health summary - best-effort, same as the checks
 		// above: a failed lookup here must not break /healthz itself, it
 		// just leaves the counts at zero (indistinguishable from "no
@@ -256,6 +312,20 @@ func main() {
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
+		// Postgres is the core datastore - every request eventually touches it
+		// (sessions land in Valkey, but users/settings/audit/module state all
+		// live in Postgres), so Postgres being down means Core cannot actually
+		// serve traffic even though this process is still up and answering.
+		// A monitoring/orchestration layer (Docker healthcheck, Traefik,
+		// an uptime check) needs a non-2xx to notice that, so this reports
+		// 503 rather than always 200 while still returning the same
+		// informative JSON body. Valkey down does NOT trigger 503 here: most
+		// of the app still works with Valkey unreachable (only
+		// sessions/cache/SSE degrade), so it stays a status field rather
+		// than an outage signal for orchestration purposes.
+		if !status.PostgresUp {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
 		_ = json.NewEncoder(w).Encode(status)
 	})
 
@@ -893,6 +963,21 @@ func main() {
 	srv := &http.Server{
 		Addr:    cfg.HTTPAddr,
 		Handler: handler,
+		// ReadHeaderTimeout/ReadTimeout/IdleTimeout/MaxHeaderBytes guard
+		// against slow-header/slowloris-style connections and unbounded
+		// idle-connection buildup - none of these were set before, so a
+		// client that trickled headers in slowly (or never finished sending
+		// them) could tie up a connection indefinitely.
+		//
+		// WriteTimeout is deliberately NOT set: /v1/ai/chat streams SSE
+		// responses (internal/ai's ChatHandler) that can legitimately stay
+		// open far longer than any fixed WriteTimeout would allow, and
+		// GET /v1/events (internal/notify) is a long-lived SSE connection by
+		// design. A WriteTimeout here would silently cut both off mid-stream.
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	// Serve on a separate goroutine so the main goroutine below can block on

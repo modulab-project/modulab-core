@@ -46,7 +46,7 @@ func CompleteHandler(pool *db.Pool, mgr *bootstrap.Manager, masterKeyEnv string)
 			return
 		}
 		if len(missing) > 0 {
-			writeJSON(w, http.StatusPreconditionFailed, CompleteResponse{
+			httperr.JSON(w, http.StatusPreconditionFailed, CompleteResponse{
 				Completed: false,
 				Missing:   missing,
 			})
@@ -67,7 +67,7 @@ func CompleteHandler(pool *db.Pool, mgr *bootstrap.Manager, masterKeyEnv string)
 			}
 		}
 
-		writeJSON(w, http.StatusOK, CompleteResponse{Completed: true})
+		httperr.JSON(w, http.StatusOK, CompleteResponse{Completed: true})
 	}
 }
 

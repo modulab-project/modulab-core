@@ -72,10 +72,16 @@ func SystemStatusHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 		}
 		if issuerExists && encIssuer != "" {
 			oidcStatus.Configured = true
-			oidcStatus.IssuerURL, _ = crypto.DecryptIfNotEmpty(masterKey, encIssuer)
+			if oidcStatus.IssuerURL, err = crypto.DecryptIfNotEmpty(masterKey, encIssuer); err != nil {
+				log.Printf("adminapi: decrypt failed for setting=oidc_issuer_url: %v", err)
+				oidcStatus.IssuerURL = "<decryption failed>"
+			}
 			encClientID, cidExists, _ := pool.GetSetting(ctx, "oidc_client_id")
 			if cidExists {
-				oidcStatus.ClientID, _ = crypto.DecryptIfNotEmpty(masterKey, encClientID)
+				if oidcStatus.ClientID, err = crypto.DecryptIfNotEmpty(masterKey, encClientID); err != nil {
+					log.Printf("adminapi: decrypt failed for setting=oidc_client_id: %v", err)
+					oidcStatus.ClientID = "<decryption failed>"
+				}
 			}
 		}
 
@@ -86,7 +92,7 @@ func SystemStatusHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 			return
 		}
 
-		writeJSON(w, http.StatusOK, SystemStatusResponse{
+		httperr.JSON(w, http.StatusOK, SystemStatusResponse{
 			OIDC:        oidcStatus,
 			GroupPrefix: prefix,
 		})
@@ -173,7 +179,7 @@ func OIDCUpdateHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 			}
 		}
 
-		writeJSON(w, http.StatusOK, OIDCStatus{
+		httperr.JSON(w, http.StatusOK, OIDCStatus{
 			Configured: true,
 			IssuerURL:  req.IssuerURL,
 			ClientID:   req.ClientID,
@@ -212,7 +218,7 @@ func OIDCDeleteHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 			}
 		}
 
-		writeJSON(w, http.StatusOK, OIDCStatus{Configured: false})
+		httperr.JSON(w, http.StatusOK, OIDCStatus{Configured: false})
 	}
 }
 
@@ -282,7 +288,7 @@ func AuditLogHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 		if entries == nil {
 			entries = []audit.Entry{}
 		}
-		writeJSON(w, http.StatusOK, entries)
+		httperr.JSON(w, http.StatusOK, entries)
 	}
 }
 
@@ -302,7 +308,7 @@ func AuditActorsHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 		if actors == nil {
 			actors = []audit.ActorOption{}
 		}
-		writeJSON(w, http.StatusOK, actors)
+		httperr.JSON(w, http.StatusOK, actors)
 	}
 }
 
@@ -324,20 +330,24 @@ func AuditVerifyHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 			return
 		}
 
-		result, err := audit.Verify(ctx, pool, masterKey)
+		// Optional ?limit= caps how many rows this single call examines (see
+		// audit.Verify's doc comment on defaultVerifyLimit) - not exposed in
+		// the current admin UI, but available for an operator who wants to
+		// deliberately check a smaller/larger slice via curl. Malformed or
+		// non-positive values fall back to audit.Verify's own default rather
+		// than erroring the request over a cosmetic query param.
+		var limit int64
+		if v := r.URL.Query().Get("limit"); v != "" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				limit = n
+			}
+		}
+
+		result, err := audit.Verify(ctx, pool, masterKey, limit)
 		if err != nil {
 			httperr.Internal(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, result)
+		httperr.JSON(w, http.StatusOK, result)
 	}
-}
-
-// writeJSON is a local copy of the same helper from setup/wizard.go and
-// auth/admin.go - each package keeps its own so there is no shared utility
-// dependency just for one line of JSON encoding.
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
 }

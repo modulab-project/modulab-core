@@ -23,6 +23,7 @@ import { useAuthenticatedSession } from "../lib/useSession";
 import { useLoginRedirect } from "../lib/useLoginRedirect";
 import { isReauthRequiredError } from "../lib/authErrors";
 import { AppShell } from "../components/AppShell";
+import { Modal } from "../components/Modal";
 import { ReauthBanner } from "../components/ReauthBanner";
 import { Logo } from "../components/AuthShell";
 import { isAdminRole, isSuperAdminRole } from "../lib/roles";
@@ -405,7 +406,7 @@ export default function StorePage() {
                     <a
                       href={safeHref(githubURL)}
                       target="_blank"
-                      rel="noreferrer"
+                      rel="noopener noreferrer"
                       className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
                     >
                       <i className="ti ti-brand-github text-[13px]" />
@@ -640,11 +641,15 @@ function CustomSourcesDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 dark:bg-gray-900">
+    <Modal
+      open
+      onClose={onClose}
+      titleId="store-custom-sources-title"
+      className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 dark:bg-gray-900"
+    >
         <div className="mb-4 flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-base font-semibold">{t("store.custom.title")}</h2>
+            <h2 id="store-custom-sources-title" className="text-base font-semibold">{t("store.custom.title")}</h2>
             <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
               {t("store.custom.subtitle")}
             </p>
@@ -652,6 +657,7 @@ function CustomSourcesDialog({
           <button
             type="button"
             onClick={onClose}
+            aria-label={t("shell.close")}
             className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
           >
             <i className="ti ti-x text-[16px]" />
@@ -858,8 +864,7 @@ function CustomSourcesDialog({
             )}
           </button>
         </form>
-      </div>
-    </div>
+    </Modal>
   );
 }
 

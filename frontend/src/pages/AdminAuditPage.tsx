@@ -270,6 +270,12 @@ export default function AdminAuditPage() {
 
   const hasFetched = useRef(false);
 
+  // Guards against out-of-order responses: if the admin changes filters
+  // again before an in-flight query's response arrives, a slow older
+  // response must not clobber the newer one's results. Same pattern as
+  // Home.tsx's searchSeq.
+  const querySeq = useRef(0);
+
   // Runs a fresh (first-page) query for the given filter set.
   const runQuery = useCallback(
     (f: Filters) => {
@@ -277,6 +283,7 @@ export default function AdminAuditPage() {
       cursorRef.current = undefined;
       setFetching(true);
       setError(null);
+      const mySeq = ++querySeq.current;
       getAuditLog({
         event_type: f.eventType || undefined,
         actor_id: f.actorId || undefined,
@@ -286,14 +293,20 @@ export default function AdminAuditPage() {
         limit: PAGE_SIZE,
       })
         .then((data) => {
+          if (mySeq !== querySeq.current) return; // a newer query has since started - discard
           setEntries(data);
           setHasMore(data.length === PAGE_SIZE);
           if (data.length > 0) {
             cursorRef.current = data[data.length - 1].id;
           }
         })
-        .catch(() => setError(t("admin.audit.load_error")))
-        .finally(() => setFetching(false));
+        .catch(() => {
+          if (mySeq !== querySeq.current) return;
+          setError(t("admin.audit.load_error"));
+        })
+        .finally(() => {
+          if (mySeq === querySeq.current) setFetching(false);
+        });
     },
     [t],
   );
@@ -309,10 +322,20 @@ export default function AdminAuditPage() {
     runQuery(EMPTY_FILTERS);
   }, [session, navigate, runQuery]);
 
+  // Skip the very first run of the debounce effect below - it fires on
+  // mount (same as any [searchInput]-deps effect) and would otherwise fire
+  // a second, redundant runQuery(EMPTY_FILTERS) 400ms after the mount
+  // effect above already ran it once.
+  const debounceMounted = useRef(false);
+
   // Debounce the search box: only apply it (and re-query) once the admin
   // has paused typing. Reads the *other* filters fresh at the moment the
   // timer fires so a search doesn't clobber a filter changed in between.
   useEffect(() => {
+    if (!debounceMounted.current) {
+      debounceMounted.current = true;
+      return;
+    }
     const handle = setTimeout(() => {
       setSearchFilter(searchInput);
       hasFetched.current = true;

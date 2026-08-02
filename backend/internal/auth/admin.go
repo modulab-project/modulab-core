@@ -538,7 +538,7 @@ func UsersHandler(d Deps) http.HandlerFunc {
 				LastLoginAt: u.LastLoginAt,
 			})
 		}
-		writeJSON(w, http.StatusOK, resp)
+		httperr.JSON(w, http.StatusOK, resp)
 	}
 }
 

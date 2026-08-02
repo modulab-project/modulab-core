@@ -29,6 +29,7 @@ import {
 } from "../lib/api";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell } from "../components/AppShell";
+import { Modal } from "../components/Modal";
 import { isAdminRole } from "../lib/roles";
 
 export default function AdminFeedsPage() {
@@ -517,20 +518,14 @@ function CatalogLangModal({
 }) {
   const { t } = useTranslation();
 
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   return (
-    <>
-      {/* click-outside-to-close backdrop; Escape (above) is the keyboard equivalent */}
-      <div className="fixed inset-0 z-40 bg-black/40" onClick={onClose} aria-hidden="true" />
-      <div className="fixed inset-x-4 top-[25%] z-50 mx-auto max-w-sm rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-gray-800 dark:bg-gray-950">
-        <h2 className="mb-1 text-base font-semibold">{t("admin.feeds.catalog_modal.pick_title")}</h2>
+    <Modal
+      open
+      onClose={onClose}
+      titleId="catalog-lang-modal-title"
+      className="fixed inset-x-4 top-[25%] z-50 mx-auto max-w-sm rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-gray-800 dark:bg-gray-950"
+    >
+        <h2 id="catalog-lang-modal-title" className="mb-1 text-base font-semibold">{t("admin.feeds.catalog_modal.pick_title")}</h2>
         <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
           {t("admin.feeds.catalog_modal.pick_subtitle")}
         </p>
@@ -554,8 +549,7 @@ function CatalogLangModal({
         >
           {t("admin.feeds.opml_modal.cancel")}
         </button>
-      </div>
-    </>
+    </Modal>
   );
 }
 
@@ -614,14 +608,6 @@ function OPMLSelectionModal({
   const [importing, setImporting] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   // Selectable = not already in DB and reachable.
   const selectable = entries.filter((e) => !e.already_exists && e.reachable);
   const allSelectableSelected = selectable.length > 0 && selectable.every((e) => selected.has(e.url));
@@ -660,15 +646,16 @@ function OPMLSelectionModal({
   }
 
   return (
-    <>
-      {/* Backdrop - Escape (registered above) is the keyboard equivalent */}
-      <div className="fixed inset-0 z-40 bg-black/40" onClick={onClose} aria-hidden="true" />
-      {/* Dialog */}
-      <div className="fixed inset-x-4 top-[8%] z-50 mx-auto flex max-w-lg flex-col rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-gray-950"
-        style={{ maxHeight: "80vh" }}>
+    <Modal
+      open
+      onClose={onClose}
+      titleId="opml-selection-modal-title"
+      className="fixed inset-x-4 top-[8%] z-50 mx-auto flex max-w-lg flex-col rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-gray-950"
+      style={{ maxHeight: "80vh" }}
+    >
         {/* Header */}
         <div className="px-6 pt-5 pb-3 shrink-0">
-          <h2 className="text-base font-semibold">{t(titleKey)}</h2>
+          <h2 id="opml-selection-modal-title" className="text-base font-semibold">{t(titleKey)}</h2>
           <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
             {t(subtitleKey)}
           </p>
@@ -758,8 +745,7 @@ function OPMLSelectionModal({
             </button>
           </div>
         </div>
-      </div>
-    </>
+    </Modal>
   );
 }
 
@@ -781,14 +767,6 @@ function FeedModal({
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [checkResult, setCheckResult] = useState<FeedCheckResult | null>(null);
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   async function handleCheck() {
     if (!url.trim()) return;
@@ -823,16 +801,13 @@ function FeedModal({
   }
 
   return (
-    <>
-      {/* Backdrop - Escape (registered above) is the keyboard equivalent */}
-      <div
-        className="fixed inset-0 z-40 bg-black/40"
-        onClick={onClose}
-        aria-hidden="true"
-      />
-      {/* Dialog */}
-      <div className="fixed inset-x-4 top-[20%] z-50 mx-auto max-h-[80vh] max-w-md overflow-y-auto rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-gray-800 dark:bg-gray-950">
-        <h2 className="mb-4 text-base font-semibold">
+    <Modal
+      open
+      onClose={onClose}
+      titleId="feed-modal-title"
+      className="fixed inset-x-4 top-[20%] z-50 mx-auto max-h-[80vh] max-w-md overflow-y-auto rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-gray-800 dark:bg-gray-950"
+    >
+        <h2 id="feed-modal-title" className="mb-4 text-base font-semibold">
           {feed ? t("admin.feeds.modal.title_edit") : t("admin.feeds.modal.title_add")}
         </h2>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -907,7 +882,6 @@ function FeedModal({
             </button>
           </div>
         </form>
-      </div>
-    </>
+    </Modal>
   );
 }

@@ -14,7 +14,7 @@
 //   - EgressHostsHandler, which Core dispatches to ask the module itself
 //     what it needs (WorkerPool.QueryEgressHosts).
 //
-// Both fed straight into ReloadEgress -> startLocked -> --allow-net with no
+// Both fed straight into ReloadEgress -> Start -> buildWorker -> --allow-net with no
 // check of any kind. A module could therefore answer any request with
 // {"restartHosts": ["attacker.example", "169.254.169.254", "10.0.0.5"]} and
 // restart itself seconds later holding exactly that grant - the manifest the

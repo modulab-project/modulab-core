@@ -14,6 +14,7 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/httperr"
 )
 
 // CustomSourceResponse is what the admin-only custom-sources endpoints
@@ -63,7 +64,7 @@ func ListCustomSourcesHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 		for _, row := range rows {
 			out = append(out, toCustomSourceResponse(row))
 		}
-		writeJSON(w, http.StatusOK, out)
+		httperr.JSON(w, http.StatusOK, out)
 	}
 }
 
@@ -160,7 +161,7 @@ func AddCustomSourceHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 			}
 		}
 
-		writeJSON(w, http.StatusCreated, toCustomSourceResponse(row))
+		httperr.JSON(w, http.StatusCreated, toCustomSourceResponse(row))
 	}
 }
 
@@ -303,7 +304,7 @@ func UpdateCustomSourceHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 				updated.RepoURL, req.Name != nil, req.PubKey != nil, req.Token != nil),
 		})
 
-		writeJSON(w, http.StatusOK, toCustomSourceResponse(updated))
+		httperr.JSON(w, http.StatusOK, toCustomSourceResponse(updated))
 	}
 }
 

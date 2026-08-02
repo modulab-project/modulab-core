@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ToastItem } from "../components/Toast";
 
 let nextToastID = 1;
@@ -22,12 +22,28 @@ const TOAST_DURATION_MS = 6_000;
 export function useToasts(): { toasts: ToastItem[]; push: (t: Omit<ToastItem, "id">) => void } {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
+  // Per-toast auto-dismiss timers, keyed by toast id, so they can be
+  // cleared individually (once the toast fires) and in bulk on unmount -
+  // without this a timer that outlives its owning component would call
+  // setToasts() on an unmounted hook instance.
+  const timers = useRef<Map<number, ReturnType<typeof window.setTimeout>>>(new Map());
+
+  useEffect(() => {
+    const timerMap = timers.current;
+    return () => {
+      timerMap.forEach((timer) => window.clearTimeout(timer));
+      timerMap.clear();
+    };
+  }, []);
+
   const push = useCallback((t: Omit<ToastItem, "id">) => {
     const id = nextToastID++;
     setToasts((prev) => [...prev, { ...t, id }]);
-    window.setTimeout(() => {
+    const timer = window.setTimeout(() => {
+      timers.current.delete(id);
       setToasts((prev) => prev.filter((x) => x.id !== id));
     }, TOAST_DURATION_MS);
+    timers.current.set(id, timer);
   }, []);
 
   return { toasts, push };

@@ -393,19 +393,6 @@ func isHTTPURL(raw string) bool {
 	return u.Scheme == "http" || u.Scheme == "https"
 }
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	data, err := json.Marshal(v)
-	if err != nil {
-		httperr.Internal(w, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if _, err := w.Write(data); err != nil {
-		log.Printf("news: write response: %v", err)
-	}
-}
-
 // ---- OPML import ------------------------------------------------------------
 
 // opmlBody is the minimal OPML 2.0 structure we need to parse.
@@ -597,7 +584,7 @@ func AdminParseOPMLHandler(d auth.Deps) http.HandlerFunc {
 		}
 		wg.Wait()
 
-		writeJSON(w, http.StatusOK, entries)
+		httperr.JSON(w, http.StatusOK, entries)
 	}
 }
 
@@ -690,7 +677,7 @@ func AdminImportHandler(d auth.Deps) http.HandlerFunc {
 			Details:    fmt.Sprintf(`{"import":true,"created":%d,"skipped":%d,"failed":%d}`, created, skipped, failed),
 		})
 
-		writeJSON(w, http.StatusOK, results)
+		httperr.JSON(w, http.StatusOK, results)
 	}
 }
 
@@ -722,13 +709,13 @@ func AdminCheckHandler(d auth.Deps) http.HandlerFunc {
 		}
 		body.URL = strings.TrimSpace(body.URL)
 		if !isHTTPURL(body.URL) {
-			writeJSON(w, http.StatusOK, CheckResult{Reachable: false, Error: "url must be a valid http or https URL"})
+			httperr.JSON(w, http.StatusOK, CheckResult{Reachable: false, Error: "url must be a valid http or https URL"})
 			return
 		}
 
 		arts, err := fetchFeed(r.Context(), d.Pool, body.URL, "check")
 		if err != nil {
-			writeJSON(w, http.StatusOK, CheckResult{Reachable: false, Error: err.Error()})
+			httperr.JSON(w, http.StatusOK, CheckResult{Reachable: false, Error: err.Error()})
 			return
 		}
 
@@ -739,7 +726,7 @@ func AdminCheckHandler(d auth.Deps) http.HandlerFunc {
 				break
 			}
 		}
-		writeJSON(w, http.StatusOK, CheckResult{
+		httperr.JSON(w, http.StatusOK, CheckResult{
 			Reachable:    true,
 			ArticleCount: len(arts),
 			HasImages:    hasImages,
@@ -769,7 +756,7 @@ func AdminListHandler(d auth.Deps) http.HandlerFunc {
 				CreatedAt: f.CreatedAt,
 			})
 		}
-		writeJSON(w, http.StatusOK, resp)
+		httperr.JSON(w, http.StatusOK, resp)
 	}
 }
 
@@ -811,7 +798,7 @@ func AdminCreateHandler(d auth.Deps) http.HandlerFunc {
 			TargetID:   strconv.Itoa(feed.ID),
 			Details:    fmt.Sprintf(`{"label":%q,"url":%q}`, feed.Label, feed.URL),
 		})
-		writeJSON(w, http.StatusCreated, FeedResponse{
+		httperr.JSON(w, http.StatusCreated, FeedResponse{
 			ID:        feed.ID,
 			URL:       feed.URL,
 			Label:     feed.Label,
@@ -948,7 +935,7 @@ func FeedsHandler(d auth.Deps) http.HandlerFunc {
 				CreatedAt: f.CreatedAt,
 			})
 		}
-		writeJSON(w, http.StatusOK, resp)
+		httperr.JSON(w, http.StatusOK, resp)
 	}
 }
 
@@ -1001,7 +988,7 @@ func NewsHandler(d auth.Deps) http.HandlerFunc {
 			return
 		}
 		if len(feeds) == 0 {
-			writeJSON(w, http.StatusOK, []Article{})
+			httperr.JSON(w, http.StatusOK, []Article{})
 			return
 		}
 
@@ -1013,11 +1000,19 @@ func NewsHandler(d auth.Deps) http.HandlerFunc {
 			err  error
 		}
 		results := make([]result, len(feeds))
+		// Bounded by maxConcurrency (same pattern as the OPML-import
+		// reachability checks elsewhere in this package) - a user subscribed
+		// to a large number of feeds previously spawned one goroutine + one
+		// outbound HTTP request per feed with no cap, all fired at once on
+		// every cache-miss /v1/news request.
+		sem := make(chan struct{}, maxConcurrency)
 		var wg sync.WaitGroup
 		for i, feed := range feeds {
 			wg.Add(1)
 			go func(i int, f db.FeedRow) {
 				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
 				arts, err := cachedFeed(r.Context(), d.Valkey, d.Pool, f.ID, f.URL, f.Label)
 				results[i] = result{arts: arts, err: err}
 			}(i, feed)
@@ -1052,7 +1047,7 @@ func NewsHandler(d auth.Deps) http.HandlerFunc {
 		if all == nil {
 			all = []Article{}
 		}
-		writeJSON(w, http.StatusOK, all)
+		httperr.JSON(w, http.StatusOK, all)
 	}
 }
 
@@ -1088,7 +1083,7 @@ func NewsConfigHandler(d auth.Deps) http.HandlerFunc {
 			return
 		}
 		_, homeCount, showImages := newsSettingsDefaults(r.Context(), d.Pool)
-		writeJSON(w, http.StatusOK, map[string]any{
+		httperr.JSON(w, http.StatusOK, map[string]any{
 			"home_count":  homeCount,
 			"show_images": showImages,
 		})
@@ -1123,7 +1118,7 @@ func AdminNewsSettingsHandler(d auth.Deps) http.HandlerFunc {
 		}
 
 		if r.Method == http.MethodGet {
-			writeJSON(w, http.StatusOK, readCurrent(r.Context()))
+			httperr.JSON(w, http.StatusOK, readCurrent(r.Context()))
 			return
 		}
 
@@ -1194,7 +1189,7 @@ func AdminNewsSettingsHandler(d auth.Deps) http.HandlerFunc {
 			}
 		}
 
-		writeJSON(w, http.StatusOK, readCurrent(r.Context()))
+		httperr.JSON(w, http.StatusOK, readCurrent(r.Context()))
 	}
 }
 
@@ -1248,7 +1243,7 @@ func AdminCatalogHandler(d auth.Deps) http.HandlerFunc {
 
 		// No lang param → return language list.
 		if lang == "" {
-			writeJSON(w, http.StatusOK, map[string][]string{"languages": catalogLanguages})
+			httperr.JSON(w, http.StatusOK, map[string][]string{"languages": catalogLanguages})
 			return
 		}
 
@@ -1343,7 +1338,7 @@ func AdminCatalogHandler(d auth.Deps) http.HandlerFunc {
 		}
 		wg.Wait()
 
-		writeJSON(w, http.StatusOK, entries)
+		httperr.JSON(w, http.StatusOK, entries)
 	}
 }
 

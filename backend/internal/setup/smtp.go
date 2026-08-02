@@ -235,7 +235,7 @@ func SMTPStatusHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 			return
 		}
 		if !exists {
-			writeJSON(w, http.StatusOK, SMTPStatusResponse{Configured: false})
+			httperr.JSON(w, http.StatusOK, SMTPStatusResponse{Configured: false})
 			return
 		}
 
@@ -280,7 +280,7 @@ func SMTPStatusHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 			return
 		}
 
-		writeJSON(w, http.StatusOK, SMTPStatusResponse{
+		httperr.JSON(w, http.StatusOK, SMTPStatusResponse{
 			Configured:  true,
 			Host:        host,
 			Port:        port,
@@ -383,7 +383,7 @@ func SMTPConfigureHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 			return
 		}
 
-		writeJSON(w, http.StatusOK, SMTPStatusResponse{
+		httperr.JSON(w, http.StatusOK, SMTPStatusResponse{
 			Configured:  true,
 			Host:        req.Host,
 			Port:        req.Port,
@@ -483,7 +483,7 @@ func SMTPTestHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 			http.Error(w, fmt.Sprintf("smtp test failed: %v", err), http.StatusBadGateway)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		httperr.JSON(w, http.StatusOK, map[string]bool{"ok": true})
 	}
 }
 

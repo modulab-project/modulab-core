@@ -8,7 +8,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./lib/queryClient";
 import App from "./App";
 import "./index.css";
-import "./lib/i18n";
+import i18n, { ensureLanguage } from "./lib/i18n";
 // Self-hosted Tabler Icons webfont (used throughout the app as ti/ti-*
 // classes) - replaces the previous <link> to cdnjs.cloudflare.com in
 // index.html. Bundled and fingerprinted by Vite like any other asset, so
@@ -28,12 +28,17 @@ import "@tabler/icons-webfont/dist/tabler-icons.min.css";
   ReactI18next,
 };
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
-    </QueryClientProvider>
-  </React.StrictMode>,
-);
+// Make sure the detected/current language's translation bundle is loaded
+// before the first render, so there's no flash of English before the real
+// language pops in (only "en" ships in the entry bundle - see lib/i18n.ts).
+ensureLanguage(i18n.language).finally(() => {
+  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+    <React.StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </QueryClientProvider>
+    </React.StrictMode>,
+  );
+});

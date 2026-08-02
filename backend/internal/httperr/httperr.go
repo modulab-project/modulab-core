@@ -23,6 +23,7 @@
 package httperr
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"path/filepath"
@@ -45,4 +46,33 @@ func Internal(w http.ResponseWriter, err error) {
 		log.Printf("internal error (unknown caller): %v", err)
 	}
 	http.Error(w, "internal server error", http.StatusInternalServerError)
+}
+
+// JSON encodes v as JSON and writes it to w with the given status code.
+// Consolidates six identical (or near-identical) local `writeJSON` helpers
+// that used to live one per handler package (auth, adminapi, setup, store,
+// news, quicklinks - found during an ops/quality pass, 2026-08-02).
+//
+// v is marshalled before anything is written to w, so a marshal failure
+// (which should never happen for the plain structs/maps every caller passes,
+// but json.Marshal can still fail on unsupported types like channels or
+// cyclic pointers) goes through httperr.Internal - a proper 500 with a
+// generic body - instead of committing a 200/whatever status header and
+// then writing nothing or a half-written body. This mirrors the safer of
+// the two writeJSON variants that existed before consolidation (the ones in
+// news.go/store/handlers.go/quicklinks.go); the other three
+// (adminapi/handlers.go, setup/wizard.go, auth/handlers.go) used
+// json.NewEncoder(w).Encode(v) directly after already writing the header
+// and silently discarded the encode error, which this replaces.
+func JSON(w http.ResponseWriter, status int, v any) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		Internal(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if _, err := w.Write(data); err != nil {
+		log.Printf("httperr: write response: %v", err)
+	}
 }

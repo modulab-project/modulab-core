@@ -6,6 +6,7 @@ package config
 import (
 	"encoding/hex"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 )
@@ -263,6 +264,8 @@ func applyDotEnvFile(path string) {
 		if _, alreadySet := os.LookupEnv(key); alreadySet {
 			continue // real environment variables always win over .env content
 		}
-		_ = os.Setenv(key, value)
+		if err := os.Setenv(key, value); err != nil {
+			log.Printf("config: failed to set env var %s: %v", key, err)
+		}
 	}
 }

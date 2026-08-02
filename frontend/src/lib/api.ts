@@ -1,3 +1,5 @@
+import i18n from "./i18n";
+
 // Minimal fetch wrapper for the Setup Wizard's backend endpoints
 // (backend/internal/setup) plus the one URL the OIDC login flow
 // (backend/internal/auth) needs. Deliberately not TanStack Query - this
@@ -92,6 +94,15 @@ export async function request<T>(
   });
   if (!res.ok) {
     const text = await res.text();
+    if (res.status >= 500) {
+      // 5xx bodies are raw backend/proxy error text (stack traces, Traefik
+      // gateway pages, etc.) - not fit for the UI. Log the real text for
+      // diagnosis but surface a generic, translated message instead. Below
+      // 500 the body is almost always a clean validation message meant to
+      // be shown as-is, so that path is untouched.
+      console.debug(`[api] ${res.status} ${path}:`, text || res.statusText);
+      throw new ApiError(res.status, i18n.t("errors.server_error"));
+    }
     throw new ApiError(res.status, text || res.statusText);
   }
   if (res.status === 204) {

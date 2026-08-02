@@ -38,6 +38,7 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/auth"
 	"github.com/modulab-project/modulab-core/backend/internal/coreupdate"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/httperr"
 	"github.com/modulab-project/modulab-core/backend/internal/modules"
 	"github.com/modulab-project/modulab-core/backend/internal/news"
 	"github.com/modulab-project/modulab-core/backend/internal/search"
@@ -270,7 +271,7 @@ func AdminLimitsHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 
 		switch r.Method {
 		case http.MethodGet:
-			writeJSON(w, http.StatusOK, currentLimitsSettings(r, pool))
+			httperr.JSON(w, http.StatusOK, currentLimitsSettings(r, pool))
 
 		case http.MethodPatch:
 			var body LimitsSettings
@@ -392,7 +393,7 @@ func AdminLimitsHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 				}
 			}
 
-			writeJSON(w, http.StatusOK, body)
+			httperr.JSON(w, http.StatusOK, body)
 
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

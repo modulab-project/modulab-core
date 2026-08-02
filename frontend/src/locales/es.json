@@ -1,4 +1,7 @@
 {
+  "errors": {
+    "server_error": "Se ha producido un error interno. Inténtalo de nuevo más tarde."
+  },
   "auth": {
     "error": {
       "missing_state_or_code": "El intento de inicio de sesión estaba incompleto. Por favor, inténtelo de nuevo.",
@@ -135,7 +138,8 @@
         "loading": "Consultando…",
         "label": "Saldo",
         "fetch_error": "No se pudo consultar el saldo.",
-        "not_supported": "Este proveedor no admite consulta de saldo."
+        "not_supported": "Este proveedor no admite consulta de saldo.",
+        "refresh": "Actualizar saldo"
       }
     },
     "feeds": {
@@ -799,7 +803,9 @@
       "placeholder": "Mensaje… (Intro para enviar)",
       "own_key": "clave propia",
       "managed_by": "· gestionado por ModuLab",
-      "error": "Error — no se puede conectar con el proveedor de IA."
+      "error": "Error — no se puede conectar con el proveedor de IA.",
+      "stop": "Detener generación",
+      "send": "Enviar mensaje"
     }
   },
   "setup": {

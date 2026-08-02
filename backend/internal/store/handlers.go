@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -78,7 +77,7 @@ func ListHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 			resp.Entries = []Entry{}
 		}
 
-		writeJSON(w, http.StatusOK, resp)
+		httperr.JSON(w, http.StatusOK, resp)
 	}
 }
 
@@ -108,7 +107,7 @@ func DetailHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 			return
 		}
 
-		writeJSON(w, http.StatusOK, entry)
+		httperr.JSON(w, http.StatusOK, entry)
 	}
 }
 
@@ -136,7 +135,7 @@ func SyncHandler(d Deps, authDeps auth.Deps, onSynced onSyncedFunc) http.Handler
 			})
 			// Partial sync: still a 200 so the UI can show what was refreshed,
 			// but include the error detail so the admin can investigate.
-			writeJSON(w, http.StatusOK, map[string]any{
+			httperr.JSON(w, http.StatusOK, map[string]any{
 				"ok":    false,
 				"error": err.Error(),
 			})
@@ -149,21 +148,6 @@ func SyncHandler(d Deps, authDeps auth.Deps, onSynced onSyncedFunc) http.Handler
 			ActorEmail: sess.Email,
 			Details:    `{"ok":true}`,
 		})
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-	}
-}
-
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	data, err := json.Marshal(v)
-	if err != nil {
-		httperr.Internal(w, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if _, err := w.Write(data); err != nil {
-		log.Printf("store: write response: %v", err)
+		httperr.JSON(w, http.StatusOK, map[string]any{"ok": true})
 	}
 }

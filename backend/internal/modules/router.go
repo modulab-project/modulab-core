@@ -3,7 +3,9 @@ package modules
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"image/gif"
@@ -342,18 +344,21 @@ var allowedImageTypes = map[string]bool{
 // without that handler ever needing filesystem access or to know its own
 // absolute storage location (see the ModuleProxyHandler call site's comment).
 type uploadedFile struct {
-	relPath  string // e.g. "uploads/{filename}" - stable, portable, unchanged from before
+	relPath  string // e.g. "uploads/{random-hex}-{filename}" - stable, portable, collision-resistant across users (see saveUploadedFile)
 	bytes    []byte // full file content, already validated as an allowed image type
 	mimeType string // sniffed content type, e.g. "image/jpeg" - stripped of any ";charset=..." parameters
 }
 
 // saveUploadedFile extracts the "file" field from a multipart upload, validates
 // that it is an image, and saves it to {dataDir}/{moduleName}/storage/uploads/.
-// The returned relPath ("uploads/{filename}") is never an absolute path, so
-// that the value stored in the DB is portable across environments (local dev,
-// Docker, different data dir mounts) - the returned bytes/mimeType are for the
-// caller to forward to the module's handler in the same request, not for any
-// portability-sensitive persistence.
+// The returned relPath ("uploads/{random-hex}-{filename}") is never an
+// absolute path, so that the value stored in the DB is portable across
+// environments (local dev, Docker, different data dir mounts) - the returned
+// bytes/mimeType are for the caller to forward to the module's handler in the
+// same request, not for any portability-sensitive persistence. The random
+// prefix (added 2026-08-02) prevents two users uploading a file with the same
+// original name from overwriting each other's file in the shared uploadDir —
+// see the prefix-generation comment below for the full reasoning.
 //
 // limit is the caller-resolved max_upload_body_bytes value (see
 // MaxUploadBodyBytes) — resolved once by the caller rather than looked up
@@ -415,7 +420,27 @@ func saveUploadedFile(r *http.Request, dataDir, moduleName string, limit int64) 
 		return uploadedFile{}, fmt.Errorf("create upload dir: %w", err)
 	}
 
-	dst := filepath.Join(uploadDir, safeName)
+	// Store under a server-generated, unpredictable name rather than the
+	// caller-supplied one: uploadDir is shared by every user of this module
+	// (there is no per-user subdirectory), so two users picking the same
+	// filename (e.g. "receipt.jpg") used to silently overwrite each other's
+	// upload — whoever uploaded last won, and the earlier uploader's DB row
+	// (file_path "uploads/receipt.jpg") now pointed at someone else's file.
+	// The random prefix also closes a smaller issue: filenames under this
+	// path are guessable and this directory is served back with no
+	// per-file ACL beyond the module-scoped token (ModuleStorageHandler), so
+	// a predictable name made it easier to guess another user's upload URL.
+	// The original filename is intentionally not persisted anywhere — no
+	// caller of saveUploadedFile currently surfaces it back to the browser
+	// (ModuleStorageHandler serves by storage path, not by original name),
+	// so there is nothing depending on it being kept.
+	randPrefix := make([]byte, 16)
+	if _, err := rand.Read(randPrefix); err != nil {
+		return uploadedFile{}, fmt.Errorf("generate upload filename: %w", err)
+	}
+	storedName := hex.EncodeToString(randPrefix) + "-" + safeName
+
+	dst := filepath.Join(uploadDir, storedName)
 	out, err := os.Create(dst)
 	if err != nil {
 		return uploadedFile{}, fmt.Errorf("create file: %w", err)
@@ -453,7 +478,7 @@ func saveUploadedFile(r *http.Request, dataDir, moduleName string, limit int64) 
 
 	// Return a relative path so the DB value is portable across environments.
 	// The storage handler reconstructs the absolute path from DataDir at serve time.
-	return uploadedFile{relPath: "uploads/" + safeName, bytes: content.Bytes(), mimeType: mediaType}, nil
+	return uploadedFile{relPath: "uploads/" + storedName, bytes: content.Bytes(), mimeType: mediaType}, nil
 }
 
 // maxUploadImageDimension caps the width/height (in pixels) accepted for an

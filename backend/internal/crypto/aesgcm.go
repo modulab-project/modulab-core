@@ -13,7 +13,32 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"sync"
 )
+
+// gcmCache caches the built cipher.AEAD per key (keyed by the hex string
+// itself) so Encrypt/Decrypt don't redo hex.DecodeString + aes.NewCipher +
+// cipher.NewGCM on every single call - in practice there is only ever one
+// distinct key (the master key), so this cache stays at size 1, but every
+// encrypt/decrypt call across the whole app (session tokens, SMTP
+// credentials, OIDC secrets, module PII, ...) was paying that setup cost
+// repeatedly for no reason. sync.Map is safe for concurrent
+// read-mostly/write-rarely use per its own doc comment, which matches this
+// access pattern exactly. Only the AEAD *setup* is cached here - the actual
+// Seal/Open calls still happen fresh per call, same as before.
+var gcmCache sync.Map // keyHex (string) -> cipher.AEAD
+
+func newGCM(keyHex string) (cipher.AEAD, error) {
+	if cached, ok := gcmCache.Load(keyHex); ok {
+		return cached.(cipher.AEAD), nil
+	}
+	gcm, err := buildGCM(keyHex)
+	if err != nil {
+		return nil, err
+	}
+	actual, _ := gcmCache.LoadOrStore(keyHex, gcm)
+	return actual.(cipher.AEAD), nil
+}
 
 // Encrypt encrypts plaintext with AES-256-GCM under keyHex and returns a
 // base64-encoded nonce||ciphertext blob suitable for storing in a TEXT
@@ -72,7 +97,7 @@ func DecryptIfNotEmpty(keyHex, encoded string) (string, error) {
 	return Decrypt(keyHex, encoded)
 }
 
-func newGCM(keyHex string) (cipher.AEAD, error) {
+func buildGCM(keyHex string) (cipher.AEAD, error) {
 	key, err := hex.DecodeString(keyHex)
 	if err != nil {
 		return nil, fmt.Errorf("crypto: decode key: %w", err)

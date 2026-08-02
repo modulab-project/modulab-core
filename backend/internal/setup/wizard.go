@@ -5,11 +5,11 @@ package setup
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 
 	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/httperr"
 )
 
 // StatusResponse reports whether Core's master key is configured. Always
@@ -35,7 +35,7 @@ type InitResponse struct {
 // anything that still polls it rather than checking /healthz.
 func StatusHandler(pool *db.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, StatusResponse{Configured: true})
+		httperr.JSON(w, http.StatusOK, StatusResponse{Configured: true})
 	}
 }
 
@@ -53,7 +53,7 @@ func StatusHandler(pool *db.Pool) http.HandlerFunc {
 // persists it client-side and moves to step 2.
 func InitHandler(pool *db.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, InitResponse{Ready: true})
+		httperr.JSON(w, http.StatusOK, InitResponse{Ready: true})
 	}
 }
 
@@ -75,10 +75,4 @@ func ResolveMasterKey(ctx context.Context, pool *db.Pool, envValue string) (stri
 		return "", fmt.Errorf("setup: MODULAB_MASTER_KEY is not set - this should be unreachable, since config.Load refuses to start Core without it")
 	}
 	return envValue, nil
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
 }
