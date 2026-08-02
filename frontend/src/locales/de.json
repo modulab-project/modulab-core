@@ -15,7 +15,8 @@
     "title": "Bei ModuLab anmelden",
     "subtitle": "Melde dich sicher mit deinem SSO-Login an.",
     "button": "Mit SSO anmelden",
-    "waiting_other_tab": "Anmeldung läuft in einem anderen Tab …"
+    "waiting_other_tab": "Anmeldung läuft in einem anderen Tab …",
+    "force_button": "Trotzdem hier anmelden"
   },
   "pending": {
     "title_locked": "Dein Konto wurde gesperrt",

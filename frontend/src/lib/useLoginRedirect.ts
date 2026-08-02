@@ -26,8 +26,17 @@ import { acquireLoginLock, isLoginLockHeld, onLoginLockChange } from "./loginLoc
 // that didn't itself run the OIDC round-trip. Defaults to a full reload,
 // a safe fallback for any caller that doesn't need anything fancier than
 // "pick up the newly-valid session".
+// How long a waiting tab gives the lock-holding tab the benefit of the
+// doubt before offering a manual "sign in anyway" escape hatch. Short
+// enough to not feel stuck, long enough that a normal IdP round-trip
+// (typing credentials, maybe an MFA prompt) doesn't spuriously reach it -
+// unlike LOCK_TTL_MS (loginLock.ts), this is a UX timer, not a correctness
+// one, so it doesn't need to be anywhere near as generous.
+const FORCE_WAIT_MS = 12_000;
+
 export function useLoginRedirect(onAlreadyAuthenticated?: (session: Session) => void) {
   const [waiting, setWaiting] = useState(false);
+  const [canForce, setCanForce] = useState(false);
 
   useEffect(() => {
     if (!isLoginLockHeld()) {
@@ -53,7 +62,11 @@ export function useLoginRedirect(onAlreadyAuthenticated?: (session: Session) => 
           setWaiting(false);
         });
     });
-    return unsubscribe;
+    const forceTimer = window.setTimeout(() => setCanForce(true), FORCE_WAIT_MS);
+    return () => {
+      unsubscribe();
+      window.clearTimeout(forceTimer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- onAlreadyAuthenticated is expected to be a stable callback per caller; re-subscribing on every render would tear down/rebuild the listener for no reason.
   }, []);
 
@@ -67,13 +80,17 @@ export function useLoginRedirect(onAlreadyAuthenticated?: (session: Session) => 
   // returnPath: <current page> } here; Login.tsx's main button and
   // SetupWizard.tsx's step 4 call this with no options at all, same as
   // before this parameter existed.
-  function startLogin(options?: { reauth?: boolean; returnPath?: string }) {
-    if (!acquireLoginLock()) {
+  //
+  // `force`: bypasses another tab's live lock - only meant to be wired to a
+  // button gated on `canForce` (i.e. the user has already been waiting
+  // FORCE_WAIT_MS and chose to proceed anyway), not called unconditionally.
+  function startLogin(options?: { reauth?: boolean; returnPath?: string }, force = false) {
+    if (!acquireLoginLock(force)) {
       setWaiting(true);
       return;
     }
     window.location.href = loginRedirectUrl(options);
   }
 
-  return { waiting, startLogin };
+  return { waiting, canForce, startLogin };
 }

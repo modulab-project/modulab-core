@@ -15,7 +15,8 @@
     "title": "Sign in to ModuLab",
     "subtitle": "Access ModuLab securely using your SSO login.",
     "button": "Log in with SSO",
-    "waiting_other_tab": "Signing in from another tab…"
+    "waiting_other_tab": "Signing in from another tab…",
+    "force_button": "Sign in here anyway"
   },
   "pending": {
     "title_locked": "Your account has been locked",

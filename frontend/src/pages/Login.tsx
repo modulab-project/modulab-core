@@ -28,7 +28,7 @@ export default function Login() {
   // Info page, 2026-07-16). If another tab is already mid-login, `waiting`
   // is true and this tab jumps straight to "/" the moment that other
   // login succeeds, without ever bothering the IdP itself.
-  const { waiting, startLogin } = useLoginRedirect(() => navigate("/", { replace: true }));
+  const { waiting, canForce, startLogin } = useLoginRedirect(() => navigate("/", { replace: true }));
 
   useEffect(() => {
     const result = consumeAuthResult();
@@ -48,6 +48,15 @@ export default function Login() {
       <AuthButton type="button" onClick={() => startLogin()} disabled={waiting} className="w-full">
         {waiting ? t("login.waiting_other_tab") : t("login.button")}
       </AuthButton>
+      {waiting && canForce && (
+        <button
+          type="button"
+          onClick={() => startLogin(undefined, true)}
+          className="mt-3 w-full text-center text-sm text-gray-500 underline hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+        >
+          {t("login.force_button")}
+        </button>
+      )}
     </AuthShell>
   );
 }

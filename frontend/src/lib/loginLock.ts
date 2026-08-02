@@ -59,9 +59,19 @@ function readLock(): LoginLock | null {
 // or this same tab already held it (re-entrant on purpose, so an effect
 // that happens to run twice, e.g. React StrictMode, doesn't fight itself).
 // Returns false if another tab is genuinely mid-login right now.
-export function acquireLoginLock(): boolean {
+//
+// `force` overrides someone else's live lock outright - used by the "sign
+// in anyway" fallback a waiting tab offers after FORCE_WAIT_MS (see
+// useLoginRedirect.ts). Deliberately a manual, user-triggered escape hatch
+// rather than a shorter TTL or an unload-based auto-release: the lock's
+// whole job is to survive this tab going away mid-redirect (that's the
+// normal, successful path, not just the abandoned one), so nothing short of
+// "a human decided the other tab's attempt is stale" can safely clear it
+// early. See loginLock.ts's top-of-file comment for the bug this protects
+// against.
+export function acquireLoginLock(force = false): boolean {
   const existing = readLock();
-  if (existing && existing.owner !== ownerId) {
+  if (existing && existing.owner !== ownerId && !force) {
     return false;
   }
   localStorage.setItem(LOCK_KEY, JSON.stringify({ owner: ownerId, ts: Date.now() } satisfies LoginLock));
