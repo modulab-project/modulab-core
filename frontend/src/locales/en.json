@@ -1035,6 +1035,13 @@
     "migrate_pii_key_hint": "Re-encrypts this module's stored data under its own dedicated key instead of the shared one. One-time, cannot be undone.",
     "migrate_pii_key_confirm": "Migrate {{name}}'s encrypted data to its own dedicated key? This cannot be undone.",
     "migrate_pii_key_error": "Migration failed",
+    "migrate_pii_key_error_for": "Migrating {{name}} failed: {{reason}}",
+    "migrate_pii_key_reason": {
+      "needs_update": "This module doesn't support migration yet — install its latest update first, then try again.",
+      "no_pii_key": "No encryption key is configured on this server for this module.",
+      "forbidden": "This action was refused by the module itself.",
+      "unknown_code": "Unknown error ({{code}})"
+    },
     "uninstall": "Uninstall",
     "uninstall_confirm": "Uninstall {{name}}? Module files will be removed.",
     "uninstall_error": "Uninstall failed",

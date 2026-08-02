@@ -1035,6 +1035,13 @@
     "migrate_pii_key_hint": "Verschlüsselt die gespeicherten Daten dieses Moduls unter einem eigenen Schlüssel statt dem gemeinsamen. Einmalig, nicht rückgängig zu machen.",
     "migrate_pii_key_confirm": "Verschlüsselte Daten von {{name}} auf einen eigenen Schlüssel migrieren? Das kann nicht rückgängig gemacht werden.",
     "migrate_pii_key_error": "Migration fehlgeschlagen",
+    "migrate_pii_key_error_for": "Migration von {{name}} fehlgeschlagen: {{reason}}",
+    "migrate_pii_key_reason": {
+      "needs_update": "Dieses Modul unterstützt die Migration noch nicht — installiere zuerst das neueste Update und versuche es erneut.",
+      "no_pii_key": "Für dieses Modul ist auf diesem Server kein Verschlüsselungsschlüssel konfiguriert.",
+      "forbidden": "Diese Aktion wurde vom Modul selbst abgelehnt.",
+      "unknown_code": "Unbekannter Fehler ({{code}})"
+    },
     "uninstall": "Deinstallieren",
     "uninstall_confirm": "{{name}} deinstallieren? Die Moduldateien werden entfernt.",
     "uninstall_error": "Deinstallation fehlgeschlagen",

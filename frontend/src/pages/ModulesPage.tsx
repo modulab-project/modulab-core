@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   listInstalledModules,
@@ -127,7 +128,7 @@ export default function ModulesPage() {
       if (isReauthRequiredError(e)) {
         setReauthRequired(true);
       } else {
-        alert(`${t("modules.migrate_pii_key_error")}: ${(e as Error).message}`);
+        alert(t("modules.migrate_pii_key_error_for", { name, reason: describeMigratePiiKeyError(e, t) }));
       }
     } finally {
       setBusyName(null);
@@ -338,6 +339,46 @@ export default function ModulesPage() {
       </div>
     </AppShell>
   );
+}
+
+// Known error_code/error values a migrate-pii-key attempt can come back
+// with, mapped to a translation key each. Two different shapes can reach
+// here: Core's own MigratePIIKeyHandler (handlers.go) sends a plain-text
+// http.Error body (e.g. "module worker not running") - shown as-is, it's
+// already human-readable. A module's own /admin/migrate-pii-key handler
+// forwards its error as JSON instead, either { error_code: "..." } (pantry)
+// or { error: "..." } (recipes/my-place/unifi-network) - see each module's
+// errorResponse()/badRequest() helpers. "not_found"/"route_not_found" is by
+// far the most common case in practice: it's the module's generic
+// catch-all for an unmatched route, meaning this module's installed code
+// predates the migrate-pii-key handler entirely and needs its update
+// installed first - worth calling out explicitly rather than leaving an
+// admin to guess why a route "wasn't found" on a module they just clicked
+// a button for.
+const MIGRATE_PII_KEY_ERROR_REASON_KEYS: Record<string, string> = {
+  not_found: "modules.migrate_pii_key_reason.needs_update",
+  route_not_found: "modules.migrate_pii_key_reason.needs_update",
+  pii_key_missing: "modules.migrate_pii_key_reason.no_pii_key",
+  pii_key_not_configured: "modules.migrate_pii_key_reason.no_pii_key",
+  server_encryption_not_configured: "modules.migrate_pii_key_reason.no_pii_key",
+  forbidden: "modules.migrate_pii_key_reason.forbidden",
+};
+
+function describeMigratePiiKeyError(err: unknown, t: TFunction): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  try {
+    const parsed = JSON.parse(raw);
+    const code = typeof parsed?.error_code === "string" ? parsed.error_code : parsed?.error;
+    if (typeof code === "string") {
+      const key = MIGRATE_PII_KEY_ERROR_REASON_KEYS[code];
+      return key ? t(key) : t("modules.migrate_pii_key_reason.unknown_code", { code });
+    }
+  } catch {
+    // Not JSON - Core's own http.Error responses (module not installed,
+    // module worker not running, ...) are plain text and already read fine
+    // shown as-is.
+  }
+  return raw;
 }
 
 function TierBadge({ tier }: { tier: number }) {

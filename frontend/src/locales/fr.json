@@ -1035,6 +1035,13 @@
     "migrate_pii_key_hint": "Rechiffre les données stockées de ce module avec sa propre clé au lieu de la clé partagée. Action unique et irréversible.",
     "migrate_pii_key_confirm": "Migrer les données chiffrées de {{name}} vers sa propre clé ? Cette action est irréversible.",
     "migrate_pii_key_error": "Échec de la migration",
+    "migrate_pii_key_error_for": "Échec de la migration de {{name}} : {{reason}}",
+    "migrate_pii_key_reason": {
+      "needs_update": "Ce module ne prend pas encore en charge la migration — installez d'abord sa dernière mise à jour, puis réessayez.",
+      "no_pii_key": "Aucune clé de chiffrement n'est configurée sur ce serveur pour ce module.",
+      "forbidden": "Cette action a été refusée par le module lui-même.",
+      "unknown_code": "Erreur inconnue ({{code}})"
+    },
     "uninstall": "Désinstaller",
     "uninstall_confirm": "Désinstaller {{name}} ? Les fichiers du module seront supprimés.",
     "uninstall_error": "Échec de la désinstallation",

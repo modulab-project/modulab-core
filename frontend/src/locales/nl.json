@@ -1035,6 +1035,13 @@
     "migrate_pii_key_hint": "Versleutelt de opgeslagen gegevens van deze module met een eigen sleutel in plaats van de gedeelde sleutel. Eenmalig, kan niet ongedaan worden gemaakt.",
     "migrate_pii_key_confirm": "Versleutelde gegevens van {{name}} migreren naar een eigen sleutel? Dit kan niet ongedaan worden gemaakt.",
     "migrate_pii_key_error": "Migratie mislukt",
+    "migrate_pii_key_error_for": "Migratie van {{name}} mislukt: {{reason}}",
+    "migrate_pii_key_reason": {
+      "needs_update": "Deze module ondersteunt migratie nog niet — installeer eerst de nieuwste update en probeer het opnieuw.",
+      "no_pii_key": "Voor deze module is op deze server geen versleutelingssleutel geconfigureerd.",
+      "forbidden": "Deze actie werd door de module zelf geweigerd.",
+      "unknown_code": "Onbekende fout ({{code}})"
+    },
     "uninstall": "Verwijderen",
     "uninstall_confirm": "{{name}} verwijderen? De modulebestanden worden gewist.",
     "uninstall_error": "Verwijderen mislukt",

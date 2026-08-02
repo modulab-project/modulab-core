@@ -1035,6 +1035,13 @@
     "migrate_pii_key_hint": "Vuelve a cifrar los datos guardados de este módulo con una clave propia en lugar de la compartida. Es una acción única e irreversible.",
     "migrate_pii_key_confirm": "¿Migrar los datos cifrados de {{name}} a una clave propia? Esta acción no se puede deshacer.",
     "migrate_pii_key_error": "Error en la migración",
+    "migrate_pii_key_error_for": "Error al migrar {{name}}: {{reason}}",
+    "migrate_pii_key_reason": {
+      "needs_update": "Este módulo aún no admite la migración — instala primero su última actualización e inténtalo de nuevo.",
+      "no_pii_key": "No hay ninguna clave de cifrado configurada en este servidor para este módulo.",
+      "forbidden": "El propio módulo rechazó esta acción.",
+      "unknown_code": "Error desconocido ({{code}})"
+    },
     "uninstall": "Desinstalar",
     "uninstall_confirm": "¿Desinstalar {{name}}? Se eliminarán los archivos del módulo.",
     "uninstall_error": "Error al desinstalar",
