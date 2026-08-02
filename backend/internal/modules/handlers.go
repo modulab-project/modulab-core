@@ -484,10 +484,11 @@ func UpdateModuleHandler(d Deps, storeDeps store.Deps, authDeps auth.Deps) http.
 					egressHosts = carryOverRuntimeEgress(name, runtimeEgressHosts, mf.DynamicEgressAllow, "update")
 				}
 				opts := WorkerOptions{
-					EgressHosts:   egressHosts,
-					Jobs:          ResolveJobEntrypoints(destDir, mf.Jobs, mf.EgressHostsHandler),
-					SkipTLSVerify: mf.TLSSkipVerify,
-					EgressPolicy:  mf.DynamicEgressAllow,
+					EgressHosts:    egressHosts,
+					Jobs:           ResolveJobEntrypoints(destDir, mf.Jobs, mf.EgressHostsHandler),
+					SkipTLSVerify:  mf.TLSSkipVerify,
+					EgressPolicy:   mf.DynamicEgressAllow,
+					DBRolePassword: moduleDBRolePassword(r.Context(), d, name),
 				}
 				if err := d.Workers.Start(name, entrypoint, opts); err != nil {
 					log.Printf("modules: update %q: restart worker: %v", name, err)
@@ -667,10 +668,11 @@ func RestartModuleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 			egressHosts = carryOverRuntimeEgress(name, runtimeEgressHosts, mf.DynamicEgressAllow, "restart")
 		}
 		opts := WorkerOptions{
-			EgressHosts:   egressHosts,
-			Jobs:          ResolveJobEntrypoints(destDir, mf.Jobs, mf.EgressHostsHandler),
-			SkipTLSVerify: mf.TLSSkipVerify,
-			EgressPolicy:  mf.DynamicEgressAllow,
+			EgressHosts:    egressHosts,
+			Jobs:           ResolveJobEntrypoints(destDir, mf.Jobs, mf.EgressHostsHandler),
+			SkipTLSVerify:  mf.TLSSkipVerify,
+			EgressPolicy:   mf.DynamicEgressAllow,
+			DBRolePassword: moduleDBRolePassword(r.Context(), d, name),
 		}
 		if err := d.Workers.Start(name, entrypoint, opts); err != nil {
 			http.Error(w, fmt.Sprintf("failed to restart worker: %v", err), http.StatusInternalServerError)

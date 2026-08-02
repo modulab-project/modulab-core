@@ -688,15 +688,18 @@ func main() {
 	// List/detail: any active session. Install/uninstall/update/pin: admin.
 	// Note: GET /v1/modules/updates is registered before GET /v1/modules/{name}
 	// so the literal path wins over the wildcard in Go's 1.22 ServeMux.
-	// dbURL for Deno workers: no sslmode param here because postgres.js
-	// (npm:postgres@3) uses its own TLS defaults. The search_path is added
-	// per-module in WorkerPool.Start so each worker sees only its own schema.
-	dbURL := fmt.Sprintf("postgres://%s:%s@%s:%s/%s",
-		cfg.DBUser, cfg.DBPassword, cfg.DBHost, cfg.DBPort, cfg.DBName)
+	// dbHostPort/dbName for Deno workers: no sslmode param here because
+	// postgres.js (npm:postgres@3) uses its own TLS defaults. Each worker's
+	// actual connection string - including its own LOGIN role and
+	// search_path - is built per-module in WorkerPool.buildWorker, not
+	// here; see WorkerPool.dbHostPort's doc comment for why this is no
+	// longer a single shared connection string the way it was before the
+	// 2026-08-02 security audit (H-1).
+	dbHostPort := fmt.Sprintf("%s:%s", cfg.DBHost, cfg.DBPort)
 	// deno_conn_pool_size is only read here, at startup - see
 	// modules.ConnPoolSize's doc comment for why a running worker's pool
 	// can't be resized without restarting it.
-	workerPool := modules.NewWorkerPool(cfg.ModuleDataDir, dbURL, cfg.ModulePIIKey, modules.ConnPoolSize(ctx, pool))
+	workerPool := modules.NewWorkerPool(cfg.ModuleDataDir, dbHostPort, cfg.DBName, cfg.ModulePIIKey, modules.ConnPoolSize(ctx, pool))
 	defer workerPool.StopAll()
 
 	// A worker that crashes on its own (as opposed to Stop/StopAll or a
@@ -749,12 +752,14 @@ func main() {
 	})
 
 	moduleDeps := modules.Deps{
-		DB:        pool,
-		DataDir:   cfg.ModuleDataDir,
-		CosignBin: cfg.CosignBinaryPath,
-		Workers:   workerPool,
-		Valkey:    valkeyClient,
-		PIIKey:    cfg.ModulePIIKey,
+		DB:         pool,
+		DataDir:    cfg.ModuleDataDir,
+		CosignBin:  cfg.CosignBinaryPath,
+		Workers:    workerPool,
+		Valkey:     valkeyClient,
+		PIIKey:     cfg.ModulePIIKey,
+		DBHostPort: fmt.Sprintf("%s:%s", cfg.DBHost, cfg.DBPort),
+		DBName:     cfg.DBName,
 	}
 
 	// onStoreSynced runs a module-update check immediately after every
@@ -861,11 +866,32 @@ func main() {
 					}
 				}
 				if entrypoint != "" {
+					// EnsureModuleDBRole both looks up an existing password
+					// AND provisions/upgrades the role if this module has
+					// never been through it before - the case that matters
+					// here is a module installed by a Core version predating
+					// per-module DB roles (2026-08-02 security audit, H-1):
+					// without this call, GetModuleDBRolePassword alone would
+					// find nothing on file, and buildWorker's empty-password
+					// check would then refuse to start a worker that was
+					// running perfectly well before this Core version's
+					// first restart. Calling this on every boot for every
+					// active module is deliberately redundant for modules
+					// that already have a role/password on file -
+					// provisionSchema reuses what's there instead of
+					// rotating it (see its doc comment) - but that's the
+					// price of the upgrade being fully automatic instead of
+					// needing a manual Install/Update per module.
+					dbRolePassword, err := modules.EnsureModuleDBRole(ctx, moduleDeps, row.Name)
+					if err != nil {
+						log.Printf("main: startup: could not ensure db role for %q, worker will not start: %v", row.Name, err)
+					}
 					opts := modules.WorkerOptions{
-						EgressHosts:   mf.EgressAllowlist,
-						Jobs:          modules.ResolveJobEntrypoints(destDir, mf.Jobs, mf.EgressHostsHandler),
-						SkipTLSVerify: mf.TLSSkipVerify,
-						EgressPolicy:  mf.DynamicEgressAllow,
+						EgressHosts:    mf.EgressAllowlist,
+						Jobs:           modules.ResolveJobEntrypoints(destDir, mf.Jobs, mf.EgressHostsHandler),
+						SkipTLSVerify:  mf.TLSSkipVerify,
+						EgressPolicy:   mf.DynamicEgressAllow,
+						DBRolePassword: dbRolePassword,
 					}
 					if err := workerPool.Start(row.Name, entrypoint, opts); err != nil {
 						log.Printf("main: startup: could not start worker for %q: %v", row.Name, err)

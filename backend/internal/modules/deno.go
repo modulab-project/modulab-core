@@ -31,7 +31,21 @@ import (
 // All public methods are safe for concurrent use.
 type WorkerPool struct {
 	dataDir string // /var/lib/modulab/modules — used to resolve socket paths
-	dbURL   string // postgres:// URL passed to Deno workers for DB access
+
+	// dbHostPort and dbName are the pieces of a worker's Postgres
+	// connection that are the same for every module - buildWorker combines
+	// them with a per-module role name (derived from moduleIdentifiers, the
+	// same helper migrations.go uses to CREATE the role) and the module's
+	// own password (opts.DBRolePassword, resolved by the caller from
+	// db.Pool.GetModuleDBRolePassword before calling Start - see Start's
+	// doc comment) to build a connection string scoped to exactly that
+	// module's schema, enforced by Postgres GRANTs rather than by
+	// convention. Before this (2026-08-02 security audit finding H-1),
+	// every worker connected using Core's own DB credentials, relying only
+	// on a search_path setting - which resolves unqualified names, but
+	// grants and blocks nothing - to keep modules inside their own schema.
+	dbHostPort string
+	dbName     string
 
 	// piiKey is MODULAB_MODULE_PII_KEY (config.Config.ModulePIIKey), passed
 	// in once at construction time rather than read from os.Getenv inside
@@ -42,22 +56,21 @@ type WorkerPool struct {
 	// May be empty (unset in .env) if no installed module needs PII
 	// encryption; see WorkerPool.piiKey's use in buildWorker.
 	piiKey string
-	// dbHost is the host:port parsed out of dbURL once at construction time.
-	// Every worker's --allow-net always includes this, on top of whatever
-	// the module's own manifest egress_allowlist grants: the DB connection
-	// is Core-managed infrastructure (schema-isolated per module via
-	// search_path, see buildWorker below — that's the real access boundary
-	// for the database, not the OS-level network permission), not a module
-	// choosing an external destination, so it doesn't belong in the
-	// module-authored egress allowlist. Without this, npm:postgres's own
-	// DNS resolution of the DB hostname is blocked by the Deno sandbox
-	// (getaddrinfo EPERM) even though the worker never leaves the network
-	// path Core itself set up for it — hit on the first real deploy with a
-	// module that had an empty egress_allowlist (2026-07-02).
-	dbHost string
+	// Every worker's --allow-net always includes dbHostPort (see field doc
+	// comment above), on top of whatever the module's own manifest
+	// egress_allowlist grants: the DB connection is Core-managed
+	// infrastructure (schema- and role-isolated per module - see
+	// buildWorker below, that's the real access boundary for the database,
+	// not the OS-level network permission), not a module choosing an
+	// external destination, so it doesn't belong in the module-authored
+	// egress allowlist. Without this, npm:postgres's own DNS resolution of
+	// the DB hostname is blocked by the Deno sandbox (getaddrinfo EPERM)
+	// even though the worker never leaves the network path Core itself set
+	// up for it — hit on the first real deploy with a module that had an
+	// empty egress_allowlist (2026-07-02).
 
 	// dnsResolver is the host:port every worker's --allow-net also always
-	// includes, on top of dbHost and the manifest/runtime egress hosts.
+	// includes, on top of dbHostPort and the manifest/runtime egress hosts.
 	// Deno's --allow-net is a TCP-connect allowlist, but resolving *any*
 	// hostname (including ones already on the allowlist, like a gateway's
 	// FQDN) requires Deno's internal DNS client to reach a resolver over the
@@ -150,30 +163,28 @@ func (p *WorkerPool) SetEgressDenyHandler(fn func(name string, rejected []string
 }
 
 // NewWorkerPool creates an empty WorkerPool. Call Start for each installed
-// Tier 2/3 module at startup. dbURL is the PostgreSQL connection string that
-// will be passed to each Deno worker so modules can query the database.
-// piiKey is config.Config.ModulePIIKey (MODULAB_MODULE_PII_KEY), already
-// validated by config.Load; may be empty. connPoolSize is the resolved
-// deno_conn_pool_size setting (see ConnPoolSize) to use for every worker
-// this pool starts — resolved once by the caller (main.go, which has the DB
-// pool at hand during startup) rather than looked up here, since WorkerPool
-// itself has no *db.Pool reference. Values below 1 fall back to
-// defaultConnPoolSize.
-func NewWorkerPool(dataDir, dbURL, piiKey string, connPoolSize int) *WorkerPool {
-	dbHost := ""
-	if u, err := url.Parse(dbURL); err == nil {
-		dbHost = u.Host // includes port, e.g. "postgres:5432" — exactly what --allow-net expects
-	} else {
-		log.Printf("modules: NewWorkerPool: could not parse dbURL to extract host for worker --allow-net grants: %v", err)
-	}
+// Tier 2/3 module at startup. dbHostPort ("host:port", e.g. "postgres:5432")
+// and dbName are the connection pieces shared by every module; each
+// worker's actual connection string is built per-module in buildWorker from
+// these plus that module's own LOGIN role and password (see
+// WorkerOptions.DBRolePassword) - never a single connection string shared
+// across modules, unlike before this field's introduction (2026-08-02
+// security audit, H-1). piiKey is config.Config.ModulePIIKey
+// (MODULAB_MODULE_PII_KEY), already validated by config.Load; may be empty.
+// connPoolSize is the resolved deno_conn_pool_size setting (see
+// ConnPoolSize) to use for every worker this pool starts — resolved once by
+// the caller (main.go, which has the DB pool at hand during startup) rather
+// than looked up here, since WorkerPool itself has no *db.Pool reference.
+// Values below 1 fall back to defaultConnPoolSize.
+func NewWorkerPool(dataDir, dbHostPort, dbName, piiKey string, connPoolSize int) *WorkerPool {
 	if connPoolSize < 1 {
 		connPoolSize = defaultConnPoolSize
 	}
 	return &WorkerPool{
 		dataDir:      dataDir,
-		dbURL:        dbURL,
+		dbHostPort:   dbHostPort,
+		dbName:       dbName,
 		piiKey:       piiKey,
-		dbHost:       dbHost,
 		connPoolSize: connPoolSize,
 		dnsResolver:  "127.0.0.11:53", // Docker's embedded DNS resolver — see field doc comment
 		workers:      make(map[string]*denoWorker),
@@ -217,6 +228,17 @@ type WorkerOptions struct {
 	// egresspolicy.go for why that fail-closed default is the point rather
 	// than an oversight.
 	EgressPolicy []string
+	// DBRolePassword is the module's own Postgres LOGIN role password (see
+	// db.Pool.GetModuleDBRolePassword/modules.provisionSchema), resolved by
+	// the caller before calling Start - WorkerPool has no *db.Pool
+	// reference of its own (see SetEgressDenyHandler's doc comment for why)
+	// so it cannot look this up itself. Required for any module that has
+	// been through provisionSchema, which is every Tier 2/3 module by the
+	// time Start is ever called for it (Install/Update always provisions
+	// the schema+role before starting the worker) - buildWorker treats an
+	// empty value as a configuration error rather than silently starting a
+	// worker with no DB access.
+	DBRolePassword string
 }
 
 // Start spawns a Deno worker for the given module. entrypoint is the absolute
@@ -288,8 +310,8 @@ func (p *WorkerPool) popAndStop(name string) {
 
 // buildWorker constructs and starts (denoWorker.start) a new worker for name
 // without touching p.workers or p.mu — callers are responsible for inserting
-// the result into the map under lock. Reads p.onCrash, p.dbHost,
-// p.dnsResolver, p.dbURL, p.piiKey, p.dataDir and p.connPoolSize without a
+// the result into the map under lock. Reads p.onCrash, p.dbHostPort,
+// p.dbName, p.dnsResolver, p.piiKey, p.dataDir and p.connPoolSize without a
 // lock: all of these are fixed at NewWorkerPool construction time except
 // onCrash, which SetCrashHandler's doc comment requires be set once, before
 // any Start call — so by the time any goroutine can reach here, none of
@@ -299,21 +321,28 @@ func (p *WorkerPool) buildWorker(name, entrypoint string, opts WorkerOptions) (*
 	// Remove stale socket file from a previous crash.
 	_ = os.Remove(sockPath)
 
-	// Build a module-scoped DB URL with search_path set to the module's schema
-	// first, then public. This means unqualified table names like "settings"
-	// resolve to "module_vacation_spots.settings" without the handler needing to
-	// schema-qualify every query.
-	//
-	// IMPORTANT: use the same identifier transformation as moduleIdentifiers()
-	// in migrations.go (hyphens → underscores) so the schema name matches what
-	// was actually created during installation.
-	// Also use & instead of ? when the base URL already carries query parameters.
-	moduleSchema := "module_" + strings.ReplaceAll(strings.ToLower(name), "-", "_")
-	sep := "?"
-	if strings.Contains(p.dbURL, "?") {
-		sep = "&"
+	if opts.DBRolePassword == "" {
+		return nil, fmt.Errorf("no DB role password for module %q - provisionSchema must run (Install/Update) before Start", name)
 	}
-	dbURL := p.dbURL + sep + "search_path=" + moduleSchema + ",public"
+
+	// Build a connection string authenticated as this module's own Postgres
+	// LOGIN role (module_{name}_role, created by modules.provisionSchema in
+	// migrations.go - same identifier derivation as moduleIdentifiers()
+	// there, reused here directly rather than re-implemented, so the two
+	// can never drift apart again the way the previous inline
+	// hyphen-to-underscore transform here could have) with search_path set
+	// to the module's own schema first, then public. This means unqualified
+	// table names like "settings" resolve to "module_vacation_spots.settings"
+	// without the handler needing to schema-qualify every query - but unlike
+	// before this role existed (2026-08-02 security audit, H-1), the schema
+	// isolation is now enforced by what the role is actually GRANTed, not
+	// merely by which name search_path happens to resolve first.
+	schemaName, roleName, err := moduleIdentifiers(name)
+	if err != nil {
+		return nil, fmt.Errorf("worker %q: %w", name, err)
+	}
+	dbURL := fmt.Sprintf("postgres://%s:%s@%s/%s?search_path=%s,public",
+		url.QueryEscape(roleName), url.QueryEscape(opts.DBRolePassword), p.dbHostPort, p.dbName, schemaName)
 
 	jobs := opts.Jobs
 	if jobs == nil {
@@ -325,7 +354,12 @@ func (p *WorkerPool) buildWorker(name, entrypoint string, opts WorkerOptions) (*
 		entrypoint: entrypoint,
 		sockPath:   sockPath,
 		dbURL:      dbURL,
-		piiKey:     p.piiKey,
+		// dbRolePassword is kept on the worker (in addition to being baked
+		// into dbURL above) purely so ReloadEgress can carry it forward
+		// when it rebuilds WorkerOptions for a restart - see ReloadEgress's
+		// use of existing.dbRolePassword.
+		dbRolePassword: opts.DBRolePassword,
+		piiKey:         p.piiKey,
 		// moduleRoot is {dataDir}/{name} — the common parent of both the
 		// handler code (moduleRoot/handlers/...) and the worker's Unix
 		// socket (moduleRoot/worker.sock, see sockPath above). Used as the
@@ -360,10 +394,10 @@ func (p *WorkerPool) buildWorker(name, entrypoint string, opts WorkerOptions) (*
 	return w, nil
 }
 
-// effectiveEgressHosts prepends dbHost (if known) to manifestHosts and
+// effectiveEgressHosts prepends dbHostPort (if known) to manifestHosts and
 // dedupes. Every worker gets the DB host regardless of what its manifest
-// declares — see the dbHost field doc comment on WorkerPool for why the DB
-// connection is Core infrastructure, not module-chosen egress.
+// declares — see the dbHostPort field doc comment on WorkerPool for why the
+// DB connection is Core infrastructure, not module-chosen egress.
 func (p *WorkerPool) effectiveEgressHosts(manifestHosts []string) []string {
 	seen := make(map[string]bool, len(manifestHosts)+1)
 	var out []string
@@ -373,7 +407,7 @@ func (p *WorkerPool) effectiveEgressHosts(manifestHosts []string) []string {
 			out = append(out, h)
 		}
 	}
-	add(p.dbHost)
+	add(p.dbHostPort)
 	add(p.dnsResolver)
 	for _, h := range manifestHosts {
 		add(h)
@@ -454,6 +488,10 @@ func (p *WorkerPool) ReloadEgress(name string, hosts []string) error {
 		Jobs:          existing.jobEntrypoints,
 		SkipTLSVerify: existing.skipTLSVerify,
 		EgressPolicy:  policy,
+		// Also carried over, not manifest-derived but just as essential to
+		// preserve: without this, buildWorker's empty-password check would
+		// reject every ReloadEgress-triggered restart outright.
+		DBRolePassword: existing.dbRolePassword,
 	}
 	err := p.Start(name, entrypoint, opts)
 	// onEgressDeny is read without a lock here, same as buildWorker reading
@@ -776,6 +814,11 @@ type denoWorker struct {
 	entrypoint string
 	sockPath   string
 	dbURL      string
+	// dbRolePassword is this module's Postgres role password, already baked
+	// into dbURL above - kept separately as well purely so ReloadEgress can
+	// carry it forward into the WorkerOptions it rebuilds for a restart.
+	// See WorkerOptions.DBRolePassword.
+	dbRolePassword string
 	// piiKey is copied from the owning WorkerPool at construction time (see
 	// buildWorker) - the already-validated MODULAB_MODULE_PII_KEY value, or
 	// "" if unset. See WorkerPool.piiKey's doc comment.

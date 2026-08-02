@@ -52,6 +52,33 @@ func (p *Pool) EnsureModuleStoreSchema(ctx context.Context) error {
 		return fmt.Errorf("db: ensure installed_modules_source_check: %w", err)
 	}
 
+	// db_role_password_enc: the AES-GCM-encrypted (Core's master key)
+	// password for this module's dedicated Postgres LOGIN role
+	// (module_{name}_role - see modules.provisionSchema in migrations.go).
+	// NULL until the role is first provisioned as a LOGIN role; also NULL
+	// for modules installed before this column existed, until Core next
+	// provisions their schema (on the next boot or module update) and
+	// backfills it - see provisionSchema's "upgrade path" case. Read/written
+	// exclusively via GetModuleDBRolePassword/SetModuleDBRolePassword below,
+	// never exposed over any API.
+	//
+	// Added as part of closing H-1/H-2 from the 2026-08-02 security audit:
+	// before this, every Tier 2/3 Deno worker connected to Postgres using
+	// Core's own DB credentials (see cmd/core/main.go's dbURL construction
+	// for workerPool), relying on a Postgres search_path setting alone to
+	// keep modules inside their own schema - search_path is a resolution
+	// default for unqualified names, not an access control boundary, so a
+	// compromised or malicious module's SQL could simply schema-qualify its
+	// way into any other table in the database, including users and
+	// core_settings. A per-module LOGIN role with GRANT/REVOKE actually
+	// enforced by Postgres closes that.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE installed_modules
+		    ADD COLUMN IF NOT EXISTS db_role_password_enc TEXT
+	`); err != nil {
+		return fmt.Errorf("db: ensure installed_modules.db_role_password_enc: %w", err)
+	}
+
 	// 'manual' addition (2026-07-23): manually uploaded module ZIPs
 	// (InstallManual/UpdateManual, installer.go) have no registry entry and
 	// no release URL to re-download from - a distinct source value from
@@ -686,4 +713,77 @@ func (p *Pool) SetModulePinned(ctx context.Context, name string, pinned bool) (b
 		return false, fmt.Errorf("db: set module pinned %q: %w", name, err)
 	}
 	return tag.RowsAffected() > 0, nil
+}
+
+// ---- Module DB role password (per-module Postgres LOGIN role) --------------
+//
+// See installed_modules.db_role_password_enc's column comment (above, in
+// EnsureModuleStoreSchema) for why this exists. Both methods assume the
+// installed_modules row for name already exists - true for every real
+// caller, since modules.provisionSchema (migrations.go) only ever runs
+// after modules.Deps.DB.InsertInstalledModule during Install/Update.
+
+// SetModuleDBRolePassword stores password (plaintext in memory only for the
+// duration of this call) AES-GCM-encrypted with Core's master key, for the
+// named module's dedicated Postgres LOGIN role. Called exactly once per
+// role - the first time modules.provisionSchema creates or upgrades it -
+// never to rotate an existing password (a live Deno worker already holds a
+// connection string built from the old one; rotating here without also
+// restarting every worker for this module would just break its DB access).
+func (p *Pool) SetModuleDBRolePassword(ctx context.Context, moduleName, password string) error {
+	enc, err := crypto.Encrypt(p.masterKey, password)
+	if err != nil {
+		return fmt.Errorf("db: encrypt module db role password for %q: %w", moduleName, err)
+	}
+	if _, err := p.Exec(ctx, `
+		UPDATE installed_modules SET db_role_password_enc = $2 WHERE name = $1
+	`, moduleName, enc); err != nil {
+		return fmt.Errorf("db: set module db role password for %q: %w", moduleName, err)
+	}
+	return nil
+}
+
+// GetModuleDBRolePassword returns the decrypted Postgres role password for
+// moduleName. ok is false if no password has been set yet - either the
+// module predates the per-module DB role feature and provisionSchema
+// hasn't run for it since (upgrade path, see provisionSchema), or the
+// installed_modules row doesn't exist yet (caller error - see this
+// section's doc comment above).
+func (p *Pool) GetModuleDBRolePassword(ctx context.Context, moduleName string) (password string, ok bool, err error) {
+	var enc *string
+	if err := p.QueryRow(ctx, `
+		SELECT db_role_password_enc FROM installed_modules WHERE name = $1
+	`, moduleName).Scan(&enc); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("db: get module db role password for %q: %w", moduleName, err)
+	}
+	if enc == nil || *enc == "" {
+		return "", false, nil
+	}
+	plain, err := crypto.Decrypt(p.masterKey, *enc)
+	if err != nil {
+		return "", false, fmt.Errorf("db: decrypt module db role password for %q: %w", moduleName, err)
+	}
+	return plain, true, nil
+}
+
+// ClearModuleDBRolePassword sets db_role_password_enc back to SQL NULL for
+// moduleName - called when the role itself is dropped (modules.
+// dropModuleSchema), so a stale encrypted password can never linger for a
+// role that no longer exists. Deliberately a separate method from
+// SetModuleDBRolePassword rather than SetModuleDBRolePassword(ctx, name,
+// ""): encrypting the empty string still produces a non-NULL ciphertext,
+// which GetModuleDBRolePassword would then decrypt back to ("", true, nil)
+// - "there is a password and it's empty" - instead of the ("", false, nil)
+// "no password on file" that a caller re-provisioning this module name
+// needs to see in order to generate a fresh one.
+func (p *Pool) ClearModuleDBRolePassword(ctx context.Context, moduleName string) error {
+	if _, err := p.Exec(ctx, `
+		UPDATE installed_modules SET db_role_password_enc = NULL WHERE name = $1
+	`, moduleName); err != nil {
+		return fmt.Errorf("db: clear module db role password for %q: %w", moduleName, err)
+	}
+	return nil
 }

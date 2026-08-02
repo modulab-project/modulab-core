@@ -64,6 +64,16 @@ type Deps struct {
 	// WorkerPool.piiKey - encrypted fields simply cannot be used until it's
 	// configured.
 	PIIKey string
+	// DBHostPort and DBName are Postgres' host:port (e.g. "postgres:5432")
+	// and database name - the pieces of the connection string that are the
+	// same for every module, as opposed to the per-module LOGIN role
+	// credentials (see db.Pool.GetModuleDBRolePassword). Used by
+	// migrations.go's runModuleMigrations/runModuleUpdateMigrations to open
+	// a second, module-role-scoped connection alongside Core's own
+	// superuser connection (d.DB) - see provisionSchema's doc comment for
+	// why migrations run under the module's own role rather than Core's.
+	DBHostPort string
+	DBName     string
 }
 
 // Manifest is the parsed content of manifest.yaml inside a module ZIP.
@@ -526,10 +536,11 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 	// worker. See WorkerOptions in deno.go for why there is no wildcard.
 	if mf.Tier >= 2 {
 		opts := WorkerOptions{
-			EgressHosts:   mf.EgressAllowlist,
-			Jobs:          ResolveJobEntrypoints(destDir, mf.Jobs, mf.EgressHostsHandler),
-			SkipTLSVerify: mf.TLSSkipVerify,
-			EgressPolicy:  mf.DynamicEgressAllow,
+			EgressHosts:    mf.EgressAllowlist,
+			Jobs:           ResolveJobEntrypoints(destDir, mf.Jobs, mf.EgressHostsHandler),
+			SkipTLSVerify:  mf.TLSSkipVerify,
+			EgressPolicy:   mf.DynamicEgressAllow,
+			DBRolePassword: moduleDBRolePassword(ctx, d, mf.Name),
 		}
 		if err := d.Workers.Start(mf.Name, filepath.Join(destDir, mf.Handler), opts); err != nil {
 			_, _ = d.DB.UpdateModuleStatus(ctx, entry.Name, db.ModuleStatusFailed)
@@ -678,10 +689,11 @@ func InstallManual(ctx context.Context, d Deps, zipPath string) error {
 	// ── Deno worker registration ────────────────────────────────────────────
 	if mf.Tier >= 2 {
 		opts := WorkerOptions{
-			EgressHosts:   mf.EgressAllowlist,
-			Jobs:          ResolveJobEntrypoints(destDir, mf.Jobs, mf.EgressHostsHandler),
-			SkipTLSVerify: mf.TLSSkipVerify,
-			EgressPolicy:  mf.DynamicEgressAllow,
+			EgressHosts:    mf.EgressAllowlist,
+			Jobs:           ResolveJobEntrypoints(destDir, mf.Jobs, mf.EgressHostsHandler),
+			SkipTLSVerify:  mf.TLSSkipVerify,
+			EgressPolicy:   mf.DynamicEgressAllow,
+			DBRolePassword: moduleDBRolePassword(ctx, d, mf.Name),
 		}
 		if err := d.Workers.Start(mf.Name, filepath.Join(destDir, mf.Handler), opts); err != nil {
 			_, _ = d.DB.UpdateModuleStatus(ctx, mf.Name, db.ModuleStatusFailed)
