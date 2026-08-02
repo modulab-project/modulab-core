@@ -266,12 +266,27 @@ export default function ModulesPage() {
                 {/* Right: actions (admin only) */}
                 {isAdmin && (
                   <div className="flex flex-wrap items-center gap-2">
-                    {mod.tier >= 2 && (mod.status === "degraded" || mod.status === "failed") && (
+                    {mod.tier >= 2 && (
+                      // Shown for every Tier 2/3 module now, not just
+                      // degraded/failed ones (2026-08-02) - a healthy module
+                      // can still need a manual restart, e.g. to pick up a
+                      // just-completed PII key migration whose worker wasn't
+                      // running with the right key yet (found on my-place:
+                      // migrate-pii-key restarts the worker itself going
+                      // forward, but a module migrated before that fix
+                      // shipped is stuck on the old key until restarted by
+                      // hand). Amber only for degraded/failed - a healthy
+                      // module's restart button reads as a neutral action,
+                      // not a "something's wrong" warning.
                       <button
                         type="button"
                         onClick={() => handleRestart(mod.name)}
                         disabled={isBusy}
-                        className="flex items-center gap-1 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                        className={
+                          mod.status === "degraded" || mod.status === "failed"
+                            ? "flex items-center gap-1 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                            : "flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                        }
                       >
                         {isBusy ? (
                           <i className="ti ti-loader-2 animate-spin text-[13px]" />
