@@ -1031,7 +1031,7 @@
     "update_error": "Bijwerken mislukt",
     "restart": "Herstarten",
     "restart_error": "Herstarten mislukt",
-    "migrate_pii_key": "PII-sleutel migreren",
+    "migrate_pii_key": "Migreren",
     "migrate_pii_key_hint": "Versleutelt de opgeslagen gegevens van deze module met een eigen sleutel in plaats van de gedeelde sleutel. Eenmalig, kan niet ongedaan worden gemaakt.",
     "migrate_pii_key_confirm": "Versleutelde gegevens van {{name}} migreren naar een eigen sleutel? Dit kan niet ongedaan worden gemaakt.",
     "migrate_pii_key_error": "Migratie mislukt",

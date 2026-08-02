@@ -1031,7 +1031,7 @@
     "update_error": "Update failed",
     "restart": "Restart",
     "restart_error": "Restart failed",
-    "migrate_pii_key": "Migrate PII key",
+    "migrate_pii_key": "Migrate",
     "migrate_pii_key_hint": "Re-encrypts this module's stored data under its own dedicated key instead of the shared one. One-time, cannot be undone.",
     "migrate_pii_key_confirm": "Migrate {{name}}'s encrypted data to its own dedicated key? This cannot be undone.",
     "migrate_pii_key_error": "Migration failed",

@@ -1031,7 +1031,7 @@
     "update_error": "Error al actualizar",
     "restart": "Reiniciar",
     "restart_error": "Error al reiniciar",
-    "migrate_pii_key": "Migrar clave PII",
+    "migrate_pii_key": "Migrar",
     "migrate_pii_key_hint": "Vuelve a cifrar los datos guardados de este módulo con una clave propia en lugar de la compartida. Es una acción única e irreversible.",
     "migrate_pii_key_confirm": "¿Migrar los datos cifrados de {{name}} a una clave propia? Esta acción no se puede deshacer.",
     "migrate_pii_key_error": "Error en la migración",
