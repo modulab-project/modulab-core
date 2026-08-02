@@ -163,6 +163,14 @@ const (
 	// has since rotated away. ActorID is left empty: the "actor" is module
 	// code, not a user.
 	EventModuleEgressDenied = "module.egress_denied"
+	// EventModulePIIKeyMigrated marks the one-time admin action that asks a
+	// module's own migrate-pii-key handler to re-encrypt its PII columns
+	// (and, where applicable, blind-index hashes) under its HKDF-derived
+	// per-module key and retire the legacy shared MODULAB_MODULE_PII_KEY
+	// grant. See docs/Modul-DB-Sandbox_Plan_2026-08-02.md Part B - this is
+	// the only PII-bearing action gated by adminReauthOnly instead of the
+	// regular RequireAdminSession check, same tier as revoking a session.
+	EventModulePIIKeyMigrated = "module.pii_key_migrated"
 	// Feed management (admin), internal/news.
 	EventFeedCreated = "feed.created"
 	EventFeedUpdated = "feed.updated"

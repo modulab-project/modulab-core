@@ -79,6 +79,25 @@ func (p *Pool) EnsureModuleStoreSchema(ctx context.Context) error {
 		return fmt.Errorf("db: ensure installed_modules.db_role_password_enc: %w", err)
 	}
 
+	// pii_migrated_at: when this module's own PII data (if any) was last
+	// re-encrypted under its per-module derived key (crypto.DeriveModuleKey)
+	// instead of the one raw MODULAB_MODULE_PII_KEY every Tier 2/3 worker
+	// used to receive verbatim (2026-08-02 security audit, M-1). NULL means
+	// "not migrated yet" - WorkerPool.buildWorker then also grants the
+	// worker the raw shared key (as MODULAB_MODULE_PII_LEGACY_KEY) alongside
+	// its own derived one, so the module's own admin-triggered migration
+	// handler can decrypt old data under the old key and re-encrypt it under
+	// the new one. Set once, by the admin API endpoint that invokes that
+	// handler and only then marks this column - never by the module itself,
+	// which has no access to installed_modules. See
+	// IsModulePIIMigrated/SetModulePIIMigrated below.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE installed_modules
+		    ADD COLUMN IF NOT EXISTS pii_migrated_at TIMESTAMPTZ
+	`); err != nil {
+		return fmt.Errorf("db: ensure installed_modules.pii_migrated_at: %w", err)
+	}
+
 	// 'manual' addition (2026-07-23): manually uploaded module ZIPs
 	// (InstallManual/UpdateManual, installer.go) have no registry entry and
 	// no release URL to re-download from - a distinct source value from
@@ -784,6 +803,44 @@ func (p *Pool) ClearModuleDBRolePassword(ctx context.Context, moduleName string)
 		UPDATE installed_modules SET db_role_password_enc = NULL WHERE name = $1
 	`, moduleName); err != nil {
 		return fmt.Errorf("db: clear module db role password for %q: %w", moduleName, err)
+	}
+	return nil
+}
+
+// ---- Module PII key migration (per-module derived key, M-1) ----------------
+//
+// See installed_modules.pii_migrated_at's column comment above for the
+// full picture. IsModulePIIMigrated is deliberately fail-safe on error:
+// callers (WorkerPool.buildWorker, via modules.modulePIIMigrated) treat any
+// failure to determine the true state as "not migrated", which means the
+// worker still receives the legacy key alongside its derived one - the
+// safe direction to be wrong in is "grant the old key one boot longer than
+// strictly necessary", not "assume migrated and let a module's own
+// decrypt-under-the-old-key calls start failing".
+
+// IsModulePIIMigrated reports whether moduleName's pii_migrated_at is set.
+func (p *Pool) IsModulePIIMigrated(ctx context.Context, moduleName string) (bool, error) {
+	var migratedAt *time.Time
+	if err := p.QueryRow(ctx, `
+		SELECT pii_migrated_at FROM installed_modules WHERE name = $1
+	`, moduleName).Scan(&migratedAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("db: check module pii migrated for %q: %w", moduleName, err)
+	}
+	return migratedAt != nil, nil
+}
+
+// SetModulePIIMigrated marks moduleName's PII migration as complete (sets
+// pii_migrated_at to now()). Called by the admin API handler that invokes
+// the module's own migrate-pii-key handler, only after that call reports
+// success - never by the module itself.
+func (p *Pool) SetModulePIIMigrated(ctx context.Context, moduleName string) error {
+	if _, err := p.Exec(ctx, `
+		UPDATE installed_modules SET pii_migrated_at = now() WHERE name = $1
+	`, moduleName); err != nil {
+		return fmt.Errorf("db: set module pii migrated for %q: %w", moduleName, err)
 	}
 	return nil
 }

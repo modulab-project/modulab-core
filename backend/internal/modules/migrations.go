@@ -483,6 +483,23 @@ func provisionSchema(ctx context.Context, d Deps, moduleName, schemaName, roleNa
 	return password, nil
 }
 
+// modulePIIMigrated looks up whether moduleName's PII data has already been
+// re-encrypted under its own derived key (db.Pool.IsModulePIIMigrated),
+// for use as WorkerOptions.PIIMigrated before every Workers.Start call -
+// same reasoning and pairing as moduleDBRolePassword below. Fails safe: any
+// lookup error returns false ("not migrated"), which makes buildWorker
+// grant the worker the legacy shared key alongside its derived one rather
+// than risk cutting off a module's access to its own not-yet-migrated data
+// because of a transient DB error.
+func modulePIIMigrated(ctx context.Context, d Deps, moduleName string) bool {
+	migrated, err := d.DB.IsModulePIIMigrated(ctx, moduleName)
+	if err != nil {
+		log.Printf("modules: could not check pii migration status for %q, assuming not migrated: %v", moduleName, err)
+		return false
+	}
+	return migrated
+}
+
 // moduleDBRolePassword looks up the stored password for a module's Postgres
 // LOGIN role (see db.Pool.GetModuleDBRolePassword) for use as
 // WorkerOptions.DBRolePassword before every Workers.Start call - every call

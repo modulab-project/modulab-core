@@ -541,6 +541,7 @@ func Install(ctx context.Context, d Deps, entry store.Entry) error {
 			SkipTLSVerify:  mf.TLSSkipVerify,
 			EgressPolicy:   mf.DynamicEgressAllow,
 			DBRolePassword: moduleDBRolePassword(ctx, d, mf.Name),
+			PIIMigrated:    modulePIIMigrated(ctx, d, mf.Name),
 		}
 		if err := d.Workers.Start(mf.Name, filepath.Join(destDir, mf.Handler), opts); err != nil {
 			_, _ = d.DB.UpdateModuleStatus(ctx, entry.Name, db.ModuleStatusFailed)
@@ -694,6 +695,7 @@ func InstallManual(ctx context.Context, d Deps, zipPath string) error {
 			SkipTLSVerify:  mf.TLSSkipVerify,
 			EgressPolicy:   mf.DynamicEgressAllow,
 			DBRolePassword: moduleDBRolePassword(ctx, d, mf.Name),
+			PIIMigrated:    modulePIIMigrated(ctx, d, mf.Name),
 		}
 		if err := d.Workers.Start(mf.Name, filepath.Join(destDir, mf.Handler), opts); err != nil {
 			_, _ = d.DB.UpdateModuleStatus(ctx, mf.Name, db.ModuleStatusFailed)

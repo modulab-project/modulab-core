@@ -886,12 +886,23 @@ func main() {
 					if err != nil {
 						log.Printf("main: startup: could not ensure db role for %q, worker will not start: %v", row.Name, err)
 					}
+					// Fail-safe like modulePIIMigrated's Go-side sibling in
+					// migrations.go: a lookup error here defaults to false
+					// ("not migrated"), so buildWorker still grants the
+					// worker the legacy shared key rather than risk cutting
+					// off its own not-yet-migrated data over a transient DB
+					// error at boot.
+					piiMigrated, err := pool.IsModulePIIMigrated(ctx, row.Name)
+					if err != nil {
+						log.Printf("main: startup: could not check pii migration status for %q, assuming not migrated: %v", row.Name, err)
+					}
 					opts := modules.WorkerOptions{
 						EgressHosts:    mf.EgressAllowlist,
 						Jobs:           modules.ResolveJobEntrypoints(destDir, mf.Jobs, mf.EgressHostsHandler),
 						SkipTLSVerify:  mf.TLSSkipVerify,
 						EgressPolicy:   mf.DynamicEgressAllow,
 						DBRolePassword: dbRolePassword,
+						PIIMigrated:    piiMigrated,
 					}
 					if err := workerPool.Start(row.Name, entrypoint, opts); err != nil {
 						log.Printf("main: startup: could not start worker for %q: %v", row.Name, err)
@@ -934,6 +945,13 @@ func main() {
 	mux.HandleFunc("POST /v1/modules/{name}/restart", modules.RestartModuleHandler(moduleDeps, authDeps))
 	mux.HandleFunc("POST /v1/modules/{name}/pin", modules.PinHandler(moduleDeps, authDeps))
 	mux.HandleFunc("DELETE /v1/modules/{name}/pin", modules.UnpinHandler(moduleDeps, authDeps))
+
+	// Module PII key migration (Part B of the module DB sandbox work, see
+	// docs/Modul-DB-Sandbox_Plan_2026-08-02.md): one-time, hard-to-undo
+	// per-module action, so it gets adminReauthOnly like SMTP/OIDC/session
+	// revoke above instead of the plain RequireAdminSession every other
+	// module route uses.
+	mux.Handle("POST /v1/admin/modules/{name}/migrate-pii-key", adminReauthOnly(modules.MigratePIIKeyHandler(moduleDeps, authDeps)))
 
 	// Module API proxy: /v1/modules/{name}/api/* → Deno worker for that module.
 	// Registered after all specific lifecycle routes so the wildcard does not

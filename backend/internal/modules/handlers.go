@@ -489,6 +489,7 @@ func UpdateModuleHandler(d Deps, storeDeps store.Deps, authDeps auth.Deps) http.
 					SkipTLSVerify:  mf.TLSSkipVerify,
 					EgressPolicy:   mf.DynamicEgressAllow,
 					DBRolePassword: moduleDBRolePassword(r.Context(), d, name),
+					PIIMigrated:    modulePIIMigrated(r.Context(), d, name),
 				}
 				if err := d.Workers.Start(name, entrypoint, opts); err != nil {
 					log.Printf("modules: update %q: restart worker: %v", name, err)
@@ -673,6 +674,7 @@ func RestartModuleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 			SkipTLSVerify:  mf.TLSSkipVerify,
 			EgressPolicy:   mf.DynamicEgressAllow,
 			DBRolePassword: moduleDBRolePassword(r.Context(), d, name),
+			PIIMigrated:    modulePIIMigrated(r.Context(), d, name),
 		}
 		if err := d.Workers.Start(name, entrypoint, opts); err != nil {
 			http.Error(w, fmt.Sprintf("failed to restart worker: %v", err), http.StatusInternalServerError)
@@ -699,6 +701,121 @@ func RestartModuleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 		})
 
 		writeModuleJSON(w, http.StatusOK, row)
+	}
+}
+
+// ── POST /v1/admin/modules/{name}/migrate-pii-key ─────────────────────────────
+
+// MigratePIIKeyHandler triggers a Tier 2/3 module's own migrate-pii-key
+// handler (see docs/Modul-DB-Sandbox_Plan_2026-08-02.md Part B) and, on
+// success, marks installed_modules.pii_migrated_at so the next worker
+// (re)start stops granting MODULAB_MODULE_PII_LEGACY_KEY (deno.go's
+// buildWorker checks opts.PIIMigrated). This is the one PII-bearing action
+// gated by adminReauthOnly (wired in main.go) rather than plain
+// RequireAdminSession: it is a one-time, hard-to-undo action - once the
+// legacy key stops being granted, any row the module's handler failed to
+// re-encrypt becomes unreadable - the same bar as revoking a session or
+// changing SMTP/OIDC config.
+//
+// The module side of the contract (its own POST /admin/migrate-pii-key
+// route) is expected to check auth.roles for "admin" itself, same as every
+// other module route - Core does not special-case that here, it just
+// forwards the already-verified admin session as WorkerAuth like the normal
+// module proxy (router.go) does.
+func MigratePIIKeyHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := auth.RequireAdminSession(authDeps, w, r)
+		if !ok {
+			return
+		}
+
+		name := r.PathValue("name")
+		if name == "" {
+			http.Error(w, "missing module name", http.StatusBadRequest)
+			return
+		}
+
+		row, found, err := d.DB.GetInstalledModule(r.Context(), name)
+		if err != nil {
+			http.Error(w, "failed to look up module", http.StatusInternalServerError)
+			return
+		}
+		if !found {
+			http.Error(w, "module not installed", http.StatusNotFound)
+			return
+		}
+		if row.Tier < 2 {
+			// Tier 1 modules have no Deno worker and never received the
+			// shared PII key in the first place (crud.go uses d.PIIKey
+			// directly, undifferentiated per module - see installer.go's
+			// Deps.PIIKey doc comment).
+			http.Error(w, "module has no PII key to migrate", http.StatusBadRequest)
+			return
+		}
+		if row.Status != "active" {
+			http.Error(w, fmt.Sprintf("module is %s", row.Status), http.StatusServiceUnavailable)
+			return
+		}
+
+		migrated, err := d.DB.IsModulePIIMigrated(r.Context(), name)
+		if err != nil {
+			http.Error(w, "failed to check migration status", http.StatusInternalServerError)
+			return
+		}
+		if migrated {
+			http.Error(w, "module already migrated", http.StatusConflict)
+			return
+		}
+
+		workerAuth := WorkerAuth{
+			UserID:    sess.UserID,
+			UserEmail: sess.Email,
+			UserName:  sess.Name,
+			Roles:     []string{sess.Role},
+			Scopes:    []string{},
+		}
+
+		resp, err := d.Workers.Dispatch(r.Context(), name, WorkerRequest{
+			Method: "POST",
+			Path:   "/admin/migrate-pii-key",
+			Auth:   workerAuth,
+		})
+		if err != nil {
+			log.Printf("modules: migrate-pii-key %q: dispatch error: %v", name, err)
+			if err == ErrWorkerNotFound {
+				http.Error(w, "module worker not running", http.StatusServiceUnavailable)
+			} else {
+				http.Error(w, "module error: "+err.Error(), http.StatusBadGateway)
+			}
+			return
+		}
+		if resp.Status < 200 || resp.Status >= 300 {
+			// Forward the module handler's own error body/status as-is -
+			// same reasoning as the generic proxy (router.go): the module
+			// knows best why its own migration failed (e.g. a row it
+			// couldn't decrypt under the legacy key), Core just relays it.
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(resp.Status)
+			_, _ = w.Write(resp.Body)
+			return
+		}
+
+		if err := d.DB.SetModulePIIMigrated(r.Context(), name); err != nil {
+			log.Printf("modules: migrate-pii-key %q: mark migrated: %v", name, err)
+			http.Error(w, "module re-encrypted its data but Core failed to record the migration - do not retry, contact support", http.StatusInternalServerError)
+			return
+		}
+
+		logModuleAudit(r.Context(), authDeps, audit.LogParams{
+			EventType:  audit.EventModulePIIKeyMigrated,
+			ActorID:    sess.UserID,
+			ActorEmail: sess.Email,
+			TargetID:   name,
+		})
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(resp.Body)
 	}
 }
 

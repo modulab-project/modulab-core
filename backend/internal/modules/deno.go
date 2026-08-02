@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/modulab-project/modulab-core/backend/internal/crypto"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
 )
 
@@ -54,7 +55,13 @@ type WorkerPool struct {
 	// exactly 32 bytes) at Core startup - a malformed value now fails fast
 	// with a clear error instead of silently reaching a module worker later.
 	// May be empty (unset in .env) if no installed module needs PII
-	// encryption; see WorkerPool.piiKey's use in buildWorker.
+	// encryption.
+	//
+	// As of the 2026-08-02 security audit (M-1), this raw value is never
+	// handed to a worker directly - buildWorker derives a distinct
+	// per-module subkey from it (crypto.DeriveModuleKey) and grants that
+	// instead. This field remains the one root key every derived key comes
+	// from.
 	piiKey string
 	// Every worker's --allow-net always includes dbHostPort (see field doc
 	// comment above), on top of whatever the module's own manifest
@@ -239,6 +246,18 @@ type WorkerOptions struct {
 	// empty value as a configuration error rather than silently starting a
 	// worker with no DB access.
 	DBRolePassword string
+	// PIIMigrated mirrors db.Pool.IsModulePIIMigrated(moduleName), resolved
+	// by the caller the same way DBRolePassword is (WorkerPool has no
+	// *db.Pool reference). false (the fail-safe default a lookup error
+	// should map to - see IsModulePIIMigrated's doc comment) makes
+	// buildWorker also grant the worker the raw, pre-derivation
+	// MODULAB_MODULE_PII_KEY as MODULAB_MODULE_PII_LEGACY_KEY, alongside its
+	// own per-module derived key, so the module's own migrate-pii-key
+	// handler can decrypt data encrypted under the old shared key and
+	// re-encrypt it under the new derived one. true omits the legacy key
+	// entirely - see crypto.DeriveModuleKey and the 2026-08-02 security
+	// audit's M-1 finding.
+	PIIMigrated bool
 }
 
 // Start spawns a Deno worker for the given module. entrypoint is the absolute
@@ -344,6 +363,30 @@ func (p *WorkerPool) buildWorker(name, entrypoint string, opts WorkerOptions) (*
 	dbURL := fmt.Sprintf("postgres://%s:%s@%s/%s?search_path=%s,public",
 		url.QueryEscape(roleName), url.QueryEscape(opts.DBRolePassword), p.dbHostPort, p.dbName, schemaName)
 
+	// Derive this module's own PII key from the one raw
+	// MODULAB_MODULE_PII_KEY every Tier 2/3 worker used to receive verbatim
+	// (2026-08-02 security audit, M-1) - a compromised module can no longer
+	// decrypt another module's PII with a key it never had. p.piiKey may be
+	// "" (unset in .env, same meaning as before: PII encryption simply
+	// isn't available to any module yet), in which case there is nothing to
+	// derive and both keys below stay empty.
+	var derivedPIIKey, legacyPIIKey string
+	if p.piiKey != "" {
+		derived, err := crypto.DeriveModuleKey(p.piiKey, name)
+		if err != nil {
+			return nil, fmt.Errorf("worker %q: derive pii key: %w", name, err)
+		}
+		derivedPIIKey = derived
+		if !opts.PIIMigrated {
+			// Not yet migrated (or the caller couldn't determine that, and
+			// fail-safe defaulted to false - see PIIMigrated's doc comment):
+			// grant the raw shared key too, so this module's own
+			// migrate-pii-key handler can decrypt data still encrypted
+			// under it and re-encrypt under derivedPIIKey.
+			legacyPIIKey = p.piiKey
+		}
+	}
+
 	jobs := opts.Jobs
 	if jobs == nil {
 		jobs = map[string]string{}
@@ -359,7 +402,9 @@ func (p *WorkerPool) buildWorker(name, entrypoint string, opts WorkerOptions) (*
 		// when it rebuilds WorkerOptions for a restart - see ReloadEgress's
 		// use of existing.dbRolePassword.
 		dbRolePassword: opts.DBRolePassword,
-		piiKey:         p.piiKey,
+		piiKey:         derivedPIIKey,
+		legacyPIIKey:   legacyPIIKey,
+		piiMigrated:    opts.PIIMigrated,
 		// moduleRoot is {dataDir}/{name} — the common parent of both the
 		// handler code (moduleRoot/handlers/...) and the worker's Unix
 		// socket (moduleRoot/worker.sock, see sockPath above). Used as the
@@ -492,6 +537,11 @@ func (p *WorkerPool) ReloadEgress(name string, hosts []string) error {
 		// preserve: without this, buildWorker's empty-password check would
 		// reject every ReloadEgress-triggered restart outright.
 		DBRolePassword: existing.dbRolePassword,
+		// buildWorker recomputes both derived and legacy PII keys fresh from
+		// this flag and the pool's own p.piiKey - existing.legacyPIIKey
+		// itself doesn't need to be threaded through here, only whether
+		// migration is done.
+		PIIMigrated: existing.piiMigrated,
 	}
 	err := p.Start(name, entrypoint, opts)
 	// onEgressDeny is read without a lock here, same as buildWorker reading
@@ -819,10 +869,20 @@ type denoWorker struct {
 	// carry it forward into the WorkerOptions it rebuilds for a restart.
 	// See WorkerOptions.DBRolePassword.
 	dbRolePassword string
-	// piiKey is copied from the owning WorkerPool at construction time (see
-	// buildWorker) - the already-validated MODULAB_MODULE_PII_KEY value, or
-	// "" if unset. See WorkerPool.piiKey's doc comment.
+	// piiKey is this module's own derived PII key (crypto.DeriveModuleKey of
+	// the owning WorkerPool's raw p.piiKey), or "" if p.piiKey is unset. Not
+	// the raw shared key itself as of the 2026-08-02 security audit (M-1) -
+	// see buildWorker's derivation and WorkerOptions.PIIMigrated.
 	piiKey string
+	// legacyPIIKey is the raw, pre-derivation shared key, granted to the
+	// worker alongside piiKey only while this module's PII migration is not
+	// yet complete (WorkerOptions.PIIMigrated false) - "" once it is. Kept
+	// on the worker, like dbRolePassword and piiMigrated below, purely so
+	// ReloadEgress can carry it forward across a restart.
+	legacyPIIKey string
+	// piiMigrated mirrors WorkerOptions.PIIMigrated, carried over the same
+	// way for the same reason.
+	piiMigrated bool
 	// moduleRoot is {dataDir}/{name} — the --allow-read/--allow-write scope.
 	// Covers both the handler code under moduleRoot/handlers/... and the
 	// worker's own Unix socket at moduleRoot/worker.sock.
@@ -902,12 +962,14 @@ const db = {
 
 // ── PII encryption key setup ─────────────────────────────────────────────────
 //
-// Reads MODULAB_MODULE_PII_KEY exactly once, here, in Core's own bootstrap
-// script - never in module code. The resulting CryptoKey objects are handed
-// to every handler/job call explicitly (piiCrypto.key / piiCrypto.hashKey
-// below), the same way db already is - NOT via globalThis or any other
-// ambient/implicit channel, so a module's dependency on this value is always
-// visible in its own function signatures.
+// Reads MODULAB_MODULE_PII_KEY (and, only while this module's PII migration
+// isn't complete, MODULAB_MODULE_PII_LEGACY_KEY) exactly once, here, in
+// Core's own bootstrap script - never in module code. The resulting
+// CryptoKey objects are handed to every handler/job call explicitly
+// (crypto/legacyCrypto below), the same way db already is - NOT via
+// globalThis or any other ambient/implicit channel, so a module's
+// dependency on these values is always visible in its own function
+// signatures.
 //
 // Why centralize this at all: before this (2026-07-16), every module read
 // Deno.env.get("MODULAB_ENCRYPTION_KEY") directly, which meant renaming that
@@ -919,16 +981,25 @@ const db = {
 // rotation is a one-line change in this file, with zero module changes or
 // releases required - module code never sees an env var name at all anymore.
 //
-// piiCrypto.key / piiCrypto.hashKey are null if MODULAB_MODULE_PII_KEY is
-// unset or malformed - module code must treat that the same as "not
-// configured" (matches the existing getEncKey() -> null contract every
-// module already had before this change).
+// As of the 2026-08-02 security audit (M-1), MODULAB_MODULE_PII_KEY is this
+// module's own key, derived by Go (crypto.DeriveModuleKey) from what used
+// to be handed to every module verbatim - a compromised module can no
+// longer decrypt another module's PII with it. MODULAB_MODULE_PII_LEGACY_KEY
+// is that old, still-shared raw key, granted only until this module's own
+// migrate-pii-key handler has re-encrypted its data under the new key (see
+// db.Pool.IsModulePIIMigrated/SetModulePIIMigrated on the Go side) - null
+// once that's done, same as if it were never configured.
+//
+// .key / .hashKey are null if the corresponding env var is unset or
+// malformed - module code must treat that the same as "not configured"
+// (matches the existing getEncKey() -> null contract every module already
+// had before this change).
 interface PiiCrypto {
   key: CryptoKey | null;
   hashKey: CryptoKey | null;
 }
-async function loadPiiCrypto(): Promise<PiiCrypto> {
-  const hexKey = Deno.env.get("MODULAB_MODULE_PII_KEY") ?? "";
+async function loadPiiCryptoFromEnv(envVarName: string): Promise<PiiCrypto> {
+  const hexKey = Deno.env.get(envVarName) ?? "";
   if (hexKey.length !== 64) return { key: null, hashKey: null };
   const raw = new Uint8Array(32);
   for (let i = 0; i < 32; i++) raw[i] = parseInt(hexKey.slice(i * 2, i * 2 + 2), 16);
@@ -941,7 +1012,8 @@ async function loadPiiCrypto(): Promise<PiiCrypto> {
   const hashKey = await crypto.subtle.importKey("raw", raw, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   return { key, hashKey };
 }
-const piiCrypto: PiiCrypto = await loadPiiCrypto();
+const piiCrypto: PiiCrypto = await loadPiiCryptoFromEnv("MODULAB_MODULE_PII_KEY");
+const legacyPiiCrypto: PiiCrypto = await loadPiiCryptoFromEnv("MODULAB_MODULE_PII_LEGACY_KEY");
 
 // Job handlers this module declares in manifest.yaml's jobs: list, keyed by
 // job name. Populated by Go (see denoWorker.start) as a JSON object literal
@@ -952,7 +1024,7 @@ const piiCrypto: PiiCrypto = await loadPiiCrypto();
 // per job; a job that needs network access relies on the same egress hosts
 // the HTTP handler was granted).
 const jobEntrypoints: Record<string, string> = %s;
-const jobHandlers: Record<string, (ctx: { db: typeof db; crypto: PiiCrypto }) => Promise<unknown>> = {};
+const jobHandlers: Record<string, (ctx: { db: typeof db; crypto: PiiCrypto; legacyCrypto: PiiCrypto }) => Promise<unknown>> = {};
 for (const [jobName, path] of Object.entries(jobEntrypoints)) {
   const mod = await import(path);
   jobHandlers[jobName] = mod.default;
@@ -1028,7 +1100,7 @@ async function handleConn(conn: Deno.Conn) {
             if (!jobFn) {
               resp = { status: 404, body: { error: "unknown job: " + req.job } };
             } else {
-              const result = await jobFn({ db, crypto: piiCrypto });
+              const result = await jobFn({ db, crypto: piiCrypto, legacyCrypto: legacyPiiCrypto });
               let notifications: unknown;
               let body: unknown = result;
               if (result && typeof result === "object" && "__notifications" in result) {
@@ -1044,7 +1116,7 @@ async function handleConn(conn: Deno.Conn) {
               };
             }
           } else {
-            resp = await handler({ ...req, db, crypto: piiCrypto });
+            resp = await handler({ ...req, db, crypto: piiCrypto, legacyCrypto: legacyPiiCrypto });
           }
         } catch (e) {
           resp = { status: 500, body: { error: String(e) } };
@@ -1167,7 +1239,13 @@ func (w *denoWorker) start() error {
 		// (NotCapable) until a --allow-env alias papered over it; moving key
 		// retrieval into the bootstrap script entirely (module code never
 		// touches Deno.env for this) is what let that alias be removed again.
-		"--allow-env=MODULAB_DB_URL,MODULAB_MODULE_PII_KEY,PG*",
+		// MODULAB_MODULE_PII_LEGACY_KEY: same reasoning, granted only while
+		// this module's PII migration isn't complete yet (w.legacyPIIKey
+		// empty otherwise, see buildWorker) - the bootstrap script's own
+		// loadPiiCrypto() call reads it into legacyCrypto, passed to the
+		// module's migrate-pii-key handler alongside its regular derived
+		// crypto. See M-1 in the 2026-08-02 security audit.
+		"--allow-env=MODULAB_DB_URL,MODULAB_MODULE_PII_KEY,MODULAB_MODULE_PII_LEGACY_KEY,PG*",
 	}
 	netGrants := append([]string{"unix:" + w.sockPath}, w.egressHosts...)
 	args = append(args, "--allow-net="+strings.Join(netGrants, ","))
@@ -1204,6 +1282,9 @@ func (w *denoWorker) start() error {
 		// because that's the existing, already-sandboxed channel
 		// (--allow-env) for getting a secret into the worker process.
 		moduleEnv = append(moduleEnv, "MODULAB_MODULE_PII_KEY="+w.piiKey)
+	}
+	if w.legacyPIIKey != "" {
+		moduleEnv = append(moduleEnv, "MODULAB_MODULE_PII_LEGACY_KEY="+w.legacyPIIKey)
 	}
 	w.cmd.Env = moduleEnv
 	w.cmd.Stdout = &prefixWriter{prefix: "[" + w.name + "] ", w: os.Stdout}
