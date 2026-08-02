@@ -9,7 +9,7 @@
 // "admin.security_info.*" namespace, to avoid a five-locale-file rename of
 // every shared string for what is otherwise a pure page split.
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, Link } from "react-router";
+import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import {
@@ -146,14 +146,6 @@ export default function AdminSecurityInfoPage() {
   return (
     <AppShell session={session}>
       <div className="mx-auto w-full max-w-3xl py-10">
-        <Link
-          to="/admin/system"
-          className="mb-6 flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
-        >
-          <i className="ti ti-arrow-left text-[14px]" />
-          {t("admin.system.title")}
-        </Link>
-
         <div className="mb-8">
           <h1 className="text-xl font-semibold mb-1">{t("admin.security_info.title")}</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">{t("admin.security_info.subtitle")}</p>

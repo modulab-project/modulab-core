@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { useNavigate, Link } from "react-router";
+import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { getSystemStatus, updateOIDC, deleteOIDCConfig } from "../lib/api";
 import { useAuthenticatedSession } from "../lib/useSession";
@@ -109,7 +109,6 @@ export default function AdminSystemOIDCPage() {
   return (
     <AppShell session={session}>
       <div className="mx-auto w-full max-w-md py-10">
-        <BackLink />
         <div className="mb-6 flex items-center gap-2">
           <h1 className="text-xl font-semibold">{t("admin.system.oidc_title")}</h1>
           <StatusDot configured={configured} t={t} />
@@ -173,17 +172,6 @@ export default function AdminSystemOIDCPage() {
 }
 
 // ── shared helpers ──────────────────────────────────────────────────────────
-
-function BackLink() {
-  const { t } = useTranslation();
-  return (
-    <Link to="/admin/system"
-      className="mb-6 flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200">
-      <i className="ti ti-arrow-left text-[14px]" />
-      {t("admin.system.back")}
-    </Link>
-  );
-}
 
 function StatusDot({ configured, t }: { configured: boolean; t: (k: string) => string }) {
   return (

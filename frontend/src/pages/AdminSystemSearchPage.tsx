@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate, Link } from "react-router";
+import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import {
   adminListSearchProviders,
@@ -138,7 +138,6 @@ export default function AdminSystemSearchPage() {
   return (
     <AppShell session={session}>
       <div className="mx-auto w-full max-w-2xl py-10">
-        <BackLink />
         <h1 className="mb-1 text-xl font-semibold">{t("admin.search.title")}</h1>
         <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">{t("admin.search.subtitle")}</p>
 
@@ -416,17 +415,6 @@ function EditProviderModal({
         </div>
       </form>
     </Overlay>
-  );
-}
-
-function BackLink() {
-  const { t } = useTranslation();
-  return (
-    <Link to="/admin/system"
-      className="mb-6 flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200">
-      <i className="ti ti-arrow-left text-[14px]" />
-      {t("admin.system.back")}
-    </Link>
   );
 }
 
