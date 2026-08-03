@@ -141,7 +141,7 @@ export default function AdminSystemSmtpPage() {
 
   return (
     <AppShell session={session}>
-      <div className="mx-auto w-full max-w-md py-10">
+      <div className="mx-auto w-full max-w-3xl py-10">
         <div className="mb-1 flex items-center gap-2">
           <h1 className="text-xl font-semibold">{t("admin.smtp.title")}</h1>
           {status && (

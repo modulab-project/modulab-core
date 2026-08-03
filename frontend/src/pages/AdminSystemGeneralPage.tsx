@@ -85,7 +85,7 @@ export default function AdminSystemGeneralPage() {
 
   return (
     <AppShell session={session}>
-      <div className="mx-auto w-full max-w-2xl py-6 sm:py-10">
+      <div className="mx-auto w-full max-w-3xl py-6 sm:py-10">
         <h1 className="mb-1 text-xl font-semibold">{t("admin.system_general.title")}</h1>
         <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">{t("admin.system_general.subtitle")}</p>
 

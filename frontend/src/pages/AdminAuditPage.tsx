@@ -424,7 +424,7 @@ export default function AdminAuditPage() {
 
   return (
     <AppShell session={session}>
-      <div className="mx-auto w-full max-w-4xl py-10">
+      <div className="mx-auto w-full max-w-3xl py-10">
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-xl font-semibold">{t("admin.audit.title")}</h1>

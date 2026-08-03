@@ -172,7 +172,7 @@ export default function ModulesPage() {
 
   return (
     <AppShell session={session}>
-      <div className="mx-auto max-w-4xl py-6 px-2">
+      <div className="mx-auto max-w-3xl py-6 px-2">
         {/* Header */}
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>

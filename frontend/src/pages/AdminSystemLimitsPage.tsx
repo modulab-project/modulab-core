@@ -295,7 +295,7 @@ export default function AdminSystemLimitsPage() {
 
   return (
     <AppShell session={session}>
-      <div className="mx-auto w-full max-w-2xl py-10">
+      <div className="mx-auto w-full max-w-3xl py-10">
         <h1 className="mb-1 text-xl font-semibold">{t("admin.system_limits.title")}</h1>
         <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">{t("admin.system_limits.subtitle")}</p>
 

@@ -192,7 +192,7 @@ export default function StorePage() {
 
   return (
     <AppShell session={session}>
-      <div className="mx-auto max-w-4xl py-6 px-2">
+      <div className="mx-auto max-w-3xl py-6 px-2">
         <Link
           to="/admin/modules/installed"
           className="mb-6 flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"

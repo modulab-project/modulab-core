@@ -92,7 +92,7 @@ export default function UserSearchPrefsPage() {
 
   return (
     <AppShell session={session}>
-      <div className="mx-auto max-w-xl px-4 py-10">
+      <div className="mx-auto max-w-3xl px-4 py-10">
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="mb-1 text-xl font-semibold">{t("user.search.title")}</h1>

@@ -220,7 +220,7 @@ export default function ProfilePage() {
 
   return (
     <AppShell session={session}>
-      <div className="mx-auto w-full max-w-md py-10">
+      <div className="mx-auto w-full max-w-3xl py-10">
         <div className="mb-6 flex items-center gap-4">
           <Avatar session={session} className="h-16 w-16 text-lg" />
           <div>

@@ -52,7 +52,7 @@ export default function UserFeedsPage() {
 
   return (
     <AppShell session={session}>
-      <div className="mx-auto max-w-xl px-4 py-10">
+      <div className="mx-auto max-w-3xl px-4 py-10">
         <h1 className="mb-1 text-xl font-semibold">{t("user.feeds.title")}</h1>
         <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">
           {t("user.feeds.subtitle")}

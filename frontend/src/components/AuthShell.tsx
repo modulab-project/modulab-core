@@ -32,7 +32,7 @@ export function AuthShell({
 }) {
   return (
     <div className="flex min-h-[calc(100dvh-77px)] items-center justify-center px-4 py-10">
-      <div className="w-full max-w-md">
+      <div className="w-full max-w-3xl">
         <div className="mb-8 flex flex-col items-center gap-2.5">
           <Logo />
           <span className="text-[22px] font-semibold tracking-tight text-gray-900 dark:text-gray-100">

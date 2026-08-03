@@ -108,7 +108,7 @@ export default function AdminSystemOIDCPage() {
 
   return (
     <AppShell session={session}>
-      <div className="mx-auto w-full max-w-md py-10">
+      <div className="mx-auto w-full max-w-3xl py-10">
         <div className="mb-6 flex items-center gap-2">
           <h1 className="text-xl font-semibold">{t("admin.system.oidc_title")}</h1>
           <StatusDot configured={configured} t={t} />
