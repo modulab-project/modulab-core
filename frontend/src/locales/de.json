@@ -32,6 +32,10 @@
   "profile": {
     "title": "Profil",
     "subtitle": "Dein Profil wird über dein SSO-Konto verwaltet. Änderungen nimmst du dort vor.",
+    "tab_account": "Konto",
+    "tab_sessions": "Sitzungen",
+    "tab_notifications": "Benachrichtigungen",
+    "tab_data": "Daten",
     "name": "Name",
     "username": "Benutzername",
     "email": "E-Mail",

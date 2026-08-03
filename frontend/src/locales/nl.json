@@ -32,6 +32,10 @@
   "profile": {
     "title": "Profiel",
     "subtitle": "Beheerd door uw identiteitsprovider — Core toont alleen wat het heeft ontvangen bij het inloggen.",
+    "tab_account": "Account",
+    "tab_sessions": "Sessies",
+    "tab_notifications": "Meldingen",
+    "tab_data": "Gegevens",
     "name": "Naam",
     "username": "Gebruikersnaam",
     "email": "E-mail",

@@ -32,6 +32,10 @@
   "profile": {
     "title": "Profil",
     "subtitle": "Géré par votre fournisseur d'identité — Core affiche uniquement ce qu'il a reçu lors de la connexion.",
+    "tab_account": "Compte",
+    "tab_sessions": "Sessions",
+    "tab_notifications": "Notifications",
+    "tab_data": "Données",
     "name": "Nom",
     "username": "Nom d'utilisateur",
     "email": "E-mail",

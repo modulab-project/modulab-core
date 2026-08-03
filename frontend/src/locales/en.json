@@ -32,6 +32,10 @@
   "profile": {
     "title": "Profile",
     "subtitle": "Your profile is managed via your SSO account. Make changes there.",
+    "tab_account": "Account",
+    "tab_sessions": "Sessions",
+    "tab_notifications": "Notifications",
+    "tab_data": "Data",
     "name": "Name",
     "username": "Username",
     "email": "Email",

@@ -40,10 +40,28 @@ import { useLoginRedirect } from "../lib/useLoginRedirect";
 // standalone screen with its own "Back" button: this is meant to feel like
 // a second tab of the same app, reachable straight from the avatar menu,
 // not a one-off detour you have to explicitly back out of.
+//
+// Tab navigation (2026-08-03) mirrors AdminSystemLimitsPage.tsx's pattern
+// (tab strip + Group card, see that file's own doc comment) - added once
+// this page grew from "one info card" to four genuinely separate concerns
+// (account info, sessions, notification prefs, data/deletion) that used to
+// all sit stacked on one screen. Unlike AdminSystemLimitsPage, there is no
+// shared "Save" button here - each tab keeps its own save-on-change/
+// save-on-click behavior (checkboxes save immediately, export/delete are
+// one-shot actions), so switching tabs never risks losing an unsaved edit.
+const TABS = [
+  { id: "account", icon: "ti-user-circle" },
+  { id: "sessions", icon: "ti-devices" },
+  { id: "notifications", icon: "ti-bell" },
+  { id: "data", icon: "ti-download" },
+] as const;
+type ProfileTab = (typeof TABS)[number]["id"];
+
 export default function ProfilePage() {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { session, loading } = useAuthenticatedSession();
+  const [activeTab, setActiveTab] = useState<ProfileTab>("account");
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   // See AdminUsersPage.tsx's identical flag for lock/delete - self-delete
@@ -108,7 +126,6 @@ export default function ProfilePage() {
         // call - if this fails the toggles simply stay hidden below
         // (notifyPrefs stays null) rather than showing a stale/wrong state.
       });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch-once-on-mount guarded by hasFetchedNotifyPrefs.
   }, [session]);
 
   function handleNotifyPrefChange(
@@ -214,148 +231,201 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
-          <ProfileRow label={t("profile.name")} value={displayName} />
-          <ProfileRow label={t("profile.username")} value={<ClaimValue value={session.preferred_username} />} />
-          <ProfileRow label={t("profile.email")} value={session.email} />
-          <ProfileRow
-            label={t("profile.email_verified")}
-            value={
-              <span
-                className={`flex items-center gap-1.5 text-xs font-medium ${
-                  session.email_verified
-                    ? "text-teal-700 dark:text-teal-400"
-                    : "text-gray-500 dark:text-gray-400"
-                }`}
-              >
-                <span
-                  className={`h-1.5 w-1.5 rounded-full ${
-                    session.email_verified ? "bg-teal-600" : "bg-gray-400"
-                  }`}
-                />
-                {session.email_verified ? t("profile.verified") : t("profile.not_verified")}
-              </span>
-            }
-          />
-          <ProfileRow
-            label={t("profile.subject")}
-            value={<span className="font-mono text-xs">{session.user_id}</span>}
-            last
-          />
+        <div className="mb-6 flex gap-1 overflow-x-auto border-b border-gray-200 dark:border-gray-800">
+          {TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm ${
+                activeTab === tab.id
+                  ? "border-teal-600 font-medium text-teal-700 dark:border-teal-400 dark:text-teal-400"
+                  : "border-transparent text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
+              }`}
+            >
+              <i className={`ti ${tab.icon} text-[14px]`} />
+              {t(`profile.tab_${tab.id}`)}
+            </button>
+          ))}
         </div>
 
-        {session.account_settings_url && (
-          <AuthButton
-            type="button"
-            onClick={() => {
-              window.open(session.account_settings_url, "_blank", "noopener,noreferrer");
-            }}
-            className="mt-6 w-full"
-          >
-            {t("profile.manage_account")}
-          </AuthButton>
+        {activeTab === "account" && (
+          <div className="space-y-4">
+            <div>
+              <p className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                {t("profile.tab_account")}
+              </p>
+              <div className="rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+                <ProfileRow label={t("profile.name")} value={displayName} />
+                <ProfileRow label={t("profile.username")} value={<ClaimValue value={session.preferred_username} />} />
+                <ProfileRow label={t("profile.email")} value={session.email} />
+                <ProfileRow
+                  label={t("profile.email_verified")}
+                  value={
+                    <span
+                      className={`flex items-center gap-1.5 text-xs font-medium ${
+                        session.email_verified
+                          ? "text-teal-700 dark:text-teal-400"
+                          : "text-gray-500 dark:text-gray-400"
+                      }`}
+                    >
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${
+                          session.email_verified ? "bg-teal-600" : "bg-gray-400"
+                        }`}
+                      />
+                      {session.email_verified ? t("profile.verified") : t("profile.not_verified")}
+                    </span>
+                  }
+                />
+                <ProfileRow
+                  label={t("profile.subject")}
+                  value={<span className="font-mono text-xs">{session.user_id}</span>}
+                  last
+                />
+              </div>
+            </div>
+
+            {session.account_settings_url && (
+              <AuthButton
+                type="button"
+                onClick={() => {
+                  window.open(session.account_settings_url, "_blank", "noopener,noreferrer");
+                }}
+                className="w-full"
+              >
+                {t("profile.manage_account")}
+              </AuthButton>
+            )}
+          </div>
         )}
 
-        <div className="mt-6 rounded-2xl border border-gray-200 p-4 dark:border-gray-800">
-          <p className="text-sm font-medium">{t("profile.export_data")}</p>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            {t("profile.export_data_desc")}
-          </p>
-          {exportError && (
-            <p className="mt-2 text-sm text-red-600 dark:text-red-400">{exportError}</p>
-          )}
-          <button
-            type="button"
-            disabled={exporting}
-            onClick={handleExportData}
-            className="mt-3 rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-          >
-            {exporting ? t("profile.exporting") : t("profile.export_data")}
-          </button>
-        </div>
-
-        <div className="mt-6 rounded-2xl border border-gray-200 p-4 dark:border-gray-800">
-          <p className="text-sm font-medium">{t("profile.sessions_title")}</p>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("profile.sessions_desc")}</p>
-          {sessionsError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{sessionsError}</p>}
-          {revokeError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{revokeError}</p>}
-          {sessions === null && !sessionsError && (
-            <p className="mt-3 text-sm text-gray-400 dark:text-gray-500">{t("common.loading")}</p>
-          )}
-          {sessions && sessions.length === 0 && (
-            <p className="mt-3 text-sm text-gray-400 dark:text-gray-500">{t("profile.sessions_empty")}</p>
-          )}
-          {sessions && sessions.length > 0 && (
-            <ul className="mt-3 flex flex-col gap-2">
-              {sessions.map((s) => (
-                <SessionListItem
-                  key={s.id}
-                  session={s}
-                  revoking={revokingIds.has(s.id)}
-                  onRevoke={() => handleRevokeSession(s)}
-                />
-              ))}
-            </ul>
-          )}
-        </div>
-
-        <div className="mt-6 rounded-2xl border border-gray-200 p-4 dark:border-gray-800">
-          <p className="text-sm font-medium">{t("profile.notifications_title")}</p>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("profile.notifications_desc")}</p>
-          {notifyPrefs === null ? (
-            <p className="mt-3 text-sm text-gray-400 dark:text-gray-500">{t("common.loading")}</p>
-          ) : (
-            <div className="mt-3 flex flex-col gap-2">
-              <NotifyToggle
-                label={t("profile.notify_new_login")}
-                checked={notifyPrefs.notify_new_login}
-                onChange={(checked) => handleNotifyPrefChange("notify_new_login", checked)}
-              />
-              <NotifyToggle
-                label={t("profile.notify_country_anomaly")}
-                checked={notifyPrefs.notify_country_anomaly}
-                onChange={(checked) => handleNotifyPrefChange("notify_country_anomaly", checked)}
-              />
-              <NotifyToggle
-                label={t("profile.notify_new_device")}
-                checked={notifyPrefs.notify_new_device}
-                onChange={(checked) => handleNotifyPrefChange("notify_new_device", checked)}
-              />
-              <NotifyToggle
-                label={t("profile.notify_session_revoked_by_admin")}
-                checked={notifyPrefs.notify_session_revoked_by_admin}
-                onChange={(checked) => handleNotifyPrefChange("notify_session_revoked_by_admin", checked)}
-              />
+        {activeTab === "sessions" && (
+          <Group title={t("profile.tab_sessions")}>
+            <div>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{t("profile.sessions_desc")}</p>
+              {sessionsError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{sessionsError}</p>}
+              {revokeError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{revokeError}</p>}
+              {sessions === null && !sessionsError && (
+                <p className="mt-3 text-sm text-gray-400 dark:text-gray-500">{t("common.loading")}</p>
+              )}
+              {sessions && sessions.length === 0 && (
+                <p className="mt-3 text-sm text-gray-400 dark:text-gray-500">{t("profile.sessions_empty")}</p>
+              )}
+              {sessions && sessions.length > 0 && (
+                <ul className="mt-3 flex flex-col gap-2">
+                  {sessions.map((s) => (
+                    <SessionListItem
+                      key={s.id}
+                      session={s}
+                      revoking={revokingIds.has(s.id)}
+                      onRevoke={() => handleRevokeSession(s)}
+                    />
+                  ))}
+                </ul>
+              )}
             </div>
-          )}
-        </div>
+          </Group>
+        )}
 
-        <div className="mt-6 rounded-2xl border border-red-200 p-4 dark:border-red-900">
-          <p className="text-sm font-medium text-red-700 dark:text-red-400">{t("profile.delete_section_title")}</p>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            {t("profile.delete_section_body")}
-          </p>
-          {deleteError && !reauthRequired && (
-            <p className="mt-2 text-sm text-red-600 dark:text-red-400">{deleteError}</p>
-          )}
-          {reauthRequired && (
-            <ReauthBanner
-              waiting={reauthWaiting}
-              onReauth={() => startLogin({ reauth: true, returnPath: window.location.pathname })}
-              onDismiss={() => setReauthRequired(false)}
-            />
-          )}
-          <button
-            type="button"
-            disabled={deleting}
-            onClick={handleDeleteAccount}
-            className="mt-3 rounded-md border border-red-300 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
-          >
-            {deleting ? t("profile.deleting") : t("profile.delete_button")}
-          </button>
-        </div>
+        {activeTab === "notifications" && (
+          <Group title={t("profile.tab_notifications")}>
+            <div>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{t("profile.notifications_desc")}</p>
+              {notifyPrefs === null ? (
+                <p className="mt-3 text-sm text-gray-400 dark:text-gray-500">{t("common.loading")}</p>
+              ) : (
+                <div className="mt-3 flex flex-col gap-2">
+                  <NotifyToggle
+                    label={t("profile.notify_new_login")}
+                    checked={notifyPrefs.notify_new_login}
+                    onChange={(checked) => handleNotifyPrefChange("notify_new_login", checked)}
+                  />
+                  <NotifyToggle
+                    label={t("profile.notify_country_anomaly")}
+                    checked={notifyPrefs.notify_country_anomaly}
+                    onChange={(checked) => handleNotifyPrefChange("notify_country_anomaly", checked)}
+                  />
+                  <NotifyToggle
+                    label={t("profile.notify_new_device")}
+                    checked={notifyPrefs.notify_new_device}
+                    onChange={(checked) => handleNotifyPrefChange("notify_new_device", checked)}
+                  />
+                  <NotifyToggle
+                    label={t("profile.notify_session_revoked_by_admin")}
+                    checked={notifyPrefs.notify_session_revoked_by_admin}
+                    onChange={(checked) => handleNotifyPrefChange("notify_session_revoked_by_admin", checked)}
+                  />
+                </div>
+              )}
+            </div>
+          </Group>
+        )}
+
+        {activeTab === "data" && (
+          <div className="space-y-4">
+            <Group title={t("profile.export_data")}>
+              <div>
+                <p className="text-sm text-gray-500 dark:text-gray-400">{t("profile.export_data_desc")}</p>
+                {exportError && (
+                  <p className="mt-2 text-sm text-red-600 dark:text-red-400">{exportError}</p>
+                )}
+                <button
+                  type="button"
+                  disabled={exporting}
+                  onClick={handleExportData}
+                  className="mt-3 rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                >
+                  {exporting ? t("profile.exporting") : t("profile.export_data")}
+                </button>
+              </div>
+            </Group>
+
+            <div className="rounded-2xl border border-red-200 p-4 dark:border-red-900">
+              <p className="text-sm font-medium text-red-700 dark:text-red-400">{t("profile.delete_section_title")}</p>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {t("profile.delete_section_body")}
+              </p>
+              {deleteError && !reauthRequired && (
+                <p className="mt-2 text-sm text-red-600 dark:text-red-400">{deleteError}</p>
+              )}
+              {reauthRequired && (
+                <ReauthBanner
+                  waiting={reauthWaiting}
+                  onReauth={() => startLogin({ reauth: true, returnPath: window.location.pathname })}
+                  onDismiss={() => setReauthRequired(false)}
+                />
+              )}
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={handleDeleteAccount}
+                className="mt-3 rounded-md border border-red-300 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
+              >
+                {deleting ? t("profile.deleting") : t("profile.delete_button")}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </AppShell>
+  );
+}
+
+// Same small-caps-label + card wrapper as AdminSystemLimitsPage.tsx's local
+// Group helper - copied rather than imported/shared, matching that file's
+// own reasoning (it isn't exported from there either): this is a two-element
+// JSX shape, not worth a cross-page dependency for.
+function Group({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div>
+      <p className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+        {title}
+      </p>
+      <div className="space-y-4 rounded-2xl border border-gray-200 bg-white px-4 py-4 dark:border-gray-800 dark:bg-gray-900">
+        {children}
+      </div>
+    </div>
   );
 }
 
