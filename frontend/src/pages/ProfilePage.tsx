@@ -5,7 +5,16 @@ import type { TFunction } from "i18next";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { AppShell, Avatar } from "../components/AppShell";
 import { AuthButton } from "../components/AuthShell";
-import { deleteSelf, exportMyData, listMySessions, revokeMySession, type ActiveSession } from "../lib/api";
+import {
+  deleteSelf,
+  exportMyData,
+  getUserPrefs,
+  listMySessions,
+  revokeMySession,
+  updateUserPrefs,
+  type ActiveSession,
+  type UserPrefs,
+} from "../lib/api";
 import { isReauthRequiredError } from "../lib/authErrors";
 import { ReauthBanner } from "../components/ReauthBanner";
 import { queryClient } from "../lib/queryClient";
@@ -68,6 +77,54 @@ export default function ProfilePage() {
       .catch(() => setSessionsError(t("profile.sessions_load_error")));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch-once-on-mount guarded by hasFetchedSessions, not meant to re-run on t changing.
   }, [session]);
+
+  // Account-security email opt-ins (db.NotificationPrefs) - fetched once
+  // alongside the sessions list above, saved fire-and-forget per checkbox
+  // the same way AppShell.tsx's theme/language controls already do
+  // (updateUserPrefs(...).catch(() => {})), rather than a single "Save"
+  // button: each toggle is independent and the backend already treats a
+  // partial PATCH body as "touch only these fields" (UserPrefsHandler),
+  // so there is nothing to batch.
+  const [notifyPrefs, setNotifyPrefs] = useState<Pick<
+    UserPrefs,
+    "notify_new_login" | "notify_country_anomaly" | "notify_new_device" | "notify_session_revoked_by_admin"
+  > | null>(null);
+  const hasFetchedNotifyPrefs = useRef(false);
+
+  useEffect(() => {
+    if (!session || hasFetchedNotifyPrefs.current) return;
+    hasFetchedNotifyPrefs.current = true;
+    getUserPrefs()
+      .then((prefs) =>
+        setNotifyPrefs({
+          notify_new_login: prefs.notify_new_login,
+          notify_country_anomaly: prefs.notify_country_anomaly,
+          notify_new_device: prefs.notify_new_device,
+          notify_session_revoked_by_admin: prefs.notify_session_revoked_by_admin,
+        }),
+      )
+      .catch(() => {
+        // Best-effort, same as AppShell.tsx's own getUserPrefs().then(...)
+        // call - if this fails the toggles simply stay hidden below
+        // (notifyPrefs stays null) rather than showing a stale/wrong state.
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch-once-on-mount guarded by hasFetchedNotifyPrefs.
+  }, [session]);
+
+  function handleNotifyPrefChange(
+    key: "notify_new_login" | "notify_country_anomaly" | "notify_new_device" | "notify_session_revoked_by_admin",
+    value: boolean,
+  ) {
+    setNotifyPrefs((prev) => (prev ? { ...prev, [key]: value } : prev));
+    updateUserPrefs({ [key]: value }).catch(() => {
+      // Revert on failure - same reasoning a checkbox needs unlike
+      // AppShell's fire-and-forget theme/language calls: those re-render
+      // from the next getUserPrefs() call anyway on next page load, but a
+      // checkbox left showing the wrong state until then would look like
+      // this page silently ignored the click.
+      setNotifyPrefs((prev) => (prev ? { ...prev, [key]: !value } : prev));
+    });
+  }
 
   function handleRevokeSession(target: ActiveSession) {
     if (!window.confirm(t("profile.sessions_end_confirm", { device: target.user_agent ? parseUserAgent(target.user_agent, t) : target.ip || target.role }))) {
@@ -242,6 +299,37 @@ export default function ProfilePage() {
           )}
         </div>
 
+        <div className="mt-6 rounded-2xl border border-gray-200 p-4 dark:border-gray-800">
+          <p className="text-sm font-medium">{t("profile.notifications_title")}</p>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("profile.notifications_desc")}</p>
+          {notifyPrefs === null ? (
+            <p className="mt-3 text-sm text-gray-400 dark:text-gray-500">{t("common.loading")}</p>
+          ) : (
+            <div className="mt-3 flex flex-col gap-2">
+              <NotifyToggle
+                label={t("profile.notify_new_login")}
+                checked={notifyPrefs.notify_new_login}
+                onChange={(checked) => handleNotifyPrefChange("notify_new_login", checked)}
+              />
+              <NotifyToggle
+                label={t("profile.notify_country_anomaly")}
+                checked={notifyPrefs.notify_country_anomaly}
+                onChange={(checked) => handleNotifyPrefChange("notify_country_anomaly", checked)}
+              />
+              <NotifyToggle
+                label={t("profile.notify_new_device")}
+                checked={notifyPrefs.notify_new_device}
+                onChange={(checked) => handleNotifyPrefChange("notify_new_device", checked)}
+              />
+              <NotifyToggle
+                label={t("profile.notify_session_revoked_by_admin")}
+                checked={notifyPrefs.notify_session_revoked_by_admin}
+                onChange={(checked) => handleNotifyPrefChange("notify_session_revoked_by_admin", checked)}
+              />
+            </div>
+          )}
+        </div>
+
         <div className="mt-6 rounded-2xl border border-red-200 p-4 dark:border-red-900">
           <p className="text-sm font-medium text-red-700 dark:text-red-400">{t("profile.delete_section_title")}</p>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -403,6 +491,32 @@ function formatDuration(seconds: number): string {
   const days = Math.floor(hours / 24);
   const remHours = hours % 24;
   return `${days}d ${remHours}h`;
+}
+
+// One row in the notifications section above - same checkbox styling as
+// AdminAIPage.tsx/AdminSystemSearchPage.tsx's toggles, reused rather than a
+// new component there since this is the first (and so far only) checkbox
+// ProfilePage.tsx itself needs.
+function NotifyToggle({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-sm">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="h-4 w-4 rounded accent-teal-600"
+      />
+      <span>{label}</span>
+    </label>
+  );
 }
 
 function ProfileRow({

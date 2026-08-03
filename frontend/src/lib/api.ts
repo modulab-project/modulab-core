@@ -1370,6 +1370,14 @@ export function verifyAuditLog(): Promise<AuditVerifyResult> {
 export interface UserPrefs {
   ui_language: string; // "en" | "de" | "" (browser default)
   theme: string; // "light" | "dark" | "system" | "" (client default, see AppShell.tsx)
+  // Account-security email opt-ins (backend/internal/db.NotificationPrefs),
+  // all default true - see ProfilePage.tsx's notifications section, the one
+  // place these are shown/edited. Gate the mails auth.checkSessionCountryAnomaly/
+  // checkSessionDeviceAnomaly/CallbackHandler/RevokeSessionByID send.
+  notify_new_login: boolean;
+  notify_country_anomaly: boolean;
+  notify_new_device: boolean;
+  notify_session_revoked_by_admin: boolean;
 }
 
 // GET /v1/user/preferences — returns the calling user's stored UI language

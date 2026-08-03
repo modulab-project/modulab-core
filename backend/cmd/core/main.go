@@ -1492,7 +1492,7 @@ func identifyBySessionOrIP(authDeps auth.Deps) func(*http.Request) string {
 		// the whole point of bucketing by user (see this function's
 		// package doc comment on the shared-NAT/office-egress case).
 		if token := sessionToken(r); token != "" {
-			if sess, ok, err := auth.ValidateSession(r.Context(), authDeps, token, clientIP(r), auth.LoginCountry(r)); err == nil && ok {
+			if sess, ok, err := auth.ValidateSession(r.Context(), authDeps, token, clientIP(r), auth.LoginCountry(r), r.Header.Get("User-Agent")); err == nil && ok {
 				return "user:" + sess.UserID
 			}
 		}

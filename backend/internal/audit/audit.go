@@ -91,6 +91,19 @@ const (
 	// subject - there is no separate "actor" here, the account is acting on
 	// itself, same reasoning as EventUserSelfDeleted.
 	EventAuthCountryAnomaly = "auth.country_anomaly"
+	// EventAuthDeviceAnomaly is session.go's checkSessionDeviceAnomaly's
+	// counterpart to EventAuthCountryAnomaly above - same "this
+	// credential/token is now being used from somewhere new" finding, but
+	// via a User-Agent mismatch instead of a CF-IPCountry one. Kept as its
+	// own constant rather than reusing EventAuthCountryAnomaly with a
+	// different Details.source: an admin filtering the audit log by event
+	// type should be able to tell "new country" and "new device" trails
+	// apart without parsing Details first. There is no login-time
+	// equivalent of this one (unlike EventAuthCountryAnomaly, which also
+	// fires from CallbackHandler) - a brand-new login always starts a
+	// brand-new session with no device baseline yet, so there is nothing to
+	// compare against until at least one mid-session request has run.
+	EventAuthDeviceAnomaly = "auth.device_anomaly"
 	// Fired by auth.recordReauthFailure (admin.go) once a caller's step-up
 	// reauth attempts (requireRecentLogin - lock/unlock/approve/delete a
 	// user, self-delete, SMTP/OIDC config, ending another session) fail

@@ -608,6 +608,27 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 		}); pubErr != nil {
 			log.Printf("auth: notify session.new for %s: %v", claims.Subject, pubErr)
 		}
+		// Loaded once, used to gate every mail this login can produce below
+		// (LoginMessage, AnomalyMessage) - never the live push above (that
+		// one is not user-configurable, same reasoning notify.Publish call
+		// sites elsewhere in this package give: an in-app toast is not the
+		// kind of thing worth an opt-out) or the audit_log write below (a
+		// user disabling their own anomaly mail must never also suppress the
+		// admin-facing trail of the same event - that would make the
+		// account-owner's own preference a way to hide evidence of token
+		// misuse from an admin reviewing System Info/Audit Log later).
+		// GetNotificationPrefs itself already fails open (all-true) on error,
+		// so no separate error handling is needed here.
+		notifyPrefs, _ := d.Pool.GetNotificationPrefs(ctx, claims.Subject)
+		// Unconditional-per-login mail (not gated on anomaly at all) - see
+		// mail.LoginMessage's own doc comment on how this differs from
+		// AnomalyMessage below.
+		if notifyPrefs.NewLogin && claims.Email != "" {
+			msg := mail.LoginMessage(claims.Email, claims.Name, clientIP(r), country, r.Header.Get("User-Agent"), d.FrontendBaseURL)
+			if err := mail.Enqueue(ctx, d.Valkey, d.Pool, d.MasterKeyEnv, msg); err != nil {
+				log.Printf("auth: enqueue login mail for %s: %v", claims.Subject, err)
+			}
+		}
 		// Same gap AnomalyMessage's own doc comment describes: the live push
 		// just above only reaches an already-open second tab/device, so mail
 		// plus a durable audit_log row (EventAuthCountryAnomaly) are added
@@ -631,7 +652,7 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 			} else {
 				log.Printf("auth: audit login country anomaly for %s: resolve master key: %v", claims.Subject, mkErr)
 			}
-			if claims.Email != "" {
+			if notifyPrefs.CountryAnomaly && claims.Email != "" {
 				msg := mail.AnomalyMessage(claims.Email, claims.Name, clientIP(r), country, previousCountry, d.FrontendBaseURL)
 				if err := mail.Enqueue(ctx, d.Valkey, d.Pool, d.MasterKeyEnv, msg); err != nil {
 					log.Printf("auth: enqueue login country anomaly mail for %s: %v", claims.Subject, err)
@@ -691,7 +712,7 @@ func MeHandler(d Deps) http.HandlerFunc {
 		}
 
 		ctx := r.Context()
-		sess, ok, err := ValidateSession(ctx, d, token, clientIP(r), loginCountry(r))
+		sess, ok, err := ValidateSession(ctx, d, token, clientIP(r), loginCountry(r), r.Header.Get("User-Agent"))
 		if err != nil {
 			httperr.Internal(w, err)
 			return
@@ -753,7 +774,7 @@ func DeleteSelfHandler(d Deps) http.HandlerFunc {
 		}
 
 		ctx := r.Context()
-		sess, ok, err := ValidateSession(ctx, d, token, clientIP(r), loginCountry(r))
+		sess, ok, err := ValidateSession(ctx, d, token, clientIP(r), loginCountry(r), r.Header.Get("User-Agent"))
 		if err != nil {
 			httperr.Internal(w, err)
 			return
@@ -845,6 +866,7 @@ func DeleteSelfHandler(d Deps) http.HandlerFunc {
 type UserPrefsResponse struct {
 	UILanguage string `json:"ui_language"` // "en", "de", or "" (browser default)
 	Theme      string `json:"theme"`       // "light", "dark", "system", or "" (client default)
+	db.NotificationPrefs
 }
 
 // UserPrefsHandler handles GET and PATCH /v1/user/preferences.
@@ -866,7 +888,7 @@ func UserPrefsHandler(d Deps) http.HandlerFunc {
 			return
 		}
 		ctx := r.Context()
-		sess, ok, err := ValidateSession(ctx, d, token, clientIP(r), loginCountry(r))
+		sess, ok, err := ValidateSession(ctx, d, token, clientIP(r), loginCountry(r), r.Header.Get("User-Agent"))
 		if err != nil {
 			httperr.Internal(w, err)
 			return
@@ -905,7 +927,12 @@ func UserPrefsHandler(d Deps) http.HandlerFunc {
 				http.Error(w, "internal error", http.StatusInternalServerError)
 				return
 			}
-			httperr.JSON(w, http.StatusOK, UserPrefsResponse{UILanguage: lang, Theme: theme})
+			notifyPrefs, err := d.Pool.GetNotificationPrefs(ctx, sess.UserID)
+			if err != nil {
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			httperr.JSON(w, http.StatusOK, UserPrefsResponse{UILanguage: lang, Theme: theme, NotificationPrefs: notifyPrefs})
 
 		case http.MethodPatch:
 			// Pointer fields, not plain strings: the frontend now sends a
@@ -918,6 +945,14 @@ func UserPrefsHandler(d Deps) http.HandlerFunc {
 			var body struct {
 				UILanguage *string `json:"ui_language"`
 				Theme      *string `json:"theme"`
+				// The four notify_* toggles (db.NotificationPrefs' own JSON
+				// tags) - same partial-update, pointer-means-"untouched"
+				// semantics as UILanguage/Theme above, passed straight through
+				// to SetNotificationPrefs' own COALESCE-based partial update.
+				NewLogin              *bool `json:"notify_new_login"`
+				CountryAnomaly        *bool `json:"notify_country_anomaly"`
+				NewDevice             *bool `json:"notify_new_device"`
+				SessionRevokedByAdmin *bool `json:"notify_session_revoked_by_admin"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -933,6 +968,12 @@ func UserPrefsHandler(d Deps) http.HandlerFunc {
 			}
 			if body.Theme != nil {
 				if err := d.Pool.SetUserTheme(ctx, sess.UserID, *body.Theme); err != nil {
+					http.Error(w, "internal error", http.StatusInternalServerError)
+					return
+				}
+			}
+			if body.NewLogin != nil || body.CountryAnomaly != nil || body.NewDevice != nil || body.SessionRevokedByAdmin != nil {
+				if err := d.Pool.SetNotificationPrefs(ctx, sess.UserID, body.NewLogin, body.CountryAnomaly, body.NewDevice, body.SessionRevokedByAdmin); err != nil {
 					http.Error(w, "internal error", http.StatusInternalServerError)
 					return
 				}
@@ -965,7 +1006,7 @@ func ExportSelfHandler(d Deps) http.HandlerFunc {
 			return
 		}
 		ctx := r.Context()
-		sess, ok, err := ValidateSession(ctx, d, token, clientIP(r), loginCountry(r))
+		sess, ok, err := ValidateSession(ctx, d, token, clientIP(r), loginCountry(r), r.Header.Get("User-Agent"))
 		if err != nil {
 			httperr.Internal(w, err)
 			return
@@ -1130,7 +1171,7 @@ func LogoutHandler(d Deps) http.HandlerFunc {
 			return
 		}
 
-		sess, ok, err := ValidateSession(ctx, d, token, clientIP(r), loginCountry(r))
+		sess, ok, err := ValidateSession(ctx, d, token, clientIP(r), loginCountry(r), r.Header.Get("User-Agent"))
 
 		// Best-effort: also invalidate this session's refresh token at the
 		// IdP itself (see Provider.Revoke's doc comment), not just delete

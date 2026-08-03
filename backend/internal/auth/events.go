@@ -41,7 +41,7 @@ func EventsHandler(d Deps) http.HandlerFunc {
 		}
 
 		ctx := r.Context()
-		sess, ok, err := ValidateSession(ctx, d, token, clientIP(r), loginCountry(r))
+		sess, ok, err := ValidateSession(ctx, d, token, clientIP(r), loginCountry(r), r.Header.Get("User-Agent"))
 		if err != nil {
 			httperr.Internal(w, err)
 			return

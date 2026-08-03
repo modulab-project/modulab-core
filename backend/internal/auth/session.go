@@ -85,6 +85,20 @@ const userSessionsKeyPrefix = "usersessions:"
 // validating.
 const sessionCountryKeyPrefix = "sessioncountry:"
 
+// sessionDeviceKeyPrefix is sessionCountryKeyPrefix's User-Agent counterpart:
+// tracks the most recently observed User-Agent for one specific active
+// session token, so checkSessionDeviceAnomaly (below) can catch a session
+// suddenly being used from a different device/browser - a signal
+// country-based detection misses entirely (same country, different device),
+// and one a legitimate single-device session should never produce on its
+// own mid-lifetime. Same TTL-synced-to-SessionTTL reasoning as
+// sessionCountryKeyPrefix. Not PII by the same reasoning
+// storedSession.UserAgentEnc's doc comment gives for encrypting it at rest
+// there - but this key stores it in plaintext regardless, same tradeoff
+// sessionCountryKeyPrefix already makes for country (a short-lived,
+// session-scoped cache key, not the durable PII store storedSession is).
+const sessionDeviceKeyPrefix = "sessiondevice:"
+
 // Session is what's stored in Valkey for a logged-in user, and handed back
 // by ValidateSession on every authenticated request.
 //
@@ -475,9 +489,46 @@ func RevokeSessionByID(ctx context.Context, d Deps, id string) (bool, error) {
 		if err := d.Valkey.RemoveSetMember(ctx, userSessionsKeyPrefix+stored.UserID, token); err != nil {
 			return true, fmt.Errorf("auth: revoke session by id: unindex: %w", err)
 		}
+		notifySessionRevokedByAdmin(ctx, d, stored)
 		return true, nil
 	}
 	return false, nil
+}
+
+// notifySessionRevokedByAdmin sends mail.SessionRevokedByAdminMessage to the
+// owner of a session RevokeSessionByID just ended - best-effort, called
+// after that session's Valkey keys are already gone, so a failure here never
+// blocks the revocation itself from taking effect. Gated by
+// notify_session_revoked_by_admin (db.NotificationPrefs, default true).
+// Never called from RevokeOwnSessionByID (ending your own session needs no
+// mail about it) or RevokeUserSessions (lock/delete already send their own,
+// higher-severity LockedMessage/DeletedMessage for that event).
+func notifySessionRevokedByAdmin(ctx context.Context, d Deps, stored storedSession) {
+	prefs, err := d.Pool.GetNotificationPrefs(ctx, stored.UserID)
+	if err != nil {
+		log.Printf("auth: read notification prefs for %s: %v", stored.UserID, err)
+		return
+	}
+	if !prefs.SessionRevokedByAdmin {
+		return
+	}
+	masterKey, err := setup.ResolveMasterKey(ctx, d.Pool, d.MasterKeyEnv)
+	if err != nil {
+		log.Printf("auth: notify session revoked for %s: resolve master key: %v", stored.UserID, err)
+		return
+	}
+	sess, err := decryptSession(masterKey, stored)
+	if err != nil {
+		log.Printf("auth: notify session revoked for %s: decrypt: %v", stored.UserID, err)
+		return
+	}
+	if sess.Email == "" {
+		return
+	}
+	msg := mail.SessionRevokedByAdminMessage(sess.Email, sess.Name, sess.IP, sess.UserAgent, d.FrontendBaseURL)
+	if err := mail.Enqueue(ctx, d.Valkey, d.Pool, d.MasterKeyEnv, msg); err != nil {
+		log.Printf("auth: enqueue session revoked mail for %s: %v", stored.UserID, err)
+	}
 }
 
 // RevokeOwnSessionByID is RevokeSessionByID's self-service counterpart: any
@@ -538,15 +589,18 @@ func RevokeOwnSessionByID(ctx context.Context, d Deps, subject, id string) (bool
 // to, if any. A missing or expired token is not an error - ok is simply
 // false.
 //
-// currentIP/currentCountry are this request's clientIP(r)/loginCountry(r)
-// (handlers.go), threaded in by every caller purely so the mid-session
-// anomaly check below has something to compare against - unlike
-// CreateSession's IP/Country (captured once, at login, for display only),
-// these two are never stored on the Session itself. currentCountry == ""
-// (no CF-IPCountry header - local/dev access bypassing Cloudflare, or a
-// grey-clouded DNS-only setup) always skips the check entirely, same
-// fail-open behavior as checkAndRecordLoginCountry's own doc comment
-// describes for the login-time equivalent this mirrors.
+// currentIP/currentCountry/currentUserAgent are this request's
+// clientIP(r)/loginCountry(r)/r.Header.Get("User-Agent") (handlers.go),
+// threaded in by every caller purely so the mid-session anomaly checks
+// below have something to compare against - unlike CreateSession's IP/
+// Country/UserAgent (captured once, at login, for display only), these
+// three are never stored on the Session itself. currentCountry/
+// currentUserAgent == "" (no CF-IPCountry header - local/dev access
+// bypassing Cloudflare, or a grey-clouded DNS-only setup; or no User-Agent
+// header at all, unusual but possible for a non-browser client) always
+// skips the respective check entirely, same fail-open behavior as
+// checkAndRecordLoginCountry's own doc comment describes for the
+// login-time equivalent this mirrors.
 //
 // Sliding window: on every successful lookup the TTL of both the session
 // key and the per-user session index are reset to SessionTTL. This means
@@ -555,7 +609,7 @@ func RevokeOwnSessionByID(ctx context.Context, d Deps, subject, id string) (bool
 // extension failures are non-fatal: the session was already read
 // successfully, so the caller gets a valid response regardless. Worst
 // case the session expires on its original schedule rather than sliding.
-func ValidateSession(ctx context.Context, d Deps, token, currentIP, currentCountry string) (Session, bool, error) {
+func ValidateSession(ctx context.Context, d Deps, token, currentIP, currentCountry, currentUserAgent string) (Session, bool, error) {
 	raw, exists, err := d.Valkey.Get(ctx, sessionKeyPrefix+token)
 	if err != nil {
 		return Session{}, false, err
@@ -598,23 +652,25 @@ func ValidateSession(ctx context.Context, d Deps, token, currentIP, currentCount
 	_ = d.Valkey.Expire(ctx, userSessionsKeyPrefix+sess.UserID, SessionTTL)
 
 	checkSessionCountryAnomaly(ctx, d, token, sess, masterKey, currentIP, currentCountry)
+	checkSessionDeviceAnomaly(ctx, d, token, sess, masterKey, currentIP, currentUserAgent)
 
 	return sess, true, nil
 }
 
-// isCountryAnomaly is checkSessionCountryAnomaly's pure decision: true only
+// sessionBaselineChanged is the pure decision shared by
+// checkSessionCountryAnomaly and checkSessionDeviceAnomaly below: true only
 // when both baseline and current are known (non-empty) and they differ - a
 // first-ever check (no baseline yet) or a request with no CF-IPCountry
-// header at all must never be flagged, since there is nothing meaningful to
-// compare. Split out from checkSessionCountryAnomaly (which also does
-// Valkey/notify/mail/audit I/O and is therefore awkward to unit test
+// header/User-Agent at all must never be flagged, since there is nothing
+// meaningful to compare. Split out from those two (which also do
+// Valkey/notify/mail/audit I/O and are therefore awkward to unit test
 // directly) purely so this one decision has a test of its own - see
-// TestIsCountryAnomaly. Same logic handlers.go's checkAndRecordLoginCountry
-// inlines for the login-time case; kept as two separate, differently-shaped
-// call sites rather than factored into one shared helper, since that one
-// also owns writing its own per-*user* baseline back to Valkey, which this
-// function deliberately has no side effects for at all.
-func isCountryAnomaly(baseline, current string) bool {
+// TestSessionBaselineChanged. Same logic handlers.go's
+// checkAndRecordLoginCountry inlines for the login-time case; kept as a
+// separate, differently-shaped call site rather than folded in here, since
+// that one also owns writing its own per-*user* baseline back to Valkey,
+// which this function deliberately has no side effects for at all.
+func sessionBaselineChanged(baseline, current string) bool {
 	return baseline != "" && current != "" && baseline != current
 }
 
@@ -650,7 +706,7 @@ func checkSessionCountryAnomaly(ctx context.Context, d Deps, token string, sess 
 		baseline = prev
 	}
 
-	if isCountryAnomaly(baseline, currentCountry) {
+	if sessionBaselineChanged(baseline, currentCountry) {
 		// Same "session.new" event shape CallbackHandler already publishes at
 		// login (handlers.go), reused rather than introducing a second event
 		// type - AppShell.tsx's frontend handler already renders the
@@ -684,11 +740,16 @@ func checkSessionCountryAnomaly(ctx context.Context, d Deps, token string, sess 
 		}
 		// Unlike the live push above, this reaches the account owner even if
 		// they have no other tab/device connected right now to receive it -
-		// see AnomalyMessage's doc comment. Best-effort: sess.Email may be ""
-		// for an IdP that never populated it, in which case there is no
-		// address to send to and this is silently skipped, same as every
-		// other mail.Enqueue call site treats a missing recipient.
-		if sess.Email != "" {
+		// see AnomalyMessage's doc comment. Gated on notify_country_anomaly
+		// (default true) - unlike the audit.Log call just above, which is
+		// never user-suppressible (see ValidateSession's own doc comment on
+		// why). sess.Email may also be "" for an IdP that never populated it,
+		// in which case there is no address to send to and this is silently
+		// skipped, same as every other mail.Enqueue call site treats a
+		// missing recipient.
+		if prefs, err := d.Pool.GetNotificationPrefs(ctx, sess.UserID); err != nil {
+			log.Printf("auth: read notification prefs for %s: %v", sess.UserID, err)
+		} else if prefs.CountryAnomaly && sess.Email != "" {
 			msg := mail.AnomalyMessage(sess.Email, sess.Name, currentIP, currentCountry, baseline, d.FrontendBaseURL)
 			if err := mail.Enqueue(ctx, d.Valkey, d.Pool, d.MasterKeyEnv, msg); err != nil {
 				log.Printf("auth: enqueue anomaly mail for %s: %v", sess.UserID, err)
@@ -698,6 +759,68 @@ func checkSessionCountryAnomaly(ctx context.Context, d Deps, token string, sess 
 
 	if err := d.Valkey.SetWithTTL(ctx, key, currentCountry, SessionTTL); err != nil {
 		log.Printf("auth: record session country baseline: %v", err)
+	}
+}
+
+// checkSessionDeviceAnomaly is checkSessionCountryAnomaly's User-Agent-based
+// sibling: catches a session suddenly being used from a different device/
+// browser, a signal country detection misses entirely (same country,
+// different device - e.g. a token copied to another machine on the same
+// network/ISP) and one a legitimate single-device session should never
+// produce on its own mid-lifetime, unlike an IP/country drift a mobile
+// network or VPN can cause innocently. Structurally identical to
+// checkSessionCountryAnomaly (same baseline-in-Valkey, notify/audit/mail
+// pattern) but kept as a separate function rather than a parameterized
+// shared one - the two differ in event Type, audit Details shape, and which
+// notification-preference field and mail template they use, which would
+// otherwise need to be threaded through as several more parameters than the
+// shared logic saves.
+func checkSessionDeviceAnomaly(ctx context.Context, d Deps, token string, sess Session, masterKey, currentIP, currentUserAgent string) {
+	if currentUserAgent == "" {
+		return
+	}
+	key := sessionDeviceKeyPrefix + token
+	baseline := sess.UserAgent // first check of this session: fall back to the login-time device
+	if prev, exists, err := d.Valkey.Get(ctx, key); err != nil {
+		log.Printf("auth: read session device baseline: %v", err)
+	} else if exists && prev != "" {
+		baseline = prev
+	}
+
+	if sessionBaselineChanged(baseline, currentUserAgent) {
+		if pubErr := notify.Publish(ctx, d.Valkey, notify.UserChannel(sess.UserID), notify.Event{
+			Type: "session.new",
+			Data: map[string]any{
+				"ip":                  currentIP,
+				"user_agent":          currentUserAgent,
+				"anomaly":             true,
+				"previous_user_agent": baseline,
+			},
+		}); pubErr != nil {
+			log.Printf("auth: notify mid-session device anomaly for %s: %v", sess.UserID, pubErr)
+		}
+		if err := audit.Log(ctx, d.Pool, masterKey, audit.LogParams{
+			EventType:   audit.EventAuthDeviceAnomaly,
+			ActorID:     sess.UserID,
+			ActorEmail:  sess.Email,
+			TargetID:    sess.UserID,
+			TargetEmail: sess.Email,
+			Details:     fmt.Sprintf(`{"user_agent":%q,"previous_user_agent":%q,"ip":%q}`, currentUserAgent, baseline, currentIP),
+		}); err != nil {
+			log.Printf("auth: audit mid-session device anomaly for %s: %v", sess.UserID, err)
+		}
+		if prefs, err := d.Pool.GetNotificationPrefs(ctx, sess.UserID); err != nil {
+			log.Printf("auth: read notification prefs for %s: %v", sess.UserID, err)
+		} else if prefs.NewDevice && sess.Email != "" {
+			msg := mail.NewDeviceMessage(sess.Email, sess.Name, currentIP, baseline, currentUserAgent, d.FrontendBaseURL)
+			if err := mail.Enqueue(ctx, d.Valkey, d.Pool, d.MasterKeyEnv, msg); err != nil {
+				log.Printf("auth: enqueue new-device mail for %s: %v", sess.UserID, err)
+			}
+		}
+	}
+
+	if err := d.Valkey.SetWithTTL(ctx, key, currentUserAgent, SessionTTL); err != nil {
+		log.Printf("auth: record session device baseline: %v", err)
 	}
 }
 

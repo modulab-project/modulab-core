@@ -134,6 +134,83 @@ func PendingApprovalMessage(to, name, frontendBaseURL, requesterName, requesterE
 	}
 }
 
+// LoginMessage is sent on every successful login for a user who has
+// notify_new_login enabled (db.NotificationPrefs, users.notify_new_login,
+// default true) - unlike AnomalyMessage below, this is unconditional: no
+// country/device comparison, just "you just signed in", the same category
+// of mail Google/GitHub send on every new session by default. Users who
+// find that too noisy (e.g. signing in from the same device daily) can turn
+// it off from their Profile page without losing AnomalyMessage/
+// NewDeviceMessage, which stay gated by their own separate toggles.
+func LoginMessage(to, name, ip, country, userAgent, frontendBaseURL string) Message {
+	if ip == "" {
+		ip = "(unknown)"
+	}
+	if country == "" {
+		country = "(unknown)"
+	}
+	if userAgent == "" {
+		userAgent = "(unknown)"
+	}
+	return Message{
+		To:      to,
+		Subject: "New sign-in to your ModuLab account",
+		Body: fmt.Sprintf(
+			"%s\n\nYour ModuLab account was just signed in:\n\n  Country: %s\n  IP:      %s\n  Device:  %s\n\nIf this was you, no action is needed. If it wasn't, review and end your active sessions here:\n\n  %s/profile\n%s",
+			greeting(name), country, ip, userAgent, strings.TrimRight(frontendBaseURL, "/"), signature,
+		),
+	}
+}
+
+// NewDeviceMessage is AnomalyMessage's device-based counterpart: sent when
+// auth.checkSessionDeviceAnomaly (session.go) sees an already-active
+// session's request suddenly carry a different User-Agent than the one
+// recorded for it - a change that country-based detection cannot catch
+// (same country, different device/browser), and unlike a fresh login, one a
+// legitimate user's own browser would never produce on its own mid-session.
+// Gated by notify_new_device (db.NotificationPrefs), default true.
+func NewDeviceMessage(to, name, ip, previousUserAgent, currentUserAgent, frontendBaseURL string) Message {
+	if ip == "" {
+		ip = "(unknown)"
+	}
+	return Message{
+		To:      to,
+		Subject: "New device detected on your ModuLab account",
+		Body: fmt.Sprintf(
+			"%s\n\nAn already-signed-in session on your ModuLab account was just used from a different device/browser than before:\n\n  Previous: %s\n  Now:      %s\n  IP:       %s\n\nIf this was you (a browser update, a new machine), no action is needed. If it wasn't, review and end your active sessions here:\n\n  %s/profile\n%s",
+			greeting(name), previousUserAgent, currentUserAgent, ip, strings.TrimRight(frontendBaseURL, "/"), signature,
+		),
+	}
+}
+
+// SessionRevokedByAdminMessage is sent to a user whenever an admin ends one
+// of their active sessions (auth.RevokeSessionByID, System Info page's
+// per-row "end session" action) - never for RevokeOwnSessionByID (a user
+// ending their own session from their own Profile page needs no mail
+// telling them about the very thing they just clicked) or for the
+// account-wide RevokeUserSessions path (lock/delete already send
+// LockedMessage/DeletedMessage, which cover this same event at a higher
+// severity). Gated by notify_session_revoked_by_admin (db.NotificationPrefs),
+// default true - the one toggle here about someone *else's* action, not the
+// account owner's own device/location, so it stays separate from the three
+// anomaly-detection toggles above.
+func SessionRevokedByAdminMessage(to, name, ip, userAgent, frontendBaseURL string) Message {
+	if ip == "" {
+		ip = "(unknown)"
+	}
+	if userAgent == "" {
+		userAgent = "(unknown)"
+	}
+	return Message{
+		To:      to,
+		Subject: "One of your ModuLab sessions was ended by an administrator",
+		Body: fmt.Sprintf(
+			"%s\n\nAn administrator has ended one of your active ModuLab sessions:\n\n  IP:     %s\n  Device: %s\n\nYou will need to sign in again on that device if you still need access there. If you have questions, contact your administrator. Your other sessions, if any, are unaffected - review them here:\n\n  %s/profile\n%s",
+			greeting(name), ip, userAgent, strings.TrimRight(frontendBaseURL, "/"), signature,
+		),
+	}
+}
+
 // AnomalyMessage is sent to a session's own owner when auth.checkAndRecordLoginCountry
 // (a fresh login) or auth.ValidateSession's per-session country tracking (an
 // already-issued session suddenly seen from a different CF-IPCountry mid-lifetime)

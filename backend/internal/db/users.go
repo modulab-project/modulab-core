@@ -386,6 +386,57 @@ func (p *Pool) SetUserTheme(ctx context.Context, userID, theme string) error {
 	return nil
 }
 
+// NotificationPrefs holds a user's account-security email opt-ins - see
+// schema_core.go's four notify_* columns for what each one gates.
+type NotificationPrefs struct {
+	NewLogin              bool `json:"notify_new_login"`
+	CountryAnomaly        bool `json:"notify_country_anomaly"`
+	NewDevice             bool `json:"notify_new_device"`
+	SessionRevokedByAdmin bool `json:"notify_session_revoked_by_admin"`
+}
+
+// GetNotificationPrefs returns the stored notification preferences for
+// userID, or all-true defaults if the row somehow can't be read (e.g. a
+// userID that does not exist) - matching each column's own DEFAULT true, so
+// a lookup failure never silently suppresses a security-relevant mail that
+// would otherwise have been sent.
+func (p *Pool) GetNotificationPrefs(ctx context.Context, userID string) (NotificationPrefs, error) {
+	prefs := NotificationPrefs{true, true, true, true}
+	err := p.QueryRow(ctx, `
+		SELECT notify_new_login, notify_country_anomaly, notify_new_device, notify_session_revoked_by_admin
+		FROM   users
+		WHERE  id = $1
+	`, userID).Scan(&prefs.NewLogin, &prefs.CountryAnomaly, &prefs.NewDevice, &prefs.SessionRevokedByAdmin)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return prefs, nil
+		}
+		return prefs, fmt.Errorf("db: get notification prefs for %q: %w", userID, err)
+	}
+	return prefs, nil
+}
+
+// SetNotificationPrefs persists a partial update to userID's notification
+// preferences - nil fields leave the stored value untouched, matching
+// UserPrefsHandler's ui_language/theme PATCH semantics (handlers.go). Only
+// the fields present in the request are written, via COALESCE against the
+// existing row, so a PATCH touching just one toggle can never silently reset
+// the other three.
+func (p *Pool) SetNotificationPrefs(ctx context.Context, userID string, newLogin, countryAnomaly, newDevice, sessionRevoked *bool) error {
+	_, err := p.Exec(ctx, `
+		UPDATE users
+		SET notify_new_login = COALESCE($1, notify_new_login),
+		    notify_country_anomaly = COALESCE($2, notify_country_anomaly),
+		    notify_new_device = COALESCE($3, notify_new_device),
+		    notify_session_revoked_by_admin = COALESCE($4, notify_session_revoked_by_admin)
+		WHERE id = $5
+	`, newLogin, countryAnomaly, newDevice, sessionRevoked, userID)
+	if err != nil {
+		return fmt.Errorf("db: set notification prefs for %q: %w", userID, err)
+	}
+	return nil
+}
+
 // UserExportRow collects all personal data stored for one user — used by the
 // DSGVO data-export endpoint (GET /v1/auth/me/export). All encrypted fields
 // are returned as plaintext (already decrypted by this method).

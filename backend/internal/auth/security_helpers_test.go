@@ -75,31 +75,34 @@ func TestIsTrustedProxyPeer(t *testing.T) {
 	}
 }
 
-// isCountryAnomaly is checkSessionCountryAnomaly's (session.go) pure
-// decision of whether a country change is worth flagging: only when both
-// sides are known and they actually differ - never on a first-ever check
-// (no baseline yet) or when the current request has no CF-IPCountry header
-// at all (loginCountry returns "" for local/dev access bypassing
-// Cloudflare), since there is nothing meaningful to compare in either case.
-func TestIsCountryAnomaly(t *testing.T) {
+// sessionBaselineChanged is checkSessionCountryAnomaly's and
+// checkSessionDeviceAnomaly's (session.go) shared pure decision of whether a
+// country/device change is worth flagging: only when both sides are known
+// and they actually differ - never on a first-ever check (no baseline yet)
+// or when the current request has no CF-IPCountry header/User-Agent at all
+// (loginCountry returns "" for local/dev access bypassing Cloudflare),
+// since there is nothing meaningful to compare in either case. Cases below
+// use country-shaped values, but the function is value-agnostic - the same
+// table would hold for User-Agent strings.
+func TestSessionBaselineChanged(t *testing.T) {
 	cases := []struct {
 		name     string
 		baseline string
 		current  string
 		want     bool
 	}{
-		{"same country - no anomaly", "DE", "DE", false},
-		{"different country - anomaly", "DE", "US", true},
+		{"same value - no anomaly", "DE", "DE", false},
+		{"different value - anomaly", "DE", "US", true},
 		{"no baseline yet - not flagged", "", "US", false},
-		{"no current country header - not flagged", "DE", "", false},
+		{"no current value - not flagged", "DE", "", false},
 		{"neither known - not flagged", "", "", false},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := isCountryAnomaly(tc.baseline, tc.current)
+			got := sessionBaselineChanged(tc.baseline, tc.current)
 			if got != tc.want {
-				t.Fatalf("isCountryAnomaly(%q, %q) = %v, want %v", tc.baseline, tc.current, got, tc.want)
+				t.Fatalf("sessionBaselineChanged(%q, %q) = %v, want %v", tc.baseline, tc.current, got, tc.want)
 			}
 		})
 	}

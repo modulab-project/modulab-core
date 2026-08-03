@@ -130,6 +130,39 @@ func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
 	`); err != nil {
 		return fmt.Errorf("db: ensure users.theme: %w", err)
 	}
+	// notify_new_login/notify_country_anomaly/notify_new_device/
+	// notify_session_revoked_by_admin gate the four account-security emails
+	// added alongside auth's country/device anomaly detection (see
+	// session.go's checkSessionCountryAnomaly/checkSessionDeviceAnomaly and
+	// handlers.go's CallbackHandler) - each defaults to true so existing
+	// users keep getting every one of these mails exactly as before this
+	// column existed, and can opt out per-category from their Profile page
+	// instead of all-or-nothing. Deliberately four separate booleans, not one
+	// bitmask/JSON blob: matches ui_language/theme's own one-column-per-
+	// preference style just above, keeps each one individually indexable/
+	// queryable, and a future fifth toggle is one more ADD COLUMN rather than
+	// a migration of an opaque blob's shape. Not PII, same exemption as
+	// ui_language/theme/locked - plain booleans, no GCM encryption needed.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_new_login BOOLEAN NOT NULL DEFAULT true
+	`); err != nil {
+		return fmt.Errorf("db: ensure users.notify_new_login: %w", err)
+	}
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_country_anomaly BOOLEAN NOT NULL DEFAULT true
+	`); err != nil {
+		return fmt.Errorf("db: ensure users.notify_country_anomaly: %w", err)
+	}
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_new_device BOOLEAN NOT NULL DEFAULT true
+	`); err != nil {
+		return fmt.Errorf("db: ensure users.notify_new_device: %w", err)
+	}
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_session_revoked_by_admin BOOLEAN NOT NULL DEFAULT true
+	`); err != nil {
+		return fmt.Errorf("db: ensure users.notify_session_revoked_by_admin: %w", err)
+	}
 
 	// Role model collapsed from four tiers to three on 2026-07-29: the
 	// org-admin tier was removed entirely, and super-admin was renamed to
