@@ -3,9 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-    <meta http-equiv="Pragma" content="no-cache" />
-    <meta http-equiv="Expires" content="0" />
+    <!-- No cache-control meta tags here on purpose: browsers ignore
+         http-equiv Cache-Control/Pragma/Expires for actual HTTP caching
+         decisions, and Cloudflare's edge (this domain is proxied through
+         it) never sees them at all - only a real response header works.
+         See deploy/nginx.conf's "location /" block for the real
+         no-cache, must-revalidate header that replaced these. -->
     <title>ModuLab</title>
     <!-- Best-effort pre-paint dark-mode guess, before React mounts - see
          public/theme-init.js for the full rationale. Loaded as an external
