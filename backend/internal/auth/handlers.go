@@ -608,6 +608,36 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 		}); pubErr != nil {
 			log.Printf("auth: notify session.new for %s: %v", claims.Subject, pubErr)
 		}
+		// Same gap AnomalyMessage's own doc comment describes: the live push
+		// just above only reaches an already-open second tab/device, so mail
+		// plus a durable audit_log row (EventAuthCountryAnomaly) are added
+		// here too rather than leaving a login-time anomaly with a weaker
+		// trail than the mid-session one (session.go's
+		// checkSessionCountryAnomaly, which does the same). Both best-effort,
+		// same reasoning as the login audit entry above - neither should ever
+		// fail an otherwise-successful login.
+		if anomaly {
+			if masterKey, mkErr := setup.ResolveMasterKey(ctx, d.Pool, d.MasterKeyEnv); mkErr == nil {
+				if err := audit.Log(ctx, d.Pool, masterKey, audit.LogParams{
+					EventType:   audit.EventAuthCountryAnomaly,
+					ActorID:     claims.Subject,
+					ActorEmail:  claims.Email,
+					TargetID:    claims.Subject,
+					TargetEmail: claims.Email,
+					Details:     fmt.Sprintf(`{"source":"login","country":%q,"previous_country":%q,"ip":%q}`, country, previousCountry, clientIP(r)),
+				}); err != nil {
+					log.Printf("auth: audit login country anomaly for %s: %v", claims.Subject, err)
+				}
+			} else {
+				log.Printf("auth: audit login country anomaly for %s: resolve master key: %v", claims.Subject, mkErr)
+			}
+			if claims.Email != "" {
+				msg := mail.AnomalyMessage(claims.Email, claims.Name, clientIP(r), country, previousCountry, d.FrontendBaseURL)
+				if err := mail.Enqueue(ctx, d.Valkey, d.Pool, d.MasterKeyEnv, msg); err != nil {
+					log.Printf("auth: enqueue login country anomaly mail for %s: %v", claims.Subject, err)
+				}
+			}
+		}
 
 		// The session cookie is set directly on this redirect response,
 		// never carried in the URL fragment the way the bearer token used

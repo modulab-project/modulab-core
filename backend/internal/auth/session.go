@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/crypto"
 	"github.com/modulab-project/modulab-core/backend/internal/mail"
 	"github.com/modulab-project/modulab-core/backend/internal/notify"
@@ -596,9 +597,25 @@ func ValidateSession(ctx context.Context, d Deps, token, currentIP, currentCount
 	_ = d.Valkey.Expire(ctx, sessionKeyPrefix+token, SessionTTL)
 	_ = d.Valkey.Expire(ctx, userSessionsKeyPrefix+sess.UserID, SessionTTL)
 
-	checkSessionCountryAnomaly(ctx, d, token, sess, currentIP, currentCountry)
+	checkSessionCountryAnomaly(ctx, d, token, sess, masterKey, currentIP, currentCountry)
 
 	return sess, true, nil
+}
+
+// isCountryAnomaly is checkSessionCountryAnomaly's pure decision: true only
+// when both baseline and current are known (non-empty) and they differ - a
+// first-ever check (no baseline yet) or a request with no CF-IPCountry
+// header at all must never be flagged, since there is nothing meaningful to
+// compare. Split out from checkSessionCountryAnomaly (which also does
+// Valkey/notify/mail/audit I/O and is therefore awkward to unit test
+// directly) purely so this one decision has a test of its own - see
+// TestIsCountryAnomaly. Same logic handlers.go's checkAndRecordLoginCountry
+// inlines for the login-time case; kept as two separate, differently-shaped
+// call sites rather than factored into one shared helper, since that one
+// also owns writing its own per-*user* baseline back to Valkey, which this
+// function deliberately has no side effects for at all.
+func isCountryAnomaly(baseline, current string) bool {
+	return baseline != "" && current != "" && baseline != current
 }
 
 // checkSessionCountryAnomaly is ValidateSession's mid-session counterpart to
@@ -612,11 +629,16 @@ func ValidateSession(ctx context.Context, d Deps, token, currentIP, currentCount
 // a baseline (sessionCountryKeyPrefix+token) that itself slides forward -
 // see that key's doc comment for why a fixed baseline is not enough.
 //
+// masterKey is passed in rather than re-resolved here - ValidateSession
+// already resolved it once (to decrypt sess) just above, and mail/audit
+// both need it too (mail.Enqueue resolves its own internally regardless,
+// but audit.Log takes it directly).
+//
 // Best-effort throughout, like the TTL renewal just above: a Valkey hiccup
 // here degrades to "this particular check was skipped this once", never to
 // a failed request - the session was already successfully validated by the
 // time this runs.
-func checkSessionCountryAnomaly(ctx context.Context, d Deps, token string, sess Session, currentIP, currentCountry string) {
+func checkSessionCountryAnomaly(ctx context.Context, d Deps, token string, sess Session, masterKey, currentIP, currentCountry string) {
 	if currentCountry == "" {
 		return
 	}
@@ -628,7 +650,7 @@ func checkSessionCountryAnomaly(ctx context.Context, d Deps, token string, sess 
 		baseline = prev
 	}
 
-	if baseline != "" && baseline != currentCountry {
+	if isCountryAnomaly(baseline, currentCountry) {
 		// Same "session.new" event shape CallbackHandler already publishes at
 		// login (handlers.go), reused rather than introducing a second event
 		// type - AppShell.tsx's frontend handler already renders the
@@ -645,6 +667,20 @@ func checkSessionCountryAnomaly(ctx context.Context, d Deps, token string, sess 
 			},
 		}); pubErr != nil {
 			log.Printf("auth: notify mid-session anomaly for %s: %v", sess.UserID, pubErr)
+		}
+		// Durable, admin-reviewable trail - the live push above only reaches
+		// an already-open second tab/device, and nothing before this wrote
+		// anything to audit_log for a mid-session anomaly at all. Best-effort,
+		// same reasoning as every other audit.Log call site in this package.
+		if err := audit.Log(ctx, d.Pool, masterKey, audit.LogParams{
+			EventType:   audit.EventAuthCountryAnomaly,
+			ActorID:     sess.UserID,
+			ActorEmail:  sess.Email,
+			TargetID:    sess.UserID,
+			TargetEmail: sess.Email,
+			Details:     fmt.Sprintf(`{"source":"mid_session","country":%q,"previous_country":%q,"ip":%q}`, currentCountry, baseline, currentIP),
+		}); err != nil {
+			log.Printf("auth: audit mid-session country anomaly for %s: %v", sess.UserID, err)
 		}
 		// Unlike the live push above, this reaches the account owner even if
 		// they have no other tab/device connected right now to receive it -

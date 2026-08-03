@@ -73,6 +73,24 @@ const (
 	// can tell "I locked them" apart from "the IdP revoked them and Core
 	// caught it automatically".
 	EventSessionRevokedByIdP = "auth.session_revoked_by_idp"
+	// EventAuthCountryAnomaly is fired whenever a login or an already-active
+	// session is suddenly seen from a CF-IPCountry different from the one
+	// last recorded for it - handlers.go's checkAndRecordLoginCountry (a new
+	// login, compared against the account's last-known country) and
+	// session.go's checkSessionCountryAnomaly (a mid-session request,
+	// compared against that session's own sliding baseline) both write this
+	// same event type, distinguished by a "source":"login"|"mid_session"
+	// field in Details rather than a second constant - both represent the
+	// exact same finding ("this credential/token is now being used from
+	// somewhere new"), just caught at two different points in a session's
+	// lifetime. Previously this only ever produced a live SSE push
+	// (internal/notify) and, as of the mail addition alongside this
+	// constant, an email to the account owner - neither of which leaves a
+	// durable, admin-reviewable trail the way every other security-relevant
+	// event here does. ActorID/TargetID are both the affected user's own
+	// subject - there is no separate "actor" here, the account is acting on
+	// itself, same reasoning as EventUserSelfDeleted.
+	EventAuthCountryAnomaly = "auth.country_anomaly"
 	// Fired by auth.recordReauthFailure (admin.go) once a caller's step-up
 	// reauth attempts (requireRecentLogin - lock/unlock/approve/delete a
 	// user, self-delete, SMTP/OIDC config, ending another session) fail
