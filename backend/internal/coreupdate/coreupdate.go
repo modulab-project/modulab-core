@@ -154,7 +154,49 @@ func CachedResult(ctx context.Context, pool *db.Pool) CheckResult {
 	if latest == "" {
 		return CheckResult{}
 	}
-	return CheckResult{LatestVersion: latest, UpdateAvailable: latest != version.Version}
+	return CheckResult{LatestVersion: latest, UpdateAvailable: isNewerVersion(latest, version.Version)}
+}
+
+// isNewerVersion reports whether latest is a strictly greater semantic
+// version than current ("X.Y.Z", no leading "v" - see version.Version's doc
+// comment). Malformed segments compare as 0, so a garbled cached value never
+// panics, it just fails the "is newer" check.
+//
+// Added 2026-08-03 to fix a false-positive "update available" badge: both
+// CachedResult and CheckNow used to compare with a plain latest !=
+// version.Version. core_latest_known_version is only refreshed by the daily
+// scheduler or a manual "check now" (see CachedResult's doc comment above),
+// so right after an admin manually installs a new release and restarts, the
+// cache can still hold an *older* version than the one now running (last
+// checked before the release the admin just installed). != flagged that as
+// "update available" and displayed the stale, older cached version as the
+// suggested update - exactly backwards. Only a real "latest > current" now
+// counts.
+func isNewerVersion(latest, current string) bool {
+	l := parseVersionParts(latest)
+	c := parseVersionParts(current)
+	for i := 0; i < 3; i++ {
+		if l[i] != c[i] {
+			return l[i] > c[i]
+		}
+	}
+	return false
+}
+
+// parseVersionParts splits "X.Y.Z" into its three numeric components.
+// Missing or non-numeric segments become 0 rather than erroring - callers
+// only use this for ordering, not validation.
+func parseVersionParts(v string) [3]int {
+	var out [3]int
+	parts := strings.SplitN(strings.TrimPrefix(strings.TrimSpace(v), "v"), ".", 3)
+	for i := 0; i < len(parts) && i < 3; i++ {
+		n, err := strconv.Atoi(strings.TrimSpace(parts[i]))
+		if err != nil {
+			n = 0
+		}
+		out[i] = n
+	}
+	return out
 }
 
 // CheckNow performs one live GitHub lookup, caches the result for
@@ -194,7 +236,7 @@ func CheckNow(ctx context.Context, pool *db.Pool, vk *valkey.Client) (CheckResul
 		log.Printf("coreupdate: cache last-checked time: %v", err)
 	}
 
-	result := CheckResult{LatestVersion: normalized, UpdateAvailable: normalized != version.Version}
+	result := CheckResult{LatestVersion: normalized, UpdateAvailable: isNewerVersion(normalized, version.Version)}
 
 	if result.UpdateAvailable && vk != nil {
 		lastNotified, _, _ := pool.GetSetting(ctx, "core_update_last_notified_version")
