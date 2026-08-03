@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/modulab-project/modulab-core/backend/internal/crypto"
+	"github.com/modulab-project/modulab-core/backend/internal/mail"
+	"github.com/modulab-project/modulab-core/backend/internal/notify"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
 	"github.com/modulab-project/modulab-core/backend/internal/valkey"
 )
@@ -61,6 +63,26 @@ const SessionKeyPrefix = sessionKeyPrefix
 // to find and kill an already-issued session, and the user could keep
 // using it normally until it naturally expired (up to SessionTTL later).
 const userSessionsKeyPrefix = "usersessions:"
+
+// sessionCountryKeyPrefix tracks the most recently observed CF-IPCountry
+// (see handlers.go's loginCountry) for one specific active session token,
+// separately from that session's own Session.Country - which stays frozen
+// at whatever country the session was created in, purely for the "logged in
+// from" display (see Session's doc comment). This second, sliding value is
+// what ValidateSession's mid-session anomaly check (below) compares each
+// request's country against, since ValidateSession runs on every single
+// authenticated request (including main.go's identifyBySessionOrIP rate-
+// limit bucketing) - comparing against a baseline that itself slides
+// forward is what lets a *second* country change during the same session's
+// lifetime be caught too, not just a change away from the original login
+// country. TTL is kept in step with SessionTTL (see ValidateSession) so
+// this key never outlives the session it shadows and needs no separate
+// cleanup path. Not PII (a two-letter country code), same exemption
+// checkAndRecordLoginCountry's doc comment already gives for the
+// per-*user* equivalent this mirrors - this one is scoped per-session
+// instead, since a session, not a user, is what ValidateSession is
+// validating.
+const sessionCountryKeyPrefix = "sessioncountry:"
 
 // Session is what's stored in Valkey for a logged-in user, and handed back
 // by ValidateSession on every authenticated request.
@@ -515,6 +537,16 @@ func RevokeOwnSessionByID(ctx context.Context, d Deps, subject, id string) (bool
 // to, if any. A missing or expired token is not an error - ok is simply
 // false.
 //
+// currentIP/currentCountry are this request's clientIP(r)/loginCountry(r)
+// (handlers.go), threaded in by every caller purely so the mid-session
+// anomaly check below has something to compare against - unlike
+// CreateSession's IP/Country (captured once, at login, for display only),
+// these two are never stored on the Session itself. currentCountry == ""
+// (no CF-IPCountry header - local/dev access bypassing Cloudflare, or a
+// grey-clouded DNS-only setup) always skips the check entirely, same
+// fail-open behavior as checkAndRecordLoginCountry's own doc comment
+// describes for the login-time equivalent this mirrors.
+//
 // Sliding window: on every successful lookup the TTL of both the session
 // key and the per-user session index are reset to SessionTTL. This means
 // an actively-used session never expires mid-use; only a session that
@@ -522,7 +554,7 @@ func RevokeOwnSessionByID(ctx context.Context, d Deps, subject, id string) (bool
 // extension failures are non-fatal: the session was already read
 // successfully, so the caller gets a valid response regardless. Worst
 // case the session expires on its original schedule rather than sliding.
-func ValidateSession(ctx context.Context, d Deps, token string) (Session, bool, error) {
+func ValidateSession(ctx context.Context, d Deps, token, currentIP, currentCountry string) (Session, bool, error) {
 	raw, exists, err := d.Valkey.Get(ctx, sessionKeyPrefix+token)
 	if err != nil {
 		return Session{}, false, err
@@ -564,7 +596,73 @@ func ValidateSession(ctx context.Context, d Deps, token string) (Session, bool, 
 	_ = d.Valkey.Expire(ctx, sessionKeyPrefix+token, SessionTTL)
 	_ = d.Valkey.Expire(ctx, userSessionsKeyPrefix+sess.UserID, SessionTTL)
 
+	checkSessionCountryAnomaly(ctx, d, token, sess, currentIP, currentCountry)
+
 	return sess, true, nil
+}
+
+// checkSessionCountryAnomaly is ValidateSession's mid-session counterpart to
+// handlers.go's checkAndRecordLoginCountry: that one only ever fires once,
+// at login, so a session token that gets copied out and used from a second
+// location *without* a new login (the actual token-theft scenario a stolen
+// bearer token, not a stolen password, would look like - PocketID passkey
+// login already makes the latter far harder) would otherwise never be
+// flagged for as long as that token remains valid. This closes that gap by
+// re-running the same comparison on every request that reaches here, against
+// a baseline (sessionCountryKeyPrefix+token) that itself slides forward -
+// see that key's doc comment for why a fixed baseline is not enough.
+//
+// Best-effort throughout, like the TTL renewal just above: a Valkey hiccup
+// here degrades to "this particular check was skipped this once", never to
+// a failed request - the session was already successfully validated by the
+// time this runs.
+func checkSessionCountryAnomaly(ctx context.Context, d Deps, token string, sess Session, currentIP, currentCountry string) {
+	if currentCountry == "" {
+		return
+	}
+	key := sessionCountryKeyPrefix + token
+	baseline := sess.Country // first check of this session: fall back to the login-time country
+	if prev, exists, err := d.Valkey.Get(ctx, key); err != nil {
+		log.Printf("auth: read session country baseline: %v", err)
+	} else if exists && prev != "" {
+		baseline = prev
+	}
+
+	if baseline != "" && baseline != currentCountry {
+		// Same "session.new" event shape CallbackHandler already publishes at
+		// login (handlers.go), reused rather than introducing a second event
+		// type - AppShell.tsx's frontend handler already renders the
+		// anomaly-toast branch for exactly this shape (ip/country/anomaly/
+		// previous_country), so nothing there needs to change.
+		if pubErr := notify.Publish(ctx, d.Valkey, notify.UserChannel(sess.UserID), notify.Event{
+			Type: "session.new",
+			Data: map[string]any{
+				"ip":               currentIP,
+				"user_agent":       sess.UserAgent,
+				"country":          currentCountry,
+				"anomaly":          true,
+				"previous_country": baseline,
+			},
+		}); pubErr != nil {
+			log.Printf("auth: notify mid-session anomaly for %s: %v", sess.UserID, pubErr)
+		}
+		// Unlike the live push above, this reaches the account owner even if
+		// they have no other tab/device connected right now to receive it -
+		// see AnomalyMessage's doc comment. Best-effort: sess.Email may be ""
+		// for an IdP that never populated it, in which case there is no
+		// address to send to and this is silently skipped, same as every
+		// other mail.Enqueue call site treats a missing recipient.
+		if sess.Email != "" {
+			msg := mail.AnomalyMessage(sess.Email, sess.Name, currentIP, currentCountry, baseline, d.FrontendBaseURL)
+			if err := mail.Enqueue(ctx, d.Valkey, d.Pool, d.MasterKeyEnv, msg); err != nil {
+				log.Printf("auth: enqueue anomaly mail for %s: %v", sess.UserID, err)
+			}
+		}
+	}
+
+	if err := d.Valkey.SetWithTTL(ctx, key, currentCountry, SessionTTL); err != nil {
+		log.Printf("auth: record session country baseline: %v", err)
+	}
 }
 
 // ActiveSession is one entry in ListActiveSessions' result - the fields the

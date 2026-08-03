@@ -85,7 +85,7 @@ func CreateModuleToken(ctx context.Context, d Deps, sessionToken, module string)
 // the actual session lookup (see moduleTokenRecord's doc comment), so a
 // module token is never valid for longer than both its own TTL AND the
 // underlying session's remain true.
-func ValidateModuleToken(ctx context.Context, d Deps, token, module string) (Session, bool, error) {
+func ValidateModuleToken(ctx context.Context, d Deps, token, module, currentIP, currentCountry string) (Session, bool, error) {
 	raw, exists, err := d.Valkey.Get(ctx, moduleTokenKeyPrefix+token)
 	if err != nil {
 		return Session{}, false, err
@@ -100,7 +100,7 @@ func ValidateModuleToken(ctx context.Context, d Deps, token, module string) (Ses
 	if rec.Module != module {
 		return Session{}, false, nil
 	}
-	return ValidateSession(ctx, d, rec.SessionToken)
+	return ValidateSession(ctx, d, rec.SessionToken, currentIP, currentCountry)
 }
 
 // RequireModuleToken is the module-token equivalent of RequireActiveSession:
@@ -121,7 +121,7 @@ func RequireModuleToken(d Deps, module string, w http.ResponseWriter, r *http.Re
 		http.Error(w, "missing module token", http.StatusUnauthorized)
 		return Session{}, false
 	}
-	sess, ok, err := ValidateModuleToken(r.Context(), d, token, module)
+	sess, ok, err := ValidateModuleToken(r.Context(), d, token, module, clientIP(r), loginCountry(r))
 	if err != nil {
 		httperr.Internal(w, err)
 		return Session{}, false
@@ -156,7 +156,7 @@ func RequireSessionOrModuleToken(d Deps, module string, w http.ResponseWriter, r
 	// exists yet). Full sessions travel via the httpOnly cookie now, not
 	// the Authorization header - see setSessionCookie's doc comment.
 	if token := sessionToken(r); token != "" {
-		sess, ok, err := ValidateSession(r.Context(), d, token)
+		sess, ok, err := ValidateSession(r.Context(), d, token, clientIP(r), loginCountry(r))
 		if err != nil {
 			httperr.Internal(w, err)
 			return Session{}, false
@@ -179,7 +179,7 @@ func RequireSessionOrModuleToken(d Deps, module string, w http.ResponseWriter, r
 		http.Error(w, "missing session cookie or bearer token", http.StatusUnauthorized)
 		return Session{}, false
 	}
-	sess, ok, err := ValidateModuleToken(r.Context(), d, token, module)
+	sess, ok, err := ValidateModuleToken(r.Context(), d, token, module, clientIP(r), loginCountry(r))
 	if err != nil {
 		httperr.Internal(w, err)
 		return Session{}, false

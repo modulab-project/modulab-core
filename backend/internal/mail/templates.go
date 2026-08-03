@@ -133,3 +133,32 @@ func PendingApprovalMessage(to, name, frontendBaseURL, requesterName, requesterE
 		),
 	}
 }
+
+// AnomalyMessage is sent to a session's own owner when auth.checkAndRecordLoginCountry
+// (a fresh login) or auth.ValidateSession's per-session country tracking (an
+// already-issued session suddenly seen from a different CF-IPCountry mid-lifetime)
+// detects a country change. This is the one channel that still reaches the
+// account owner even if they have no other tab/device currently connected to
+// receive the matching "session.new"/anomaly SSE push (internal/notify) -
+// see that event's doc comment for why the live push alone is not enough.
+// previousCountry/country are both two-letter CF-IPCountry codes, never
+// empty here (both call sites only invoke this once they have already
+// confirmed a genuine, known-to-known difference - see loginCountry's doc
+// comment on "" meaning "anomaly detection not available", not "matches").
+// Deliberately no link to a specific "block this session" action: the
+// System Info / Profile sessions tables (already linked here) are where
+// that already lives, and duplicating it risks the link going stale if
+// that page's route ever moves.
+func AnomalyMessage(to, name, ip, country, previousCountry, frontendBaseURL string) Message {
+	if ip == "" {
+		ip = "(unknown)"
+	}
+	return Message{
+		To:      to,
+		Subject: "New sign-in location detected on your ModuLab account",
+		Body: fmt.Sprintf(
+			"%s\n\nYour ModuLab account was just used from a different country than usual:\n\n  Previous:  %s\n  Now:       %s\n  IP:        %s\n\nIf this was you (traveling, VPN, a new network), no action is needed. If it wasn't, review and end your active sessions here:\n\n  %s/profile\n%s",
+			greeting(name), previousCountry, country, ip, strings.TrimRight(frontendBaseURL, "/"), signature,
+		),
+	}
+}

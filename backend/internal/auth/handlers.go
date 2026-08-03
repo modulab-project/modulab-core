@@ -127,6 +127,13 @@ func loginCountry(r *http.Request) string {
 	return r.Header.Get("CF-IPCountry")
 }
 
+// LoginCountry exports loginCountry for main.go's identifyBySessionOrIP,
+// the one caller of auth.ValidateSession outside this package - every
+// in-package caller uses the unexported loginCountry directly.
+func LoginCountry(r *http.Request) string {
+	return loginCountry(r)
+}
+
 // checkAndRecordLoginCountry compares country (this login's CF-IPCountry,
 // possibly "") against the last country remembered for subject, then
 // records country as the new baseline for next time. Returns anomaly=true
@@ -654,7 +661,7 @@ func MeHandler(d Deps) http.HandlerFunc {
 		}
 
 		ctx := r.Context()
-		sess, ok, err := ValidateSession(ctx, d, token)
+		sess, ok, err := ValidateSession(ctx, d, token, clientIP(r), loginCountry(r))
 		if err != nil {
 			httperr.Internal(w, err)
 			return
@@ -716,7 +723,7 @@ func DeleteSelfHandler(d Deps) http.HandlerFunc {
 		}
 
 		ctx := r.Context()
-		sess, ok, err := ValidateSession(ctx, d, token)
+		sess, ok, err := ValidateSession(ctx, d, token, clientIP(r), loginCountry(r))
 		if err != nil {
 			httperr.Internal(w, err)
 			return
@@ -829,7 +836,7 @@ func UserPrefsHandler(d Deps) http.HandlerFunc {
 			return
 		}
 		ctx := r.Context()
-		sess, ok, err := ValidateSession(ctx, d, token)
+		sess, ok, err := ValidateSession(ctx, d, token, clientIP(r), loginCountry(r))
 		if err != nil {
 			httperr.Internal(w, err)
 			return
@@ -928,7 +935,7 @@ func ExportSelfHandler(d Deps) http.HandlerFunc {
 			return
 		}
 		ctx := r.Context()
-		sess, ok, err := ValidateSession(ctx, d, token)
+		sess, ok, err := ValidateSession(ctx, d, token, clientIP(r), loginCountry(r))
 		if err != nil {
 			httperr.Internal(w, err)
 			return
@@ -1093,7 +1100,7 @@ func LogoutHandler(d Deps) http.HandlerFunc {
 			return
 		}
 
-		sess, ok, err := ValidateSession(ctx, d, token)
+		sess, ok, err := ValidateSession(ctx, d, token, clientIP(r), loginCountry(r))
 
 		// Best-effort: also invalidate this session's refresh token at the
 		// IdP itself (see Provider.Revoke's doc comment), not just delete
