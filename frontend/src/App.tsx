@@ -23,6 +23,7 @@ const AdminSystemSmtpPage = lazy(() => import("./pages/AdminSystemSmtpPage"));
 const AdminSystemSearchPage = lazy(() => import("./pages/AdminSystemSearchPage"));
 const AdminAIPage = lazy(() => import("./pages/AdminAIPage"));
 const AdminSystemLimitsPage = lazy(() => import("./pages/AdminSystemLimitsPage"));
+const AdminSystemGeneralPage = lazy(() => import("./pages/AdminSystemGeneralPage"));
 const AdminQuickLinksPage = lazy(() => import("./pages/AdminQuickLinksPage"));
 const AdminSystemInfoPage = lazy(() => import("./pages/AdminSystemInfoPage"));
 const AdminSecurityInfoPage = lazy(() => import("./pages/AdminSecurityInfoPage"));
@@ -71,6 +72,7 @@ export default function App() {
         <Route path="/admin/ai" element={<Navigate to="/admin/system/ai" replace />} />
         <Route path="/admin/system/ai" element={<AdminAIPage />} />
         <Route path="/admin/system/limits" element={<AdminSystemLimitsPage />} />
+        <Route path="/admin/system/general" element={<AdminSystemGeneralPage />} />
         <Route path="/admin/quick-links" element={<AdminQuickLinksPage />} />
         <Route path="/admin/system/info" element={<AdminSystemInfoPage />} />
         <Route path="/admin/security/info" element={<AdminSecurityInfoPage />} />

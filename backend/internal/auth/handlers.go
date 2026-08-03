@@ -523,11 +523,12 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 			if admins, err := d.Pool.ListAdmins(ctx); err != nil {
 				log.Printf("auth: failed to list admins for pending-approval mail: %v", err)
 			} else {
+				pendingBranding := mail.CurrentBranding(ctx, d.Pool)
 				for _, admin := range admins {
 					if admin.Email == "" {
 						continue
 					}
-					msg := mail.PendingApprovalMessage(admin.Email, admin.Name, d.FrontendBaseURL, claims.Name, claims.Email)
+					msg := mail.PendingApprovalMessage(admin.Email, admin.Name, d.FrontendBaseURL, claims.Name, claims.Email, pendingBranding)
 					if err := mail.Enqueue(ctx, d.Valkey, d.Pool, d.MasterKeyEnv, msg); err != nil {
 						log.Printf("auth: failed to enqueue pending-approval mail for %s: %v", admin.Email, err)
 					}
@@ -620,11 +621,15 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 		// GetNotificationPrefs itself already fails open (all-true) on error,
 		// so no separate error handling is needed here.
 		notifyPrefs, _ := d.Pool.GetNotificationPrefs(ctx, claims.Subject)
+		// Loaded once and reused by both LoginMessage and AnomalyMessage
+		// below - see mail.CurrentBranding's doc comment on why this is
+		// cheap to re-resolve per login rather than cached.
+		loginBranding := mail.CurrentBranding(ctx, d.Pool)
 		// Unconditional-per-login mail (not gated on anomaly at all) - see
 		// mail.LoginMessage's own doc comment on how this differs from
 		// AnomalyMessage below.
 		if notifyPrefs.NewLogin && claims.Email != "" {
-			msg := mail.LoginMessage(claims.Email, claims.Name, clientIP(r), country, r.Header.Get("User-Agent"), d.FrontendBaseURL)
+			msg := mail.LoginMessage(claims.Email, claims.Name, clientIP(r), country, r.Header.Get("User-Agent"), d.FrontendBaseURL, loginBranding)
 			if err := mail.Enqueue(ctx, d.Valkey, d.Pool, d.MasterKeyEnv, msg); err != nil {
 				log.Printf("auth: enqueue login mail for %s: %v", claims.Subject, err)
 			}
@@ -653,7 +658,7 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 				log.Printf("auth: audit login country anomaly for %s: resolve master key: %v", claims.Subject, mkErr)
 			}
 			if notifyPrefs.CountryAnomaly && claims.Email != "" {
-				msg := mail.AnomalyMessage(claims.Email, claims.Name, clientIP(r), country, previousCountry, d.FrontendBaseURL)
+				msg := mail.AnomalyMessage(claims.Email, claims.Name, clientIP(r), country, previousCountry, d.FrontendBaseURL, loginBranding)
 				if err := mail.Enqueue(ctx, d.Valkey, d.Pool, d.MasterKeyEnv, msg); err != nil {
 					log.Printf("auth: enqueue login country anomaly mail for %s: %v", claims.Subject, err)
 				}
@@ -854,7 +859,7 @@ func DeleteSelfHandler(d Deps) http.HandlerFunc {
 		// succeeded and is the source of truth, so a missed confirmation
 		// email must not turn it into a 500 the caller has to retry.
 		if sess.Email != "" {
-			if err := mail.Enqueue(ctx, d.Valkey, d.Pool, d.MasterKeyEnv, mail.DeletedMessage(sess.Email, sess.Name)); err != nil {
+			if err := mail.Enqueue(ctx, d.Valkey, d.Pool, d.MasterKeyEnv, mail.DeletedMessage(sess.Email, sess.Name, mail.CurrentBranding(ctx, d.Pool))); err != nil {
 				log.Printf("auth: delete-self: failed to enqueue mail for %s: %v", sess.UserID, err)
 			}
 		}

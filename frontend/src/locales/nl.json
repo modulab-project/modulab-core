@@ -438,6 +438,25 @@
       "check_now_up_to_date": "Je gebruikt al de nieuwste versie.",
       "check_now_error": "Controle mislukt. Probeer het opnieuw."
     },
+    "system_general": {
+      "title": "Taal & Instantie",
+      "subtitle": "De systeembrede standaardtaal en de weergavenaam die in de hele instantie en in uitgaande systeem-e-mails wordt gebruikt.",
+      "load_error": "Kon deze instellingen niet laden.",
+      "save_error": "Opslaan is mislukt.",
+      "saved": "Opgeslagen",
+      "validation_error": "Instantienaam mag niet leeg zijn.",
+      "section_language": "Taal & Regio",
+      "system_language_label": "Systeemtaal",
+      "system_language_hint": "Gebruikt als standaard voor nieuwe gebruikers en voor elke uitgaande systeem-e-mail (account goedgekeurd/vergrendeld/verwijderd, nieuwe aanmeldingen, enz.).",
+      "lang_en": "Engels",
+      "lang_de": "Duits",
+      "lang_nl": "Nederlands",
+      "lang_es": "Spaans",
+      "lang_fr": "Frans",
+      "section_identity": "Instantie-identiteit",
+      "instance_name_label": "Instantienaam",
+      "instance_name_hint": "Vervangt \"ModuLab\" in systeem-e-mails (bijv. \"Uw {{name}}-account is klaar\")."
+    },
     "system_info": {
       "title": "Systeeminfo",
       "subtitle": "Versie, uptime en de status van alle achtergrondprocessen in één oogopslag.",

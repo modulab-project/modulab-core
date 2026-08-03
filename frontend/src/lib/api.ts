@@ -1007,6 +1007,32 @@ export function adminPatchLimitsSettings(settings: LimitsSettings): Promise<Limi
   });
 }
 
+// GeneralSettings backs GET/PATCH /v1/admin/system/general - the
+// "Sprache & Region" / "Instanz-Identität" settings page
+// (adminapi.AdminGeneralHandler). system_language drives which of the 5
+// supported UI languages (matches frontend/src/locales/*.json) outgoing
+// system mail is rendered in (see backend's mail.CurrentBranding);
+// instance_name replaces the literal "ModuLab" in those same mails.
+export interface GeneralSettings {
+  system_language: "en" | "de" | "nl" | "es" | "fr";
+  instance_name: string;
+}
+
+// GET /v1/admin/system/general — admin only.
+export function adminGetGeneralSettings(): Promise<GeneralSettings> {
+  return request<GeneralSettings>("/v1/admin/system/general");
+}
+
+// PATCH /v1/admin/system/general — admin only. Always sends the full
+// object, same "backend validates and rewrites every field" contract as
+// adminPatchLimitsSettings above.
+export function adminPatchGeneralSettings(settings: GeneralSettings): Promise<GeneralSettings> {
+  return request<GeneralSettings>("/v1/admin/system/general", {
+    method: "PATCH",
+    body: JSON.stringify(settings),
+  });
+}
+
 // POST /v1/admin/system/core-update-check — admin only. Manually
 // triggers coreupdate.CheckNow instead of waiting for the next scheduled
 // (core_update_check_weekdays/_time) tick — used by the "check now" button

@@ -525,7 +525,7 @@ func notifySessionRevokedByAdmin(ctx context.Context, d Deps, stored storedSessi
 	if sess.Email == "" {
 		return
 	}
-	msg := mail.SessionRevokedByAdminMessage(sess.Email, sess.Name, sess.IP, sess.UserAgent, d.FrontendBaseURL)
+	msg := mail.SessionRevokedByAdminMessage(sess.Email, sess.Name, sess.IP, sess.UserAgent, d.FrontendBaseURL, mail.CurrentBranding(ctx, d.Pool))
 	if err := mail.Enqueue(ctx, d.Valkey, d.Pool, d.MasterKeyEnv, msg); err != nil {
 		log.Printf("auth: enqueue session revoked mail for %s: %v", stored.UserID, err)
 	}
@@ -750,7 +750,7 @@ func checkSessionCountryAnomaly(ctx context.Context, d Deps, token string, sess 
 		if prefs, err := d.Pool.GetNotificationPrefs(ctx, sess.UserID); err != nil {
 			log.Printf("auth: read notification prefs for %s: %v", sess.UserID, err)
 		} else if prefs.CountryAnomaly && sess.Email != "" {
-			msg := mail.AnomalyMessage(sess.Email, sess.Name, currentIP, currentCountry, baseline, d.FrontendBaseURL)
+			msg := mail.AnomalyMessage(sess.Email, sess.Name, currentIP, currentCountry, baseline, d.FrontendBaseURL, mail.CurrentBranding(ctx, d.Pool))
 			if err := mail.Enqueue(ctx, d.Valkey, d.Pool, d.MasterKeyEnv, msg); err != nil {
 				log.Printf("auth: enqueue anomaly mail for %s: %v", sess.UserID, err)
 			}
@@ -812,7 +812,7 @@ func checkSessionDeviceAnomaly(ctx context.Context, d Deps, token string, sess S
 		if prefs, err := d.Pool.GetNotificationPrefs(ctx, sess.UserID); err != nil {
 			log.Printf("auth: read notification prefs for %s: %v", sess.UserID, err)
 		} else if prefs.NewDevice && sess.Email != "" {
-			msg := mail.NewDeviceMessage(sess.Email, sess.Name, currentIP, baseline, currentUserAgent, d.FrontendBaseURL)
+			msg := mail.NewDeviceMessage(sess.Email, sess.Name, currentIP, baseline, currentUserAgent, d.FrontendBaseURL, mail.CurrentBranding(ctx, d.Pool))
 			if err := mail.Enqueue(ctx, d.Valkey, d.Pool, d.MasterKeyEnv, msg); err != nil {
 				log.Printf("auth: enqueue new-device mail for %s: %v", sess.UserID, err)
 			}

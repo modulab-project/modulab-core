@@ -546,6 +546,11 @@ func main() {
 	// comment for why these were consolidated into one endpoint.
 	mux.Handle("GET /v1/admin/system/limits", adminOnly(adminapi.AdminLimitsHandler(pool, cfg.MasterKey)))
 	mux.Handle("PATCH /v1/admin/system/limits", adminOnly(adminapi.AdminLimitsHandler(pool, cfg.MasterKey)))
+	// System language + instance identity ("Sprache & Region" /
+	// "Instanz-Identität") - see adminapi.AdminGeneralHandler's package doc
+	// comment. Drives mail.CurrentBranding for every outgoing system mail.
+	mux.Handle("GET /v1/admin/system/general", adminOnly(adminapi.AdminGeneralHandler(pool, cfg.MasterKey)))
+	mux.Handle("PATCH /v1/admin/system/general", adminOnly(adminapi.AdminGeneralHandler(pool, cfg.MasterKey)))
 
 	// Widget endpoints (spec section 8 / Home page). Not wrapped in any
 	// auth middleware: weather data is not sensitive, and the 15-minute

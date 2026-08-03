@@ -160,6 +160,14 @@ const (
 	// handler's doc comment for the full list - all DoS/availability-
 	// relevant, hence audited the same way max_body_bytes is above.
 	EventConfigSystemLimits = "config.system_limits"
+	// System language + instance identity (adminapi.AdminGeneralHandler,
+	// GET/PATCH /v1/admin/system/general) - the "Sprache & Region" /
+	// "Instanz-Identität" settings page. Neither field is secret (see
+	// mail.Branding's doc comment), but both are worth a durable trail same
+	// as EventConfigSystemLimits: a language change silently reshapes every
+	// outgoing system mail from that point on, and an instance rename shows
+	// up in every one of them too.
+	EventConfigSystemGeneral = "config.system_general"
 	// Setup
 	EventSetupComplete = "setup.completed"
 	// Wizard steps that write config before the wizard itself is marked

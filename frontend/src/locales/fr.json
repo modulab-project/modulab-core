@@ -438,6 +438,25 @@
       "check_now_up_to_date": "Vous utilisez déjà la dernière version.",
       "check_now_error": "Échec de la vérification. Veuillez réessayer."
     },
+    "system_general": {
+      "title": "Langue & Instance",
+      "subtitle": "La langue par défaut à l'échelle du système et le nom d'affichage utilisé dans toute l'instance et dans les e-mails système sortants.",
+      "load_error": "Impossible de charger ces paramètres.",
+      "save_error": "Échec de l'enregistrement.",
+      "saved": "Enregistré",
+      "validation_error": "Le nom de l'instance ne doit pas être vide.",
+      "section_language": "Langue & Région",
+      "system_language_label": "Langue du système",
+      "system_language_hint": "Utilisée par défaut pour les nouveaux utilisateurs et pour chaque e-mail système sortant (compte approuvé/verrouillé/supprimé, nouvelles connexions, etc.).",
+      "lang_en": "Anglais",
+      "lang_de": "Allemand",
+      "lang_nl": "Néerlandais",
+      "lang_es": "Espagnol",
+      "lang_fr": "Français",
+      "section_identity": "Identité de l'Instance",
+      "instance_name_label": "Nom de l'instance",
+      "instance_name_hint": "Remplace « ModuLab » dans les e-mails système (ex. « Votre compte {{name}} est prêt »)."
+    },
     "system_info": {
       "title": "Informations système",
       "subtitle": "Version, disponibilité et état de tous les processus en arrière-plan en un coup d'œil.",

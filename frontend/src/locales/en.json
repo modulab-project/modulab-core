@@ -438,6 +438,25 @@
       "check_now_up_to_date": "You're already on the latest version.",
       "check_now_error": "Check failed. Please try again."
     },
+    "system_general": {
+      "title": "Language & Instance",
+      "subtitle": "The system-wide default language, and the display name used throughout the instance and in outgoing system mail.",
+      "load_error": "Could not load these settings.",
+      "save_error": "Failed to save.",
+      "saved": "Saved",
+      "validation_error": "Instance name must not be empty.",
+      "section_language": "Language & Region",
+      "system_language_label": "System language",
+      "system_language_hint": "Used as the default for new users and for every outgoing system email (account approved/locked/deleted, new sign-in alerts, etc.).",
+      "lang_en": "English",
+      "lang_de": "German",
+      "lang_nl": "Dutch",
+      "lang_es": "Spanish",
+      "lang_fr": "French",
+      "section_identity": "Instance Identity",
+      "instance_name_label": "Instance name",
+      "instance_name_hint": "Shown in place of \"ModuLab\" in system emails (e.g. \"Your {{name}} account is ready\")."
+    },
     "system_info": {
       "title": "System info",
       "subtitle": "Version, uptime, and the status of every background process at a glance.",

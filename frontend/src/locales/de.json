@@ -438,6 +438,25 @@
       "check_now_up_to_date": "Du verwendest bereits die aktuelle Version.",
       "check_now_error": "Prüfung fehlgeschlagen. Bitte erneut versuchen."
     },
+    "system_general": {
+      "title": "Sprache & Instanz",
+      "subtitle": "Die systemweite Standardsprache und der Anzeigename, der in der gesamten Instanz sowie in ausgehenden System-E-Mails verwendet wird.",
+      "load_error": "Diese Einstellungen konnten nicht geladen werden.",
+      "save_error": "Speichern fehlgeschlagen.",
+      "saved": "Gespeichert",
+      "validation_error": "Der Instanzname darf nicht leer sein.",
+      "section_language": "Sprache & Region",
+      "system_language_label": "Systemsprache",
+      "system_language_hint": "Wird als Standard für neue Benutzer und für jede ausgehende System-E-Mail verwendet (Konto freigegeben/gesperrt/gelöscht, neue Anmeldungen usw.).",
+      "lang_en": "Englisch",
+      "lang_de": "Deutsch",
+      "lang_nl": "Niederländisch",
+      "lang_es": "Spanisch",
+      "lang_fr": "Französisch",
+      "section_identity": "Instanz-Identität",
+      "instance_name_label": "Instanzname",
+      "instance_name_hint": "Ersetzt \"ModuLab\" in System-E-Mails (z. B. \"Ihr {{name}}-Konto ist bereit\")."
+    },
     "system_info": {
       "title": "Systeminfo",
       "subtitle": "Version, Laufzeit und Status aller Hintergrundprozesse auf einen Blick.",

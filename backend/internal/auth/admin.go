@@ -605,7 +605,7 @@ func ApproveUserHandler(d Deps) http.HandlerFunc {
 			logNotifyError("approve", subject, err)
 		}
 		enqueueMail(r.Context(), d, "approve", subject, func(email, name string) mail.Message {
-			return mail.ApprovedMessage(email, name, d.FrontendBaseURL)
+			return mail.ApprovedMessage(email, name, d.FrontendBaseURL, mail.CurrentBranding(r.Context(), d.Pool))
 		})
 		// Best-effort: include the target's email in the audit entry so the
 		// log is readable without having to cross-reference UUIDs.
@@ -676,7 +676,7 @@ func LockUserHandler(d Deps) http.HandlerFunc {
 			logRevokeError("lock", subject, err)
 		}
 		enqueueMail(r.Context(), d, "lock", subject, func(email, name string) mail.Message {
-			return mail.LockedMessage(email, name)
+			return mail.LockedMessage(email, name, mail.CurrentBranding(r.Context(), d.Pool))
 		})
 		// Best-effort: include the target's email in the audit entry.
 		lockedEmail := ""
@@ -726,7 +726,7 @@ func UnlockUserHandler(d Deps) http.HandlerFunc {
 			return
 		}
 		enqueueMail(r.Context(), d, "unlock", subject, func(email, name string) mail.Message {
-			return mail.UnlockedMessage(email, name, d.FrontendBaseURL)
+			return mail.UnlockedMessage(email, name, d.FrontendBaseURL, mail.CurrentBranding(r.Context(), d.Pool))
 		})
 		// Best-effort: include the target's email in the audit entry.
 		unlockedEmail := ""
@@ -803,7 +803,7 @@ func DeleteUserHandler(d Deps) http.HandlerFunc {
 		// a missed confirmation email must not turn it into a 500 the
 		// admin has to retry.
 		if targetExists && target.Email != "" {
-			if err := mail.Enqueue(r.Context(), d.Valkey, d.Pool, d.MasterKeyEnv, mail.DeletedMessage(target.Email, target.Name)); err != nil {
+			if err := mail.Enqueue(r.Context(), d.Valkey, d.Pool, d.MasterKeyEnv, mail.DeletedMessage(target.Email, target.Name, mail.CurrentBranding(r.Context(), d.Pool))); err != nil {
 				log.Printf("auth: delete: failed to enqueue mail for %s: %v", subject, err)
 			}
 		}

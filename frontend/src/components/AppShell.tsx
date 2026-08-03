@@ -1105,6 +1105,9 @@ function ProfilePanelContent({
                 <Link to="/admin/system/limits" onClick={onClose} className={SUB_ITEM_CLASS}>
                   {t("admin.system_limits.title")}
                 </Link>
+                <Link to="/admin/system/general" onClick={onClose} className={SUB_ITEM_CLASS}>
+                  {t("admin.system_general.title")}
+                </Link>
                 <Link to="/admin/feeds" onClick={onClose} className={SUB_ITEM_CLASS}>
                   {t("shell.feed_sources_link")}
                 </Link>

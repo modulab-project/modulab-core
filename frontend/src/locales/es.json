@@ -438,6 +438,25 @@
       "check_now_up_to_date": "Ya tienes la versión más reciente.",
       "check_now_error": "Error al comprobar. Inténtalo de nuevo."
     },
+    "system_general": {
+      "title": "Idioma e Instancia",
+      "subtitle": "El idioma predeterminado de todo el sistema y el nombre visible utilizado en toda la instancia y en los correos del sistema salientes.",
+      "load_error": "No se pudieron cargar estos ajustes.",
+      "save_error": "Error al guardar.",
+      "saved": "Guardado",
+      "validation_error": "El nombre de la instancia no puede estar vacío.",
+      "section_language": "Idioma y Región",
+      "system_language_label": "Idioma del sistema",
+      "system_language_hint": "Se usa como valor predeterminado para nuevos usuarios y para todos los correos del sistema salientes (cuenta aprobada/bloqueada/eliminada, nuevos inicios de sesión, etc.).",
+      "lang_en": "Inglés",
+      "lang_de": "Alemán",
+      "lang_nl": "Neerlandés",
+      "lang_es": "Español",
+      "lang_fr": "Francés",
+      "section_identity": "Identidad de la Instancia",
+      "instance_name_label": "Nombre de la instancia",
+      "instance_name_hint": "Sustituye a \"ModuLab\" en los correos del sistema (p. ej. \"Su cuenta de {{name}} está lista\")."
+    },
     "system_info": {
       "title": "Información del sistema",
       "subtitle": "Versión, tiempo de actividad y estado de todos los procesos en segundo plano de un vistazo.",
