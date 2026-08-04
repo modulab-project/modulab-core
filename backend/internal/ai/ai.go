@@ -1090,6 +1090,15 @@ func ChatHandler(deps auth.Deps) http.HandlerFunc {
 			model = prov.DefaultModel
 		}
 
+		// A provider seeded without a default_model (see EnsureAISchema's doc
+		// comment) has no model until the admin explicitly picks one via "load
+		// models" - refuse the request rather than sending model="" upstream,
+		// which every provider rejects with a confusing error anyway.
+		if model == "" {
+			http.Error(w, "no model selected for this provider — configure one in AI settings", http.StatusServiceUnavailable)
+			return
+		}
+
 		// Set SSE headers before any streaming begins.
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")

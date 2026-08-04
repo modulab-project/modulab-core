@@ -23,12 +23,19 @@ import { isAdminRole } from "../lib/roles";
 // Built-in provider definitions — these are the seven first-class providers
 // that have known base URLs and dedicated types. Admins only need to supply
 // an API key. Custom providers (type = "openai_compat") are freely created.
+//
+// defaultModel is only pre-filled for providers with a vendor-guaranteed
+// "always latest" alias (mistral, openrouter). The rest ship with an empty
+// model - hardcoded model IDs go stale as vendors release new versions (see
+// the deepseek-chat retirement), so the admin picks one explicitly on first
+// setup via the "load models" button, which queries the provider's live
+// model list instead of relying on a string we'd have to keep updating here.
 const BUILTIN_PROVIDERS = [
-  { id: "anthropic", type: "anthropic", name: "Anthropic (Claude)", defaultModel: "claude-sonnet-4-5" },
-  { id: "openai", type: "openai", name: "OpenAI", defaultModel: "gpt-4o" },
-  { id: "gemini", type: "gemini", name: "Google Gemini", defaultModel: "gemini-2.0-flash" },
-  { id: "deepseek", type: "deepseek", name: "DeepSeek", defaultModel: "deepseek-v4-flash" },
-  { id: "kimi", type: "kimi", name: "Kimi (Moonshot AI)", defaultModel: "kimi-k2.6" },
+  { id: "anthropic", type: "anthropic", name: "Anthropic (Claude)", defaultModel: "" },
+  { id: "openai", type: "openai", name: "OpenAI", defaultModel: "" },
+  { id: "gemini", type: "gemini", name: "Google Gemini", defaultModel: "" },
+  { id: "deepseek", type: "deepseek", name: "DeepSeek", defaultModel: "" },
+  { id: "kimi", type: "kimi", name: "Kimi (Moonshot AI)", defaultModel: "" },
   { id: "mistral", type: "mistral", name: "Mistral AI", defaultModel: "mistral-large-latest" },
   { id: "openrouter", type: "openrouter", name: "OpenRouter", defaultModel: "openrouter/auto" },
 ] as const;

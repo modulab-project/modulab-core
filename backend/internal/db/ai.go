@@ -56,16 +56,26 @@ func (p *Pool) EnsureAISchema(ctx context.Context) error {
 	// before an admin adds any keys. Users can then add their own keys for any
 	// built-in. ON CONFLICT DO NOTHING preserves any admin changes (keys,
 	// enabled flag, model, etc.) made after the initial seed.
+	//
+	// default_model is left empty for providers whose vendor does not offer a
+	// production-safe "always latest" alias (anthropic, openai, gemini,
+	// deepseek, kimi) - model IDs there churn too often to keep hardcoded, and
+	// a stale one silently breaks chat (see the deepseek-chat retirement on
+	// 2026-07-24). The admin picks a model on first setup via "load models"
+	// (AdminListModelsHandler queries the provider's live model list), and
+	// ChatHandler refuses to run with an empty model instead of sending "" to
+	// the provider. mistral and openrouter DO have vendor-guaranteed evergreen
+	// aliases (mistral-large-latest, openrouter/auto), so those keep a preset.
 	if _, err := p.Exec(ctx, `
 		INSERT INTO ai_providers (id, type, name, base_url, default_model, user_can_override, enabled, sort_order)
 		VALUES
-			('anthropic',  'anthropic',  'Anthropic (Claude)',  '', 'claude-sonnet-4-5',  true, true, 1),
-			('openai',     'openai',     'OpenAI',               '', 'gpt-4o',             true, true, 2),
-			('gemini',     'gemini',     'Google Gemini',        '', 'gemini-2.0-flash',   true, true, 3),
-			('deepseek',   'deepseek',   'DeepSeek',             '', 'deepseek-v4-flash',  true, true, 4),
-			('kimi',       'kimi',       'Kimi (Moonshot AI)',   '', 'kimi-k2.6',          true, true, 5),
+			('anthropic',  'anthropic',  'Anthropic (Claude)',  '', '',                     true, true, 1),
+			('openai',     'openai',     'OpenAI',               '', '',                     true, true, 2),
+			('gemini',     'gemini',     'Google Gemini',        '', '',                     true, true, 3),
+			('deepseek',   'deepseek',   'DeepSeek',             '', '',                     true, true, 4),
+			('kimi',       'kimi',       'Kimi (Moonshot AI)',   '', '',                     true, true, 5),
 			('mistral',    'mistral',    'Mistral AI',           '', 'mistral-large-latest', true, true, 6),
-			('openrouter', 'openrouter', 'OpenRouter',           '', 'openrouter/auto',    true, true, 7)
+			('openrouter', 'openrouter', 'OpenRouter',           '', 'openrouter/auto',      true, true, 7)
 		ON CONFLICT (id) DO NOTHING
 	`); err != nil {
 		return fmt.Errorf("db: seed built-in ai_providers: %w", err)
