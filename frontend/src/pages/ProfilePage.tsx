@@ -314,7 +314,7 @@ export default function ProfilePage() {
               )}
               {sessions && sessions.length > 0 && (
                 <ul className="mt-3 flex flex-col gap-2">
-                  {sessions.map((s) => (
+                  {sortSessions(sessions).map((s) => (
                     <SessionListItem
                       key={s.id}
                       session={s}
@@ -443,6 +443,20 @@ function ClaimValue({ value }: { value: string }) {
     return <span className="text-gray-400 dark:text-gray-500">{t("profile.not_available")}</span>;
   }
   return <>{value}</>;
+}
+
+// Sessions come back from the API in arbitrary (Valkey scan/set) order - see
+// feedback that flagged the current session getting buried mid-list. Always
+// show the current session first, then the rest newest-login-first so the
+// oldest sessions sink to the bottom.
+function sortSessions(sessions: ActiveSession[]): ActiveSession[] {
+  return [...sessions].sort((a, b) => {
+    if (a.current && !b.current) return -1;
+    if (!a.current && b.current) return 1;
+    const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+    return bTime - aTime;
+  });
 }
 
 // One row in the "my devices" list - deliberately a plainer single-line

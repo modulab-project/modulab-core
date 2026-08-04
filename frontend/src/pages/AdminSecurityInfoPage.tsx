@@ -176,7 +176,7 @@ export default function AdminSecurityInfoPage() {
                 <p className="text-sm text-gray-400 dark:text-gray-500">{t("admin.system_info.no_sessions")}</p>
               ) : (
                 <ul className="flex flex-col gap-2">
-                  {info.active_sessions.map((s) => (
+                  {sortSessions(info.active_sessions).map((s) => (
                     <SessionListItem
                       key={s.id}
                       session={s}
@@ -269,6 +269,19 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       {children}
     </div>
   );
+}
+
+// Sessions come back in arbitrary (Valkey scan) order - same fix as
+// ProfilePage.tsx's sortSessions: current session first, then the rest
+// newest-login-first so the oldest sessions sink to the bottom of the list.
+function sortSessions(sessions: ActiveSession[]): ActiveSession[] {
+  return [...sessions].sort((a, b) => {
+    if (a.current && !b.current) return -1;
+    if (!a.current && b.current) return 1;
+    const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+    return bTime - aTime;
+  });
 }
 
 // Single-list-item rendering for one active session - same shape as
