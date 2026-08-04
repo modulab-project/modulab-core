@@ -22,14 +22,24 @@ export default defineConfig({
     react(),
     tailwindcss(),
     // "Add to Home Screen" support (Android install prompt + iOS standalone
-    // mode). Generates manifest.webmanifest + a minimal precaching service
-    // worker from the icons in public/ - see AppShell.tsx's useInstallPrompt
-    // hook for the actual install-button logic (Android triggers the real
-    // browser prompt; iOS has no such API and gets a manual instructions
-    // overlay instead, see AppShell.tsx). navigateFallbackDenylist keeps the
-    // SW's SPA fallback from ever intercepting backend routes - only the
-    // static frontend shell is precached, /v1 and /healthz always hit the
-    // network exactly like without a service worker at all.
+    // mode). Generates manifest.webmanifest so the app is installable - see
+    // AppShell.tsx's useInstallPrompt hook for the actual install-button
+    // logic (Android triggers the real browser prompt; iOS has no such API
+    // and gets a manual instructions overlay instead, see AppShell.tsx).
+    //
+    // The service worker deliberately precaches NOTHING (globPatterns: [],
+    // navigateFallback: false below) - this app was never meant to work
+    // offline (every page needs /v1 anyway), and vite-plugin-pwa's default
+    // generateSW behavior precaches the full JS/CSS/HTML app shell and
+    // serves it cache-first from the SW's own Cache Storage, which sits
+    // *in front of* any HTTP Cache-Control header (see deploy/nginx.conf).
+    // That's what caused "new version deployed, Core backend already shows
+    // it, but the frontend still shows the old build until you manually
+    // clear the browser's site data" - the SW's update-and-reload dance
+    // (registerType: autoUpdate) is supposed to handle this automatically,
+    // but is unreliable in practice, especially in Safari. Found/fixed
+    // 2026-08-04. With nothing precached, the SW has no cache layer to get
+    // stuck on - installability is all it's here for now.
     VitePWA({
       registerType: "autoUpdate",
       injectRegister: "auto",
@@ -51,7 +61,8 @@ export default defineConfig({
         ],
       },
       workbox: {
-        navigateFallbackDenylist: [/^\/v1\//, /^\/healthz$/],
+        globPatterns: [],
+        navigateFallback: undefined,
       },
     }),
   ],
