@@ -16,8 +16,8 @@ import (
 // FK on ai_user_keys.user_id resolves.
 //
 // ai_providers holds both built-in providers (anthropic, openai, gemini,
-// deepseek, kimi, mistral, openrouter — type = their slug) and user-defined
-// OpenAI-compatible endpoints
+// deepseek, kimi, mistral, openrouter, requesty — type = their slug) and
+// user-defined OpenAI-compatible endpoints
 // (type = "openai_compat"). encrypted_admin_key is nullable: a provider row
 // can exist without an admin key (user-only) and without a default_model for
 // the built-in entries that expose model selection to callers.
@@ -52,20 +52,25 @@ func (p *Pool) EnsureAISchema(ctx context.Context) error {
 	`); err != nil {
 		return fmt.Errorf("db: ensure ai_user_keys: %w", err)
 	}
-	// Seed the seven built-in providers so they always exist in the DB, even
+	// Seed the eight built-in providers so they always exist in the DB, even
 	// before an admin adds any keys. Users can then add their own keys for any
 	// built-in. ON CONFLICT DO NOTHING preserves any admin changes (keys,
 	// enabled flag, model, etc.) made after the initial seed.
 	//
 	// default_model is left empty for providers whose vendor does not offer a
 	// production-safe "always latest" alias (anthropic, openai, gemini,
-	// deepseek, kimi) - model IDs there churn too often to keep hardcoded, and
-	// a stale one silently breaks chat (see the deepseek-chat retirement on
-	// 2026-07-24). The admin picks a model on first setup via "load models"
-	// (AdminListModelsHandler queries the provider's live model list), and
-	// ChatHandler refuses to run with an empty model instead of sending "" to
-	// the provider. mistral and openrouter DO have vendor-guaranteed evergreen
-	// aliases (mistral-large-latest, openrouter/auto), so those keep a preset.
+	// deepseek, kimi, requesty) - model IDs there churn too often to keep
+	// hardcoded, and a stale one silently breaks chat (see the deepseek-chat
+	// retirement on 2026-07-24). requesty specifically routes by explicit
+	// "provider/model" strings or an admin-defined fallback policy name
+	// (e.g. "policy/sonnet-with-fallback") that only exists after the admin
+	// sets it up in Requesty's own dashboard - nothing we could hardcode here
+	// even if we wanted to. The admin picks a model on first setup via "load
+	// models" (AdminListModelsHandler queries the provider's live model
+	// list), and ChatHandler refuses to run with an empty model instead of
+	// sending "" to the provider. mistral and openrouter DO have vendor-
+	// guaranteed evergreen aliases (mistral-large-latest, openrouter/auto),
+	// so those keep a preset.
 	if _, err := p.Exec(ctx, `
 		INSERT INTO ai_providers (id, type, name, base_url, default_model, user_can_override, enabled, sort_order)
 		VALUES
@@ -75,7 +80,8 @@ func (p *Pool) EnsureAISchema(ctx context.Context) error {
 			('deepseek',   'deepseek',   'DeepSeek',             '', '',                     true, true, 4),
 			('kimi',       'kimi',       'Kimi (Moonshot AI)',   '', '',                     true, true, 5),
 			('mistral',    'mistral',    'Mistral AI',           '', 'mistral-large-latest', true, true, 6),
-			('openrouter', 'openrouter', 'OpenRouter',           '', 'openrouter/auto',      true, true, 7)
+			('openrouter', 'openrouter', 'OpenRouter',           '', 'openrouter/auto',      true, true, 7),
+			('requesty',   'requesty',   'Requesty',             '', '',                     true, true, 8)
 		ON CONFLICT (id) DO NOTHING
 	`); err != nil {
 		return fmt.Errorf("db: seed built-in ai_providers: %w", err)

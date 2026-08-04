@@ -296,7 +296,7 @@ func AdminCreateHandler(deps auth.Deps) http.HandlerFunc {
 		validTypes := map[string]bool{
 			"anthropic": true, "openai": true, "gemini": true,
 			"deepseek": true, "kimi": true, "mistral": true,
-			"openrouter": true, "openai_compat": true,
+			"openrouter": true, "requesty": true, "openai_compat": true,
 		}
 		if !validTypes[req.Type] {
 			http.Error(w, "invalid type", http.StatusBadRequest)
@@ -1142,6 +1142,8 @@ func defaultBaseURL(providerType string) string {
 		return "https://api.mistral.ai/v1"
 	case "openrouter":
 		return "https://openrouter.ai/api/v1"
+	case "requesty":
+		return "https://router.requesty.ai/v1"
 	default:
 		return ""
 	}

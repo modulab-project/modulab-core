@@ -20,7 +20,7 @@ import { Modal } from "../components/Modal";
 import { ReauthBanner } from "../components/ReauthBanner";
 import { isAdminRole } from "../lib/roles";
 
-// Built-in provider definitions — these are the seven first-class providers
+// Built-in provider definitions — these are the eight first-class providers
 // that have known base URLs and dedicated types. Admins only need to supply
 // an API key. Custom providers (type = "openai_compat") are freely created.
 //
@@ -38,6 +38,7 @@ const BUILTIN_PROVIDERS = [
   { id: "kimi", type: "kimi", name: "Kimi (Moonshot AI)", defaultModel: "" },
   { id: "mistral", type: "mistral", name: "Mistral AI", defaultModel: "mistral-large-latest" },
   { id: "openrouter", type: "openrouter", name: "OpenRouter", defaultModel: "openrouter/auto" },
+  { id: "requesty", type: "requesty", name: "Requesty", defaultModel: "" },
 ] as const;
 
 type ModalState =
