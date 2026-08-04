@@ -1058,11 +1058,11 @@ function ProfilePanelContent({
         <Link to="/user/feeds" onClick={onClose} className={SUB_ITEM_CLASS}>
           {t("shell.my_feeds")}
         </Link>
-        <Link to="/user/search-prefs" onClick={onClose} className={SUB_ITEM_CLASS}>
-          {t("shell.search_settings")}
-        </Link>
         <Link to="/user/ai-keys" onClick={onClose} className={SUB_ITEM_CLASS}>
           {t("shell.ai_providers")}
+        </Link>
+        <Link to="/user/search-prefs" onClick={onClose} className={SUB_ITEM_CLASS}>
+          {t("shell.search_settings")}
         </Link>
       </AccordionGroup>
 
@@ -1086,18 +1086,25 @@ function ProfilePanelContent({
               className="flex transition-transform duration-200"
               style={{ width: "200%", transform: systemDrill ? "translateX(-50%)" : "translateX(0)" }}
             >
+              {/* Alphabetically sorted (by displayed German label) rather
+                  than grouped by topic - see feedback that flagged the
+                  previous topic-ish-but-not-really order as arbitrary. Two
+                  rows (Single Sign-On, Sicherheitsinfo) use dedicated
+                  shell.* panel labels instead of the admin.*.title keys
+                  their target pages use, so shortening the wording here
+                  doesn't also rename those pages' own headings. */}
               <div className="flex w-1/2 flex-none flex-col">
+                <Link to="/admin/audit" onClick={onClose} className={SUB_ITEM_CLASS}>
+                  {t("shell.audit_link")}
+                </Link>
                 <Link to="/admin/users" onClick={onClose} className={SUB_ITEM_CLASS}>
                   {t("shell.system_users")}
-                </Link>
-                <Link to="/admin/system/oidc" onClick={onClose} className={SUB_ITEM_CLASS}>
-                  {t("admin.system.oidc_title")}
                 </Link>
                 <Link to="/admin/system/smtp" onClick={onClose} className={SUB_ITEM_CLASS}>
                   {t("shell.smtp_link")}
                 </Link>
-                <Link to="/admin/system/search" onClick={onClose} className={SUB_ITEM_CLASS}>
-                  {t("admin.search.title")}
+                <Link to="/admin/feeds" onClick={onClose} className={SUB_ITEM_CLASS}>
+                  {t("shell.feed_sources_link")}
                 </Link>
                 <Link to="/admin/system/ai" onClick={onClose} className={SUB_ITEM_CLASS}>
                   {t("admin.ai.title")}
@@ -1105,27 +1112,27 @@ function ProfilePanelContent({
                 <Link to="/admin/system/limits" onClick={onClose} className={SUB_ITEM_CLASS}>
                   {t("admin.system_limits.title")}
                 </Link>
-                <Link to="/admin/system/general" onClick={onClose} className={SUB_ITEM_CLASS}>
-                  {t("admin.system_general.title")}
-                </Link>
-                <Link to="/admin/feeds" onClick={onClose} className={SUB_ITEM_CLASS}>
-                  {t("shell.feed_sources_link")}
-                </Link>
-                <Link to="/admin/quick-links" onClick={onClose} className={SUB_ITEM_CLASS}>
-                  {t("shell.quick_links_link")}
-                </Link>
                 <button type="button" onClick={() => setSystemDrill(true)} className={SUB_ITEM_CLASS}>
                   <span>{t("shell.module_management_link")}</span>
                   <i className="ti ti-chevron-right text-[13px] text-gray-400" />
                 </button>
+                <Link to="/admin/quick-links" onClick={onClose} className={SUB_ITEM_CLASS}>
+                  {t("shell.quick_links_link")}
+                </Link>
+                <Link to="/admin/security/info" onClick={onClose} className={SUB_ITEM_CLASS}>
+                  {t("shell.security_info_link")}
+                </Link>
+                <Link to="/admin/system/oidc" onClick={onClose} className={SUB_ITEM_CLASS}>
+                  {t("shell.oidc_link")}
+                </Link>
+                <Link to="/admin/system/general" onClick={onClose} className={SUB_ITEM_CLASS}>
+                  {t("admin.system_general.title")}
+                </Link>
                 <Link to="/admin/system/info" onClick={onClose} className={SUB_ITEM_CLASS}>
                   {t("admin.system_info.title")}
                 </Link>
-                <Link to="/admin/security/info" onClick={onClose} className={SUB_ITEM_CLASS}>
-                  {t("admin.security_info.title")}
-                </Link>
-                <Link to="/admin/audit" onClick={onClose} className={SUB_ITEM_CLASS}>
-                  {t("shell.audit_link")}
+                <Link to="/admin/system/search" onClick={onClose} className={SUB_ITEM_CLASS}>
+                  {t("admin.search.title")}
                 </Link>
               </div>
               <div className="flex w-1/2 flex-none flex-col">
