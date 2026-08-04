@@ -27,7 +27,7 @@ const BUILTIN_PROVIDERS = [
   { id: "anthropic", type: "anthropic", name: "Anthropic (Claude)", defaultModel: "claude-sonnet-4-5" },
   { id: "openai", type: "openai", name: "OpenAI", defaultModel: "gpt-4o" },
   { id: "gemini", type: "gemini", name: "Google Gemini", defaultModel: "gemini-2.0-flash" },
-  { id: "deepseek", type: "deepseek", name: "DeepSeek", defaultModel: "deepseek-chat" },
+  { id: "deepseek", type: "deepseek", name: "DeepSeek", defaultModel: "deepseek-v4-flash" },
   { id: "kimi", type: "kimi", name: "Kimi (Moonshot AI)", defaultModel: "kimi-k2.6" },
   { id: "mistral", type: "mistral", name: "Mistral AI", defaultModel: "mistral-large-latest" },
   { id: "openrouter", type: "openrouter", name: "OpenRouter", defaultModel: "openrouter/auto" },

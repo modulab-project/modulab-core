@@ -62,7 +62,7 @@ func (p *Pool) EnsureAISchema(ctx context.Context) error {
 			('anthropic',  'anthropic',  'Anthropic (Claude)',  '', 'claude-sonnet-4-5',  true, true, 1),
 			('openai',     'openai',     'OpenAI',               '', 'gpt-4o',             true, true, 2),
 			('gemini',     'gemini',     'Google Gemini',        '', 'gemini-2.0-flash',   true, true, 3),
-			('deepseek',   'deepseek',   'DeepSeek',             '', 'deepseek-chat',      true, true, 4),
+			('deepseek',   'deepseek',   'DeepSeek',             '', 'deepseek-v4-flash',  true, true, 4),
 			('kimi',       'kimi',       'Kimi (Moonshot AI)',   '', 'kimi-k2.6',          true, true, 5),
 			('mistral',    'mistral',    'Mistral AI',           '', 'mistral-large-latest', true, true, 6),
 			('openrouter', 'openrouter', 'OpenRouter',           '', 'openrouter/auto',    true, true, 7)
