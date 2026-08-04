@@ -295,7 +295,7 @@ func AdminCreateHandler(deps auth.Deps) http.HandlerFunc {
 		}
 		validTypes := map[string]bool{
 			"anthropic": true, "openai": true, "gemini": true,
-			"deepseek": true, "openai_compat": true,
+			"deepseek": true, "kimi": true, "openai_compat": true,
 		}
 		if !validTypes[req.Type] {
 			http.Error(w, "invalid type", http.StatusBadRequest)
@@ -1116,7 +1116,7 @@ func ChatHandler(deps auth.Deps) http.HandlerFunc {
 
 // defaultBaseURL returns the canonical OpenAI-compatible base URL for
 // well-known built-in providers. Custom providers always set base_url
-// themselves, so this only covers the four built-ins that happen to use
+// themselves, so this only covers the five built-ins that happen to use
 // the OpenAI-compat client.
 func defaultBaseURL(providerType string) string {
 	switch providerType {
@@ -1126,6 +1126,8 @@ func defaultBaseURL(providerType string) string {
 		return "https://generativelanguage.googleapis.com/v1beta/openai"
 	case "deepseek":
 		return "https://api.deepseek.com/v1"
+	case "kimi":
+		return "https://api.moonshot.ai/v1"
 	default:
 		return ""
 	}

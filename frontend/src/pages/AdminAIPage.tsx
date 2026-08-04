@@ -20,7 +20,7 @@ import { Modal } from "../components/Modal";
 import { ReauthBanner } from "../components/ReauthBanner";
 import { isAdminRole } from "../lib/roles";
 
-// Built-in provider definitions — these are the four first-class providers
+// Built-in provider definitions — these are the five first-class providers
 // that have known base URLs and dedicated types. Admins only need to supply
 // an API key. Custom providers (type = "openai_compat") are freely created.
 const BUILTIN_PROVIDERS = [
@@ -28,6 +28,7 @@ const BUILTIN_PROVIDERS = [
   { id: "openai", type: "openai", name: "OpenAI", defaultModel: "gpt-4o" },
   { id: "gemini", type: "gemini", name: "Google Gemini", defaultModel: "gemini-2.0-flash" },
   { id: "deepseek", type: "deepseek", name: "DeepSeek", defaultModel: "deepseek-chat" },
+  { id: "kimi", type: "kimi", name: "Kimi (Moonshot AI)", defaultModel: "kimi-k2.6" },
 ] as const;
 
 type ModalState =
