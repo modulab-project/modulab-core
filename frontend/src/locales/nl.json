@@ -201,6 +201,7 @@
       "catalog_modal": {
         "pick_title": "Taal selecteren",
         "pick_subtitle": "Kies een taal om de bijbehorende nieuwsfeeds te laden en te controleren.",
+        "topics_heading": "Onderwerpen",
         "checking": "{{lang}}-feeds controleren…",
         "checking_hint": "Bereikbaarheid wordt server-side gecontroleerd. Dit kan even duren.",
         "title": "Feeds uit catalogus selecteren",

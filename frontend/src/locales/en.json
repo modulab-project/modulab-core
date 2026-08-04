@@ -201,6 +201,7 @@
       "catalog_modal": {
         "pick_title": "Select Language",
         "pick_subtitle": "Pick a language to load and check the matching news feeds.",
+        "topics_heading": "Topics",
         "checking": "Checking {{lang}} feeds…",
         "checking_hint": "Reachability is verified server-side. This may take a moment.",
         "title": "Select Feeds from Catalog",

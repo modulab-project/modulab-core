@@ -201,6 +201,7 @@
       "catalog_modal": {
         "pick_title": "Choisir une langue",
         "pick_subtitle": "Choisissez une langue pour charger et vérifier les flux d'actualités correspondants.",
+        "topics_heading": "Thèmes",
         "checking": "Vérification des flux {{lang}}…",
         "checking_hint": "L'accessibilité est vérifiée côté serveur. Cela peut prendre un moment.",
         "title": "Sélectionner des flux depuis le catalogue",

@@ -201,6 +201,7 @@
       "catalog_modal": {
         "pick_title": "Sprache auswählen",
         "pick_subtitle": "Wähle eine Sprache, um die passenden Nachrichtenfeeds zu laden und zu prüfen.",
+        "topics_heading": "Themen",
         "checking": "{{lang}}-Feeds werden geprüft…",
         "checking_hint": "Erreichbarkeit der Feeds wird serverseitig geprüft. Das kann einen Moment dauern.",
         "title": "Feeds aus Katalog auswählen",

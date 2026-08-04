@@ -327,7 +327,7 @@ export default function AdminFeedsPage() {
             >
               <i className="ti ti-book text-[14px]" />
               {catalogStep === "checking"
-                ? t("admin.feeds.catalog_checking", { lang: catalogCheckingLang })
+                ? t("admin.feeds.catalog_checking", { lang: LANG_LABELS[catalogCheckingLang] ?? TOPIC_LABELS[catalogCheckingLang] ?? catalogCheckingLang })
                 : t("admin.feeds.catalog_open")}
             </button>
             {/* OPML import — hidden file input triggered by label */}
@@ -507,6 +507,27 @@ const LANG_LABELS: Record<string, string> = {
   NL: "Nederlands",
 };
 
+// Curated topic pseudo-languages from the awesome-rss-feeds catalog source
+// (backend: catalogTopicFiles in news.go). Keys must match catalogTopicKeys
+// there exactly ("TOPIC:" + key, as returned by adminFetchCatalogLanguages).
+const TOPIC_LABELS: Record<string, string> = {
+  "TOPIC:PROGRAMMING": "Programming",
+  "TOPIC:WEB_DEVELOPMENT": "Web Development",
+  "TOPIC:IOS_DEVELOPMENT": "iOS Development",
+  "TOPIC:ANDROID_DEVELOPMENT": "Android Development",
+  "TOPIC:CYBER_SECURITY": "Cyber Security",
+  "TOPIC:TECH": "Tech",
+  "TOPIC:STARTUPS": "Startups",
+  "TOPIC:CRYPTOCURRENCY": "Cryptocurrency",
+  "TOPIC:SCIENCE": "Science",
+  "TOPIC:SPACE": "Space",
+  "TOPIC:BUSINESS_ECONOMY": "Business & Economy",
+};
+
+function isTopicCode(code: string): boolean {
+  return code.startsWith("TOPIC:");
+}
+
 function CatalogLangModal({
   languages,
   onClose,
@@ -530,7 +551,7 @@ function CatalogLangModal({
           {t("admin.feeds.catalog_modal.pick_subtitle")}
         </p>
         <div className="flex flex-col gap-2">
-          {languages.map((lang) => (
+          {languages.filter((l) => !isTopicCode(l)).map((lang) => (
             <button
               key={lang}
               type="button"
@@ -542,6 +563,27 @@ function CatalogLangModal({
             </button>
           ))}
         </div>
+
+        {languages.some(isTopicCode) && (
+          <>
+            <p className="mb-2 mt-5 text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
+              {t("admin.feeds.catalog_modal.topics_heading")}
+            </p>
+            <div className="flex flex-col gap-2">
+              {languages.filter(isTopicCode).map((code) => (
+                <button
+                  key={code}
+                  type="button"
+                  onClick={() => onSelect(code)}
+                  className="flex items-center gap-3 rounded-xl border border-gray-200 px-4 py-3 text-left text-sm font-medium hover:border-teal-400 hover:bg-teal-50 dark:border-gray-700 dark:hover:border-teal-500 dark:hover:bg-teal-950 transition-colors"
+                >
+                  <i className="ti ti-tag text-[16px] text-gray-400" />
+                  <span>{TOPIC_LABELS[code] ?? code}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
         <button
           type="button"
           onClick={onClose}
@@ -578,7 +620,7 @@ function CatalogCheckingOverlay({ lang }: { lang: string }) {
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
           </svg>
         </div>
-        <p className="text-sm font-medium">{t("admin.feeds.catalog_modal.checking", { lang: LANG_LABELS[lang] ?? lang })}</p>
+        <p className="text-sm font-medium">{t("admin.feeds.catalog_modal.checking", { lang: LANG_LABELS[lang] ?? TOPIC_LABELS[lang] ?? lang })}</p>
         <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("admin.feeds.catalog_modal.checking_hint")}</p>
       </div>
     </>

@@ -201,6 +201,7 @@
       "catalog_modal": {
         "pick_title": "Seleccionar idioma",
         "pick_subtitle": "Elige un idioma para cargar y verificar los feeds de noticias correspondientes.",
+        "topics_heading": "Temas",
         "checking": "Verificando feeds de {{lang}}…",
         "checking_hint": "La accesibilidad se verifica en el servidor. Esto puede tardar un momento.",
         "title": "Seleccionar feeds del catálogo",

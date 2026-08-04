@@ -1226,13 +1226,195 @@ var catalogCountries = map[string][]string{
 // catalogLanguages is the ordered list of supported language codes for the catalog.
 var catalogLanguages = []string{"DE", "EN", "ES", "FR", "NL"}
 
+// ---- plenaryapp/awesome-rss-feeds (second catalog source) ------------------
+//
+// Unlike the yavuz JSON catalog above, this GitHub repo ships one OPML file
+// per country/topic (countries/without_category/{Country}.opml,
+// recommended/without_category/{Topic}.opml), so it's fetched and parsed
+// with the same opmlBody/flattenOPML machinery the OPML-upload feature
+// (AdminParseOPMLHandler) already uses, rather than a second JSON decoder.
+
+const (
+	awesomeCountryURLTpl = "https://raw.githubusercontent.com/plenaryapp/awesome-rss-feeds/master/countries/without_category/%s.opml"
+	awesomeTopicURLTpl   = "https://raw.githubusercontent.com/plenaryapp/awesome-rss-feeds/master/recommended/without_category/%s.opml"
+	awesomeCacheKeyPfx   = "news:catalog:awesome:"
+
+	// topicPrefix marks a pseudo "language" code (e.g. "TOPIC:PROGRAMMING")
+	// in the ?lang= query param as a topic-catalog request rather than a
+	// real language. Uppercase to match AdminCatalogHandler's
+	// strings.ToUpper(lang) normalization.
+	topicPrefix = "TOPIC:"
+)
+
+// catalogAwesomeCountries maps each supported language code to the
+// plenaryapp/awesome-rss-feeds country OPML file names (without the .opml
+// extension) whose feeds get merged into that language's catalog results,
+// in addition to the yavuz JSON catalog. A language with no entry (or an
+// empty slice, like NL - the repo has no Dutch-market country file) just
+// returns the yavuz feeds on their own, same as before this merge existed.
+var catalogAwesomeCountries = map[string][]string{
+	"DE": {"Germany"},
+	"EN": {"United States", "United Kingdom", "Canada", "Ireland", "Australia"},
+	"ES": {"Mexico", "Spain"},
+	"FR": {"France"},
+}
+
+// catalogTopicFiles maps an uppercase topic key (as sent in
+// "TOPIC:{key}") to its awesome-rss-feeds recommended/ OPML file name.
+// This is a curated subset of the repo's ~40 topic files, picked for
+// relevance to a self-hosted dev/homelab audience - extend with any other
+// file name from recommended/without_category/ as needed.
+var catalogTopicFiles = map[string]string{
+	"PROGRAMMING":         "Programming",
+	"WEB_DEVELOPMENT":     "Web Development",
+	"IOS_DEVELOPMENT":     "iOS Development",
+	"ANDROID_DEVELOPMENT": "Android Development",
+	"CYBER_SECURITY":      "Cyber security",
+	"TECH":                "Tech",
+	"STARTUPS":            "Startups",
+	"CRYPTOCURRENCY":      "Cryptocurrency",
+	"SCIENCE":             "Science",
+	"SPACE":               "Space",
+	"BUSINESS_ECONOMY":    "Business & Economy",
+}
+
+// catalogTopicKeys is catalogTopicFiles's keys in a fixed display order
+// (map iteration order is random in Go, but the frontend picker should
+// show a stable list).
+var catalogTopicKeys = []string{
+	"PROGRAMMING", "WEB_DEVELOPMENT", "IOS_DEVELOPMENT", "ANDROID_DEVELOPMENT",
+	"CYBER_SECURITY", "TECH", "STARTUPS", "CRYPTOCURRENCY", "SCIENCE", "SPACE",
+	"BUSINESS_ECONOMY",
+}
+
+// awesomeOPMLURL builds the raw.githubusercontent.com URL for one
+// awesome-rss-feeds OPML file, URL-escaping name (file names contain
+// spaces and, for "Business & Economy", an ampersand).
+func awesomeOPMLURL(tpl, name string) string {
+	return fmt.Sprintf(tpl, url.PathEscape(name))
+}
+
+// fetchAwesomeOPML downloads and parses one awesome-rss-feeds OPML file,
+// using Valkey as a 24h cache (same TTL/rationale as catalogFetchRaw -
+// these files change rarely). Returns the flattened leaf outlines
+// (feedURL in XMLURL), same shape flattenOPML already produces for
+// uploaded OPML files.
+func fetchAwesomeOPML(ctx context.Context, d auth.Deps, opmlURL string) ([]opmlOutline, error) {
+	cacheKey := awesomeCacheKeyPfx + opmlURL
+	var body []byte
+	if cached, hit, err := d.Valkey.Get(ctx, cacheKey); err == nil && hit {
+		body = []byte(cached)
+	} else {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, opmlURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("User-Agent", httpUserAgent)
+		client := &http.Client{Timeout: 30 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				log.Printf("news: close awesome-rss-feeds response body: %v", err)
+			}
+		}()
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("awesome-rss-feeds returned HTTP %d for %s", resp.StatusCode, opmlURL)
+		}
+		raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+		if err != nil {
+			return nil, err
+		}
+		body = raw
+		if cacheErr := d.Valkey.SetWithTTL(ctx, cacheKey, string(raw), catalogCacheTTL); cacheErr != nil {
+			log.Printf("news: awesome-rss-feeds cache write failed for %s: %v", opmlURL, cacheErr)
+		}
+	}
+
+	var doc opmlBody
+	dec := xml.NewDecoder(bytes.NewReader(body))
+	dec.Strict = false
+	if err := dec.Decode(&doc); err != nil {
+		return nil, fmt.Errorf("awesome-rss-feeds opml decode: %w", err)
+	}
+	return flattenOPML(doc.Outlines), nil
+}
+
+// checkOPMLEntriesReachable fetches each entry's feed URL in parallel
+// (bounded by maxConcurrency) and sets Reachable/ReachError in place.
+// Shared by AdminCatalogHandler's yavuz and topic branches - factored out
+// here (rather than tripled inline) when the topic branch was added,
+// since all three reachability loops in this package were already
+// byte-for-byte identical.
+func checkOPMLEntriesReachable(ctx context.Context, pool *db.Pool, entries []OPMLEntry) {
+	sem := make(chan struct{}, maxConcurrency)
+	var wg sync.WaitGroup
+	for i := range entries {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			_, fetchErr := fetchFeed(ctx, pool, entries[idx].URL, entries[idx].Label)
+			if fetchErr != nil {
+				entries[idx].Reachable = false
+				entries[idx].ReachError = fetchErr.Error()
+			} else {
+				entries[idx].Reachable = true
+			}
+		}(i)
+	}
+	wg.Wait()
+}
+
+// awesomeEntriesFromLeaves converts flattened OPML leaves into OPMLEntry,
+// deduplicating against seen (shared with the caller's yavuz/topic entries
+// so a feed appearing in both sources isn't offered twice) and marking
+// AlreadyExists against existingURLs.
+func awesomeEntriesFromLeaves(leaves []opmlOutline, seen, existingURLs map[string]bool) []OPMLEntry {
+	var out []OPMLEntry
+	for _, leaf := range leaves {
+		feedURL := strings.TrimSpace(leaf.XMLURL)
+		if !isHTTPURL(feedURL) {
+			continue
+		}
+		lower := strings.ToLower(feedURL)
+		if seen[lower] {
+			continue
+		}
+		seen[lower] = true
+		label := strings.TrimSpace(leaf.Text)
+		if label == "" {
+			label = strings.TrimSpace(leaf.Title)
+		}
+		if label == "" {
+			label = feedURL
+		}
+		out = append(out, OPMLEntry{
+			URL:           feedURL,
+			Label:         label,
+			AlreadyExists: existingURLs[lower],
+		})
+	}
+	return out
+}
+
 // AdminCatalogHandler is GET /v1/admin/feeds/catalog.
 //
-// Without query params: returns {"languages": ["DE","EN","ES","FR","NL"]}.
-// With ?lang=DE: fetches the GitHub catalog (cached 24 h), filters to the
-// countries for that language, checks reachability in parallel (same semaphore
-// approach as AdminParseOPMLHandler), and returns []OPMLEntry with Reachable
-// and AlreadyExists both populated.
+// Without query params: returns {"languages": [...]} - the yavuz language
+// codes ("DE","EN","ES","FR","NL") followed by the curated topic
+// pseudo-codes ("TOPIC:PROGRAMMING", ...), all selectable through the same
+// picker.
+// With ?lang=DE: fetches the yavuz GitHub catalog (cached 24 h), filters to
+// the countries for that language, merges in any mapped
+// plenaryapp/awesome-rss-feeds country OPML files (catalogAwesomeCountries),
+// checks reachability in parallel (same semaphore approach as
+// AdminParseOPMLHandler), and returns []OPMLEntry with Reachable and
+// AlreadyExists both populated.
+// With ?lang=TOPIC:{key}: fetches a single awesome-rss-feeds topic OPML
+// file (catalogTopicFiles) instead - no yavuz data involved.
 func AdminCatalogHandler(d auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := auth.RequireAdminSession(d, w, r); !ok {
@@ -1241,9 +1423,47 @@ func AdminCatalogHandler(d auth.Deps) http.HandlerFunc {
 
 		lang := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("lang")))
 
-		// No lang param → return language list.
+		// No lang param → return language list, with the curated topic
+		// pseudo-languages (see catalogTopicFiles) appended so the frontend
+		// can offer them in the same picker without a second endpoint.
 		if lang == "" {
-			httperr.JSON(w, http.StatusOK, map[string][]string{"languages": catalogLanguages})
+			langs := append([]string{}, catalogLanguages...)
+			for _, key := range catalogTopicKeys {
+				langs = append(langs, topicPrefix+key)
+			}
+			httperr.JSON(w, http.StatusOK, map[string][]string{"languages": langs})
+			return
+		}
+
+		// "TOPIC:{key}" → fetch a single awesome-rss-feeds topic OPML file
+		// instead of the yavuz country catalog. Handled as its own branch
+		// since topics have no yavuz equivalent to merge with.
+		if strings.HasPrefix(lang, topicPrefix) {
+			topicKey := strings.TrimPrefix(lang, topicPrefix)
+			topicFile, ok := catalogTopicFiles[topicKey]
+			if !ok {
+				http.Error(w, "unsupported topic: "+topicKey, http.StatusBadRequest)
+				return
+			}
+
+			existingFeeds, dbErr := d.Pool.ListFeeds(r.Context())
+			if dbErr != nil {
+				httperr.Internal(w, dbErr)
+				return
+			}
+			existingURLs := make(map[string]bool, len(existingFeeds))
+			for _, f := range existingFeeds {
+				existingURLs[strings.ToLower(f.URL)] = true
+			}
+
+			leaves, err := fetchAwesomeOPML(r.Context(), d, awesomeOPMLURL(awesomeTopicURLTpl, topicFile))
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+			entries := awesomeEntriesFromLeaves(leaves, make(map[string]bool), existingURLs)
+			checkOPMLEntriesReachable(r.Context(), d.Pool, entries)
+			httperr.JSON(w, http.StatusOK, entries)
 			return
 		}
 
@@ -1318,25 +1538,23 @@ func AdminCatalogHandler(d auth.Deps) http.HandlerFunc {
 			}
 		}
 
-		// 5. Check reachability in parallel (max 10 concurrent).
-		sem := make(chan struct{}, maxConcurrency)
-		var wg sync.WaitGroup
-		for i := range entries {
-			wg.Add(1)
-			go func(idx int) {
-				defer wg.Done()
-				sem <- struct{}{}
-				defer func() { <-sem }()
-				_, fetchErr := fetchFeed(r.Context(), d.Pool, entries[idx].URL, entries[idx].Label)
-				if fetchErr != nil {
-					entries[idx].Reachable = false
-					entries[idx].ReachError = fetchErr.Error()
-				} else {
-					entries[idx].Reachable = true
-				}
-			}(i)
+		// 5. Merge in plenaryapp/awesome-rss-feeds country feeds mapped to
+		// this language (see catalogAwesomeCountries's doc comment). A
+		// fetch failure for one country (network hiccup, renamed file) is
+		// logged and skipped rather than failing the whole catalog
+		// response - same "one bad source shouldn't blank the panel"
+		// tradeoff as NewsHandler's per-feed error handling.
+		for _, country := range catalogAwesomeCountries[lang] {
+			leaves, err := fetchAwesomeOPML(r.Context(), d, awesomeOPMLURL(awesomeCountryURLTpl, country))
+			if err != nil {
+				log.Printf("news: catalog: awesome-rss-feeds country %q: %v", country, err)
+				continue
+			}
+			entries = append(entries, awesomeEntriesFromLeaves(leaves, seen, existingURLs)...)
 		}
-		wg.Wait()
+
+		// 6. Check reachability in parallel (max 10 concurrent).
+		checkOPMLEntriesReachable(r.Context(), d.Pool, entries)
 
 		httperr.JSON(w, http.StatusOK, entries)
 	}
