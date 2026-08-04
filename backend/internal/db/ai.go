@@ -16,7 +16,8 @@ import (
 // FK on ai_user_keys.user_id resolves.
 //
 // ai_providers holds both built-in providers (anthropic, openai, gemini,
-// deepseek, kimi — type = their slug) and user-defined OpenAI-compatible endpoints
+// deepseek, kimi, mistral, openrouter — type = their slug) and user-defined
+// OpenAI-compatible endpoints
 // (type = "openai_compat"). encrypted_admin_key is nullable: a provider row
 // can exist without an admin key (user-only) and without a default_model for
 // the built-in entries that expose model selection to callers.
@@ -51,18 +52,20 @@ func (p *Pool) EnsureAISchema(ctx context.Context) error {
 	`); err != nil {
 		return fmt.Errorf("db: ensure ai_user_keys: %w", err)
 	}
-	// Seed the five built-in providers so they always exist in the DB, even
+	// Seed the seven built-in providers so they always exist in the DB, even
 	// before an admin adds any keys. Users can then add their own keys for any
 	// built-in. ON CONFLICT DO NOTHING preserves any admin changes (keys,
 	// enabled flag, model, etc.) made after the initial seed.
 	if _, err := p.Exec(ctx, `
 		INSERT INTO ai_providers (id, type, name, base_url, default_model, user_can_override, enabled, sort_order)
 		VALUES
-			('anthropic', 'anthropic', 'Anthropic (Claude)',  '', 'claude-sonnet-4-5', true, true, 1),
-			('openai',    'openai',    'OpenAI',              '', 'gpt-4o',            true, true, 2),
-			('gemini',    'gemini',    'Google Gemini',       '', 'gemini-2.0-flash',  true, true, 3),
-			('deepseek',  'deepseek',  'DeepSeek',            '', 'deepseek-chat',     true, true, 4),
-			('kimi',      'kimi',      'Kimi (Moonshot AI)',  '', 'kimi-k2.6',         true, true, 5)
+			('anthropic',  'anthropic',  'Anthropic (Claude)',  '', 'claude-sonnet-4-5',  true, true, 1),
+			('openai',     'openai',     'OpenAI',               '', 'gpt-4o',             true, true, 2),
+			('gemini',     'gemini',     'Google Gemini',        '', 'gemini-2.0-flash',   true, true, 3),
+			('deepseek',   'deepseek',   'DeepSeek',             '', 'deepseek-chat',      true, true, 4),
+			('kimi',       'kimi',       'Kimi (Moonshot AI)',   '', 'kimi-k2.6',          true, true, 5),
+			('mistral',    'mistral',    'Mistral AI',           '', 'mistral-large-latest', true, true, 6),
+			('openrouter', 'openrouter', 'OpenRouter',           '', 'openrouter/auto',    true, true, 7)
 		ON CONFLICT (id) DO NOTHING
 	`); err != nil {
 		return fmt.Errorf("db: seed built-in ai_providers: %w", err)
