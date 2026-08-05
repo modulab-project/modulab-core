@@ -80,6 +80,18 @@ const (
 // "unreachable" reports for feeds that just needed a bit longer.
 var safeFeedClient = netguard.SafeHTTPClient(0)
 
+// catalogHTTPClient fetches Core's own fixed, hardcoded upstream URLs -
+// catalogURL and the awesome-rss-feeds OPML templates (awesomeOPMLURL,
+// fetchAwesomeOPML) - never admin- or user-supplied input, unlike
+// safeFeedClient above, so this does not need netguard's SSRF guard.
+// Package-level (M-5, PERFORMANCE_AUDIT.md) instead of a fresh
+// &http.Client{} per call at each of catalogFetchRaw/fetchAwesomeOPML's
+// call sites - a fresh client means a fresh *http.Transport, i.e. no
+// connection/TLS-session reuse, which fetchAwesomeOPML in particular used
+// to pay repeatedly in its loop over several OPML URLs per catalog
+// request.
+var catalogHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
 // SettingKeyFetchTimeoutSeconds/SettingKeyMaxOPMLUploadBytes name the
 // core_settings keys FetchTimeoutSeconds/MaxOPMLUploadBytes below read.
 // Exported so adminapi.AdminLimitsHandler's PATCH handler writes through
@@ -1310,8 +1322,7 @@ func fetchAwesomeOPML(ctx context.Context, d auth.Deps, opmlURL string) ([]opmlO
 			return nil, err
 		}
 		req.Header.Set("User-Agent", httpUserAgent)
-		client := &http.Client{Timeout: 30 * time.Second}
-		resp, err := client.Do(req)
+		resp, err := catalogHTTPClient.Do(req)
 		if err != nil {
 			return nil, err
 		}
@@ -1573,8 +1584,7 @@ func catalogFetchRaw(ctx context.Context, d auth.Deps) (string, error) {
 	}
 	req.Header.Set("User-Agent", httpUserAgent)
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := catalogHTTPClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch catalog: %w", err)
 	}

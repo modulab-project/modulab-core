@@ -555,25 +555,31 @@ func notifySessionRevokedByAdmin(ctx context.Context, d Deps, stored storedSessi
 // keeping them syntactically distinct means a future change to one can
 // never accidentally loosen the other's ownership check.
 //
-// The ownership check (stored.UserID == subject) is the entire reason this
-// exists instead of just exposing RevokeSessionByID more widely: an ID is a
-// one-way hash of a token (SessionID), not a per-user-scoped value, so
-// without this check a self-service caller could pass any other session's
-// ID (e.g. found by guessing, or the same ID shown in an admin
-// screenshot) and end a stranger's session. A mismatch is treated
-// identically to "no session with that ID" (ok = false, no error) - not
-// distinguishing "wrong owner" from "doesn't exist" avoids confirming to
-// the caller that some other, inaccessible session ID is currently valid.
+// The ownership check (stored.UserID == subject) is defense in depth, not
+// the primary guard: this now only ever looks at subject's own tokens (see
+// below), so it should always hold - but keeping it means a future bug in
+// the per-user index can never turn into ending a stranger's session
+// instead of just failing closed. A mismatch is treated identically to "no
+// session with that ID" (ok = false, no error) - not distinguishing "wrong
+// owner" from "doesn't exist" avoids confirming to the caller that some
+// other, inaccessible session ID is currently valid.
+//
+// Scoped to subject's own tokens via the userSessionsKeyPrefix index
+// (M-2, PERFORMANCE_AUDIT.md; same pattern ListActiveSessionsForUser
+// above already uses), not a ScanKeysWithPrefix over every session in the
+// system - this is a self-service, any-approved-user action, so before
+// this fix every call to "end this one session of mine" walked every
+// other user's session key too just to find its own.
 func RevokeOwnSessionByID(ctx context.Context, d Deps, subject, id string) (bool, error) {
-	keys, err := d.Valkey.ScanKeysWithPrefix(ctx, sessionKeyPrefix)
+	tokens, err := d.Valkey.SetMembers(ctx, userSessionsKeyPrefix+subject)
 	if err != nil {
-		return false, fmt.Errorf("auth: revoke own session by id: scan: %w", err)
+		return false, fmt.Errorf("auth: revoke own session by id: list: %w", err)
 	}
-	for _, key := range keys {
-		token := strings.TrimPrefix(key, sessionKeyPrefix)
+	for _, token := range tokens {
 		if SessionID(token) != id {
 			continue
 		}
+		key := sessionKeyPrefix + token
 		raw, exists, err := d.Valkey.Get(ctx, key)
 		if err != nil {
 			return false, fmt.Errorf("auth: revoke own session by id: get: %w", err)
@@ -793,6 +799,23 @@ func checkSessionCountryAnomaly(ctx context.Context, d Deps, token string, sess 
 		}
 	}
 
+	// Only actually rewrite the baseline value when it changed (M-1,
+	// PERFORMANCE_AUDIT.md) - the overwhelmingly common case on every one of
+	// these mid-session checks is "still the same country", which used to
+	// mean writing back the exact value just read on every single
+	// authenticated request. An unchanged check still needs *some* TTL
+	// refresh so this key doesn't expire out from under a session that
+	// slides on indefinitely (ValidateSession's own SessionTTL renewal just
+	// above) - a bare Expire is far cheaper than a full SET, and is a
+	// harmless no-op on a key that was never written in the first place
+	// (nothing to refresh yet: baseline fell back to sess.Country above,
+	// which stays correct on its own for as long as nothing has changed).
+	if baseline == currentCountry {
+		if err := d.Valkey.Expire(ctx, key, SessionTTL); err != nil {
+			log.Printf("auth: refresh session country baseline ttl: %v", err)
+		}
+		return
+	}
 	if err := d.Valkey.SetWithTTL(ctx, key, currentCountry, SessionTTL); err != nil {
 		log.Printf("auth: record session country baseline: %v", err)
 	}
@@ -855,6 +878,15 @@ func checkSessionDeviceAnomaly(ctx context.Context, d Deps, token string, sess S
 		}
 	}
 
+	// Same M-1 fix (PERFORMANCE_AUDIT.md) as checkSessionCountryAnomaly
+	// above: skip the rewrite when the baseline is unchanged, just refresh
+	// its TTL instead.
+	if baseline == currentUserAgent {
+		if err := d.Valkey.Expire(ctx, key, SessionTTL); err != nil {
+			log.Printf("auth: refresh session device baseline ttl: %v", err)
+		}
+		return
+	}
 	if err := d.Valkey.SetWithTTL(ctx, key, currentUserAgent, SessionTTL); err != nil {
 		log.Printf("auth: record session device baseline: %v", err)
 	}
