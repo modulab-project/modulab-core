@@ -210,6 +210,19 @@ func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
 		return fmt.Errorf("db: ensure users_role_check: %w", err)
 	}
 
+	// HasAdmin/AdminCount/ListAdmins (users.go) all filter on role = 'admin',
+	// and ListAdmins runs on every login's new-pending-user notification path
+	// - without an index, every one of those was a sequential scan of the
+	// whole users table (L-3, PERFORMANCE_AUDIT.md). A partial index (only
+	// 'admin' rows) rather than a plain btree on the whole column: the only
+	// queries filtering on role at all filter for exactly 'admin', so there
+	// is no reason to also index the far larger 'user'/'pending' rows.
+	if _, err := p.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_users_role_admin ON users (role) WHERE role = 'admin'
+	`); err != nil {
+		return fmt.Errorf("db: ensure idx_users_role_admin: %w", err)
+	}
+
 	if err := p.EnsureNewsSchema(ctx); err != nil {
 		return err
 	}

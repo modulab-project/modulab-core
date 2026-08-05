@@ -195,18 +195,28 @@ type UserRow struct {
 	LastLoginAt time.Time
 }
 
-// ListUsers returns every user row, oldest first. Unlike the narrower
-// ListPendingUsers this replaces, this includes already-approved and
-// locked users too - the admin frontend derives a single status (Pending /
-// Active / Locked) per row from Approved+Locked itself, rather than this
-// method pre-filtering, so there is exactly one place an admin needs to
-// look to manage anyone.
+// listUsersHardLimit bounds ListUsers below (L-2, PERFORMANCE_AUDIT.md) -
+// not real pagination (AdminUsersPage.tsx has no cursor/paging UI, and
+// nothing about the admin experience needs one at homelab scale), just a
+// backstop so a directory far larger than anything ModuLab is designed for
+// (a large IdP JIT-provisioning many accounts) can't turn one page load
+// into scanning and AES-GCM-decrypting an unbounded number of rows. 1000 is
+// comfortably above any realistic homelab/small-org user count.
+const listUsersHardLimit = 1000
+
+// ListUsers returns every user row, oldest first (up to listUsersHardLimit).
+// Unlike the narrower ListPendingUsers this replaces, this includes
+// already-approved and locked users too - the admin frontend derives a
+// single status (Pending / Active / Locked) per row from Approved+Locked
+// itself, rather than this method pre-filtering, so there is exactly one
+// place an admin needs to look to manage anyone.
 func (p *Pool) ListUsers(ctx context.Context) ([]UserRow, error) {
 	rows, err := p.Query(ctx, `
 		SELECT id, email, name, role, approved, locked, created_at, last_login_at
 		FROM users
 		ORDER BY created_at ASC
-	`)
+		LIMIT $1
+	`, listUsersHardLimit)
 	if err != nil {
 		return nil, fmt.Errorf("db: list users: %w", err)
 	}

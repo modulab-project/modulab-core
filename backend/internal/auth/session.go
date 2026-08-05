@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/crypto"
 	"github.com/modulab-project/modulab-core/backend/internal/mail"
@@ -950,6 +952,13 @@ const rdnsCacheTTL = time.Hour
 // "no hostname" rather than delaying the whole response.
 const rdnsLookupTimeout = 2 * time.Second
 
+// rdnsResolveConcurrency bounds how many resolveHostname calls
+// ListActiveSessions (below) runs at once (L-1, PERFORMANCE_AUDIT.md) - high
+// enough that a homelab-scale session count resolves in essentially one
+// batch, low enough not to fire off an unbounded burst of concurrent DNS
+// queries if the session count is ever much larger than that.
+const rdnsResolveConcurrency = 8
+
 // resolveHostname returns ip's reverse-DNS name (PTR record), or "" if ip is
 // empty, has no PTR record, or the lookup fails/times out. Results -
 // including the negative "no hostname" case, so a PTR-less IP is not
@@ -1026,12 +1035,17 @@ func ListActiveSessions(ctx context.Context, d Deps) ([]ActiveSession, error) {
 		}
 		token := strings.TrimPrefix(key, sessionKeyPrefix)
 		as := ActiveSession{
-			ID:        SessionID(token),
+			ID: SessionID(token),
+			// Hostname is deliberately left unset here and filled in by the
+			// bounded-concurrency pass below (L-1, PERFORMANCE_AUDIT.md) -
+			// resolveHostname is the one genuinely slow step in this loop (a
+			// real DNS PTR lookup on an rDNS-cache miss, up to
+			// rdnsLookupTimeout), everything else in this function is a
+			// same-Docker-network Valkey round trip.
 			Name:      sess.Name,
 			Email:     sess.Email,
 			Role:      sess.Role,
 			IP:        sess.IP,
-			Hostname:  resolveHostname(ctx, d, sess.IP),
 			UserAgent: sess.UserAgent,
 			Country:   sess.Country,
 		}
@@ -1053,6 +1067,30 @@ func ListActiveSessions(ctx context.Context, d Deps) ([]ActiveSession, error) {
 		}
 		out = append(out, as)
 	}
+
+	// Resolve every entry's hostname concurrently, bounded to
+	// rdnsResolveConcurrency at a time (L-1, PERFORMANCE_AUDIT.md) - run
+	// sequentially, k sessions with a cold rDNS cache would cost up to
+	// k*rdnsLookupTimeout in the worst case (an unreachable/slow resolver);
+	// bounded concurrency instead caps the wall-clock cost at roughly
+	// ceil(k/rdnsResolveConcurrency)*rdnsLookupTimeout. Each goroutine below
+	// only ever touches its own index of out, never a shared variable, so
+	// this needs no locking. resolveHostname itself never returns an error
+	// (a failed/timed-out lookup just yields ""), so g.Wait()'s return value
+	// is always nil and deliberately ignored.
+	// No per-iteration `i := i` capture needed - go.mod requires Go >= 1.26.5,
+	// where each loop iteration already gets its own copy of i (Go 1.22+
+	// semantics), so this closure over i is safe as written.
+	var g errgroup.Group
+	g.SetLimit(rdnsResolveConcurrency)
+	for i := range out {
+		g.Go(func() error {
+			out[i].Hostname = resolveHostname(ctx, d, out[i].IP)
+			return nil
+		})
+	}
+	_ = g.Wait()
+
 	return out, nil
 }
 
