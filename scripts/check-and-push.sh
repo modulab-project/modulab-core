@@ -554,48 +554,79 @@ backend_golangci() {
   go run "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_VERSION}.0" run
 }
 
-# Two govulncheck passes, because they answer different questions:
+# govulncheck's default symbol scan answers "does code in this repo *call* a
+# known-vulnerable function?" — that's the hard gate, identical to CI's
+# govulncheck step. But its summary also mentions a second number that the
+# exit code deliberately ignores:
 #
-#   default (-scan symbol): "does code in this repo call a known-vulnerable
-#       function?" — that's the hard gate, same as CI's govulncheck step.
+#   This scan also found 0 vulnerabilities in packages you import and 1
+#   vulnerability in modules you require, but your code doesn't appear to
+#   call these vulnerabilities.
 #
-#   -scan module: "is any module in go.mod known-vulnerable at all, reachable
-#       or not?" — this is the count in the summary line the symbol scan
-#       prints ("...and 1 vulnerability in modules you require, but your code
-#       doesn't appear to call these"). The symbol scan exits 0 on those, so
-#       until now they were printed and then completely ignored. They matter
-#       because "not currently reachable" is a property of today's call
-#       graph: the next refactor that starts calling into that dependency
-#       turns a silent line of output into a live CVE. Warn-only, since
-#       blocking on an unreachable CVE with no fixed release available would
-#       wedge every commit.
+# Those module-level advisories exit 0, so they used to be printed and then
+# forgotten. They matter because "not currently reachable" is a property of
+# today's call graph: the next refactor that starts calling into that
+# dependency silently turns that line of output into a live CVE.
 #
-# Note the two flags are unrelated: -mode picks the *input* (source, binary,
-# extract), -scan picks the *depth* (module, package, symbol). Module depth
-# additionally rejects package patterns — internal/scan/flags.go:
-# "patterns are not accepted for module only scanning" — so no "./..." here.
-GOVULNCHECK_EXIT_VULNS=3
+# Getting at them separately turned out not to be worth it. The obvious
+# route, a second `govulncheck -scan module` pass, does not work in this
+# repo: -scan module rejects package patterns (internal/scan/flags.go,
+# "patterns are not accepted for module only scanning"), but runSource then
+# still calls packages.Load with the empty pattern list, which the go command
+# resolves to "." — and backend/ has no .go files at its root, only
+# subdirectories. Result: "no Go files in .../backend", exit 1. (Note also
+# that -mode and -scan are unrelated: -mode picks the input — source, binary,
+# extract — while -scan picks the depth.)
+#
+# So instead of a second full scan over the network, the count is read back
+# out of the scan that already ran. Cheaper, and it can't disagree with the
+# gate. Warn-only: blocking on an unreachable CVE that may have no fixed
+# release yet would wedge every commit.
+# Set here, not inside the function: run_step executes every check in a
+# subshell, so an assignment made in backend_govulncheck_symbol would not be
+# visible to backend_govulncheck_advisory. The file itself survives, being on
+# disk under RUNDIR.
+GOVULNCHECK_OUT="$RUNDIR/govulncheck-symbol.txt"
 
 backend_govulncheck_symbol() {
-  go run "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}" ./...
+  go run "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}" ./... 2>&1 | tee "$GOVULNCHECK_OUT"
+  return "${PIPESTATUS[0]}"
 }
 
-backend_govulncheck_module() {
-  local rc=0
-  go run "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}" -scan module || rc=$?
-  case $rc in
-    0) ;;
-    "$GOVULNCHECK_EXIT_VULNS")
-      warn "Module-level advisories above are NOT reachable from this repo's call graph today (the symbol scan passed), so they don't block. Worth a look when bumping deps."
-      ;;
-    *)
-      # Anything other than "clean" or "found vulnerabilities" is govulncheck
-      # itself failing — a bad flag, no network, a broken module cache. Saying
-      # "advisory findings" there would be a lie in the reassuring direction.
-      warn "govulncheck could not complete the module scan (exit $rc) — that's a tool/environment error, not a clean result."
-      ;;
-  esac
-  return $rc
+# The summary sentence is hard-wrapped at ~80 columns, so the number and the
+# phrase it belongs to routinely land on different lines ("...and 1\n
+# vulnerability in modules you require..."). Newlines are folded to spaces
+# before matching, otherwise a line-based grep misses exactly the cases that
+# matter.
+backend_govulncheck_advisory() {
+  if [ -z "$GOVULNCHECK_OUT" ] || [ ! -s "$GOVULNCHECK_OUT" ]; then
+    note "No govulncheck output captured (scan skipped or failed) — nothing to report."
+    return 0
+  fi
+
+  local joined n
+  joined="$(tr '\n' ' ' < "$GOVULNCHECK_OUT" | tr -s ' ')"
+  n="$(printf '%s' "$joined" | sed -nE 's/.*[^0-9]([0-9]+) vulnerabilit(y|ies) in modules you require.*/\1/p')"
+
+  if [ -z "$n" ]; then
+    # Either genuinely nothing to report, or the wording changed in a newer
+    # govulncheck. Say which, rather than implying a clean result.
+    if printf '%s' "$joined" | grep -q "No vulnerabilities found"; then
+      note "No module-level advisories."
+    else
+      warn "Could not find the 'in modules you require' summary in govulncheck's output — the wording may have changed in $GOVULNCHECK_VERSION. Check backend_govulncheck_advisory()."
+    fi
+    return 0
+  fi
+
+  if [ "$n" -eq 0 ]; then
+    note "No module-level advisories."
+    return 0
+  fi
+
+  warn "$n vulnerabilit$([ "$n" -eq 1 ] && echo y || echo ies) in modules you require, not reachable from this repo's call graph today — not blocking."
+  note "Details: (cd backend && go run golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION} -show verbose ./...)"
+  return 1
 }
 
 run_backend() {
@@ -620,7 +651,7 @@ run_backend() {
     skip_step "Backend: govulncheck (--fast)"
   else
     run_step      "Backend: govulncheck ./... ($GOVULNCHECK_VERSION, same as CI)" "$dir" backend_govulncheck_symbol
-    run_step_warn "Backend: govulncheck -scan module (advisory)"                  "$dir" backend_govulncheck_module
+    run_step_warn "Backend: module-level advisories (from the scan above)"        "$dir" backend_govulncheck_advisory
   fi
   return $FAILED
 }
