@@ -168,7 +168,7 @@ services:
   # via SEARXNG_REDIS_URL=redis://valkey:6379/1) - see searxng-valkey below.
   valkey:
     # Digest-pinned - same reasoning as the traefik service above.
-    image: valkey/valkey:8-alpine@sha256:77643d152547b446fc15cbafaff22004545663fcd40c6b28038ad283837baa75
+    image: valkey/valkey:9-alpine@sha256:ee91f7a174ac4d6a6b0685b3a60e321f0a9dbbb691f9b0e285be2ba1d1be8328
     restart: unless-stopped
     # --requirepass on the command line rather than a mounted valkey.conf:
     # one less bind mount for a single directive. VALKEY_PASSWORD is
@@ -217,7 +217,7 @@ services:
   # restart costs one slower search, and persisting it would only mean
   # keeping other people's search queries on disk for no benefit.
   searxng-valkey:
-    image: valkey/valkey:8-alpine@sha256:77643d152547b446fc15cbafaff22004545663fcd40c6b28038ad283837baa75
+    image: valkey/valkey:9-alpine@sha256:ee91f7a174ac4d6a6b0685b3a60e321f0a9dbbb691f9b0e285be2ba1d1be8328
     restart: unless-stopped
     mem_limit: 128m
     cpus: 0.25
