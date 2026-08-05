@@ -210,14 +210,55 @@ export function AppShell({
     return () => mql.removeEventListener("change", onChange);
   }, []);
 
+  // frontendStale: true once a getHealth() response reports a backend
+  // version that no longer matches the JS bundle this tab actually has
+  // loaded (FRONTEND_VERSION, baked in at build time from package.json).
+  // That mismatch means a release happened after this tab's page load -
+  // the running backend has moved on, but this tab is still executing old
+  // frontend code. Added 2026-08-05 as a safety net alongside disabling
+  // the service worker's app-shell precaching (vite.config.ts) and adding
+  // real Cache-Control headers (deploy/nginx.conf): those two stop this
+  // tab from being handed stale code on its *next* load, but do nothing
+  // for a tab that was already open across a deploy - only reloading gets
+  // it current code, and nothing prompts that without this check.
+  const [frontendStale, setFrontendStale] = useState(false);
+
   // Unconditional on mount, not gated behind a session effect of its own -
   // by the time AppShell renders, the caller has already resolved a
   // session (see lib/useSession.ts), so there is nothing left to wait on
   // here.
   useEffect(() => {
-    getHealth()
-      .then(setHealth)
-      .catch(() => setHealth(null));
+    const checkHealth = () => {
+      getHealth()
+        .then((h) => {
+          setHealth(h);
+          setFrontendStale(h.version !== FRONTEND_VERSION);
+        })
+        .catch(() => setHealth(null));
+    };
+
+    checkHealth();
+
+    // Two triggers, not one: a fixed interval alone would miss a deploy
+    // that happens while this tab is backgrounded and never gets a
+    // setInterval tick delayed past the throttling browsers apply to
+    // hidden tabs; a visibilitychange listener alone would miss a deploy
+    // during a long unattended foreground session (e.g. an always-on
+    // shared browser homepage - see Home.tsx's top-of-file comment on
+    // that intended use case). Together they cover both without needing a
+    // short, battery/traffic-unfriendly interval.
+    const intervalId = window.setInterval(checkHealth, 5 * 60 * 1000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        checkHealth();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
 
   // Load active modules (for navigation links) and count pending updates
@@ -555,6 +596,25 @@ export function AppShell({
 
   return (
     <div className="flex h-dvh flex-col bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100">
+      {frontendStale && (
+        // Deliberately not a useToasts() toast: those auto-dismiss after
+        // 6s (see lib/toasts.ts), which is exactly wrong for something the
+        // user needs to actually act on to fix - a stale tab that never
+        // gets reloaded will just keep re-triggering the same problem this
+        // banner exists to solve. Shown regardless of hideChrome (a
+        // module's fullscreen view is not exempt from running stale code
+        // either).
+        <div className="flex flex-none items-center justify-center gap-3 bg-amber-100 px-3 py-2 text-sm text-amber-900 dark:bg-amber-900/40 dark:text-amber-100">
+          <span>{t("shell.stale_version_banner")}</span>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="flex-none rounded-md bg-amber-600 px-3 py-1 font-medium text-white hover:bg-amber-700 dark:bg-amber-500 dark:hover:bg-amber-400"
+          >
+            {t("shell.reload_now")}
+          </button>
+        </div>
+      )}
       {!hideChrome && (
         <Header
           session={session}

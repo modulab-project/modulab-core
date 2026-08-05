@@ -745,6 +745,8 @@
     "all_ok": "All systems normal",
     "attention": "Attention needed",
     "versions": "Core {{core}} · Frontend {{frontend}}",
+    "stale_version_banner": "A new version is running on the server. Reload to get the latest interface.",
+    "reload_now": "Reload now",
     "close": "Close",
     "close_chat": "Close chat",
     "system_status": "System status",

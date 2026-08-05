@@ -745,6 +745,8 @@
     "all_ok": "Alle systemen normaal",
     "attention": "Aandacht vereist",
     "versions": "Core {{core}} · Frontend {{frontend}}",
+    "stale_version_banner": "Op de server draait een nieuwere versie. Herlaad de pagina voor de actuele interface.",
+    "reload_now": "Nu herladen",
     "close": "Sluiten",
     "close_chat": "Chat sluiten",
     "system_status": "Systeemstatus",

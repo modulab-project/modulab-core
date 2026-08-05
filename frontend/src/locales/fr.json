@@ -745,6 +745,8 @@
     "all_ok": "Tous les systèmes normaux",
     "attention": "Attention requise",
     "versions": "Core {{core}} · Frontend {{frontend}}",
+    "stale_version_banner": "Une nouvelle version tourne sur le serveur. Recharge la page pour obtenir l'interface actuelle.",
+    "reload_now": "Recharger maintenant",
     "close": "Fermer",
     "close_chat": "Fermer le chat",
     "system_status": "État du système",
