@@ -554,7 +554,11 @@ func main() {
 			if !fi.Exists {
 				return setup.GeoIPFileInfo{}
 			}
-			return setup.GeoIPFileInfo{Exists: true, SizeBytes: fi.SizeBytes, ModifiedAt: fi.ModifiedAt.UTC().Format(time.RFC3339)}
+			out := setup.GeoIPFileInfo{Exists: true, SizeBytes: fi.SizeBytes, ModifiedAt: fi.ModifiedAt.UTC().Format(time.RFC3339)}
+			if !fi.BuildDate.IsZero() {
+				out.BuildDate = fi.BuildDate.Format(time.RFC3339)
+			}
+			return out
 		}
 		return toFileInfo(cityInfo), toFileInfo(asnInfo)
 	}

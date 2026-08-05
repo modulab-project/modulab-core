@@ -367,6 +367,17 @@ type FileInfo struct {
 	Exists     bool
 	SizeBytes  int64
 	ModifiedAt time.Time
+	// BuildDate is MaxMind's own edition build timestamp, read from the
+	// .mmdb file's embedded metadata (Reader.Metadata().BuildEpoch, a Unix
+	// timestamp every MaxMind DB file carries regardless of who downloaded
+	// it or when) - distinct from ModifiedAt, which only says when *we*
+	// wrote this file locally. The two normally track each other closely
+	// (we download within a day of a weekly MaxMind release), but BuildDate
+	// is what actually answers "how stale is this data at the source",
+	// independent of our own download cadence. Zero time.Time if the file
+	// couldn't be opened/parsed (corrupt download, wrong format) even
+	// though os.Stat above found it.
+	BuildDate time.Time
 }
 
 func fileInfo(path string) FileInfo {
@@ -374,7 +385,19 @@ func fileInfo(path string) FileInfo {
 	if err != nil {
 		return FileInfo{}
 	}
-	return FileInfo{Exists: true, SizeBytes: info.Size(), ModifiedAt: info.ModTime()}
+	fi := FileInfo{Exists: true, SizeBytes: info.Size(), ModifiedAt: info.ModTime()}
+	// Best-effort: a missing/zero BuildDate just means the admin page shows
+	// one less data point, never an error surfaced anywhere - Status() is a
+	// read-only diagnostic, not something LookupCity/LookupASN depend on.
+	if rd, openErr := geoip2.Open(path); openErr == nil {
+		if buildEpoch := rd.Metadata().BuildEpoch; buildEpoch > 0 {
+			fi.BuildDate = time.Unix(int64(buildEpoch), 0).UTC()
+		}
+		if closeErr := rd.Close(); closeErr != nil {
+			log.Printf("geoip: close %s after reading metadata: %v", path, closeErr)
+		}
+	}
+	return fi
 }
 
 // Status reports both editions' current on-disk FileInfo for dataDir -

@@ -191,12 +191,21 @@ function FileStatusRow({ label, file, t }: { label: string; file: GeoIPFileInfo;
       <dt className="font-medium text-gray-600 dark:text-gray-400">{label}</dt>
       <dd>
         {file.exists ? (
-          <span className="text-teal-700 dark:text-teal-400">
-            {t("admin.geoip.file_present", {
-              size: formatBytes(file.size_bytes ?? 0),
-              time: file.modified_at ? new Date(file.modified_at).toLocaleString() : "—",
-            })}
-          </span>
+          <>
+            <div className="text-teal-700 dark:text-teal-400">
+              {t("admin.geoip.file_present", {
+                size: formatBytes(file.size_bytes ?? 0),
+                time: file.modified_at ? new Date(file.modified_at).toLocaleString() : "—",
+              })}
+            </div>
+            {/* build_date is MaxMind's own edition timestamp, distinct from
+                modified_at (when we downloaded it) - see GeoIPFileInfo's
+                doc comment in lib/api.ts. May be absent even when the file
+                exists, if it couldn't be parsed. */}
+            {file.build_date && (
+              <div>{t("admin.geoip.file_build_date", { date: new Date(file.build_date).toLocaleDateString() })}</div>
+            )}
+          </>
         ) : (
           <span className="text-gray-400 dark:text-gray-500">{t("admin.geoip.file_missing")}</span>
         )}

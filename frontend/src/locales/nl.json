@@ -666,7 +666,8 @@
       "download_failed": "Laatste downloadpoging mislukt: {{error}}",
       "databases_title": "Databases",
       "file_present": "Aanwezig — {{size}}, laatst geschreven {{time}}",
-      "file_missing": "Nog niet gedownload."
+      "file_missing": "Nog niet gedownload.",
+      "file_build_date": "MaxMind-buildatum: {{date}}"
     }
   },
   "home": {

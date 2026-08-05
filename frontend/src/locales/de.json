@@ -666,7 +666,8 @@
       "download_failed": "Letzter Download-Versuch fehlgeschlagen: {{error}}",
       "databases_title": "Datenbanken",
       "file_present": "Vorhanden — {{size}}, zuletzt geschrieben {{time}}",
-      "file_missing": "Noch nicht heruntergeladen."
+      "file_missing": "Noch nicht heruntergeladen.",
+      "file_build_date": "MaxMind-Build-Datum: {{date}}"
     }
   },
   "home": {

@@ -474,7 +474,13 @@ export interface GeoIPFileInfo {
   exists: boolean;
   // Only present when exists is true.
   size_bytes?: number;
+  // When Core last wrote this file locally.
   modified_at?: string;
+  // MaxMind's own edition build timestamp (from the file's embedded
+  // metadata) - may be absent even when exists is true, if the file
+  // couldn't be parsed. Distinct from modified_at: this says how fresh the
+  // data is at the source, not when we happened to download it.
+  build_date?: string;
 }
 
 // Body of POST /v1/admin/geoip/configure - mirrors

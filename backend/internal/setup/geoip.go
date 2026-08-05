@@ -83,10 +83,18 @@ type GeoIPStatusResponse struct {
 // GeoIPFileInfo describes one edition's .mmdb file on disk.
 type GeoIPFileInfo struct {
 	Exists bool `json:"exists"`
-	// SizeBytes/ModifiedAt are only meaningful (and only populated) when
-	// Exists is true.
+	// SizeBytes/ModifiedAt/BuildDate are only meaningful (and only
+	// populated) when Exists is true. BuildDate may still be empty even
+	// then - it comes from parsing the file's own embedded metadata
+	// (internal/geoip.FileInfo.BuildDate), which fails open on a corrupt or
+	// unreadable file rather than erroring the whole status response.
 	SizeBytes  int64  `json:"size_bytes,omitempty"`
 	ModifiedAt string `json:"modified_at,omitempty"` // RFC3339
+	// BuildDate is MaxMind's own edition build timestamp (when MaxMind
+	// itself generated this database), not when Core downloaded it -
+	// see internal/geoip.FileInfo.BuildDate's doc comment for why both are
+	// useful.
+	BuildDate string `json:"build_date,omitempty"` // RFC3339
 }
 
 // GeoIPRuntimeConfig is the fully resolved configuration internal/geoip's

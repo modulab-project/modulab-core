@@ -666,7 +666,8 @@
       "download_failed": "El último intento de descarga falló: {{error}}",
       "databases_title": "Bases de datos",
       "file_present": "Presente — {{size}}, última escritura {{time}}",
-      "file_missing": "Aún no descargada."
+      "file_missing": "Aún no descargada.",
+      "file_build_date": "Fecha de compilación de MaxMind: {{date}}"
     }
   },
   "home": {
