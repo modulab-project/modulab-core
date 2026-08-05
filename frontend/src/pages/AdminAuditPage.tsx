@@ -38,6 +38,8 @@ const EVENT_TYPE_CATEGORIES: { category: string; types: string[] }[] = [
     types: [
       "config.smtp",
       "config.smtp.deleted",
+      "config.geoip",
+      "config.geoip.deleted",
       "config.oidc",
       "config.oidc.deleted",
       "config.searxng",
@@ -72,6 +74,10 @@ const EVENT_TYPE_CATEGORIES: { category: string; types: string[] }[] = [
     ],
   },
   { category: "feed", types: ["feed.created", "feed.updated", "feed.deleted"] },
+  {
+    category: "geoip",
+    types: ["geoip.download_succeeded", "geoip.download_failed"],
+  },
   {
     category: "quicklink",
     types: ["quicklink.created", "quicklink.updated", "quicklink.deleted"],

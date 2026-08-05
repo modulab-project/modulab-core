@@ -567,7 +567,8 @@
         "feed": "Feeds de noticias",
         "quicklink": "Accesos rápidos",
         "store": "Tienda de módulos",
-        "rate_limit": "Límite de solicitudes"
+        "rate_limit": "Límite de solicitudes",
+        "geoip": "GeoIP"
       },
       "event_types": {
         "auth_login": "Inicio de sesión",
@@ -618,7 +619,11 @@
         "store_sync_triggered": "Tienda de módulos sincronizada",
         "store_custom_source_added": "Fuente de módulos personalizada añadida",
         "store_custom_source_removed": "Fuente de módulos personalizada eliminada",
-        "rate_limit_exceeded": "Límite de solicitudes excedido"
+        "rate_limit_exceeded": "Límite de solicitudes excedido",
+        "config_geoip": "Configuración de GeoIP modificada",
+        "config_geoip_deleted": "Configuración de GeoIP eliminada",
+        "geoip_download_succeeded": "Actualización de la base de datos GeoIP correcta",
+        "geoip_download_failed": "Fallo al actualizar la base de datos GeoIP"
       }
     },
     "modules": {

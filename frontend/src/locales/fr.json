@@ -567,7 +567,8 @@
         "feed": "Flux d'actualités",
         "quicklink": "Liens rapides",
         "store": "Store de modules",
-        "rate_limit": "Limitation de débit"
+        "rate_limit": "Limitation de débit",
+        "geoip": "GeoIP"
       },
       "event_types": {
         "auth_login": "Connexion",
@@ -618,7 +619,11 @@
         "store_sync_triggered": "Store de modules synchronisé",
         "store_custom_source_added": "Source de modules personnalisée ajoutée",
         "store_custom_source_removed": "Source de modules personnalisée supprimée",
-        "rate_limit_exceeded": "Limite de débit dépassée"
+        "rate_limit_exceeded": "Limite de débit dépassée",
+        "config_geoip": "Configuration GeoIP modifiée",
+        "config_geoip_deleted": "Configuration GeoIP supprimée",
+        "geoip_download_succeeded": "Mise à jour de la base GeoIP réussie",
+        "geoip_download_failed": "Échec de la mise à jour de la base GeoIP"
       }
     },
     "modules": {

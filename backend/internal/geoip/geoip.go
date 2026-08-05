@@ -16,6 +16,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -30,6 +31,7 @@ import (
 
 	geoip2 "github.com/oschwald/geoip2-golang/v2"
 
+	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
 )
@@ -128,7 +130,7 @@ func downloadAll(ctx context.Context, deps Deps) {
 	}
 
 	if err := os.MkdirAll(deps.DataDir, 0o755); err != nil {
-		recordFailure(ctx, deps.Pool, fmt.Errorf("create data dir %q: %w", deps.DataDir, err))
+		recordFailure(ctx, deps.Pool, deps.MasterKey, fmt.Errorf("create data dir %q: %w", deps.DataDir, err))
 		return
 	}
 
@@ -139,7 +141,7 @@ func downloadAll(ctx context.Context, deps Deps) {
 		}
 	}
 	if len(failures) > 0 {
-		recordFailure(ctx, deps.Pool, fmt.Errorf("%s", strings.Join(failures, "; ")))
+		recordFailure(ctx, deps.Pool, deps.MasterKey, fmt.Errorf("%s", strings.Join(failures, "; ")))
 		return
 	}
 
@@ -149,17 +151,37 @@ func downloadAll(ctx context.Context, deps Deps) {
 	if err := deps.Pool.SetSetting(ctx, setup.GeoIPLastUpdateAtSettingKey, time.Now().UTC().Format(time.RFC3339)); err != nil {
 		log.Printf("geoip: record last update time: %v", err)
 	}
+	// Audited (not just the core_settings timestamp above, which only ever
+	// shows the single most recent attempt) so an admin reviewing the audit
+	// log later can see the full history of refreshes, not just today's
+	// state - same reasoning EventGeoIPDownloadSucceeded/Failed's own doc
+	// comment gives. No human actor (ActorID/ActorEmail empty), same shape
+	// as EventModuleEgressDenied.
+	if err := audit.Log(ctx, deps.Pool, deps.MasterKey, audit.LogParams{
+		EventType: audit.EventGeoIPDownloadSucceeded,
+		Details:   fmt.Sprintf(`{"editions":[%q,%q]}`, cityEdition, asnEdition),
+	}); err != nil {
+		log.Printf("geoip: audit download success: %v", err)
+	}
 }
 
-// recordFailure logs err and best-effort persists it to
+// recordFailure logs err, best-effort persists it to
 // setup.GeoIPLastUpdateErrorSettingKey - a failure to write that setting
 // itself is only logged, never escalated, since the download failure it
 // was trying to record is already the more important fact and this must
-// not prevent the next tick from trying again.
-func recordFailure(ctx context.Context, pool *db.Pool, err error) {
+// not prevent the next tick from trying again - and audits it (see
+// audit.EventGeoIPDownloadFailed's doc comment).
+func recordFailure(ctx context.Context, pool *db.Pool, masterKey string, err error) {
 	log.Printf("geoip: download: %v", err)
 	if setErr := pool.SetSetting(ctx, setup.GeoIPLastUpdateErrorSettingKey, err.Error()); setErr != nil {
 		log.Printf("geoip: record last update error: %v", setErr)
+	}
+	errJSON, _ := json.Marshal(err.Error())
+	if auditErr := audit.Log(ctx, pool, masterKey, audit.LogParams{
+		EventType: audit.EventGeoIPDownloadFailed,
+		Details:   fmt.Sprintf(`{"error":%s}`, errJSON),
+	}); auditErr != nil {
+		log.Printf("geoip: audit download failure: %v", auditErr)
 	}
 }
 

@@ -550,14 +550,59 @@ func main() {
 			http.Error(w, err.Error(), http.StatusPreconditionFailed)
 			return
 		}
+		// Read current config before the handler overwrites it - same
+		// "diff old vs new for the audit log" shape as SMTP's configure
+		// route above. Error ignored: "not configured yet" (first-ever
+		// save) just means old stays the zero value, so the diff below
+		// shows account_id going from "" to whatever was submitted.
+		oldGeoIP, _ := setup.ResolveGeoIPConfig(r.Context(), pool, masterKey)
+
+		// Buffer the body so the handler can still read it after we peek.
+		bodyBytes, _ := io.ReadAll(r.Body)
+		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+		rw := &responseRecorder{ResponseWriter: w, code: http.StatusOK}
 		setup.GeoIPConfigureHandler(pool, masterKey, func() {
 			// Bounded by downloadTimeout per edition inside internal/geoip -
 			// synchronous is fine here, this never runs longer than a few
 			// tens of seconds even on a cold download.
 			geoip.TriggerNow(r.Context(), geoipDeps)
-		})(w, r)
+		})(rw, r)
+		if rw.code < 400 {
+			if sess, ok := auth.SessionFromContext(r.Context()); ok {
+				var newReq struct {
+					AccountID  string `json:"account_id"`
+					LicenseKey string `json:"license_key"`
+				}
+				_ = json.Unmarshal(bodyBytes, &newReq)
+				details := geoipDiff(oldGeoIP, newReq.AccountID, newReq.LicenseKey != "")
+				if err := audit.Log(r.Context(), pool, masterKey, audit.LogParams{
+					EventType:  audit.EventConfigGeoIP,
+					ActorID:    sess.UserID,
+					ActorEmail: sess.Email,
+					Details:    details,
+				}); err != nil {
+					log.Printf("main: audit geoip configure: %v", err)
+				}
+			}
+		}
 	})))
-	mux.Handle("DELETE /v1/admin/geoip/delete", adminReauthOnly(setup.GeoIPDeleteHandler(pool)))
+	mux.Handle("DELETE /v1/admin/geoip/delete", adminReauthOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rw := &responseRecorder{ResponseWriter: w, code: http.StatusOK}
+		setup.GeoIPDeleteHandler(pool)(rw, r)
+		if rw.code < 400 {
+			masterKey, _ := setup.ResolveMasterKey(r.Context(), pool, cfg.MasterKey)
+			if sess, ok := auth.SessionFromContext(r.Context()); ok && masterKey != "" {
+				if err := audit.Log(r.Context(), pool, masterKey, audit.LogParams{
+					EventType:  audit.EventConfigGeoIPDel,
+					ActorID:    sess.UserID,
+					ActorEmail: sess.Email,
+				}); err != nil {
+					log.Printf("main: audit geoip delete: %v", err)
+				}
+			}
+		}
+	})))
 
 	// Admin system page + OIDC post-wizard config + audit log.
 	// All admin only (same tier as SMTP above).
@@ -1131,6 +1176,32 @@ func smtpDiff(old setup.SMTPRuntimeConfig, newHost string, newPort int, newFrom,
 		// Format: "field":"old → new"
 		enc, _ := json.Marshal(fmt.Sprintf("%s → %s", c.oldVal, c.newVal))
 		fmt.Fprintf(buf, "%q:%s", c.key, enc)
+	}
+	buf.WriteByte('}')
+	return buf.String()
+}
+
+// geoipDiff builds a JSON object containing only the GeoIP fields that
+// changed between old (the previously persisted config) and the newAccountID
+// submitted by the admin - same "only show what actually happened, never log
+// the credential itself" contract as smtpDiff. licenseKeyChanged is passed in
+// separately (not diffed value-to-value, unlike account_id) since
+// GeoIPConfigureHandler never returns the old license key at all to diff
+// against - the caller already knows from the request body alone whether a
+// new one was submitted. Returns "{}" when nothing changed at all.
+func geoipDiff(old setup.GeoIPRuntimeConfig, newAccountID string, licenseKeyChanged bool) string {
+	buf := bytes.NewBufferString("{")
+	first := true
+	if old.AccountID != newAccountID {
+		enc, _ := json.Marshal(fmt.Sprintf("%s → %s", old.AccountID, newAccountID))
+		fmt.Fprintf(buf, "%q:%s", "account_id", enc)
+		first = false
+	}
+	if licenseKeyChanged {
+		if !first {
+			buf.WriteByte(',')
+		}
+		fmt.Fprintf(buf, "%q:%q", "license_key", "updated")
 	}
 	buf.WriteByte('}')
 	return buf.String()

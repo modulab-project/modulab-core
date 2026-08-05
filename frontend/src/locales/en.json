@@ -567,7 +567,8 @@
         "feed": "News feeds",
         "quicklink": "Quick links",
         "store": "Module store",
-        "rate_limit": "Rate limiting"
+        "rate_limit": "Rate limiting",
+        "geoip": "GeoIP"
       },
       "event_types": {
         "auth_login": "Login",
@@ -618,7 +619,11 @@
         "store_sync_triggered": "Module store synced",
         "store_custom_source_added": "Custom module source added",
         "store_custom_source_removed": "Custom module source removed",
-        "rate_limit_exceeded": "Rate limit exceeded"
+        "rate_limit_exceeded": "Rate limit exceeded",
+        "config_geoip": "GeoIP configuration changed",
+        "config_geoip_deleted": "GeoIP configuration removed",
+        "geoip_download_succeeded": "GeoIP database refresh succeeded",
+        "geoip_download_failed": "GeoIP database refresh failed"
       }
     },
     "modules": {

@@ -567,7 +567,8 @@
         "feed": "Nieuwsfeeds",
         "quicklink": "Snelkoppelingen",
         "store": "Modulewinkel",
-        "rate_limit": "Snelheidslimiet"
+        "rate_limit": "Snelheidslimiet",
+        "geoip": "GeoIP"
       },
       "event_types": {
         "auth_login": "Aanmelding",
@@ -618,7 +619,11 @@
         "store_sync_triggered": "Modulewinkel gesynchroniseerd",
         "store_custom_source_added": "Aangepaste modulebron toegevoegd",
         "store_custom_source_removed": "Aangepaste modulebron verwijderd",
-        "rate_limit_exceeded": "Snelheidslimiet overschreden"
+        "rate_limit_exceeded": "Snelheidslimiet overschreden",
+        "config_geoip": "GeoIP-configuratie gewijzigd",
+        "config_geoip_deleted": "GeoIP-configuratie verwijderd",
+        "geoip_download_succeeded": "GeoIP-database succesvol bijgewerkt",
+        "geoip_download_failed": "Bijwerken van GeoIP-database mislukt"
       }
     },
     "modules": {

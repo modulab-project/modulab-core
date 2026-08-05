@@ -117,6 +117,8 @@ const (
 	// System config events
 	EventConfigSMTP          = "config.smtp"
 	EventConfigSMTPDel       = "config.smtp.deleted"
+	EventConfigGeoIP         = "config.geoip"
+	EventConfigGeoIPDel      = "config.geoip.deleted"
 	EventConfigOIDC          = "config.oidc"
 	EventConfigOIDCDel       = "config.oidc.deleted"
 	EventConfigSearXNG       = "config.searxng"
@@ -202,6 +204,21 @@ const (
 	// has since rotated away. ActorID is left empty: the "actor" is module
 	// code, not a user.
 	EventModuleEgressDenied = "module.egress_denied"
+	// EventGeoIPDownloadSucceeded/Failed cover internal/geoip's daily
+	// database refresh (RunScheduler) and the immediate one-off triggered
+	// right after an admin saves new credentials (TriggerNow) - same "no
+	// human actor behind an automatic background action" shape as
+	// EventModuleEgressDenied above: ActorID/ActorEmail are left empty, the
+	// only thing worth recording is what happened and why. Audited (not
+	// just log.Printf'd, which internal/geoip already also does) because a
+	// silently-failing daily download is otherwise invisible anywhere an
+	// admin would think to look - core_settings' geoip_last_update_error
+	// value (surfaced on the GeoIP settings page) already answers "is it
+	// broken right now", but not "when did it start failing, and did it
+	// ever recover in between" the way a durable, timestamped audit trail
+	// does.
+	EventGeoIPDownloadSucceeded = "geoip.download_succeeded"
+	EventGeoIPDownloadFailed    = "geoip.download_failed"
 	// EventModulePIIKeyMigrated marks the one-time admin action that asks a
 	// module's own migrate-pii-key handler to re-encrypt its PII columns
 	// (and, where applicable, blind-index hashes) under its HKDF-derived
