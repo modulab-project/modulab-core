@@ -48,6 +48,8 @@ updates:
     commit-message:
       prefix: "docker"
 
+  # Covers deploy/Dockerfile.nginx only - Dockerfiles and Compose files are
+  # two separate Dependabot ecosystems, see the docker-compose entry below.
   - package-ecosystem: "docker"
     directory: "/deploy"
     schedule:
@@ -58,6 +60,34 @@ updates:
       - "docker"
     commit-message:
       prefix: "docker"
+
+  # deploy/docker-compose.yml. This needs its own entry: "docker" above only
+  # parses Dockerfiles, Compose files are a separate ecosystem (GA since
+  # 2025-02), so the stack's images were tracked by nothing at all until this
+  # was added - the digests pinned in the 2026-07-23 security pass would have
+  # sat there going stale indefinitely.
+  #
+  # Every image there except our own two is written as tag@sha256:... on
+  # purpose (see that file's comments); Dependabot updates the tag and the
+  # digest together, which is what keeps those pins reproducible *and*
+  # current instead of just frozen. Note it only refreshes digests that are
+  # already present - it never adds one, so tecnativa/docker-socket-proxy
+  # needs its digest filled in by hand once before it is covered here too.
+  #
+  # ghcr.io/modulab-project/modulab-core{,-nginx}:latest are deliberately
+  # unpinned and deliberately not a Dependabot concern: those are published
+  # by our own release pipeline, where `docker compose pull` is the intended
+  # upgrade path.
+  - package-ecosystem: "docker-compose"
+    directory: "/deploy"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "deploy"
 
   # Keeps the actions pinned in ci.yml (actions/checkout, setup-go,
   # golangci-lint-action, trivy-action, etc.) current - several of those
