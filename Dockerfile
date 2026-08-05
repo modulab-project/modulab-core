@@ -98,6 +98,16 @@ COPY --from=frontend-builder /app/frontend/dist/ /app/frontend/dist/
 RUN mkdir -p /var/lib/modulab/modules
 ENV MODULAB_MODULE_DATA_DIR=/var/lib/modulab/modules
 
+# GeoIP (MaxMind GeoLite2) database directory — same reasoning as
+# MODULAB_MODULE_DATA_DIR above, override with MODULAB_GEOIP_DATA_DIR if
+# needed. Mount a persistent volume here in production (deploy/
+# docker-compose.yml's geoip-data) so downloaded .mmdb files survive an
+# image upgrade - baked in as a real ENV (not just internal/config's own
+# getEnvDefault fallback of the same value) so entrypoint.sh's chown below
+# always has a value to check, identical to the module dir's treatment.
+RUN mkdir -p /data/geoip
+ENV MODULAB_GEOIP_DATA_DIR=/data/geoip
+
 # Unprivileged, non-login user the process actually runs as (the default
 # for every FROM debian:... image is root unless overridden). -r makes it a
 # system account (no password, no aging policy); -d sets its home to the

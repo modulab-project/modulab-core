@@ -27,6 +27,17 @@ if [ -d "$MODULAB_MODULE_DATA_DIR" ]; then
     chown -R modulab:modulab "$MODULAB_MODULE_DATA_DIR"
 fi
 
+# Same reasoning as MODULAB_MODULE_DATA_DIR above: deploy/docker-compose.yml's
+# geoip-data named volume mounts as root:root, and internal/geoip's own
+# os.MkdirAll (backend/internal/geoip/geoip.go) cannot fix that - it just
+# creates directories as whatever user the process already is, it doesn't
+# chown a pre-existing root-owned mount point. MODULAB_GEOIP_DATA_DIR is
+# baked into the image itself (Dockerfile's ENV), so it is always set here
+# even on a deployment that doesn't override it.
+if [ -d "$MODULAB_GEOIP_DATA_DIR" ]; then
+    chown -R modulab:modulab "$MODULAB_GEOIP_DATA_DIR"
+fi
+
 # gosu (not su/sudo - no shell, no PID juggling, signals pass straight
 # through to modulab-core) drops from root to the unprivileged "modulab"
 # user for the actual, long-running process.
