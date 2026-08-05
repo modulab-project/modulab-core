@@ -556,29 +556,45 @@ backend_golangci() {
 
 # Two govulncheck passes, because they answer different questions:
 #
-#   source mode (default): "does code in this repo call a known-vulnerable
+#   default (-scan symbol): "does code in this repo call a known-vulnerable
 #       function?" — that's the hard gate, same as CI's govulncheck step.
 #
-#   -mode=mod: "is any module in go.mod known-vulnerable at all, reachable
-#       or not?" — this is the count in the summary line source mode prints
-#       ("...and 1 vulnerability in modules you require, but your code
-#       doesn't appear to call these"). Source mode exits 0 on those, so
+#   -scan module: "is any module in go.mod known-vulnerable at all, reachable
+#       or not?" — this is the count in the summary line the symbol scan
+#       prints ("...and 1 vulnerability in modules you require, but your code
+#       doesn't appear to call these"). The symbol scan exits 0 on those, so
 #       until now they were printed and then completely ignored. They matter
 #       because "not currently reachable" is a property of today's call
 #       graph: the next refactor that starts calling into that dependency
 #       turns a silent line of output into a live CVE. Warn-only, since
 #       blocking on an unreachable CVE with no fixed release available would
 #       wedge every commit.
-backend_govulncheck_source() {
+#
+# Note the two flags are unrelated: -mode picks the *input* (source, binary,
+# extract), -scan picks the *depth* (module, package, symbol). Module depth
+# additionally rejects package patterns — internal/scan/flags.go:
+# "patterns are not accepted for module only scanning" — so no "./..." here.
+GOVULNCHECK_EXIT_VULNS=3
+
+backend_govulncheck_symbol() {
   go run "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}" ./...
 }
-backend_govulncheck_mod() {
-  local out rc=0
-  out="$(go run "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}" -mode=mod ./... 2>&1)" || rc=$?
-  echo "$out"
-  if [ $rc -ne 0 ]; then
-    warn "Module-level advisories above are NOT reachable from this repo's call graph today (source mode passed), so they don't block. Worth a look when bumping deps."
-  fi
+
+backend_govulncheck_module() {
+  local rc=0
+  go run "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}" -scan module || rc=$?
+  case $rc in
+    0) ;;
+    "$GOVULNCHECK_EXIT_VULNS")
+      warn "Module-level advisories above are NOT reachable from this repo's call graph today (the symbol scan passed), so they don't block. Worth a look when bumping deps."
+      ;;
+    *)
+      # Anything other than "clean" or "found vulnerabilities" is govulncheck
+      # itself failing — a bad flag, no network, a broken module cache. Saying
+      # "advisory findings" there would be a lie in the reassuring direction.
+      warn "govulncheck could not complete the module scan (exit $rc) — that's a tool/environment error, not a clean result."
+      ;;
+  esac
   return $rc
 }
 
@@ -603,8 +619,8 @@ run_backend() {
   if [ "$FAST" -eq 1 ]; then
     skip_step "Backend: govulncheck (--fast)"
   else
-    run_step      "Backend: govulncheck ./... ($GOVULNCHECK_VERSION, same as CI)" "$dir" backend_govulncheck_source
-    run_step_warn "Backend: govulncheck -mode=mod (advisory)"                     "$dir" backend_govulncheck_mod
+    run_step      "Backend: govulncheck ./... ($GOVULNCHECK_VERSION, same as CI)" "$dir" backend_govulncheck_symbol
+    run_step_warn "Backend: govulncheck -scan module (advisory)"                  "$dir" backend_govulncheck_module
   fi
   return $FAILED
 }
