@@ -14,7 +14,3 @@ cosign.pub
 # Go build artifacts
 backend/cmd/core/core
 core
-
-# Local pre-push dry-run helper — personal dev tool, not part of the shipped
-# repo/CI.
-scripts/check-and-push.sh
