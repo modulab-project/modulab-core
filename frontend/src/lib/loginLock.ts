@@ -33,11 +33,53 @@ interface LoginLock {
   ts: number;
 }
 
-// One random ID per page load, so this tab can tell "my own lock" apart
-// from "someone else's lock" without relying on timing. Regenerating it per
-// module load (i.e. per tab) is deliberate - two tabs must never agree on
-// the same owner id.
-const ownerId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+// Identifies this browser tab across the OIDC round-trip itself - which is
+// a full top-level navigation away to the IdP and back (see this file's
+// top-of-file comment), landing on AuthComplete.tsx as a brand-new page
+// load, not a client-side route change. A plain per-module-load random
+// value (what this used to be) gets silently regenerated on that landing
+// page, so releaseLoginLock() there was comparing against a different id
+// than the one acquireLoginLock() stored before navigating away - the
+// "same owner" check could never match, and the lock was never actually
+// released by the flow that's supposed to release it. It just sat there
+// until LOCK_TTL_MS's 3-minute expiry.
+//
+// Bug found 2026-08-05: every successful (or abandoned) login left its own
+// lock stuck for up to 3 minutes, so logging out and back in within that
+// window always hit the "another tab is mid-login" state, even though it
+// was the very same tab.
+//
+// sessionStorage survives exactly this kind of same-tab full-page
+// navigation while still never being shared with a genuinely different
+// tab (same per-tab lifetime AUTH_RESULT_STORAGE_KEY/WEATHER_CACHE_KEY
+// already rely on elsewhere) - reading/writing it once here, instead of a
+// bare random constant, keeps "two tabs must never agree on the same
+// owner id" true while also keeping "the same tab must agree with itself
+// across the redirect" true, which the old approach didn't.
+const OWNER_ID_STORAGE_KEY = "modulab_login_lock_owner_id";
+
+function getOwnerId(): string {
+  let id: string | null = null;
+  try {
+    id = sessionStorage.getItem(OWNER_ID_STORAGE_KEY);
+  } catch {
+    // sessionStorage inaccessible (disabled, privacy mode, etc.) - fall
+    // through to a fresh id below every time this module loads. Degrades
+    // to exactly the pre-fix behavior in that case, not to something worse.
+  }
+  if (!id) {
+    id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    try {
+      sessionStorage.setItem(OWNER_ID_STORAGE_KEY, id);
+    } catch {
+      // Same fallback as above - id is still usable for this page load,
+      // it just won't survive a future navigation if storage is unusable.
+    }
+  }
+  return id;
+}
+
+const ownerId = getOwnerId();
 
 function readLock(): LoginLock | null {
   const raw = localStorage.getItem(LOCK_KEY);
