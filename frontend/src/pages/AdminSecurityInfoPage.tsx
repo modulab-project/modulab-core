@@ -323,7 +323,14 @@ function SessionListItem({
         </div>
         <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400" title={session.user_agent}>
           {device ? `${device.browser} · ${device.os}` : "—"}
-          {session.country && <> · {session.country}</>}
+          {/* city is GeoIP's (MaxMind GeoLite2) lookup against ip, absent
+              whenever GeoIP is not configured or has no data for this
+              address - falls back to just country, same as before GeoIP
+              existed at all. Same combination logic as ProfilePage.tsx's own
+              SessionListItem. */}
+          {(session.city || session.country) && (
+            <> · {session.city ? (session.country ? `${session.city}, ${session.country}` : session.city) : session.country}</>
+          )}
         </p>
         <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
           {session.ip && (
@@ -337,6 +344,12 @@ function SessionListItem({
           )}
           <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_role")}</dt>
           <dd>{session.role}</dd>
+          {session.asn_org && (
+            <>
+              <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_isp")}</dt>
+              <dd className="break-all">{session.asn_org}</dd>
+            </>
+          )}
           <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_login")}</dt>
           <dd>{session.created_at ? new Date(session.created_at).toLocaleString() : "—"}</dd>
           <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_last_active")}</dt>

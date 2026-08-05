@@ -516,7 +516,8 @@
       "rate_limit_reset": "Resetten",
       "rate_limit_reset_error": "Rate limit kon niet worden gereset.",
       "core_update_available_short": "Update beschikbaar",
-      "check_now_button": "Nu op updates controleren"
+      "check_now_button": "Nu op updates controleren",
+      "col_isp": "Provider / ISP"
     },
     "security_info": {
       "title": "Beveiligingsinfo",
@@ -633,6 +634,31 @@
       "updates_available": "{{count}} update(s) beschikbaar",
       "all_up_to_date": "Alle modules zijn up-to-date",
       "sync_failed": "Synchronisatie van register mislukt — gecachte gegevens worden getoond, deze kunnen verouderd zijn."
+    },
+    "geoip": {
+      "title": "GeoIP",
+      "subtitle": "Stad- en providerherkenning voor sessie-IP-adressen (MaxMind GeoLite2), automatisch bijgewerkt zodra ingesteld.",
+      "status_configured": "Geconfigureerd",
+      "status_not_configured": "Niet geconfigureerd",
+      "load_error": "GeoIP-instellingen konden niet worden geladen.",
+      "saved": "Opgeslagen.",
+      "validation_error": "Account-ID is verplicht.",
+      "save_error": "Opslaan mislukt.",
+      "remove_error": "Verwijderen van de configuratie is mislukt.",
+      "remove_confirm": "GeoIP-configuratie verwijderen? Reeds gedownloade databases blijven behouden, maar worden niet meer bijgewerkt totdat dit opnieuw is ingesteld.",
+      "account_id": "Account-ID",
+      "license_key": "Licentiesleutel",
+      "license_key_placeholder_existing": "laat leeg om de bestaande sleutel te behouden",
+      "hint": "Gratis MaxMind-account vereist — maak een account-ID en licentiesleutel aan op maxmind.com/en/geolite2/signup.",
+      "saving": "Opslaan…",
+      "save": "Opslaan",
+      "action": {
+        "removing": "Bezig met verwijderen…",
+        "remove": "Configuratie verwijderen"
+      },
+      "last_update": "Laatst bijgewerkt: {{time}}",
+      "no_update_yet": "Nog niet bijgewerkt.",
+      "download_failed": "Laatste downloadpoging mislukt: {{error}}"
     }
   },
   "home": {

@@ -516,7 +516,8 @@
       "rate_limit_reset": "Zurücksetzen",
       "rate_limit_reset_error": "Rate Limit konnte nicht zurückgesetzt werden.",
       "core_update_available_short": "Update verfügbar",
-      "check_now_button": "Jetzt auf Updates prüfen"
+      "check_now_button": "Jetzt auf Updates prüfen",
+      "col_isp": "Anbieter / ISP"
     },
     "security_info": {
       "title": "Sicherheitsinfos",
@@ -633,6 +634,31 @@
       "updates_available": "{{count}} Update(s) verfügbar",
       "all_up_to_date": "Alle Module aktuell",
       "sync_failed": "Registry-Synchronisierung fehlgeschlagen — zeige zwischengespeicherte Daten, die veraltet sein können."
+    },
+    "geoip": {
+      "title": "GeoIP",
+      "subtitle": "Stadt- und Anbieter-Ermittlung für Sitzungs-IP-Adressen (MaxMind GeoLite2), nach Einrichtung automatisch aktualisiert.",
+      "status_configured": "Konfiguriert",
+      "status_not_configured": "Nicht konfiguriert",
+      "load_error": "GeoIP-Einstellungen konnten nicht geladen werden.",
+      "saved": "Gespeichert.",
+      "validation_error": "Account-ID ist erforderlich.",
+      "save_error": "Speichern fehlgeschlagen.",
+      "remove_error": "Entfernen der Konfiguration fehlgeschlagen.",
+      "remove_confirm": "GeoIP-Konfiguration entfernen? Bereits heruntergeladene Datenbanken bleiben erhalten, werden aber nicht mehr aktualisiert, bis dies erneut eingerichtet wird.",
+      "account_id": "Account-ID",
+      "license_key": "Lizenzschlüssel",
+      "license_key_placeholder_existing": "leer lassen, um den bestehenden Schlüssel zu behalten",
+      "hint": "Kostenloser MaxMind-Account erforderlich — Account-ID und Lizenzschlüssel unter maxmind.com/en/geolite2/signup anlegen.",
+      "saving": "Speichert…",
+      "save": "Speichern",
+      "action": {
+        "removing": "Wird entfernt…",
+        "remove": "Konfiguration entfernen"
+      },
+      "last_update": "Zuletzt aktualisiert: {{time}}",
+      "no_update_yet": "Noch nicht aktualisiert.",
+      "download_failed": "Letzter Download-Versuch fehlgeschlagen: {{error}}"
     }
   },
   "home": {

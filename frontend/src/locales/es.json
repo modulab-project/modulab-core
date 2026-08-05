@@ -516,7 +516,8 @@
       "rate_limit_reset": "Restablecer",
       "rate_limit_reset_error": "No se pudo restablecer el límite de tasa.",
       "core_update_available_short": "Actualización disponible",
-      "check_now_button": "Comprobar actualizaciones ahora"
+      "check_now_button": "Comprobar actualizaciones ahora",
+      "col_isp": "Proveedor / ISP"
     },
     "security_info": {
       "title": "Información de seguridad",
@@ -633,6 +634,31 @@
       "updates_available": "{{count}} actualización(es) disponible(s)",
       "all_up_to_date": "Todos los módulos están actualizados",
       "sync_failed": "Error al sincronizar el registro — mostrando datos en caché, que pueden estar desactualizados."
+    },
+    "geoip": {
+      "title": "GeoIP",
+      "subtitle": "Detección de ciudad y proveedor para las direcciones IP de las sesiones (MaxMind GeoLite2), actualizado automáticamente una vez configurado.",
+      "status_configured": "Configurado",
+      "status_not_configured": "No configurado",
+      "load_error": "No se pudo cargar la configuración de GeoIP.",
+      "saved": "Guardado.",
+      "validation_error": "Se requiere el ID de cuenta.",
+      "save_error": "Error al guardar.",
+      "remove_error": "No se pudo eliminar la configuración.",
+      "remove_confirm": "¿Eliminar la configuración de GeoIP? Las bases de datos ya descargadas se conservan, pero dejarán de actualizarse hasta que se configure de nuevo.",
+      "account_id": "ID de cuenta",
+      "license_key": "Clave de licencia",
+      "license_key_placeholder_existing": "dejar vacío para mantener la clave existente",
+      "hint": "Se requiere una cuenta gratuita de MaxMind — cree un ID de cuenta y una clave de licencia en maxmind.com/en/geolite2/signup.",
+      "saving": "Guardando…",
+      "save": "Guardar",
+      "action": {
+        "removing": "Eliminando…",
+        "remove": "Eliminar configuración"
+      },
+      "last_update": "Última actualización: {{time}}",
+      "no_update_yet": "Aún no actualizado.",
+      "download_failed": "El último intento de descarga falló: {{error}}"
     }
   },
   "home": {

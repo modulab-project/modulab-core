@@ -35,6 +35,7 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/config"
 	"github.com/modulab-project/modulab-core/backend/internal/coreupdate"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/geoip"
 	"github.com/modulab-project/modulab-core/backend/internal/httperr"
 	"github.com/modulab-project/modulab-core/backend/internal/mail"
 	"github.com/modulab-project/modulab-core/backend/internal/modules"
@@ -533,6 +534,31 @@ func main() {
 		}
 	})))
 
+	// GeoIP configuration (MaxMind GeoLite2 City + ASN, internal/setup/
+	// geoip.go) - same admin-panel placement and auth tier as SMTP above:
+	// read-only status is adminOnly, write/delete get the reauth step-up
+	// since a License Key is credential-tier material like an SMTP
+	// password. geoipDeps is the shared internal/geoip.Deps also used by
+	// the background scheduler started below, so GeoIPConfigureHandler's
+	// triggerDownload callback re-downloads using the exact same
+	// DataDir/MasterKey/Pool the scheduler would use on its own next tick.
+	geoipDeps := geoip.Deps{Pool: pool, MasterKey: cfg.MasterKey, DataDir: cfg.GeoIPDataDir}
+	mux.Handle("GET /v1/admin/geoip/status", adminOnly(setup.GeoIPStatusHandler(pool, cfg.MasterKey)))
+	mux.Handle("POST /v1/admin/geoip/configure", adminReauthOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		masterKey, err := setup.ResolveMasterKey(r.Context(), pool, cfg.MasterKey)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusPreconditionFailed)
+			return
+		}
+		setup.GeoIPConfigureHandler(pool, masterKey, func() {
+			// Bounded by downloadTimeout per edition inside internal/geoip -
+			// synchronous is fine here, this never runs longer than a few
+			// tens of seconds even on a cold download.
+			geoip.TriggerNow(r.Context(), geoipDeps)
+		})(w, r)
+	})))
+	mux.Handle("DELETE /v1/admin/geoip/delete", adminReauthOnly(setup.GeoIPDeleteHandler(pool)))
+
 	// Admin system page + OIDC post-wizard config + audit log.
 	// All admin only (same tier as SMTP above).
 	mux.Handle("GET /v1/admin/system", adminOnly(adminapi.SystemStatusHandler(pool, cfg.MasterKey)))
@@ -983,6 +1009,15 @@ func main() {
 	// mail.RunWorker above: a tick before OIDC is configured is a logged
 	// no-op, not fatal.
 	go auth.RunSessionRevalidateWorker(ctx, authDeps)
+
+	// Downloads/refreshes the MaxMind GeoLite2 City + ASN databases once a
+	// day (internal/geoip.RunScheduler), plus once immediately at startup so
+	// a fresh install with credentials already configured (e.g. restored
+	// from a backup) does not wait a full day for its first pair of
+	// databases. A tick before GeoIP has ever been configured via the admin
+	// panel is a quiet no-op, same unconditional-start pattern as
+	// mail.RunWorker/auth.RunSessionRevalidateWorker above.
+	go geoip.RunScheduler(ctx, geoipDeps)
 
 	// The group prefix has no environment fallback anymore (removed
 	// 2026-06-21 alongside OIDC's) - it may legitimately be unconfigured

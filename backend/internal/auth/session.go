@@ -17,6 +17,7 @@ import (
 
 	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/crypto"
+	"github.com/modulab-project/modulab-core/backend/internal/geoip"
 	"github.com/modulab-project/modulab-core/backend/internal/mail"
 	"github.com/modulab-project/modulab-core/backend/internal/notify"
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
@@ -159,6 +160,22 @@ type Session struct {
 	// access-control decision, only for the sessions tables on the Profile
 	// and System Info pages.
 	Country string `json:"country,omitempty"`
+	// City/Region/ASNOrg are internal/geoip's GeoLite2 lookups against IP
+	// above, captured once at login time (see handlers.go's
+	// loginCity/loginASN), same "logged in from" display purpose and same
+	// staleness caveat as Country: they never update mid-session even if
+	// the underlying .mmdb databases are refreshed later, and all three are
+	// "" whenever GeoIP has not been configured, has no data for this IP,
+	// or IP itself is empty. City/Region come from the GeoLite2 City
+	// database (Region is the first/largest subdivision, e.g. a US state or
+	// German Bundesland); ASNOrg comes from the separate GeoLite2 ASN
+	// database (the ISP/hosting provider, not a geographic value at all -
+	// kept alongside Country/City/Region here rather than in its own struct
+	// since all four exist purely for the same read-only sessions-table
+	// display). Never read back for any access-control decision.
+	City   string `json:"city,omitempty"`
+	Region string `json:"region,omitempty"`
+	ASNOrg string `json:"asn_org,omitempty"`
 	// CSRFToken is minted once per session by CreateSession and never
 	// changes for the session's lifetime. Deliberately included here (and
 	// therefore sent to the browser in GET /v1/auth/me's response body,
@@ -233,7 +250,15 @@ type storedSession struct {
 	IPEnc                string    `json:"ip_enc,omitempty"`
 	UserAgentEnc         string    `json:"user_agent_enc,omitempty"`
 	Country              string    `json:"country,omitempty"`
-	RefreshTokenEnc      string    `json:"refresh_token_enc,omitempty"`
+	// City/Region/ASNOrg mirror Country's plaintext treatment (see Session's
+	// doc comment for why City/Region/ASNOrg exist and why the same
+	// "coarse-grained, not PII" reasoning applies to them too - a city name
+	// or ISP organization is not individually identifying at internet
+	// scale, unlike an exact IP or email address).
+	City            string `json:"city,omitempty"`
+	Region          string `json:"region,omitempty"`
+	ASNOrg          string `json:"asn_org,omitempty"`
+	RefreshTokenEnc string `json:"refresh_token_enc,omitempty"`
 	// CSRFToken stays plaintext, same exemption as Role/Locked/CreatedAt
 	// above: it is random security material, not PII, so the
 	// feedback_encrypt_at_implementation_time policy does not apply.
@@ -280,6 +305,9 @@ func encryptSession(masterKey string, sess Session) (storedSession, error) {
 		IPEnc:                ipEnc,
 		UserAgentEnc:         userAgentEnc,
 		Country:              sess.Country,
+		City:                 sess.City,
+		Region:               sess.Region,
+		ASNOrg:               sess.ASNOrg,
 		CSRFToken:            sess.CSRFToken,
 	}, nil
 }
@@ -323,6 +351,9 @@ func decryptSession(masterKey string, s storedSession) (Session, error) {
 		IP:                ip,
 		UserAgent:         userAgent,
 		Country:           s.Country,
+		City:              s.City,
+		Region:            s.Region,
+		ASNOrg:            s.ASNOrg,
 		CSRFToken:         s.CSRFToken,
 	}, nil
 }
@@ -794,7 +825,14 @@ func checkSessionCountryAnomaly(ctx context.Context, d Deps, token string, sess 
 		if prefs, err := d.Pool.GetNotificationPrefs(ctx, sess.UserID); err != nil {
 			log.Printf("auth: read notification prefs for %s: %v", sess.UserID, err)
 		} else if prefs.CountryAnomaly && sess.Email != "" {
-			msg := mail.AnomalyMessage(sess.Email, sess.Name, currentIP, currentCountry, baseline, d.FrontendBaseURL, mail.CurrentBranding(ctx, d.Pool))
+			// A fresh lookup against currentIP, not sess.City: sess still
+			// reflects this session's original login-time GeoIP result, which
+			// is exactly the stale value a mid-session anomaly is reporting a
+			// change away from - see mailLocation's doc comment. Failure
+			// (ok=false) just falls back to currentCountry alone, same as
+			// GeoIP never having been configured at all.
+			currentCity, _, _ := geoip.LookupCity(currentIP)
+			msg := mail.AnomalyMessage(sess.Email, sess.Name, currentIP, mailLocation(currentCity, currentCountry), baseline, d.FrontendBaseURL, mail.CurrentBranding(ctx, d.Pool))
 			if err := mail.Enqueue(ctx, d.Valkey, d.Pool, d.MasterKeyEnv, msg); err != nil {
 				log.Printf("auth: enqueue anomaly mail for %s: %v", sess.UserID, err)
 			}
@@ -923,9 +961,15 @@ type ActiveSession struct {
 	// (local dev with no real client address), or the lookup itself failed;
 	// the frontend falls back to showing just the IP in that case, same as
 	// Country already does when Cloudflare didn't supply one.
-	Hostname             string `json:"hostname,omitempty"`
-	UserAgent            string `json:"user_agent,omitempty"`
-	Country              string `json:"country,omitempty"`
+	Hostname  string `json:"hostname,omitempty"`
+	UserAgent string `json:"user_agent,omitempty"`
+	Country   string `json:"country,omitempty"`
+	// City/Region/ASNOrg mirror Session.City/Region/ASNOrg - see that
+	// struct's doc comment for what they are and why they are trusted for
+	// display only.
+	City                 string `json:"city,omitempty"`
+	Region               string `json:"region,omitempty"`
+	ASNOrg               string `json:"asn_org,omitempty"`
 	LastActiveSecondsAgo int64  `json:"last_active_seconds_ago,omitempty"`
 	ExpiresInSeconds     int64  `json:"expires_in_seconds,omitempty"`
 	Current              bool   `json:"current,omitempty"`
@@ -1048,6 +1092,9 @@ func ListActiveSessions(ctx context.Context, d Deps) ([]ActiveSession, error) {
 			IP:        sess.IP,
 			UserAgent: sess.UserAgent,
 			Country:   sess.Country,
+			City:      sess.City,
+			Region:    sess.Region,
+			ASNOrg:    sess.ASNOrg,
 		}
 		if !sess.CreatedAt.IsZero() {
 			as.CreatedAt = sess.CreatedAt.UTC().Format(time.RFC3339)
@@ -1159,6 +1206,9 @@ func ListActiveSessionsForUser(ctx context.Context, d Deps, subject string) ([]A
 			Hostname:  resolveHostname(ctx, d, sess.IP),
 			UserAgent: sess.UserAgent,
 			Country:   sess.Country,
+			City:      sess.City,
+			Region:    sess.Region,
+			ASNOrg:    sess.ASNOrg,
 		}
 		if !sess.CreatedAt.IsZero() {
 			as.CreatedAt = sess.CreatedAt.UTC().Format(time.RFC3339)

@@ -335,6 +335,13 @@ func PendingApprovalMessage(to, name, frontendBaseURL, requesterName, requesterE
 // find that too noisy (e.g. signing in from the same device daily) can turn
 // it off from their Profile page without losing AnomalyMessage/
 // NewDeviceMessage, which stay gated by their own separate toggles.
+//
+// country is despite its name a display-only location string, not
+// necessarily a bare CF-IPCountry code any more: callers pass
+// auth.mailLocation's result, which prepends internal/geoip's city lookup
+// ("Frankfurt am Main, DE") when GeoIP is configured and has data for the
+// login's IP, falling back to the plain country code otherwise. Never used
+// for any comparison here - purely the "Location:" line's value.
 func LoginMessage(to, name, ip, country, userAgent, frontendBaseURL string, b Branding) Message {
 	if ip == "" {
 		ip = unknownText(b.Lang)
@@ -348,23 +355,23 @@ func LoginMessage(to, name, ip, country, userAgent, frontendBaseURL string, b Br
 	table := map[string][2]string{
 		"en": {
 			"New sign-in to your %s account",
-			"%s\n\nYour %s account was just signed in:\n\n  Country: %s\n  IP:      %s\n  Device:  %s\n\nIf this was you, no action is needed. If it wasn't, review and end your active sessions here:\n\n  %s/profile\n%s",
+			"%s\n\nYour %s account was just signed in:\n\n  Location: %s\n  IP:       %s\n  Device:   %s\n\nIf this was you, no action is needed. If it wasn't, review and end your active sessions here:\n\n  %s/profile\n%s",
 		},
 		"de": {
 			"Neue Anmeldung bei Ihrem %s-Konto",
-			"%s\n\nBei Ihrem %s-Konto wurde soeben eine Anmeldung durchgeführt:\n\n  Land:   %s\n  IP:     %s\n  Gerät:  %s\n\nWenn Sie das waren, ist keine Aktion erforderlich. Falls nicht, überprüfen und beenden Sie Ihre aktiven Sitzungen hier:\n\n  %s/profile\n%s",
+			"%s\n\nBei Ihrem %s-Konto wurde soeben eine Anmeldung durchgeführt:\n\n  Standort: %s\n  IP:       %s\n  Gerät:    %s\n\nWenn Sie das waren, ist keine Aktion erforderlich. Falls nicht, überprüfen und beenden Sie Ihre aktiven Sitzungen hier:\n\n  %s/profile\n%s",
 		},
 		"nl": {
 			"Nieuwe aanmelding bij uw %s-account",
-			"%s\n\nEr is zojuist ingelogd op uw %s-account:\n\n  Land:     %s\n  IP:       %s\n  Apparaat: %s\n\nAls u dit was, is geen actie nodig. Zo niet, controleer en beëindig uw actieve sessies hier:\n\n  %s/profile\n%s",
+			"%s\n\nEr is zojuist ingelogd op uw %s-account:\n\n  Locatie:  %s\n  IP:       %s\n  Apparaat: %s\n\nAls u dit was, is geen actie nodig. Zo niet, controleer en beëindig uw actieve sessies hier:\n\n  %s/profile\n%s",
 		},
 		"es": {
 			"Nuevo inicio de sesión en su cuenta de %s",
-			"%s\n\nSe acaba de iniciar sesión en su cuenta de %s:\n\n  País:        %s\n  IP:          %s\n  Dispositivo: %s\n\nSi fue usted, no es necesario hacer nada. Si no fue usted, revise y finalice sus sesiones activas aquí:\n\n  %s/profile\n%s",
+			"%s\n\nSe acaba de iniciar sesión en su cuenta de %s:\n\n  Ubicación:   %s\n  IP:          %s\n  Dispositivo: %s\n\nSi fue usted, no es necesario hacer nada. Si no fue usted, revise y finalice sus sesiones activas aquí:\n\n  %s/profile\n%s",
 		},
 		"fr": {
 			"Nouvelle connexion à votre compte %s",
-			"%s\n\nVotre compte %s vient de faire l'objet d'une connexion :\n\n  Pays :     %s\n  IP :       %s\n  Appareil : %s\n\nSi c'était vous, aucune action n'est nécessaire. Sinon, consultez et mettez fin à vos sessions actives ici :\n\n  %s/profile\n%s",
+			"%s\n\nVotre compte %s vient de faire l'objet d'une connexion :\n\n  Lieu :     %s\n  IP :       %s\n  Appareil : %s\n\nSi c'était vous, aucune action n'est nécessaire. Sinon, consultez et mettez fin à vos sessions actives ici :\n\n  %s/profile\n%s",
 		},
 	}
 	subjectTmpl, bodyTmpl := localize(b.Lang, table)
@@ -474,10 +481,16 @@ func SessionRevokedByAdminMessage(to, name, ip, userAgent, frontendBaseURL strin
 // account owner even if they have no other tab/device currently connected to
 // receive the matching "session.new"/anomaly SSE push (internal/notify) -
 // see that event's doc comment for why the live push alone is not enough.
-// previousCountry/country are both two-letter CF-IPCountry codes, never
-// empty here (both call sites only invoke this once they have already
-// confirmed a genuine, known-to-known difference - see loginCountry's doc
-// comment on "" meaning "anomaly detection not available", not "matches").
+// previousCountry is always a bare two-letter CF-IPCountry code (the stored
+// baseline - see lastCountryTTL's doc comment, no historical city is ever
+// kept). country is the "Now" value and, like LoginMessage's own country
+// parameter, may be auth.mailLocation's city-enriched display string rather
+// than a bare code - the anomaly comparison itself always happens on the
+// plain codes before either mail function is ever called, this parameter is
+// purely what gets displayed. Neither is ever empty here (both call sites
+// only invoke this once they have already confirmed a genuine,
+// known-to-known difference - see loginCountry's doc comment on ""
+// meaning "anomaly detection not available", not "matches").
 // Deliberately no link to a specific "block this session" action: the
 // System Info / Profile sessions tables (already linked here) are where
 // that already lives, and duplicating it risks the link going stale if

@@ -1166,6 +1166,9 @@ function ProfilePanelContent({
                 <Link to="/admin/feeds" onClick={onClose} className={SUB_ITEM_CLASS}>
                   {t("shell.feed_sources_link")}
                 </Link>
+                <Link to="/admin/system/geoip" onClick={onClose} className={SUB_ITEM_CLASS}>
+                  {t("admin.geoip.title")}
+                </Link>
                 <Link to="/admin/system/ai" onClick={onClose} className={SUB_ITEM_CLASS}>
                   {t("admin.ai.title")}
                 </Link>

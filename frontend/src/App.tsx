@@ -20,6 +20,7 @@ const AdminUsersPage = lazy(() => import("./pages/AdminUsersPage"));
 const AdminFeedsPage = lazy(() => import("./pages/AdminFeedsPage"));
 const AdminSystemOIDCPage = lazy(() => import("./pages/AdminSystemOIDCPage"));
 const AdminSystemSmtpPage = lazy(() => import("./pages/AdminSystemSmtpPage"));
+const AdminSystemGeoIPPage = lazy(() => import("./pages/AdminSystemGeoIPPage"));
 const AdminSystemSearchPage = lazy(() => import("./pages/AdminSystemSearchPage"));
 const AdminAIPage = lazy(() => import("./pages/AdminAIPage"));
 const AdminSystemLimitsPage = lazy(() => import("./pages/AdminSystemLimitsPage"));
@@ -78,6 +79,7 @@ export default function App() {
         <Route path="/admin/security/info" element={<AdminSecurityInfoPage />} />
         <Route path="/admin/system/oidc" element={<AdminSystemOIDCPage />} />
         <Route path="/admin/system/smtp" element={<AdminSystemSmtpPage />} />
+        <Route path="/admin/system/geoip" element={<AdminSystemGeoIPPage />} />
         {/* Legacy URL redirect: page was renamed from SearXNG-only to a
             general multi-provider search admin page. */}
         <Route path="/admin/system/searxng" element={<Navigate to="/admin/system/search" replace />} />

@@ -23,6 +23,7 @@ import (
 
 	"github.com/modulab-project/modulab-core/backend/internal/audit"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
+	"github.com/modulab-project/modulab-core/backend/internal/geoip"
 	"github.com/modulab-project/modulab-core/backend/internal/httperr"
 	"github.com/modulab-project/modulab-core/backend/internal/mail"
 	"github.com/modulab-project/modulab-core/backend/internal/notify"
@@ -132,6 +133,51 @@ func loginCountry(r *http.Request) string {
 // in-package caller uses the unexported loginCountry directly.
 func LoginCountry(r *http.Request) string {
 	return loginCountry(r)
+}
+
+// loginCity looks up the city/region for a login's client IP via
+// internal/geoip's lazily-opened GeoLite2 City reader. Takes the
+// already-resolved client IP (clientIP(r) below), not the raw request -
+// geoip2-golang needs a real IP to parse, not a header name to re-derive
+// one from. Both return values are "" (ok=false) whenever GeoIP has not
+// been configured/downloaded yet, or the address simply has no city-level
+// data - same fail-open, "just don't show it" treatment loginCountry's own
+// doc comment already describes for a missing CF-IPCountry header. Only
+// ever used for the "logged in from" display on Session (captured once at
+// login, exactly like Country), never for any access-control decision.
+func loginCity(ip string) (city, region string) {
+	city, region, _ = geoip.LookupCity(ip)
+	return city, region
+}
+
+// loginASN looks up the autonomous-system organization (ISP/hosting
+// provider) for a login's client IP via internal/geoip's lazily-opened
+// GeoLite2 ASN reader. Same fail-open contract as loginCity.
+func loginASN(ip string) (org string) {
+	org, _ = geoip.LookupASN(ip)
+	return org
+}
+
+// mailLocation combines a GeoIP city (possibly "") with a CF-IPCountry code
+// (possibly "") into the single display value LoginMessage/AnomalyMessage
+// show for "where this happened" - "Frankfurt am Main, DE" when both are
+// known, just the country when city lookup found nothing (the common case -
+// see loginCity's doc comment), just the city in the rare case GeoIP has
+// data but Cloudflare's header is absent, or "" (both templates' own
+// unknownText fallback takes over) when neither is available. Deliberately
+// NOT used for the country-only anomaly-detection comparisons elsewhere in
+// this file/session.go (checkAndRecordLoginCountry, sessionBaselineChanged)
+// - those must keep comparing the plain two-letter code, never this
+// human-readable string.
+func mailLocation(city, country string) string {
+	switch {
+	case city == "":
+		return country
+	case country == "":
+		return city
+	default:
+		return city + ", " + country
+	}
 }
 
 // checkAndRecordLoginCountry compares country (this login's CF-IPCountry,
@@ -541,6 +587,9 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 		// use the exact same value from this one request - see loginCountry's
 		// doc comment for what "" means here.
 		country := loginCountry(r)
+		ip := clientIP(r)
+		city, region := loginCity(ip)
+		asnOrg := loginASN(ip)
 
 		token, err := CreateSession(ctx, d, Session{
 			UserID:            claims.Subject,
@@ -552,9 +601,12 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 			Role:              sessionRole,
 			Locked:            sessionLocked,
 			CreatedAt:         time.Now(),
-			IP:                clientIP(r),
+			IP:                ip,
 			UserAgent:         r.Header.Get("User-Agent"),
 			Country:           country,
+			City:              city,
+			Region:            region,
+			ASNOrg:            asnOrg,
 		}, refreshToken)
 		if err != nil {
 			redirectToFrontend(w, r, target, url.Values{"error": {"server_error"}})
@@ -629,7 +681,7 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 		// mail.LoginMessage's own doc comment on how this differs from
 		// AnomalyMessage below.
 		if notifyPrefs.NewLogin && claims.Email != "" {
-			msg := mail.LoginMessage(claims.Email, claims.Name, clientIP(r), country, r.Header.Get("User-Agent"), d.FrontendBaseURL, loginBranding)
+			msg := mail.LoginMessage(claims.Email, claims.Name, clientIP(r), mailLocation(city, country), r.Header.Get("User-Agent"), d.FrontendBaseURL, loginBranding)
 			if err := mail.Enqueue(ctx, d.Valkey, d.Pool, d.MasterKeyEnv, msg); err != nil {
 				log.Printf("auth: enqueue login mail for %s: %v", claims.Subject, err)
 			}
@@ -658,7 +710,7 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 				log.Printf("auth: audit login country anomaly for %s: resolve master key: %v", claims.Subject, mkErr)
 			}
 			if notifyPrefs.CountryAnomaly && claims.Email != "" {
-				msg := mail.AnomalyMessage(claims.Email, claims.Name, clientIP(r), country, previousCountry, d.FrontendBaseURL, loginBranding)
+				msg := mail.AnomalyMessage(claims.Email, claims.Name, clientIP(r), mailLocation(city, country), previousCountry, d.FrontendBaseURL, loginBranding)
 				if err := mail.Enqueue(ctx, d.Valkey, d.Pool, d.MasterKeyEnv, msg); err != nil {
 					log.Printf("auth: enqueue login country anomaly mail for %s: %v", claims.Subject, err)
 				}

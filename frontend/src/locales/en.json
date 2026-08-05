@@ -516,7 +516,8 @@
       "rate_limit_reset": "Reset",
       "rate_limit_reset_error": "Could not reset the rate limit.",
       "core_update_available_short": "Update available",
-      "check_now_button": "Check for updates now"
+      "check_now_button": "Check for updates now",
+      "col_isp": "ISP / Provider"
     },
     "security_info": {
       "title": "Security info",
@@ -633,6 +634,31 @@
       "updates_available": "{{count}} update(s) available",
       "all_up_to_date": "All modules up to date",
       "sync_failed": "Registry sync failed — showing cached data, which may be out of date."
+    },
+    "geoip": {
+      "title": "GeoIP",
+      "subtitle": "City and ISP lookup for session IP addresses (MaxMind GeoLite2), refreshed automatically once configured.",
+      "status_configured": "Configured",
+      "status_not_configured": "Not configured",
+      "load_error": "Could not load GeoIP settings.",
+      "saved": "Saved.",
+      "validation_error": "Account ID is required.",
+      "save_error": "Saving failed.",
+      "remove_error": "Removing the configuration failed.",
+      "remove_confirm": "Remove the GeoIP configuration? Already downloaded databases are kept, but no longer refreshed until this is set up again.",
+      "account_id": "Account ID",
+      "license_key": "License key",
+      "license_key_placeholder_existing": "leave empty to keep existing key",
+      "hint": "Free MaxMind account required — see maxmind.com/en/geolite2/signup for an account ID and license key.",
+      "saving": "Saving…",
+      "save": "Save",
+      "action": {
+        "removing": "Removing…",
+        "remove": "Remove configuration"
+      },
+      "last_update": "Last refreshed: {{time}}",
+      "no_update_yet": "Not refreshed yet.",
+      "download_failed": "Last download attempt failed: {{error}}"
     }
   },
   "home": {

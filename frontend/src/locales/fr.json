@@ -516,7 +516,8 @@
       "rate_limit_reset": "Réinitialiser",
       "rate_limit_reset_error": "Impossible de réinitialiser la limite de débit.",
       "core_update_available_short": "Mise à jour disponible",
-      "check_now_button": "Vérifier les mises à jour maintenant"
+      "check_now_button": "Vérifier les mises à jour maintenant",
+      "col_isp": "Fournisseur / FAI"
     },
     "security_info": {
       "title": "Informations de sécurité",
@@ -633,6 +634,31 @@
       "updates_available": "{{count}} mise(s) à jour disponible(s)",
       "all_up_to_date": "Tous les modules sont à jour",
       "sync_failed": "Échec de la synchronisation du registre — affichage des données en cache, qui peuvent être obsolètes."
+    },
+    "geoip": {
+      "title": "GeoIP",
+      "subtitle": "Détection de la ville et du fournisseur pour les adresses IP des sessions (MaxMind GeoLite2), actualisée automatiquement une fois configurée.",
+      "status_configured": "Configuré",
+      "status_not_configured": "Non configuré",
+      "load_error": "Impossible de charger les paramètres GeoIP.",
+      "saved": "Enregistré.",
+      "validation_error": "L'ID de compte est requis.",
+      "save_error": "Échec de l'enregistrement.",
+      "remove_error": "Échec de la suppression de la configuration.",
+      "remove_confirm": "Supprimer la configuration GeoIP ? Les bases de données déjà téléchargées sont conservées, mais ne seront plus actualisées tant que ce n'est pas reconfiguré.",
+      "account_id": "ID de compte",
+      "license_key": "Clé de licence",
+      "license_key_placeholder_existing": "laisser vide pour conserver la clé existante",
+      "hint": "Un compte MaxMind gratuit est requis — créez un ID de compte et une clé de licence sur maxmind.com/en/geolite2/signup.",
+      "saving": "Enregistrement…",
+      "save": "Enregistrer",
+      "action": {
+        "removing": "Suppression…",
+        "remove": "Supprimer la configuration"
+      },
+      "last_update": "Dernière actualisation : {{time}}",
+      "no_update_yet": "Pas encore actualisé.",
+      "download_failed": "La dernière tentative de téléchargement a échoué : {{error}}"
     }
   },
   "home": {

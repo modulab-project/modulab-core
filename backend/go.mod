@@ -5,6 +5,7 @@ go 1.26.5
 require (
 	github.com/coreos/go-oidc/v3 v3.20.0
 	github.com/jackc/pgx/v5 v5.10.0
+	github.com/oschwald/geoip2-golang/v2 v2.0.0
 	github.com/redis/go-redis/v9 v9.21.0
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sync v0.21.0
@@ -12,8 +13,10 @@ require (
 
 require (
 	github.com/kr/text v0.2.0 // indirect
+	github.com/oschwald/maxminddb-golang/v2 v2.0.0 // indirect
 	github.com/rogpeppe/go-internal v1.15.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
+	golang.org/x/sys v0.37.0 // indirect
 )
 
 require (

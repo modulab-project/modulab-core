@@ -261,6 +261,15 @@ services:
     cpus: 2.0
     volumes:
       - modulab-modules-data:/var/lib/modulab/modules
+      # MaxMind GeoLite2 City/ASN .mmdb files (internal/geoip), downloaded
+      # and refreshed by Core itself once GeoIP is configured from the
+      # admin panel (internal/setup/geoip.go) - no separate sidecar
+      # container, no .env credentials. Named volume rather than a bind
+      # mount so the databases survive a `docker compose pull && up -d`
+      # core image upgrade the same way postgres-data/valkey-data do.
+      # Path must match MODULAB_GEOIP_DATA_DIR's default in
+      # internal/config/config.go (/data/geoip).
+      - geoip-data:/data/geoip
     depends_on:
       postgres:
         condition: service_healthy
@@ -408,3 +417,4 @@ volumes:
   valkey-data:
   traefik-acme:
   modulab-modules-data:
+  geoip-data:

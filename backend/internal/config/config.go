@@ -64,6 +64,16 @@ type Config struct {
 	// Default: /var/lib/modulab/modules
 	ModuleDataDir string
 
+	// GeoIPDataDir (MODULAB_GEOIP_DATA_DIR) is where internal/geoip writes
+	// the downloaded GeoLite2-City.mmdb / GeoLite2-ASN.mmdb files. Matches
+	// deploy/docker-compose.yml's geoip-data volume mount. Credentials for
+	// the download itself live in core_settings (internal/setup/geoip.go),
+	// configured from the admin panel - this is the only GeoIP-related
+	// environment variable, since it is purely a filesystem path, not a
+	// secret.
+	// Default: /data/geoip
+	GeoIPDataDir string
+
 	// CosignBinaryPath (MODULAB_COSIGN_BINARY_PATH) is the path to the cosign
 	// binary used to verify official module signatures. Defaults to searching
 	// $PATH for "cosign". Set to "" to use the default.
@@ -152,6 +162,7 @@ func Load() (Config, error) {
 		DenoBinaryPath: getEnvDefault("MODULAB_DENO_BINARY_PATH", "/usr/local/bin/deno"),
 
 		ModuleDataDir:    getEnvDefault("MODULAB_MODULE_DATA_DIR", "/var/lib/modulab/modules"),
+		GeoIPDataDir:     getEnvDefault("MODULAB_GEOIP_DATA_DIR", "/data/geoip"),
 		CosignBinaryPath: os.Getenv("MODULAB_COSIGN_BINARY_PATH"), // "" = search $PATH
 
 		PublicBaseURL: getEnvDefault("MODULAB_PUBLIC_BASE_URL", "http://localhost:8080"),

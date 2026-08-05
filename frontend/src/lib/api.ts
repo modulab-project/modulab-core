@@ -444,6 +444,57 @@ export function testSmtp(body: SMTPTestRequest): Promise<{ ok: boolean }> {
   });
 }
 
+// --- GeoIP (MaxMind GeoLite2 City + ASN) -----------------------------------
+// Mirrors backend/internal/setup.GeoIPStatusResponse's JSON shape exactly.
+// license_key is never part of this type at all, mirroring SMTPStatus'
+// treatment of password - there is no "show the current key" affordance,
+// only "set a new one".
+
+export interface GeoIPStatus {
+  configured: boolean;
+  account_id?: string;
+  // RFC3339 timestamp of the last successful database download, if any.
+  last_update_at?: string;
+  // Diagnostic message from the most recent failed download attempt (bad
+  // credentials, network error, ...), cleared again on the next success.
+  last_update_error?: string;
+}
+
+// Body of POST /v1/admin/geoip/configure - mirrors
+// backend/internal/setup.GeoIPConfigRequest. license_key may be sent empty
+// to mean "keep the existing key" - same semantics as SMTPConfigRequest's
+// password field once a configuration already exists.
+export interface GeoIPConfigRequest {
+  account_id: string;
+  license_key: string;
+}
+
+// GET /v1/admin/geoip/status - admin only (enforced server-side).
+export function geoipStatus(): Promise<GeoIPStatus> {
+  return request<GeoIPStatus>("/v1/admin/geoip/status");
+}
+
+// POST /v1/admin/geoip/configure - admin only, step-up re-auth required
+// (RequireAdminReauthMiddleware, same tier as SMTP/OIDC's mutating
+// endpoints). Triggers an immediate download attempt server-side, so the
+// returned status may already reflect last_update_at/last_update_error from
+// that very attempt.
+export function configureGeoip(body: GeoIPConfigRequest): Promise<GeoIPStatus> {
+  return request<GeoIPStatus>("/v1/admin/geoip/configure", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+// DELETE /v1/admin/geoip/delete - clears the configuration entirely (both
+// credentials and the last-update bookkeeping), returning the instance to
+// "not configured" - same step-up re-auth gate as configureGeoip. Already
+// downloaded .mmdb files are left on disk (see GeoIPDeleteHandler's doc
+// comment) - only the credentials/status are removed.
+export function deleteGeoipConfig(): Promise<void> {
+  return request<void>("/v1/admin/geoip/delete", { method: "DELETE" });
+}
+
 // --- News feeds ----------------------------------------------------------
 // Mirrors backend/internal/news.FeedResponse exactly.
 
@@ -1213,6 +1264,17 @@ export interface ActiveSession {
   // sessions created before this field existed, or for logins that never
   // passed through Cloudflare (e.g. local/direct access).
   country?: string;
+  // GeoIP (MaxMind GeoLite2, backend/internal/geoip) City-database lookup
+  // against ip, captured once at login - absent for sessions created before
+  // GeoIP was configured, or whenever the database has no city-level data
+  // for that address (same "just omit it" treatment as country/hostname).
+  // region is the first/largest subdivision (e.g. a US state or German
+  // Bundesland).
+  city?: string;
+  region?: string;
+  // GeoIP ASN-database lookup: the ISP/hosting provider organization behind
+  // ip, not a geographic value - same absence semantics as city/region.
+  asn_org?: string;
   last_active_seconds_ago?: number;
   expires_in_seconds?: number;
   current?: boolean;

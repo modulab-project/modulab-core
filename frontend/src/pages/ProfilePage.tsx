@@ -489,7 +489,13 @@ function SessionListItem({
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium">
             {device}
-            {session.country && <> · {session.country}</>}
+            {/* city is GeoIP's (MaxMind GeoLite2) lookup against ip, absent
+                whenever GeoIP is not configured or has no data for this
+                address - falls back to just country, same as before GeoIP
+                existed at all. */}
+            {(session.city || session.country) && (
+              <> · {session.city ? (session.country ? `${session.city}, ${session.country}` : session.city) : session.country}</>
+            )}
           </span>
           {session.current && (
             <span className="whitespace-nowrap rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-medium text-teal-700 dark:bg-teal-900 dark:text-teal-300">
@@ -515,6 +521,12 @@ function SessionListItem({
                 <div>{session.ip}</div>
                 {session.hostname && <div>{session.hostname}</div>}
               </dd>
+            </>
+          )}
+          {session.asn_org && (
+            <>
+              <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_isp")}</dt>
+              <dd className="break-all">{session.asn_org}</dd>
             </>
           )}
           <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_login")}</dt>
