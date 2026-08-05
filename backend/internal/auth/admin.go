@@ -259,7 +259,7 @@ func requireAdmin(d Deps, w http.ResponseWriter, r *http.Request) (Session, bool
 		http.Error(w, "missing session cookie", http.StatusUnauthorized)
 		return Session{}, false
 	}
-	sess, ok, err := ValidateSession(r.Context(), d, token, clientIP(r), loginCountry(r), r.Header.Get("User-Agent"))
+	sess, ok, err := SessionFromRequest(r.Context(), d, token, clientIP(r), loginCountry(r), r.Header.Get("User-Agent"))
 	if err != nil {
 		httperr.Internal(w, err)
 		return Session{}, false
@@ -454,7 +454,7 @@ func requireActiveSessionWithToken(d Deps, w http.ResponseWriter, r *http.Reques
 		http.Error(w, "missing bearer token", http.StatusUnauthorized)
 		return Session{}, false
 	}
-	sess, ok, err := ValidateSession(r.Context(), d, token, clientIP(r), loginCountry(r), r.Header.Get("User-Agent"))
+	sess, ok, err := SessionFromRequest(r.Context(), d, token, clientIP(r), loginCountry(r), r.Header.Get("User-Agent"))
 	if err != nil {
 		httperr.Internal(w, err)
 		return Session{}, false

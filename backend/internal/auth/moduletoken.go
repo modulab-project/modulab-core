@@ -156,7 +156,7 @@ func RequireSessionOrModuleToken(d Deps, module string, w http.ResponseWriter, r
 	// exists yet). Full sessions travel via the httpOnly cookie now, not
 	// the Authorization header - see setSessionCookie's doc comment.
 	if token := sessionToken(r); token != "" {
-		sess, ok, err := ValidateSession(r.Context(), d, token, clientIP(r), loginCountry(r), r.Header.Get("User-Agent"))
+		sess, ok, err := SessionFromRequest(r.Context(), d, token, clientIP(r), loginCountry(r), r.Header.Get("User-Agent"))
 		if err != nil {
 			httperr.Internal(w, err)
 			return Session{}, false

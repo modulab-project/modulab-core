@@ -1400,9 +1400,16 @@ func globalRateLimitMax(ctx context.Context, pool *db.Pool) int64 {
 // looking, which is exactly what happened investigating an earlier "too
 // many requests" report. ActorID is whatever identify returned (an IP, or
 // "user:<id>" for an authenticated request at the global layer).
-func rateLimitMiddleware(vk *valkey.Client, pool *db.Pool, masterKeyEnv string, label string, window time.Duration, maxFn func(context.Context, *db.Pool) int64, identify func(*http.Request) string, next http.HandlerFunc) http.HandlerFunc {
+//
+// identify also returns the *http.Request to pass downstream (usually r
+// itself, unchanged) - identifyBySessionOrIP below uses this to stash the
+// Session it already validated into the request's context
+// (auth.ContextWithSession), so every handler further down the chain can
+// reuse it via auth.SessionFromRequest instead of validating the same
+// token a second time (H-1, PERFORMANCE_AUDIT.md).
+func rateLimitMiddleware(vk *valkey.Client, pool *db.Pool, masterKeyEnv string, label string, window time.Duration, maxFn func(context.Context, *db.Pool) int64, identify func(*http.Request) (string, *http.Request), next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		identifier := identify(r)
+		identifier, r := identify(r)
 		key := "ratelimit:" + label + ":" + identifier
 		count, err := vk.IncrExpire(r.Context(), key, window)
 		if err != nil {
@@ -1460,8 +1467,8 @@ func rateLimitMiddleware(vk *valkey.Client, pool *db.Pool, masterKeyEnv string, 
 // per-route limiter here is a coarse IP-based ceiling layered on top of
 // ai.go's own separate per-user "chat" limiter (see that file), not a
 // replacement for it.
-func identifyByIP(r *http.Request) string {
-	return clientIP(r)
+func identifyByIP(r *http.Request) (string, *http.Request) {
+	return clientIP(r), r
 }
 
 // authRateLimitMiddleware is rateLimitMiddleware pinned to the auth-endpoint
@@ -1486,8 +1493,17 @@ func authRateLimitMiddleware(vk *valkey.Client, pool *db.Pool, masterKeyEnv stri
 // whichever handler already required a session; acceptable at homelab
 // scale, and still just one extra Valkey round trip on top of the
 // IncrExpire counter itself.
-func identifyBySessionOrIP(authDeps auth.Deps) func(*http.Request) string {
-	return func(r *http.Request) string {
+//
+// The validated Session is stashed into the request's context
+// (auth.ContextWithSession) and the resulting *http.Request returned
+// alongside the bucket key, so this is the ONLY ValidateSession call for
+// the request - every downstream handler retrieves the same Session via
+// auth.SessionFromRequest instead of validating the token a second time
+// (H-1, PERFORMANCE_AUDIT.md; previously every handler re-validated,
+// doubling the ~7 Valkey round trips and the AES-GCM decrypt this call
+// already pays for).
+func identifyBySessionOrIP(authDeps auth.Deps) func(*http.Request) (string, *http.Request) {
+	return func(r *http.Request) (string, *http.Request) {
 		// Reads the session cookie, not the Authorization header - see
 		// sessionToken's doc comment. Before this fix (found during the
 		// 2026-07-15 post-migration security review), this always checked
@@ -1498,10 +1514,10 @@ func identifyBySessionOrIP(authDeps auth.Deps) func(*http.Request) string {
 		// package doc comment on the shared-NAT/office-egress case).
 		if token := sessionToken(r); token != "" {
 			if sess, ok, err := auth.ValidateSession(r.Context(), authDeps, token, clientIP(r), auth.LoginCountry(r), r.Header.Get("User-Agent")); err == nil && ok {
-				return "user:" + sess.UserID
+				return "user:" + sess.UserID, r.WithContext(auth.ContextWithSession(r.Context(), sess))
 			}
 		}
-		return clientIP(r)
+		return clientIP(r), r
 	}
 }
 

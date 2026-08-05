@@ -717,7 +717,7 @@ func MeHandler(d Deps) http.HandlerFunc {
 		}
 
 		ctx := r.Context()
-		sess, ok, err := ValidateSession(ctx, d, token, clientIP(r), loginCountry(r), r.Header.Get("User-Agent"))
+		sess, ok, err := SessionFromRequest(ctx, d, token, clientIP(r), loginCountry(r), r.Header.Get("User-Agent"))
 		if err != nil {
 			httperr.Internal(w, err)
 			return
@@ -779,7 +779,7 @@ func DeleteSelfHandler(d Deps) http.HandlerFunc {
 		}
 
 		ctx := r.Context()
-		sess, ok, err := ValidateSession(ctx, d, token, clientIP(r), loginCountry(r), r.Header.Get("User-Agent"))
+		sess, ok, err := SessionFromRequest(ctx, d, token, clientIP(r), loginCountry(r), r.Header.Get("User-Agent"))
 		if err != nil {
 			httperr.Internal(w, err)
 			return
@@ -893,7 +893,7 @@ func UserPrefsHandler(d Deps) http.HandlerFunc {
 			return
 		}
 		ctx := r.Context()
-		sess, ok, err := ValidateSession(ctx, d, token, clientIP(r), loginCountry(r), r.Header.Get("User-Agent"))
+		sess, ok, err := SessionFromRequest(ctx, d, token, clientIP(r), loginCountry(r), r.Header.Get("User-Agent"))
 		if err != nil {
 			httperr.Internal(w, err)
 			return
@@ -1011,7 +1011,7 @@ func ExportSelfHandler(d Deps) http.HandlerFunc {
 			return
 		}
 		ctx := r.Context()
-		sess, ok, err := ValidateSession(ctx, d, token, clientIP(r), loginCountry(r), r.Header.Get("User-Agent"))
+		sess, ok, err := SessionFromRequest(ctx, d, token, clientIP(r), loginCountry(r), r.Header.Get("User-Agent"))
 		if err != nil {
 			httperr.Internal(w, err)
 			return
@@ -1176,7 +1176,7 @@ func LogoutHandler(d Deps) http.HandlerFunc {
 			return
 		}
 
-		sess, ok, err := ValidateSession(ctx, d, token, clientIP(r), loginCountry(r), r.Header.Get("User-Agent"))
+		sess, ok, err := SessionFromRequest(ctx, d, token, clientIP(r), loginCountry(r), r.Header.Get("User-Agent"))
 
 		// Best-effort: also invalidate this session's refresh token at the
 		// IdP itself (see Provider.Revoke's doc comment), not just delete

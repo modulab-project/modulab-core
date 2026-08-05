@@ -433,7 +433,22 @@ func RevokeUserSessions(ctx context.Context, d Deps, subject string) error {
 			return fmt.Errorf("auth: revoke session: %w", err)
 		}
 	}
-	return d.Valkey.Del(ctx, userSessionsKeyPrefix+subject)
+	if err := d.Valkey.Del(ctx, userSessionsKeyPrefix+subject); err != nil {
+		return err
+	}
+
+	// Best-effort live push (H-3, PERFORMANCE_AUDIT.md) so any open tab
+	// notices the revocation immediately instead of waiting on
+	// useAuthenticatedSession's safety-net poll (frontend/src/lib/
+	// useSession.ts) - that hook re-checks GET /v1/auth/me the moment this
+	// event arrives. Failure here is not fatal: the sessions themselves are
+	// already gone above, so the caller's action (lock/delete/logout) has
+	// already fully succeeded regardless of whether this notification is
+	// delivered.
+	if pubErr := notify.Publish(ctx, d.Valkey, notify.UserChannel(subject), notify.Event{Type: "session.changed"}); pubErr != nil {
+		log.Printf("auth: notify session revoked for %s: %v", subject, pubErr)
+	}
+	return nil
 }
 
 // RevokeSessionByID ends exactly one active session, identified by the
@@ -583,6 +598,27 @@ func RevokeOwnSessionByID(ctx context.Context, d Deps, subject, id string) (bool
 		return true, nil
 	}
 	return false, nil
+}
+
+// SessionFromRequest returns the session already validated for this exact
+// request by globalRateLimitMiddleware's identifyBySessionOrIP
+// (cmd/core/main.go), if ctx carries one (see ContextWithSession/
+// SessionFromContext, context.go) - avoiding a second full ValidateSession
+// call per request. Before this helper, every one of this package's
+// session-requiring handlers called ValidateSession a second time on top of
+// the one the global middleware already ran, doubling the ~7 Valkey round
+// trips (session GET, two sliding-window EXPIREs, two anomaly-baseline
+// GET/SET pairs) and the AES-GCM decrypt ValidateSession does per call (see
+// H-1, PERFORMANCE_AUDIT.md). Falls back to a full ValidateSession when no
+// context session is present - a request that reaches a handler without
+// having gone through the global middleware first, or one whose session
+// cookie only appears after that middleware already ran (neither happens in
+// the current wiring, but this keeps every call site correct regardless).
+func SessionFromRequest(ctx context.Context, d Deps, token, currentIP, currentCountry, currentUserAgent string) (Session, bool, error) {
+	if sess, ok := SessionFromContext(ctx); ok {
+		return sess, true, nil
+	}
+	return ValidateSession(ctx, d, token, currentIP, currentCountry, currentUserAgent)
 }
 
 // ValidateSession looks up token in Valkey and returns the session it maps
@@ -1124,6 +1160,17 @@ func UpdateSessionsRole(ctx context.Context, vk *valkey.Client, subject, role st
 		if err := vk.SetWithTTL(ctx, sessionKeyPrefix+token, string(data), SessionTTL); err != nil {
 			return fmt.Errorf("auth: store updated session: %w", err)
 		}
+	}
+
+	// Best-effort live push (H-3, PERFORMANCE_AUDIT.md), same reasoning as
+	// RevokeUserSessions's own "session.changed" push above - lets an
+	// already-open tab pick up its new role immediately via
+	// useAuthenticatedSession instead of waiting on the safety-net poll.
+	// Published even when tokens was empty (no active session right now) -
+	// harmless, since nothing is subscribed to notify.UserChannel(subject)
+	// in that case anyway.
+	if pubErr := notify.Publish(ctx, vk, notify.UserChannel(subject), notify.Event{Type: "session.changed"}); pubErr != nil {
+		log.Printf("auth: notify session role update for %s: %v", subject, pubErr)
 	}
 	return nil
 }
