@@ -453,11 +453,28 @@ export function testSmtp(body: SMTPTestRequest): Promise<{ ok: boolean }> {
 export interface GeoIPStatus {
   configured: boolean;
   account_id?: string;
-  // RFC3339 timestamp of the last successful database download, if any.
+  // RFC3339 timestamp of the last successful download attempt across BOTH
+  // editions together, if any - a run where one edition succeeded and the
+  // other failed does not update this (see backend/internal/geoip.
+  // downloadAll). city_file/asn_file below are the more precise per-file
+  // picture for exactly that reason.
   last_update_at?: string;
   // Diagnostic message from the most recent failed download attempt (bad
   // credentials, network error, ...), cleared again on the next success.
   last_update_error?: string;
+  // Per-edition .mmdb file as it currently sits on disk - reported
+  // regardless of `configured`, since removing credentials deliberately
+  // leaves already-downloaded files in place (see GeoIPDeleteHandler's
+  // Go doc comment).
+  city_file: GeoIPFileInfo;
+  asn_file: GeoIPFileInfo;
+}
+
+export interface GeoIPFileInfo {
+  exists: boolean;
+  // Only present when exists is true.
+  size_bytes?: number;
+  modified_at?: string;
 }
 
 // Body of POST /v1/admin/geoip/configure - mirrors

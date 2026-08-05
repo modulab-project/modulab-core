@@ -663,7 +663,10 @@
       },
       "last_update": "Last refreshed: {{time}}",
       "no_update_yet": "Not refreshed yet.",
-      "download_failed": "Last download attempt failed: {{error}}"
+      "download_failed": "Last download attempt failed: {{error}}",
+      "databases_title": "Databases",
+      "file_present": "Present — {{size}}, last written {{time}}",
+      "file_missing": "Not downloaded yet."
     }
   },
   "home": {

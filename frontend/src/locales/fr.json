@@ -663,7 +663,10 @@
       },
       "last_update": "Dernière actualisation : {{time}}",
       "no_update_yet": "Pas encore actualisé.",
-      "download_failed": "La dernière tentative de téléchargement a échoué : {{error}}"
+      "download_failed": "La dernière tentative de téléchargement a échoué : {{error}}",
+      "databases_title": "Bases de données",
+      "file_present": "Présente — {{size}}, dernière écriture {{time}}",
+      "file_missing": "Pas encore téléchargée."
     }
   },
   "home": {

@@ -356,6 +356,36 @@ var (
 	asnReader  = &reader{}
 )
 
+// FileInfo describes one edition's .mmdb file as it currently sits on disk -
+// used by the GeoIP admin settings page to show "is there actually a
+// database here, and how big/recent is it", independent of whether GeoIP is
+// currently configured at all (see GeoIPDeleteHandler's doc comment in
+// internal/setup: removing credentials deliberately leaves already-
+// downloaded files in place, so an admin who did that can still see the
+// stale-but-present database here rather than the page going blank).
+type FileInfo struct {
+	Exists     bool
+	SizeBytes  int64
+	ModifiedAt time.Time
+}
+
+func fileInfo(path string) FileInfo {
+	info, err := os.Stat(path)
+	if err != nil {
+		return FileInfo{}
+	}
+	return FileInfo{Exists: true, SizeBytes: info.Size(), ModifiedAt: info.ModTime()}
+}
+
+// Status reports both editions' current on-disk FileInfo for dataDir -
+// independent of the lazily-opened readers above (this stats the files
+// directly rather than going through cityReader/asnReader), so it reflects
+// reality even before either reader has ever been opened, e.g. right after
+// a fresh install with no lookups performed yet.
+func Status(dataDir string) (city, asn FileInfo) {
+	return fileInfo(filepath.Join(dataDir, cityEdition+".mmdb")), fileInfo(filepath.Join(dataDir, asnEdition+".mmdb"))
+}
+
 // Configure points the lazy readers (and the downloader, via RunScheduler/
 // TriggerNow) at dataDir. Idempotent - safe to call on every RunScheduler/
 // TriggerNow invocation, since reader.setPath is itself a no-op when the

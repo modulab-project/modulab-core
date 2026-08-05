@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
-import { geoipStatus as fetchGeoipStatus, configureGeoip, deleteGeoipConfig, type GeoIPStatus } from "../lib/api";
+import type { TFunction } from "i18next";
+import { geoipStatus as fetchGeoipStatus, configureGeoip, deleteGeoipConfig, type GeoIPStatus, type GeoIPFileInfo } from "../lib/api";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { useLoginRedirect } from "../lib/useLoginRedirect";
 import { isReauthRequiredError } from "../lib/authErrors";
@@ -88,7 +89,16 @@ export default function AdminSystemGeoIPPage() {
     setReauthRequired(false);
     try {
       await deleteGeoipConfig();
-      setStatus({ configured: false });
+      // city_file/asn_file are preserved from whatever was last fetched -
+      // GeoIPDeleteHandler leaves already-downloaded files in place (see its
+      // Go doc comment), so the databases section should keep showing them
+      // rather than snapping to "not downloaded" the instant credentials
+      // are cleared.
+      setStatus((prev) => ({
+        configured: false,
+        city_file: prev?.city_file ?? { exists: false },
+        asn_file: prev?.asn_file ?? { exists: false },
+      }));
       setAccountId("");
       setLicenseKey("");
     } catch (err) {
@@ -156,9 +166,58 @@ export default function AdminSystemGeoIPPage() {
             )}
           </div>
         </form>
+
+        {/* Shown regardless of `configured` - GeoIPDeleteHandler deliberately
+            leaves already-downloaded files in place, so an admin who cleared
+            credentials can still see a stale-but-present database here
+            rather than this section just disappearing. */}
+        {status && (
+          <div className="mt-6 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/50">
+            <p className="mb-3 text-sm font-medium text-gray-700 dark:text-gray-300">{t("admin.geoip.databases_title")}</p>
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-xs text-gray-500 dark:text-gray-400">
+              <FileStatusRow label="GeoLite2-City" file={status.city_file} t={t} />
+              <FileStatusRow label="GeoLite2-ASN" file={status.asn_file} t={t} />
+            </dl>
+          </div>
+        )}
       </div>
     </AppShell>
   );
+}
+
+function FileStatusRow({ label, file, t }: { label: string; file: GeoIPFileInfo; t: TFunction }) {
+  return (
+    <>
+      <dt className="font-medium text-gray-600 dark:text-gray-400">{label}</dt>
+      <dd>
+        {file.exists ? (
+          <span className="text-teal-700 dark:text-teal-400">
+            {t("admin.geoip.file_present", {
+              size: formatBytes(file.size_bytes ?? 0),
+              time: file.modified_at ? new Date(file.modified_at).toLocaleString() : "—",
+            })}
+          </span>
+        ) : (
+          <span className="text-gray-400 dark:text-gray-500">{t("admin.geoip.file_missing")}</span>
+        )}
+      </dd>
+    </>
+  );
+}
+
+// Local, deliberately tiny - not worth a shared utils import for one
+// call site, same reasoning ProfilePage.tsx/AdminSecurityInfoPage.tsx give
+// for their own local formatDuration copies.
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex++;
+  }
+  return `${value.toFixed(1)} ${units[unitIndex]}`;
 }
 
 function Msg({ msg }: { msg: { ok: boolean; text: string } }) {

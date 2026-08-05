@@ -543,7 +543,22 @@ func main() {
 	// triggerDownload callback re-downloads using the exact same
 	// DataDir/MasterKey/Pool the scheduler would use on its own next tick.
 	geoipDeps := geoip.Deps{Pool: pool, MasterKey: cfg.MasterKey, DataDir: cfg.GeoIPDataDir}
-	mux.Handle("GET /v1/admin/geoip/status", adminOnly(setup.GeoIPStatusHandler(pool, cfg.MasterKey)))
+	// Adapts internal/geoip.Status (Go time.Time-based) to
+	// setup.GeoIPFileInfo (JSON/string-based) - the one seam where main.go,
+	// which is free to import both setup and geoip, bridges the circular
+	// import setup.go's own doc comment explains neither package can cross
+	// on its own.
+	geoipFileStatus := func() (city, asn setup.GeoIPFileInfo) {
+		cityInfo, asnInfo := geoip.Status(geoipDeps.DataDir)
+		toFileInfo := func(fi geoip.FileInfo) setup.GeoIPFileInfo {
+			if !fi.Exists {
+				return setup.GeoIPFileInfo{}
+			}
+			return setup.GeoIPFileInfo{Exists: true, SizeBytes: fi.SizeBytes, ModifiedAt: fi.ModifiedAt.UTC().Format(time.RFC3339)}
+		}
+		return toFileInfo(cityInfo), toFileInfo(asnInfo)
+	}
+	mux.Handle("GET /v1/admin/geoip/status", adminOnly(setup.GeoIPStatusHandler(pool, cfg.MasterKey, geoipFileStatus)))
 	mux.Handle("POST /v1/admin/geoip/configure", adminReauthOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		masterKey, err := setup.ResolveMasterKey(r.Context(), pool, cfg.MasterKey)
 		if err != nil {
@@ -567,7 +582,7 @@ func main() {
 			// synchronous is fine here, this never runs longer than a few
 			// tens of seconds even on a cold download.
 			geoip.TriggerNow(r.Context(), geoipDeps)
-		})(rw, r)
+		}, geoipFileStatus)(rw, r)
 		if rw.code < 400 {
 			if sess, ok := auth.SessionFromContext(r.Context()); ok {
 				var newReq struct {

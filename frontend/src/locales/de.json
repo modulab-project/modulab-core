@@ -663,7 +663,10 @@
       },
       "last_update": "Zuletzt aktualisiert: {{time}}",
       "no_update_yet": "Noch nicht aktualisiert.",
-      "download_failed": "Letzter Download-Versuch fehlgeschlagen: {{error}}"
+      "download_failed": "Letzter Download-Versuch fehlgeschlagen: {{error}}",
+      "databases_title": "Datenbanken",
+      "file_present": "Vorhanden — {{size}}, zuletzt geschrieben {{time}}",
+      "file_missing": "Noch nicht heruntergeladen."
     }
   },
   "home": {

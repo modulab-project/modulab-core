@@ -663,7 +663,10 @@
       },
       "last_update": "Laatst bijgewerkt: {{time}}",
       "no_update_yet": "Nog niet bijgewerkt.",
-      "download_failed": "Laatste downloadpoging mislukt: {{error}}"
+      "download_failed": "Laatste downloadpoging mislukt: {{error}}",
+      "databases_title": "Databases",
+      "file_present": "Aanwezig — {{size}}, laatst geschreven {{time}}",
+      "file_missing": "Nog niet gedownload."
     }
   },
   "home": {

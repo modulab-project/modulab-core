@@ -66,6 +66,27 @@ type GeoIPStatusResponse struct {
 	AccountID       string `json:"account_id,omitempty"`
 	LastUpdateAt    string `json:"last_update_at,omitempty"`
 	LastUpdateError string `json:"last_update_error,omitempty"`
+	// CityFile/ASNFile report each edition's .mmdb file as it currently
+	// sits on disk, independent of Configured - GeoIPDeleteHandler
+	// deliberately leaves already-downloaded files in place (see its own
+	// doc comment), so an admin who cleared credentials can still see a
+	// stale-but-present database here rather than the page going blank.
+	// Populated by the fileStatus callback GeoIPStatusHandler is given
+	// (internal/geoip.Status, wired up in cmd/core/main.go) - this package
+	// cannot import internal/geoip directly without a circular import (see
+	// this file's top-of-file doc comment on GeoIPConfigureHandler's
+	// triggerDownload for the exact same reasoning).
+	CityFile GeoIPFileInfo `json:"city_file"`
+	ASNFile  GeoIPFileInfo `json:"asn_file"`
+}
+
+// GeoIPFileInfo describes one edition's .mmdb file on disk.
+type GeoIPFileInfo struct {
+	Exists bool `json:"exists"`
+	// SizeBytes/ModifiedAt are only meaningful (and only populated) when
+	// Exists is true.
+	SizeBytes  int64  `json:"size_bytes,omitempty"`
+	ModifiedAt string `json:"modified_at,omitempty"` // RFC3339
 }
 
 // GeoIPRuntimeConfig is the fully resolved configuration internal/geoip's
@@ -123,10 +144,15 @@ func ResolveGeoIPConfig(ctx context.Context, pool *db.Pool, masterKey string) (G
 
 // GeoIPStatusHandler reports whether GeoIP has been configured, and if so,
 // every field except the license key. masterKey is required to decrypt the
-// account ID.
-func GeoIPStatusHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
+// account ID. fileStatus reports each edition's on-disk .mmdb file (see
+// internal/geoip.Status, wired up by cmd/core/main.go) - called
+// unconditionally, even when GeoIP is not (or no longer) configured, since
+// GeoIPDeleteHandler leaves already-downloaded files in place.
+func GeoIPStatusHandler(pool *db.Pool, masterKey string, fileStatus func() (city, asn GeoIPFileInfo)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+
+		cityFile, asnFile := fileStatus()
 
 		encAccountID, exists, err := pool.GetSetting(ctx, geoIPAccountIDSettingKey)
 		if err != nil {
@@ -134,7 +160,7 @@ func GeoIPStatusHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 			return
 		}
 		if !exists {
-			httperr.JSON(w, http.StatusOK, GeoIPStatusResponse{Configured: false})
+			httperr.JSON(w, http.StatusOK, GeoIPStatusResponse{Configured: false, CityFile: cityFile, ASNFile: asnFile})
 			return
 		}
 		accountID, err := crypto.DecryptIfNotEmpty(masterKey, encAccountID)
@@ -159,6 +185,8 @@ func GeoIPStatusHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 			AccountID:       accountID,
 			LastUpdateAt:    lastUpdateAt,
 			LastUpdateError: lastUpdateError,
+			CityFile:        cityFile,
+			ASNFile:         asnFile,
 		})
 	}
 }
@@ -174,8 +202,11 @@ func GeoIPStatusHandler(pool *db.Pool, masterKey string) http.HandlerFunc {
 // a plain func() (no error/status returned) so this package never needs to
 // import internal/geoip directly - see this file's doc comment for why
 // that would be circular. A nil triggerDownload (e.g. in a test) is simply
-// not called.
-func GeoIPConfigureHandler(pool *db.Pool, masterKey string, triggerDownload func()) http.HandlerFunc {
+// not called. fileStatus is read AFTER triggerDownload returns, so the
+// response already reflects whatever the just-triggered download produced
+// (or didn't, on failure) rather than requiring a second round-trip to
+// GET .../status to see it.
+func GeoIPConfigureHandler(pool *db.Pool, masterKey string, triggerDownload func(), fileStatus func() (city, asn GeoIPFileInfo)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -231,11 +262,17 @@ func GeoIPConfigureHandler(pool *db.Pool, masterKey string, triggerDownload func
 
 		lastUpdateAt, _, _ := pool.GetSetting(ctx, GeoIPLastUpdateAtSettingKey)
 		lastUpdateError, _, _ := pool.GetSetting(ctx, GeoIPLastUpdateErrorSettingKey)
+		var cityFile, asnFile GeoIPFileInfo
+		if fileStatus != nil {
+			cityFile, asnFile = fileStatus()
+		}
 		httperr.JSON(w, http.StatusOK, GeoIPStatusResponse{
 			Configured:      true,
 			AccountID:       req.AccountID,
 			LastUpdateAt:    lastUpdateAt,
 			LastUpdateError: lastUpdateError,
+			CityFile:        cityFile,
+			ASNFile:         asnFile,
 		})
 	}
 }
