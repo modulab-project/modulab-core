@@ -22,9 +22,18 @@
 // (the worker's --allow-read/--allow-write/--allow-env scopes are untouched,
 // and its env holds nothing borrowed from Core), but it does defeat the
 // containment half of the sandbox: whatever a module can read - including
-// the PII it decrypts with the shared MODULAB_MODULE_PII_KEY - it could ship
-// anywhere, and it could reach the internal network that netguard carefully
-// keeps Core itself out of.
+// the PII in its own schema - it could ship anywhere, and it could reach the
+// internal network that netguard carefully keeps Core itself out of.
+//
+// "its own schema" is now the operative limit and was not always: this
+// comment used to say the module decrypts PII "with the shared
+// MODULAB_MODULE_PII_KEY", which stopped being true on 2026-08-02 when
+// every worker moved to a per-module subkey (crypto.DeriveModuleKey) and
+// each installed module completed its own migrate-pii-key run. Exfiltration
+// via egress therefore leaks one module's data, not every module's - worth
+// stating precisely here, since the stale wording has already been read as
+// evidence of a shared-key weakness that no longer exists (security review
+// 2026-08-06).
 //
 // The fix keeps both channels working and constrains them instead: a module
 // that wants runtime egress declares the *bound* in its manifest
