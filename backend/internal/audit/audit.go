@@ -104,6 +104,25 @@ const (
 	// brand-new session with no device baseline yet, so there is nothing to
 	// compare against until at least one mid-session request has run.
 	EventAuthDeviceAnomaly = "auth.device_anomaly"
+	// EventAuthLoginFailed covers the security-relevant ways CallbackHandler
+	// (handlers.go) can end a login attempt without issuing a session:
+	// nonce_mismatch, exchange_failed (both pre-authentication - Core does
+	// not yet know who this was, so ActorID is the client IP, same "bucketed
+	// by IP" treatment EventRateLimitExceeded's doc comment already
+	// describes), and access_denied (the IdP authenticated them, but they
+	// are not a member of any of the three configured groups - ActorID/
+	// ActorEmail are the subject/email in that one case, since Core does
+	// know who this was). Deliberately does NOT cover missing_state_or_code/
+	// invalid_or_expired_state/provider_unavailable/group_prefix_unavailable/
+	// server_error - the first two are high-volume and low-signal (a user
+	// simply took too long on the IdP's own login page, or double-clicked
+	// back), and the rest are infrastructure faults rather than anything
+	// about the login attempt itself. Details carries "reason" (one of the
+	// codes above) plus the same country/asn_org/hosting_or_vpn context
+	// EventAuthLogin's Details carries below, so a burst of failures from
+	// one country/network is discoverable the same way a successful
+	// anomaly already is.
+	EventAuthLoginFailed = "auth.login_failed"
 	// Fired by auth.recordReauthFailure (admin.go) once a caller's step-up
 	// reauth attempts (requireRecentLogin - lock/unlock/approve/delete a
 	// user, self-delete, SMTP/OIDC config, ending another session) fail

@@ -524,7 +524,9 @@
       "subtitle": "Aktive Sitzungen und Rate Limits auf einen Blick.",
       "card_desc": "Aktive Sitzungen und Live-Rate-Limit-Zähler.",
       "load_error": "Sicherheitsinfos konnten nicht geladen werden.",
-      "unknown": "Unbekannt"
+      "unknown": "Unbekannt",
+      "hosting_or_vpn_badge": "Rechenzentrum/VPN?",
+      "hosting_or_vpn_hint": "Dieser ISP-Name sieht nach einem Cloud-/Hosting-Anbieter oder VPN-Dienst aus (grobe Heuristik, kein Beweis - viele legitime Logins laufen darüber)."
     },
     "audit": {
       "title": "Audit-Log",
@@ -572,7 +574,10 @@
       },
       "event_types": {
         "auth_login": "Anmeldung",
+        "auth_login_failed": "Anmeldung fehlgeschlagen",
         "auth_logout": "Abmeldung",
+        "auth_country_anomaly": "Neues Anmeldeland erkannt",
+        "auth_device_anomaly": "Neues Gerät erkannt",
         "auth_session_revoked_by_admin": "Sitzung von Admin beendet",
         "auth_session_revoked_by_idp": "Sitzung vom Identity Provider widerrufen",
         "auth_reauth_repeated_failures": "Wiederholte Reauth-Fehlschläge",

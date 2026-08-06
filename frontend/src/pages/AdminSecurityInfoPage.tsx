@@ -347,7 +347,17 @@ function SessionListItem({
           {session.asn_org && (
             <>
               <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_isp")}</dt>
-              <dd className="break-all">{session.asn_org}</dd>
+              <dd className="break-all">
+                {session.asn_org}
+                {session.hosting_or_vpn && (
+                  <span
+                    title={t("admin.security_info.hosting_or_vpn_hint")}
+                    className="ml-1.5 inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                  >
+                    {t("admin.security_info.hosting_or_vpn_badge")}
+                  </span>
+                )}
+              </dd>
             </>
           )}
           <dt className="text-gray-400 dark:text-gray-500">{t("admin.system_info.col_login")}</dt>

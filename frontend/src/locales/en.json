@@ -524,7 +524,9 @@
       "subtitle": "Active sessions and rate limits at a glance.",
       "card_desc": "Active sessions and live rate-limit counters.",
       "load_error": "Could not load security info.",
-      "unknown": "Unknown"
+      "unknown": "Unknown",
+      "hosting_or_vpn_badge": "Datacenter/VPN?",
+      "hosting_or_vpn_hint": "This ISP name looks like a cloud/hosting provider or consumer VPN service (best-effort heuristic, not a verdict - many legitimate logins go through one)."
     },
     "audit": {
       "title": "Audit log",
@@ -572,7 +574,10 @@
       },
       "event_types": {
         "auth_login": "Login",
+        "auth_login_failed": "Login failed",
         "auth_logout": "Logout",
+        "auth_country_anomaly": "New sign-in country detected",
+        "auth_device_anomaly": "New device detected",
         "auth_session_revoked_by_admin": "Session ended by admin",
         "auth_session_revoked_by_idp": "Session revoked by identity provider",
         "auth_reauth_repeated_failures": "Repeated reauth failures",

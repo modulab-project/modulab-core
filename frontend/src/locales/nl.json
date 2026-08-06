@@ -524,7 +524,9 @@
       "subtitle": "Actieve sessies en rate limits in één oogopslag.",
       "card_desc": "Actieve sessies en live rate-limit-tellers.",
       "load_error": "Beveiligingsinfo kon niet worden geladen.",
-      "unknown": "Onbekend"
+      "unknown": "Onbekend",
+      "hosting_or_vpn_badge": "Datacenter/VPN?",
+      "hosting_or_vpn_hint": "Deze ISP-naam lijkt op een cloud-/hostingprovider of consumenten-VPN-dienst (indicatieve heuristiek, geen bewijs - veel legitieme aanmeldingen verlopen hierlangs)."
     },
     "audit": {
       "title": "Auditlogboek",
@@ -572,7 +574,10 @@
       },
       "event_types": {
         "auth_login": "Aanmelding",
+        "auth_login_failed": "Aanmelding mislukt",
         "auth_logout": "Afmelding",
+        "auth_country_anomaly": "Nieuw aanmeldland gedetecteerd",
+        "auth_device_anomaly": "Nieuw apparaat gedetecteerd",
         "auth_session_revoked_by_admin": "Sessie beëindigd door beheerder",
         "auth_session_revoked_by_idp": "Sessie ingetrokken door identiteitsprovider",
         "auth_reauth_repeated_failures": "Herhaalde herauthenticatie-mislukkingen",

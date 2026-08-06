@@ -524,7 +524,9 @@
       "subtitle": "Sessions actives et limites de débit en un coup d'œil.",
       "card_desc": "Sessions actives et compteurs de limite de débit en direct.",
       "load_error": "Impossible de charger les informations de sécurité.",
-      "unknown": "Inconnu"
+      "unknown": "Inconnu",
+      "hosting_or_vpn_badge": "Datacenter/VPN ?",
+      "hosting_or_vpn_hint": "Ce nom de FAI ressemble à un fournisseur cloud/hébergement ou à un service VPN grand public (heuristique indicative, pas une preuve - de nombreuses connexions légitimes passent par ce type de réseau)."
     },
     "audit": {
       "title": "Journal d'audit",
@@ -572,7 +574,10 @@
       },
       "event_types": {
         "auth_login": "Connexion",
+        "auth_login_failed": "Connexion échouée",
         "auth_logout": "Déconnexion",
+        "auth_country_anomaly": "Nouveau pays de connexion détecté",
+        "auth_device_anomaly": "Nouvel appareil détecté",
         "auth_session_revoked_by_admin": "Session terminée par un administrateur",
         "auth_session_revoked_by_idp": "Session révoquée par le fournisseur d'identité",
         "auth_reauth_repeated_failures": "Échecs de réauthentification répétés",

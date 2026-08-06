@@ -23,7 +23,10 @@ const EVENT_TYPE_CATEGORIES: { category: string; types: string[] }[] = [
     category: "auth",
     types: [
       "auth.login",
+      "auth.login_failed",
       "auth.logout",
+      "auth.country_anomaly",
+      "auth.device_anomaly",
       "auth.session_revoked_by_admin",
       "auth.session_revoked_by_idp",
       "auth.reauth_repeated_failures",

@@ -1048,12 +1048,21 @@ type ActiveSession struct {
 	// City/Region/ASNOrg mirror Session.City/Region/ASNOrg - see that
 	// struct's doc comment for what they are and why they are trusted for
 	// display only.
-	City                 string `json:"city,omitempty"`
-	Region               string `json:"region,omitempty"`
-	ASNOrg               string `json:"asn_org,omitempty"`
-	LastActiveSecondsAgo int64  `json:"last_active_seconds_ago,omitempty"`
-	ExpiresInSeconds     int64  `json:"expires_in_seconds,omitempty"`
-	Current              bool   `json:"current,omitempty"`
+	City   string `json:"city,omitempty"`
+	Region string `json:"region,omitempty"`
+	ASNOrg string `json:"asn_org,omitempty"`
+	// HostingOrVPN is geoip.IsHostingOrVPN(ASNOrg), computed fresh on every
+	// list call rather than stored on the session - it is a pure function
+	// of ASNOrg, and keeping it derived means a future refinement of
+	// geoip.IsHostingOrVPN's keyword list takes effect for every
+	// already-active session immediately, not just new logins. Display-only
+	// best-effort hint (see IsHostingOrVPN's own doc comment), never used for
+	// any access decision - same treatment every other GeoIP-derived field
+	// here already gets.
+	HostingOrVPN         bool  `json:"hosting_or_vpn,omitempty"`
+	LastActiveSecondsAgo int64 `json:"last_active_seconds_ago,omitempty"`
+	ExpiresInSeconds     int64 `json:"expires_in_seconds,omitempty"`
+	Current              bool  `json:"current,omitempty"`
 }
 
 // rdnsCacheKeyPrefix namespaces resolveHostname's Valkey cache entries from
@@ -1184,15 +1193,16 @@ func ListActiveSessions(ctx context.Context, d Deps) ([]ActiveSession, error) {
 			// real DNS PTR lookup on an rDNS-cache miss, up to
 			// rdnsLookupTimeout), everything else in this function is a
 			// same-Docker-network Valkey round trip.
-			Name:      sess.Name,
-			Email:     sess.Email,
-			Role:      sess.Role,
-			IP:        sess.IP,
-			UserAgent: sess.UserAgent,
-			Country:   sess.Country,
-			City:      sess.City,
-			Region:    sess.Region,
-			ASNOrg:    sess.ASNOrg,
+			Name:         sess.Name,
+			Email:        sess.Email,
+			Role:         sess.Role,
+			IP:           sess.IP,
+			UserAgent:    sess.UserAgent,
+			Country:      sess.Country,
+			City:         sess.City,
+			Region:       sess.Region,
+			ASNOrg:       sess.ASNOrg,
+			HostingOrVPN: geoip.IsHostingOrVPN(sess.ASNOrg),
 		}
 		if !sess.CreatedAt.IsZero() {
 			as.CreatedAt = sess.CreatedAt.UTC().Format(time.RFC3339)
@@ -1296,17 +1306,18 @@ func ListActiveSessionsForUser(ctx context.Context, d Deps, subject string) ([]A
 			continue
 		}
 		as := ActiveSession{
-			ID:        sid,
-			Name:      sess.Name,
-			Email:     sess.Email,
-			Role:      sess.Role,
-			IP:        sess.IP,
-			Hostname:  resolveHostname(ctx, d, sess.IP),
-			UserAgent: sess.UserAgent,
-			Country:   sess.Country,
-			City:      sess.City,
-			Region:    sess.Region,
-			ASNOrg:    sess.ASNOrg,
+			ID:           sid,
+			Name:         sess.Name,
+			Email:        sess.Email,
+			Role:         sess.Role,
+			IP:           sess.IP,
+			Hostname:     resolveHostname(ctx, d, sess.IP),
+			UserAgent:    sess.UserAgent,
+			Country:      sess.Country,
+			City:         sess.City,
+			Region:       sess.Region,
+			ASNOrg:       sess.ASNOrg,
+			HostingOrVPN: geoip.IsHostingOrVPN(sess.ASNOrg),
 		}
 		if !sess.CreatedAt.IsZero() {
 			as.CreatedAt = sess.CreatedAt.UTC().Format(time.RFC3339)

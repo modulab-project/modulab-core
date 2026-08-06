@@ -1310,6 +1310,13 @@ export interface ActiveSession {
   // GeoIP ASN-database lookup: the ISP/hosting provider organization behind
   // ip, not a geographic value - same absence semantics as city/region.
   asn_org?: string;
+  // Backend heuristic (geoip.IsHostingOrVPN) flagging asn_org as looking
+  // like a cloud/hosting provider or consumer VPN service - a best-effort
+  // display hint only, never evidence of anything by itself (plenty of
+  // legitimate logins go through a corporate VPN or happen to sit in a
+  // hosting provider's IP range). Absent/false whenever asn_org is empty or
+  // doesn't match the heuristic's keyword list.
+  hosting_or_vpn?: boolean;
   last_active_seconds_ago?: number;
   expires_in_seconds?: number;
   current?: boolean;

@@ -521,3 +521,57 @@ func LookupASN(ip string) (org string, ok bool) {
 	}
 	return rec.AutonomousSystemOrganization, true
 }
+
+// hostingOrVPNKeywords is a best-effort, deliberately coarse list of
+// substrings (matched case-insensitively against LookupASN's
+// AutonomousSystemOrganization result) that commonly show up in the ASN
+// organization name of major cloud/hosting providers and consumer VPN
+// services. This is a display-only heuristic, never an access-control
+// signal - same treatment every other GeoIP-derived value in this package
+// already gets (see LookupCity's doc comment): countless legitimate users
+// route through a corporate VPN, a residential IP that happens to sit in a
+// hosting provider's range, or one of these networks for entirely
+// unremarkable reasons, and the list itself will always be incomplete (new
+// providers, regional ISPs that also resell VPS/VPN, etc). It exists purely
+// so an admin reviewing System Info/the audit log gets a "this looks like a
+// datacenter or VPN, worth a second look" hint alongside the raw ISP name
+// they'd otherwise have to recognize themselves - not a verdict.
+//
+// Deliberately not admin-configurable (unlike GeoIP's own credentials):
+// this is a static, code-level heuristic list, not a per-instance policy -
+// keeping it here means it improves for every instance on a Core upgrade
+// rather than needing to be curated per install.
+var hostingOrVPNKeywords = []string{
+	// Major cloud/hosting providers.
+	"amazon", "aws", "google cloud", "google llc", "microsoft", "azure",
+	"digitalocean", "linode", "akamai", "cloudflare", "hetzner", "ovh",
+	"vultr", "contabo", "scaleway", "leaseweb", "m247", "choopa",
+	"datacamp", "hostinger", "oracle cloud", "alibaba", "tencent",
+	"ionos", "netcup", "upcloud", "packet", "equinix", "rackspace",
+	"fastly",
+	// Consumer/commercial VPN services.
+	"nordvpn", "nord security", "expressvpn", "surfshark", "protonvpn",
+	"proton ag", "mullvad", "private internet access", "ipvanish",
+	"cyberghost", "tunnelbear", "windscribe", "hide.me", "privado",
+	"perfect privacy", "airvpn", "torguard", "vpnunlimited", "purevpn",
+	"astrill", "hola networks",
+}
+
+// IsHostingOrVPN reports whether org (an AutonomousSystemOrganization string
+// from LookupASN) matches one of hostingOrVPNKeywords. Returns false for an
+// empty/unrecognized org - "no data" and "not on the list" are
+// indistinguishable here on purpose, same as every other lookup in this
+// package failing open rather than flagging the absence of information as
+// suspicious.
+func IsHostingOrVPN(org string) bool {
+	if org == "" {
+		return false
+	}
+	lower := strings.ToLower(org)
+	for _, kw := range hostingOrVPNKeywords {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
+}

@@ -524,7 +524,9 @@
       "subtitle": "Sesiones activas y límites de tasa de un vistazo.",
       "card_desc": "Sesiones activas y contadores de límite de tasa en vivo.",
       "load_error": "No se pudo cargar la información de seguridad.",
-      "unknown": "Desconocido"
+      "unknown": "Desconocido",
+      "hosting_or_vpn_badge": "¿Centro de datos/VPN?",
+      "hosting_or_vpn_hint": "Este nombre de ISP se parece a un proveedor de nube/hosting o a un servicio de VPN de consumo (heurística orientativa, no una prueba - muchos inicios de sesión legítimos pasan por uno)."
     },
     "audit": {
       "title": "Registro de auditoría",
@@ -572,7 +574,10 @@
       },
       "event_types": {
         "auth_login": "Inicio de sesión",
+        "auth_login_failed": "Inicio de sesión fallido",
         "auth_logout": "Cierre de sesión",
+        "auth_country_anomaly": "Nuevo país de inicio de sesión detectado",
+        "auth_device_anomaly": "Nuevo dispositivo detectado",
         "auth_session_revoked_by_admin": "Sesión finalizada por un administrador",
         "auth_session_revoked_by_idp": "Sesión revocada por el proveedor de identidad",
         "auth_reauth_repeated_failures": "Fallos repetidos de reautenticación",

@@ -206,6 +206,53 @@ func checkAndRecordLoginCountry(ctx context.Context, vk *valkey.Client, subject,
 	return anomaly, previous
 }
 
+// auditLoginFailure records a security-relevant login failure that happened
+// before Core could identify who was attempting it (nonce_mismatch,
+// exchange_failed - see audit.EventAuthLoginFailed's doc comment) - ActorID
+// is the client IP, same "bucketed by IP" treatment
+// audit.EventRateLimitExceeded's own doc comment already describes for the
+// same reason: there is no subject to attribute this to yet. Best-effort,
+// like every other audit.Log call site in this file - a failure here must
+// never turn into a second error response on top of the one already being
+// returned to the browser.
+func auditLoginFailure(ctx context.Context, d Deps, reason, ip, country, asnOrg string) {
+	auditLoginFailureWithSubject(ctx, d, reason, ip, country, asnOrg, "", "")
+}
+
+// auditLoginFailureWithSubject is auditLoginFailure's counterpart for the
+// one failure reason (access_denied) where Core does know who this was: the
+// IdP successfully authenticated them, they are simply not a member of any
+// of the three configured groups. subject/email, when non-empty, are
+// recorded as both ActorID/ActorEmail (they are the one who attempted this)
+// and TargetID/TargetEmail (they are also who the outcome applies to) -
+// same "no separate actor" shape audit.EventUserSelfDeleted's doc comment
+// already describes for an account acting on itself.
+func auditLoginFailureWithSubject(ctx context.Context, d Deps, reason, ip, country, asnOrg, subject, email string) {
+	masterKey, err := setup.ResolveMasterKey(ctx, d.Pool, d.MasterKeyEnv)
+	if err != nil {
+		log.Printf("auth: resolve master key for login-failure audit (%s): %v", reason, err)
+		return
+	}
+	actorID := ip
+	if subject != "" {
+		actorID = subject
+	}
+	params := audit.LogParams{
+		EventType:  audit.EventAuthLoginFailed,
+		ActorID:    actorID,
+		ActorEmail: email,
+		Details: fmt.Sprintf(`{"reason":%q,"country":%q,"asn_org":%q,"hosting_or_vpn":%t,"ip":%q}`,
+			reason, country, asnOrg, geoip.IsHostingOrVPN(asnOrg), ip),
+	}
+	if subject != "" {
+		params.TargetID = subject
+		params.TargetEmail = email
+	}
+	if err := audit.Log(ctx, d.Pool, masterKey, params); err != nil {
+		log.Printf("auth: audit login failure (%s) for %s: %v", reason, actorID, err)
+	}
+}
+
 // Deps bundles what the login/callback/logout/me handlers need.
 // MasterKeyEnv is the one remaining raw environment value (config.Config's
 // MasterKey) - resolution against what the Setup Wizard may have persisted
@@ -399,6 +446,18 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 		ctx := r.Context()
 		target := d.frontendCallbackURL()
 
+		// Computed up front (not just at the success path further down, as
+		// before) so the security-relevant failure branches below
+		// (nonce_mismatch, exchange_failed, access_denied) can audit the
+		// same country/ASN context a successful login already records - see
+		// audit.EventAuthLoginFailed's doc comment. Cheap either way (one
+		// header read, two already-lazy GeoIP lookups), so computing it here
+		// unconditionally rather than only on the paths that end up needing
+		// it keeps this single source of truth instead of two.
+		ip := clientIP(r)
+		country := loginCountry(r)
+		asnOrg := loginASN(ip)
+
 		state := r.URL.Query().Get("state")
 		code := r.URL.Query().Get("code")
 		if state == "" || code == "" {
@@ -442,9 +501,11 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 			// fragment only carries the code and not the offending value.
 			if errors.Is(err, ErrNonceMismatch) {
 				log.Printf("auth: callback: %v", err)
+				auditLoginFailure(ctx, d, "nonce_mismatch", ip, country, asnOrg)
 				redirectToFrontend(w, r, target, url.Values{"error": {"nonce_mismatch"}})
 				return
 			}
+			auditLoginFailure(ctx, d, "exchange_failed", ip, country, asnOrg)
 			redirectToFrontend(w, r, target, url.Values{"error": {"exchange_failed"}})
 			return
 		}
@@ -477,8 +538,13 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 		derivedRole := DeriveRole(claims.Groups, prefix)
 
 		// Gate 1: not in any of the three configured groups at all - no
-		// access whatsoever, not even a pending session.
+		// access whatsoever, not even a pending session. Unlike
+		// nonce_mismatch/exchange_failed above, Core does know who this was
+		// (the IdP successfully authenticated them) - see
+		// auditLoginFailureWithSubject's doc comment for why this one call
+		// site carries ActorID/ActorEmail while the other two don't.
 		if derivedRole == RolePending {
+			auditLoginFailureWithSubject(ctx, d, "access_denied", ip, country, asnOrg, claims.Subject, claims.Email)
 			redirectToFrontend(w, r, target, url.Values{"error": {"access_denied"}})
 			return
 		}
@@ -582,14 +648,11 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 			}
 		}
 
-		// Read once here so both the stored Session (for the sessions
-		// tables) and the anomaly check below (checkAndRecordLoginCountry)
-		// use the exact same value from this one request - see loginCountry's
-		// doc comment for what "" means here.
-		country := loginCountry(r)
-		ip := clientIP(r)
+		// ip/country/asnOrg were already resolved at the top of this handler
+		// (see that doc comment for why) - only the city/region lookup is
+		// specific to the success path (the failure branches above have no
+		// use for it), so that's still done here.
 		city, region := loginCity(ip)
-		asnOrg := loginASN(ip)
 
 		token, err := CreateSession(ctx, d, Session{
 			UserID:            claims.Subject,
@@ -624,11 +687,18 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 		// it to Core's stdout log, which never logs token contents/secrets
 		// by policy.
 		if masterKey, mkErr := setup.ResolveMasterKey(ctx, d.Pool, d.MasterKeyEnv); mkErr == nil {
+			// country/asn_org/hosting_or_vpn (added alongside
+			// audit.EventAuthLoginFailed) let an admin filter/search the
+			// audit log for where successful logins are coming from, the
+			// same context a failed attempt now also carries - previously
+			// only the live session tables (System Info/Profile) showed
+			// this, with no way to search or filter by it after the fact.
 			if err := audit.Log(ctx, d.Pool, masterKey, audit.LogParams{
 				EventType:  audit.EventAuthLogin,
 				ActorID:    claims.Subject,
 				ActorEmail: claims.Email,
-				Details:    fmt.Sprintf(`{"role":%q,"refresh_token_issued":%t}`, sessionRole, refreshToken != ""),
+				Details: fmt.Sprintf(`{"role":%q,"refresh_token_issued":%t,"country":%q,"asn_org":%q,"hosting_or_vpn":%t,"ip":%q}`,
+					sessionRole, refreshToken != "", country, asnOrg, geoip.IsHostingOrVPN(asnOrg), ip),
 			}); err != nil {
 				log.Printf("auth: audit login for %s: %v", claims.Subject, err)
 			}
