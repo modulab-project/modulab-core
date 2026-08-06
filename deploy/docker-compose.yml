@@ -45,7 +45,7 @@ services:
     # Pinned to a version tag rather than "latest" (2026-08-02 ops pass) -
     # same mutable-tag risk as the other images in this file.
     # TODO: pin to a specific digest like the other images below once verified (see commented images for the pattern)
-    image: tecnativa/docker-socket-proxy:0.2
+    image: tecnativa/docker-socket-proxy:0.3
     restart: unless-stopped
     environment:
       # Read-only, GET-only endpoints Traefik's Docker provider needs:
