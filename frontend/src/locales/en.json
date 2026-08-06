@@ -667,7 +667,8 @@
       "databases_title": "Databases",
       "file_present": "Present — {{size}}, last written {{time}}",
       "file_missing": "Not downloaded yet.",
-      "file_build_date": "MaxMind build date: {{date}}"
+      "file_build_date": "MaxMind build date: {{date}}",
+      "update_timer_title": "Automatic refresh"
     }
   },
   "home": {

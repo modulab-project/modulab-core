@@ -667,7 +667,8 @@
       "databases_title": "Databases",
       "file_present": "Aanwezig — {{size}}, laatst geschreven {{time}}",
       "file_missing": "Nog niet gedownload.",
-      "file_build_date": "MaxMind-buildatum: {{date}}"
+      "file_build_date": "MaxMind-buildatum: {{date}}",
+      "update_timer_title": "Automatisch bijwerken"
     }
   },
   "home": {

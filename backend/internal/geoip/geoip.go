@@ -36,13 +36,20 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
 )
 
-// tickInterval is how often RunScheduler re-downloads both databases. Once
+// TickInterval is how often RunScheduler re-downloads both databases. Once
 // per day is plenty - MaxMind only republishes GeoLite2 databases weekly
 // (Tuesdays, per their own docs), so anything more frequent would just be
 // re-downloading the same bytes. Matches revalidateTickInterval's reasoning
 // of "generous enough to never matter in practice, small enough that a
 // credential fix or a new weekly release is picked up the same day".
-const tickInterval = 24 * time.Hour
+//
+// Exported (unlike coreupdate/auth's equivalent constants) so cmd/core/
+// main.go can surface it on the GeoIP admin settings page's "next check in
+// ..." countdown (setup.GeoIPStatusHandler's checkIntervalSeconds
+// parameter) - setup itself cannot import this package (see this file's own
+// doc comment on the reverse import), so main.go is the one place able to
+// read this value and hand it down.
+const TickInterval = 24 * time.Hour
 
 // downloadTimeout bounds a single edition's download+extract. A .mmdb file
 // is tens of MB at most - if MaxMind or the network is slow enough that
@@ -74,14 +81,14 @@ type Deps struct {
 // database refresh. Unlike coreupdate.RunScheduler (which deliberately does
 // NOT run once at startup), this DOES run immediately before entering the
 // ticker loop: a fresh install with credentials already configured (e.g.
-// restored from a backup) should not have to wait up to tickInterval for
+// restored from a backup) should not have to wait up to TickInterval for
 // its first pair of databases - LookupCity/LookupASN would otherwise report
 // ok=false the entire time in between for no good reason.
 func RunScheduler(ctx context.Context, deps Deps) {
 	Configure(deps.DataDir)
 	downloadAll(ctx, deps)
 
-	ticker := time.NewTicker(tickInterval)
+	ticker := time.NewTicker(TickInterval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -127,6 +134,20 @@ func downloadAll(ctx context.Context, deps Deps) {
 	if err != nil {
 		log.Printf("geoip: resolve config: %v", err)
 		return
+	}
+
+	// Recorded unconditionally, before either the success or failure path
+	// below - unlike GeoIPLastUpdateAtSettingKey (success only), this marks
+	// that an attempt actually happened at this moment regardless of
+	// outcome, which is what the admin page's "next check in ..." countdown
+	// (setup.GeoIPStatusHandler) needs: RunScheduler ticks every
+	// TickInterval no matter whether the previous attempt succeeded, so the
+	// countdown must anchor on "when did we last try", not "when did we
+	// last succeed" - otherwise a run of failures would make the countdown
+	// look stuck/wrong instead of reflecting the real, still-running
+	// schedule.
+	if err := deps.Pool.SetSetting(ctx, setup.GeoIPLastCheckAtSettingKey, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		log.Printf("geoip: record last check time: %v", err)
 	}
 
 	if err := os.MkdirAll(deps.DataDir, 0o755); err != nil {

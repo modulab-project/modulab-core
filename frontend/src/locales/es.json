@@ -667,7 +667,8 @@
       "databases_title": "Bases de datos",
       "file_present": "Presente — {{size}}, última escritura {{time}}",
       "file_missing": "Aún no descargada.",
-      "file_build_date": "Fecha de compilación de MaxMind: {{date}}"
+      "file_build_date": "Fecha de compilación de MaxMind: {{date}}",
+      "update_timer_title": "Actualización automática"
     }
   },
   "home": {

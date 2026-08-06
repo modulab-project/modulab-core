@@ -562,7 +562,12 @@ func main() {
 		}
 		return toFileInfo(cityInfo), toFileInfo(asnInfo)
 	}
-	mux.Handle("GET /v1/admin/geoip/status", adminOnly(setup.GeoIPStatusHandler(pool, cfg.MasterKey, geoipFileStatus)))
+	// internal/geoip.TickInterval as a plain number of seconds - the other
+	// half of the same import-direction bridge as geoipFileStatus above,
+	// needed so setup.GeoIPStatusHandler's "next check in ..." countdown
+	// knows the real schedule without importing internal/geoip itself.
+	geoipCheckIntervalSeconds := int64(geoip.TickInterval / time.Second)
+	mux.Handle("GET /v1/admin/geoip/status", adminOnly(setup.GeoIPStatusHandler(pool, cfg.MasterKey, geoipFileStatus, geoipCheckIntervalSeconds)))
 	mux.Handle("POST /v1/admin/geoip/configure", adminReauthOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		masterKey, err := setup.ResolveMasterKey(r.Context(), pool, cfg.MasterKey)
 		if err != nil {
@@ -586,7 +591,7 @@ func main() {
 			// synchronous is fine here, this never runs longer than a few
 			// tens of seconds even on a cold download.
 			geoip.TriggerNow(r.Context(), geoipDeps)
-		}, geoipFileStatus)(rw, r)
+		}, geoipFileStatus, geoipCheckIntervalSeconds)(rw, r)
 		if rw.code < 400 {
 			if sess, ok := auth.SessionFromContext(r.Context()); ok {
 				var newReq struct {

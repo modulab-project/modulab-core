@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/modulab-project/modulab-core/backend/internal/crypto"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
@@ -46,6 +47,14 @@ const (
 	// setter function per field.
 	GeoIPLastUpdateAtSettingKey    = "geoip_last_update_at"
 	GeoIPLastUpdateErrorSettingKey = "geoip_last_update_error"
+	// GeoIPLastCheckAtSettingKey marks when internal/geoip last actually
+	// attempted a download - unlike GeoIPLastUpdateAtSettingKey (success
+	// only), this is written on every attempt regardless of outcome. Used
+	// exclusively to compute GeoIPUpdateTimer's "next check in ..."
+	// countdown, which must track the real schedule (RunScheduler ticks
+	// every TickInterval no matter whether the previous attempt failed),
+	// not silently freeze at the last success.
+	GeoIPLastCheckAtSettingKey = "geoip_last_check_at"
 )
 
 // GeoIPConfigRequest is the body of POST /v1/admin/geoip/configure.
@@ -78,6 +87,24 @@ type GeoIPStatusResponse struct {
 	// triggerDownload for the exact same reasoning).
 	CityFile GeoIPFileInfo `json:"city_file"`
 	ASNFile  GeoIPFileInfo `json:"asn_file"`
+	// UpdateTimer reports the background refresh schedule - same JSON shape
+	// as adminapi/main.go's systemInfoTimer (last_run_at/next_run_at/
+	// interval_seconds) on purpose, so the frontend's existing SystemInfoTimer
+	// type and TimerCard-style rendering apply here unmodified. Populated
+	// unconditionally, even when Configured is false, so the admin page can
+	// still show the configured interval (and "not run yet") rather than the
+	// whole card disappearing.
+	UpdateTimer GeoIPUpdateTimer `json:"update_timer"`
+}
+
+// GeoIPUpdateTimer mirrors cmd/core/main.go's systemInfoTimer shape exactly
+// (same field names/JSON tags) - duplicated rather than shared because
+// systemInfoTimer lives in package main, which nothing outside cmd/core can
+// import.
+type GeoIPUpdateTimer struct {
+	LastRunAt       *string `json:"last_run_at,omitempty"`
+	NextRunAt       *string `json:"next_run_at,omitempty"`
+	IntervalSeconds int64   `json:"interval_seconds"`
 }
 
 // GeoIPFileInfo describes one edition's .mmdb file on disk.
@@ -150,17 +177,46 @@ func ResolveGeoIPConfig(ctx context.Context, pool *db.Pool, masterKey string) (G
 	}, nil
 }
 
+// resolveUpdateTimer builds a GeoIPUpdateTimer from GeoIPLastCheckAtSettingKey
+// and the caller-supplied interval - called unconditionally (even when GeoIP
+// is not configured) so the admin page can still show what interval would
+// apply, and "not run yet" rather than the card disappearing. checkIntervalSeconds
+// comes from internal/geoip.TickInterval via cmd/core/main.go, since this
+// package cannot import internal/geoip directly (see this file's top-of-file
+// doc comment).
+func resolveUpdateTimer(ctx context.Context, pool *db.Pool, checkIntervalSeconds int64) GeoIPUpdateTimer {
+	timer := GeoIPUpdateTimer{IntervalSeconds: checkIntervalSeconds}
+	lastCheckAt, exists, err := pool.GetSetting(ctx, GeoIPLastCheckAtSettingKey)
+	if err != nil || !exists || lastCheckAt == "" {
+		return timer
+	}
+	lastCheck, err := time.Parse(time.RFC3339, lastCheckAt)
+	if err != nil {
+		return timer
+	}
+	nextCheck := lastCheck.Add(time.Duration(checkIntervalSeconds) * time.Second)
+	lastStr := lastCheck.UTC().Format(time.RFC3339)
+	nextStr := nextCheck.UTC().Format(time.RFC3339)
+	timer.LastRunAt = &lastStr
+	timer.NextRunAt = &nextStr
+	return timer
+}
+
 // GeoIPStatusHandler reports whether GeoIP has been configured, and if so,
 // every field except the license key. masterKey is required to decrypt the
 // account ID. fileStatus reports each edition's on-disk .mmdb file (see
 // internal/geoip.Status, wired up by cmd/core/main.go) - called
 // unconditionally, even when GeoIP is not (or no longer) configured, since
 // GeoIPDeleteHandler leaves already-downloaded files in place.
-func GeoIPStatusHandler(pool *db.Pool, masterKey string, fileStatus func() (city, asn GeoIPFileInfo)) http.HandlerFunc {
+// checkIntervalSeconds is internal/geoip.TickInterval in seconds - see
+// resolveUpdateTimer's doc comment for why it has to be passed in rather
+// than read directly.
+func GeoIPStatusHandler(pool *db.Pool, masterKey string, fileStatus func() (city, asn GeoIPFileInfo), checkIntervalSeconds int64) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
 		cityFile, asnFile := fileStatus()
+		updateTimer := resolveUpdateTimer(ctx, pool, checkIntervalSeconds)
 
 		encAccountID, exists, err := pool.GetSetting(ctx, geoIPAccountIDSettingKey)
 		if err != nil {
@@ -168,7 +224,7 @@ func GeoIPStatusHandler(pool *db.Pool, masterKey string, fileStatus func() (city
 			return
 		}
 		if !exists {
-			httperr.JSON(w, http.StatusOK, GeoIPStatusResponse{Configured: false, CityFile: cityFile, ASNFile: asnFile})
+			httperr.JSON(w, http.StatusOK, GeoIPStatusResponse{Configured: false, CityFile: cityFile, ASNFile: asnFile, UpdateTimer: updateTimer})
 			return
 		}
 		accountID, err := crypto.DecryptIfNotEmpty(masterKey, encAccountID)
@@ -195,6 +251,7 @@ func GeoIPStatusHandler(pool *db.Pool, masterKey string, fileStatus func() (city
 			LastUpdateError: lastUpdateError,
 			CityFile:        cityFile,
 			ASNFile:         asnFile,
+			UpdateTimer:     updateTimer,
 		})
 	}
 }
@@ -213,8 +270,9 @@ func GeoIPStatusHandler(pool *db.Pool, masterKey string, fileStatus func() (city
 // not called. fileStatus is read AFTER triggerDownload returns, so the
 // response already reflects whatever the just-triggered download produced
 // (or didn't, on failure) rather than requiring a second round-trip to
-// GET .../status to see it.
-func GeoIPConfigureHandler(pool *db.Pool, masterKey string, triggerDownload func(), fileStatus func() (city, asn GeoIPFileInfo)) http.HandlerFunc {
+// GET .../status to see it. checkIntervalSeconds is passed straight through
+// to resolveUpdateTimer - see GeoIPStatusHandler's doc comment.
+func GeoIPConfigureHandler(pool *db.Pool, masterKey string, triggerDownload func(), fileStatus func() (city, asn GeoIPFileInfo), checkIntervalSeconds int64) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -281,12 +339,13 @@ func GeoIPConfigureHandler(pool *db.Pool, masterKey string, triggerDownload func
 			LastUpdateError: lastUpdateError,
 			CityFile:        cityFile,
 			ASNFile:         asnFile,
+			UpdateTimer:     resolveUpdateTimer(ctx, pool, checkIntervalSeconds),
 		})
 	}
 }
 
-// GeoIPDeleteHandler clears the GeoIP configuration entirely (all four
-// settings keys, including the last-update bookkeeping), returning the
+// GeoIPDeleteHandler clears the GeoIP configuration entirely (all five
+// settings keys, including the last-update/last-check bookkeeping), returning the
 // instance to "not configured" - the counterpart to GeoIPConfigureHandler.
 // After this, GeoIPConfigured reports false again and ResolveGeoIPConfig
 // fails the same "has not been configured yet" way it does on a fresh
@@ -309,6 +368,7 @@ func GeoIPDeleteHandler(pool *db.Pool) http.HandlerFunc {
 			geoIPLicenseKeySettingKey,
 			GeoIPLastUpdateAtSettingKey,
 			GeoIPLastUpdateErrorSettingKey,
+			GeoIPLastCheckAtSettingKey,
 		} {
 			if err := pool.DeleteSetting(ctx, key); err != nil {
 				httperr.Internal(w, err)

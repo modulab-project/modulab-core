@@ -468,6 +468,12 @@ export interface GeoIPStatus {
   // Go doc comment).
   city_file: GeoIPFileInfo;
   asn_file: GeoIPFileInfo;
+  // Same shape as AdminSystemInfoPage's SystemInfoTimer (module registry
+  // sync) - reused as-is rather than a separate type, so any future
+  // countdown-rendering helper can work with either. Present regardless of
+  // `configured`, so the page can still show the interval and "not run
+  // yet" instead of the section disappearing.
+  update_timer: SystemInfoTimer;
 }
 
 export interface GeoIPFileInfo {

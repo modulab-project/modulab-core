@@ -2,11 +2,19 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "rea
 import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { geoipStatus as fetchGeoipStatus, configureGeoip, deleteGeoipConfig, type GeoIPStatus, type GeoIPFileInfo } from "../lib/api";
+import {
+  geoipStatus as fetchGeoipStatus,
+  configureGeoip,
+  deleteGeoipConfig,
+  type GeoIPStatus,
+  type GeoIPFileInfo,
+  type SystemInfoTimer,
+} from "../lib/api";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { useLoginRedirect } from "../lib/useLoginRedirect";
 import { isReauthRequiredError } from "../lib/authErrors";
 import { isSuperAdminRole } from "../lib/roles";
+import { useNow } from "../lib/useNow";
 import { AppShell } from "../components/AppShell";
 import { ReauthBanner } from "../components/ReauthBanner";
 
@@ -22,6 +30,9 @@ export default function AdminSystemGeoIPPage() {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { session, loading } = useAuthenticatedSession();
+  // Drives the "next check in ..." countdown below - same wall-clock-
+  // anchored ticker AdminSystemInfoPage.tsx uses for its own timer cards.
+  const now = useNow();
 
   const [status, setStatus] = useState<GeoIPStatus | null>(null);
   const [accountId, setAccountId] = useState("");
@@ -89,16 +100,13 @@ export default function AdminSystemGeoIPPage() {
     setReauthRequired(false);
     try {
       await deleteGeoipConfig();
-      // city_file/asn_file are preserved from whatever was last fetched -
-      // GeoIPDeleteHandler leaves already-downloaded files in place (see its
-      // Go doc comment), so the databases section should keep showing them
-      // rather than snapping to "not downloaded" the instant credentials
-      // are cleared.
-      setStatus((prev) => ({
-        configured: false,
-        city_file: prev?.city_file ?? { exists: false },
-        asn_file: prev?.asn_file ?? { exists: false },
-      }));
+      // Re-fetch rather than hand-constructing the new state: city_file/
+      // asn_file (GeoIPDeleteHandler leaves already-downloaded files in
+      // place) and update_timer (GeoIPDeleteHandler does clear
+      // geoip_last_check_at) both need a real round-trip to reflect
+      // correctly, and duplicating that logic client-side would just be
+      // another place for the two to drift apart.
+      setStatus(await fetchGeoipStatus());
       setAccountId("");
       setLicenseKey("");
     } catch (err) {
@@ -180,9 +188,63 @@ export default function AdminSystemGeoIPPage() {
             </dl>
           </div>
         )}
+
+        {/* Same countdown shape as AdminSystemInfoPage.tsx's module registry
+            sync timer card - shown regardless of `configured` so the page
+            still communicates the interval and "not run yet" rather than
+            the section disappearing. */}
+        {status && <UpdateTimerCard timer={status.update_timer} now={now} t={t} />}
       </div>
     </AppShell>
   );
+}
+
+// Deliberately a local copy of AdminSystemInfoPage.tsx's TimerCard rather
+// than a shared import - that component isn't exported (it's a private
+// helper of that page), and duplicating ~25 lines here beats promoting it to
+// a shared component for its one other call site, same reasoning this
+// file's other local copies (formatBytes, FileStatusRow) already give.
+function UpdateTimerCard({ timer, now, t }: { timer: SystemInfoTimer; now: number; t: TFunction }) {
+  const nextInMs = timer.next_run_at ? new Date(timer.next_run_at).getTime() - now : null;
+  return (
+    <div className="mt-6 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/50">
+      <p className="mb-1 text-sm font-medium text-gray-700 dark:text-gray-300">{t("admin.geoip.update_timer_title")}</p>
+      {timer.last_run_at ? (
+        <>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            {t("admin.system_info.last_run", { time: new Date(timer.last_run_at).toLocaleTimeString() })}
+          </p>
+          <p className="mt-1 text-sm font-medium text-teal-700 dark:text-teal-400">
+            {nextInMs !== null && nextInMs > 0
+              ? t("admin.system_info.next_run_in", { duration: formatDuration(nextInMs / 1000) })
+              : t("admin.system_info.next_run_soon")}
+          </p>
+        </>
+      ) : (
+        <p className="text-xs text-gray-400 dark:text-gray-500">{t("admin.system_info.not_run_yet")}</p>
+      )}
+      <p className="mt-2 text-[11px] text-gray-400 dark:text-gray-600">
+        {t("admin.system_info.interval", { duration: formatDuration(timer.interval_seconds) })}
+      </p>
+    </div>
+  );
+}
+
+// Local copy of AdminSystemInfoPage.tsx's own formatDuration - same
+// reasoning as UpdateTimerCard's doc comment above.
+function formatDuration(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 60) return `${s}s`;
+  const minutes = Math.floor(s / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    const remMinutes = minutes % 60;
+    return remMinutes > 0 ? `${hours}h ${remMinutes}m` : `${hours}h`;
+  }
+  const days = Math.floor(hours / 24);
+  const remHours = hours % 24;
+  return remHours > 0 ? `${days}d ${remHours}h` : `${days}d`;
 }
 
 function FileStatusRow({ label, file, t }: { label: string; file: GeoIPFileInfo; t: TFunction }) {
