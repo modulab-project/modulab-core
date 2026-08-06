@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -55,12 +56,29 @@ const (
 	// every TickInterval no matter whether the previous attempt failed),
 	// not silently freeze at the last success.
 	GeoIPLastCheckAtSettingKey = "geoip_last_check_at"
+	// GeoIPTickIntervalSecondsSettingKey names the core_settings key
+	// internal/geoip.TickIntervalSeconds reads for how often RunScheduler
+	// re-downloads the databases - exported (not internal/geoip's own
+	// unexported constant) so GeoIPConfigureHandler below can write it
+	// directly, same direction as the three keys above. Deliberately NOT
+	// cleared by GeoIPDeleteHandler: it is a scheduling preference, not a
+	// credential, and an admin re-adding GeoIP later almost certainly wants
+	// whatever interval they'd already picked to still apply.
+	GeoIPTickIntervalSecondsSettingKey = "geoip_tick_interval_seconds"
 )
 
 // GeoIPConfigRequest is the body of POST /v1/admin/geoip/configure.
 type GeoIPConfigRequest struct {
 	AccountID  string `json:"account_id"`
 	LicenseKey string `json:"license_key"`
+	// TickIntervalSeconds is optional - 0 (the Go zero value, indistinguishable
+	// from "field omitted" in JSON) means "leave the current interval
+	// unchanged" rather than "set it to zero", since zero would be nonsensical
+	// anyway (see GeoIPConfigureHandler's validation). The frontend always
+	// sends the currently effective value (from the last GET .../status
+	// response) back here, so in practice this only actually changes when the
+	// admin edits the field.
+	TickIntervalSeconds int `json:"tick_interval_seconds,omitempty"`
 }
 
 // GeoIPStatusResponse reports the non-secret half of the configuration.
@@ -180,12 +198,15 @@ func ResolveGeoIPConfig(ctx context.Context, pool *db.Pool, masterKey string) (G
 // resolveUpdateTimer builds a GeoIPUpdateTimer from GeoIPLastCheckAtSettingKey
 // and the caller-supplied interval - called unconditionally (even when GeoIP
 // is not configured) so the admin page can still show what interval would
-// apply, and "not run yet" rather than the card disappearing. checkIntervalSeconds
-// comes from internal/geoip.TickInterval via cmd/core/main.go, since this
-// package cannot import internal/geoip directly (see this file's top-of-file
-// doc comment).
-func resolveUpdateTimer(ctx context.Context, pool *db.Pool, checkIntervalSeconds int64) GeoIPUpdateTimer {
-	timer := GeoIPUpdateTimer{IntervalSeconds: checkIntervalSeconds}
+// apply, and "not run yet" rather than the card disappearing.
+// checkIntervalSeconds is a callback (not a plain value) so it can read
+// internal/geoip.TickIntervalSeconds fresh on every call - this package
+// cannot import internal/geoip directly (see this file's top-of-file doc
+// comment), and the interval itself is admin-configurable, so a cached/
+// stale value would show the wrong countdown right after a change.
+func resolveUpdateTimer(ctx context.Context, pool *db.Pool, checkIntervalSeconds func(context.Context) int64) GeoIPUpdateTimer {
+	interval := checkIntervalSeconds(ctx)
+	timer := GeoIPUpdateTimer{IntervalSeconds: interval}
 	lastCheckAt, exists, err := pool.GetSetting(ctx, GeoIPLastCheckAtSettingKey)
 	if err != nil || !exists || lastCheckAt == "" {
 		return timer
@@ -194,7 +215,7 @@ func resolveUpdateTimer(ctx context.Context, pool *db.Pool, checkIntervalSeconds
 	if err != nil {
 		return timer
 	}
-	nextCheck := lastCheck.Add(time.Duration(checkIntervalSeconds) * time.Second)
+	nextCheck := lastCheck.Add(time.Duration(interval) * time.Second)
 	lastStr := lastCheck.UTC().Format(time.RFC3339)
 	nextStr := nextCheck.UTC().Format(time.RFC3339)
 	timer.LastRunAt = &lastStr
@@ -208,10 +229,10 @@ func resolveUpdateTimer(ctx context.Context, pool *db.Pool, checkIntervalSeconds
 // internal/geoip.Status, wired up by cmd/core/main.go) - called
 // unconditionally, even when GeoIP is not (or no longer) configured, since
 // GeoIPDeleteHandler leaves already-downloaded files in place.
-// checkIntervalSeconds is internal/geoip.TickInterval in seconds - see
-// resolveUpdateTimer's doc comment for why it has to be passed in rather
-// than read directly.
-func GeoIPStatusHandler(pool *db.Pool, masterKey string, fileStatus func() (city, asn GeoIPFileInfo), checkIntervalSeconds int64) http.HandlerFunc {
+// checkIntervalSeconds reads internal/geoip.TickIntervalSeconds - see
+// resolveUpdateTimer's doc comment for why it has to be a callback rather
+// than a plain value passed in once.
+func GeoIPStatusHandler(pool *db.Pool, masterKey string, fileStatus func() (city, asn GeoIPFileInfo), checkIntervalSeconds func(context.Context) int64) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
@@ -272,7 +293,7 @@ func GeoIPStatusHandler(pool *db.Pool, masterKey string, fileStatus func() (city
 // (or didn't, on failure) rather than requiring a second round-trip to
 // GET .../status to see it. checkIntervalSeconds is passed straight through
 // to resolveUpdateTimer - see GeoIPStatusHandler's doc comment.
-func GeoIPConfigureHandler(pool *db.Pool, masterKey string, triggerDownload func(), fileStatus func() (city, asn GeoIPFileInfo), checkIntervalSeconds int64) http.HandlerFunc {
+func GeoIPConfigureHandler(pool *db.Pool, masterKey string, triggerDownload func(), fileStatus func() (city, asn GeoIPFileInfo), checkIntervalSeconds func(context.Context) int64) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -314,6 +335,17 @@ func GeoIPConfigureHandler(pool *db.Pool, masterKey string, triggerDownload func
 				return
 			}
 			settings[geoIPLicenseKeySettingKey] = encLicenseKey
+		}
+		// Only overwrite the interval when a positive value was submitted -
+		// see GeoIPConfigRequest.TickIntervalSeconds's doc comment on why 0
+		// means "leave unchanged" rather than "invalid". Written separately
+		// from `settings` above since it's plaintext, not an encrypted
+		// credential.
+		if req.TickIntervalSeconds > 0 {
+			if err := pool.SetSetting(ctx, GeoIPTickIntervalSecondsSettingKey, strconv.Itoa(req.TickIntervalSeconds)); err != nil {
+				httperr.Internal(w, err)
+				return
+			}
 		}
 		for key, value := range settings {
 			if err := pool.SetSetting(ctx, key, value); err != nil {

@@ -668,7 +668,10 @@
       "file_present": "Vorhanden — {{size}}, zuletzt geschrieben {{time}}",
       "file_missing": "Noch nicht heruntergeladen.",
       "file_build_date": "MaxMind-Build-Datum: {{date}}",
-      "update_timer_title": "Automatische Aktualisierung"
+      "update_timer_title": "Automatische Aktualisierung",
+      "interval_label": "Update-Intervall (Stunden)",
+      "interval_hint": "Wie oft ModuLab bei MaxMind nach einer neuen Datenbankversion prüft. Standard: 24 Stunden.",
+      "interval_validation_error": "Bitte ein gültiges Intervall größer als 0 Stunden angeben."
     }
   },
   "home": {

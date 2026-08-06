@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -36,20 +37,45 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/setup"
 )
 
-// TickInterval is how often RunScheduler re-downloads both databases. Once
-// per day is plenty - MaxMind only republishes GeoLite2 databases weekly
-// (Tuesdays, per their own docs), so anything more frequent would just be
-// re-downloading the same bytes. Matches revalidateTickInterval's reasoning
-// of "generous enough to never matter in practice, small enough that a
-// credential fix or a new weekly release is picked up the same day".
-//
-// Exported (unlike coreupdate/auth's equivalent constants) so cmd/core/
-// main.go can surface it on the GeoIP admin settings page's "next check in
-// ..." countdown (setup.GeoIPStatusHandler's checkIntervalSeconds
-// parameter) - setup itself cannot import this package (see this file's own
-// doc comment on the reverse import), so main.go is the one place able to
-// read this value and hand it down.
-const TickInterval = 24 * time.Hour
+// defaultTickIntervalSeconds is TickIntervalSeconds's fallback: once a day
+// (86400s) is plenty by default - MaxMind only republishes GeoLite2
+// databases weekly (Tuesdays, per their own docs), so anything more
+// frequent would just be re-downloading the same bytes most of the time.
+// Matches revalidateTickInterval's reasoning of "generous enough to never
+// matter in practice, small enough that a credential fix or a new weekly
+// release is picked up the same day" - admin-configurable (see
+// TickIntervalSeconds below) for anyone who wants tighter or looser
+// checking anyway.
+const defaultTickIntervalSeconds = 24 * 60 * 60
+
+// TickIntervalSeconds reads how often RunScheduler re-downloads both
+// databases from core_settings (setup.GeoIPTickIntervalSecondsSettingKey) -
+// admin-configurable directly on the GeoIP settings page (unlike
+// coreupdate's weekday+time schedule or store's own registry-sync interval,
+// which live on admin/system/limits instead - GeoIP already has its own
+// dedicated settings page, so this setting lives there too rather than
+// being split across two pages). Defaults to defaultTickIntervalSeconds if
+// unset or invalid, same pattern as store.SyncIntervalSeconds. setup owns
+// the settings key (not this package) so setup.GeoIPConfigureHandler can
+// write it without this package needing to expose a setter - same
+// direction as the existing GeoIPLastUpdateAtSettingKey etc.
+func TickIntervalSeconds(ctx context.Context, pool *db.Pool) int {
+	val, ok, err := pool.GetSetting(ctx, setup.GeoIPTickIntervalSecondsSettingKey)
+	if err != nil || !ok || val == "" {
+		return defaultTickIntervalSeconds
+	}
+	n, err := strconv.Atoi(val)
+	if err != nil || n <= 0 {
+		return defaultTickIntervalSeconds
+	}
+	return n
+}
+
+// TickInterval is TickIntervalSeconds as a time.Duration, for RunScheduler's
+// own timer below and cmd/core/main.go's "next check in ..." countdown.
+func TickInterval(ctx context.Context, pool *db.Pool) time.Duration {
+	return time.Duration(TickIntervalSeconds(ctx, pool)) * time.Second
+}
 
 // downloadTimeout bounds a single edition's download+extract. A .mmdb file
 // is tens of MB at most - if MaxMind or the network is slow enough that
@@ -77,25 +103,32 @@ type Deps struct {
 	DataDir   string
 }
 
-// RunScheduler is the long-running background goroutine driving the daily
+// RunScheduler is the long-running background goroutine driving the
 // database refresh. Unlike coreupdate.RunScheduler (which deliberately does
 // NOT run once at startup), this DOES run immediately before entering the
-// ticker loop: a fresh install with credentials already configured (e.g.
+// timer loop: a fresh install with credentials already configured (e.g.
 // restored from a backup) should not have to wait up to TickInterval for
 // its first pair of databases - LookupCity/LookupASN would otherwise report
 // ok=false the entire time in between for no good reason.
+//
+// Uses a manually re-armed time.Timer, not a time.Ticker - same reasoning
+// as store.RunSync: a Ticker's period is fixed at creation, so re-reading
+// TickIntervalSeconds fresh before each Reset is how an admin's interval
+// change on the GeoIP settings page takes effect on the very next cycle
+// instead of requiring a Core restart.
 func RunScheduler(ctx context.Context, deps Deps) {
 	Configure(deps.DataDir)
 	downloadAll(ctx, deps)
 
-	ticker := time.NewTicker(TickInterval)
-	defer ticker.Stop()
+	timer := time.NewTimer(TickInterval(ctx, deps.Pool))
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			downloadAll(ctx, deps)
+			timer.Reset(TickInterval(ctx, deps.Pool))
 		}
 	}
 }

@@ -37,6 +37,12 @@ export default function AdminSystemGeoIPPage() {
   const [status, setStatus] = useState<GeoIPStatus | null>(null);
   const [accountId, setAccountId] = useState("");
   const [licenseKey, setLicenseKey] = useState("");
+  // Edited/displayed in hours (24 by default) rather than raw seconds - a
+  // plain "86400" input field would be unreadable. Kept as a string (not a
+  // number) so the field can be briefly empty while the admin is typing,
+  // same reasoning AdminSystemSmtpPage.tsx's port field has for its own
+  // string state.
+  const [intervalHours, setIntervalHours] = useState("24");
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -58,6 +64,12 @@ export default function AdminSystemGeoIPPage() {
         if (s.configured) {
           setAccountId(s.account_id ?? "");
         }
+        // Seconds→hours, rounded to 2dp so an odd backend value (e.g. from
+        // manual DB editing) doesn't render as an ugly repeating decimal;
+        // the field still submits whatever the admin leaves in place.
+        if (s.update_timer?.interval_seconds) {
+          setIntervalHours(String(Math.round((s.update_timer.interval_seconds / 3600) * 100) / 100));
+        }
       })
       .catch(() => setMsg({ ok: false, text: t("admin.geoip.load_error") }));
   }, [session, navigate, t]);
@@ -70,11 +82,23 @@ export default function AdminSystemGeoIPPage() {
       setMsg({ ok: false, text: t("admin.geoip.validation_error") });
       return;
     }
+    const hoursValue = Number(intervalHours);
+    if (!Number.isFinite(hoursValue) || hoursValue <= 0) {
+      setMsg({ ok: false, text: t("admin.geoip.interval_validation_error") });
+      return;
+    }
     setSaving(true);
     setMsg(null);
     setReauthRequired(false);
     try {
-      const result = await configureGeoip({ account_id: accountId.trim(), license_key: licenseKey });
+      const result = await configureGeoip({
+        account_id: accountId.trim(),
+        license_key: licenseKey,
+        // Backend treats 0/omitted as "leave unchanged" (setup.GeoIPConfigRequest's
+        // doc comment) - we always have a valid positive value here, though,
+        // since the validation above already rejected anything else.
+        tick_interval_seconds: Math.round(hoursValue * 3600),
+      });
       setStatus(result);
       setLicenseKey("");
       if (result.last_update_error) {
@@ -163,6 +187,11 @@ export default function AdminSystemGeoIPPage() {
               className={inputClass} />
           </Field>
           <p className="text-xs text-gray-500 dark:text-gray-400">{t("admin.geoip.hint")}</p>
+          <Field label={t("admin.geoip.interval_label")}>
+            <input type="number" min="1" step="0.5" value={intervalHours}
+              onChange={(e) => setIntervalHours(e.target.value)} className={inputClass} />
+          </Field>
+          <p className="text-xs text-gray-500 dark:text-gray-400">{t("admin.geoip.interval_hint")}</p>
           <div className="flex gap-3">
             <button type="submit" disabled={saving} className={`flex-1 ${btnPrimary}`}>
               {saving ? t("admin.geoip.saving") : t("admin.geoip.save")}

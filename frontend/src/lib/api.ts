@@ -496,6 +496,12 @@ export interface GeoIPFileInfo {
 export interface GeoIPConfigRequest {
   account_id: string;
   license_key: string;
+  // Optional - 0/undefined means "leave the current interval unchanged"
+  // (see backend/internal/setup.GeoIPConfigRequest's Go doc comment). The
+  // page always sends the currently effective value back (read from the
+  // last status fetch's update_timer.interval_seconds), so this only
+  // actually changes anything when the admin edits the field.
+  tick_interval_seconds?: number;
 }
 
 // GET /v1/admin/geoip/status - admin only (enforced server-side).

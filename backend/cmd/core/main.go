@@ -562,11 +562,17 @@ func main() {
 		}
 		return toFileInfo(cityInfo), toFileInfo(asnInfo)
 	}
-	// internal/geoip.TickInterval as a plain number of seconds - the other
-	// half of the same import-direction bridge as geoipFileStatus above,
-	// needed so setup.GeoIPStatusHandler's "next check in ..." countdown
-	// knows the real schedule without importing internal/geoip itself.
-	geoipCheckIntervalSeconds := int64(geoip.TickInterval / time.Second)
+	// internal/geoip.TickIntervalSeconds, read fresh on every call (not
+	// cached at startup) - the other half of the same import-direction
+	// bridge as geoipFileStatus above, needed so setup.GeoIPStatusHandler's
+	// "next check in ..." countdown knows the real, currently-configured
+	// schedule without importing internal/geoip itself. Must be a callback,
+	// not a value computed once here: the interval is admin-configurable
+	// (GeoIPConfigureHandler's TickIntervalSeconds field), so a value
+	// captured at startup would go stale the moment an admin changes it.
+	geoipCheckIntervalSeconds := func(ctx context.Context) int64 {
+		return int64(geoip.TickIntervalSeconds(ctx, pool))
+	}
 	mux.Handle("GET /v1/admin/geoip/status", adminOnly(setup.GeoIPStatusHandler(pool, cfg.MasterKey, geoipFileStatus, geoipCheckIntervalSeconds)))
 	mux.Handle("POST /v1/admin/geoip/configure", adminReauthOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		masterKey, err := setup.ResolveMasterKey(r.Context(), pool, cfg.MasterKey)
