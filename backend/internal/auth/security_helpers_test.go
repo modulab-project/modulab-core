@@ -140,3 +140,44 @@ func TestDeriveRole(t *testing.T) {
 		})
 	}
 }
+
+// SessionID is what every per-session Valkey key is named after since the
+// 2026-08 token-hashing pass (H-1) - see sessionKeyPrefix in session.go. The
+// two properties worth pinning down here are that it never returns the input
+// (a key name must not be a usable credential) and that "" maps to "", so
+// "no token presented" can never collide with a real session ID the way it
+// would if an unauthenticated request hashed to the fixed digest of the
+// empty string.
+func TestSessionID(t *testing.T) {
+	const token = "Ml1_ZKXwGZ1s0Ck9dPujtQfrbNfDPtQ2zVXeYw3FQFo"
+
+	if got := SessionID(""); got != "" {
+		t.Fatalf("SessionID(%q) = %q, want %q", "", got, "")
+	}
+
+	id := SessionID(token)
+	if id == "" {
+		t.Fatal("SessionID(token) returned empty for a non-empty token")
+	}
+	if id == token {
+		t.Fatal("SessionID(token) returned the token itself - the key name would be a replayable credential")
+	}
+	if len(id) != 64 {
+		t.Fatalf("SessionID(token) = %d chars, want 64 (hex SHA-256)", len(id))
+	}
+	for _, c := range id {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			t.Fatalf("SessionID(token) = %q, want lowercase hex only", id)
+		}
+	}
+
+	// Stable across calls: ValidateSession hashes on every request and must
+	// land on the same key CreateSession wrote.
+	if again := SessionID(token); again != id {
+		t.Fatalf("SessionID is not deterministic: %q then %q", id, again)
+	}
+	// Distinct inputs must not share a key.
+	if other := SessionID(token + "x"); other == id {
+		t.Fatal("SessionID collided for two different tokens")
+	}
+}

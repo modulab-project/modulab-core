@@ -66,8 +66,8 @@ func revalidateAllSessions(ctx context.Context, d Deps) {
 
 	var checked, revokedCount int
 	for _, key := range keys {
-		token := strings.TrimPrefix(key, sessionKeyPrefix)
-		revoked, err := RevalidateSession(ctx, d, token, provider)
+		sid := strings.TrimPrefix(key, sessionKeyPrefix)
+		revoked, err := RevalidateSession(ctx, d, sid, provider)
 		if err != nil {
 			log.Printf("auth: session revalidation: %v", err)
 			continue
@@ -82,7 +82,8 @@ func revalidateAllSessions(ctx context.Context, d Deps) {
 	}
 }
 
-// RevalidateSession re-checks one active session (by token) against the IdP
+// RevalidateSession re-checks one active session (by SessionID, the same
+// value that names its Valkey key - see sessionKeyPrefix) against the IdP
 // using its stored, encrypted refresh token: it exchanges that refresh
 // token for a fresh access token and calls the IdP's UserInfo endpoint (see
 // Provider.Revalidate). If the IdP rejects the refresh token - revoked,
@@ -100,8 +101,8 @@ func revalidateAllSessions(ctx context.Context, d Deps) {
 // scope) is left untouched, not revoked: there is nothing to check it
 // against, and silently no-op-ing is safer than treating "we don't know"
 // as "revoke it".
-func RevalidateSession(ctx context.Context, d Deps, token string, provider *Provider) (revoked bool, err error) {
-	raw, exists, err := d.Valkey.Get(ctx, sessionKeyPrefix+token)
+func RevalidateSession(ctx context.Context, d Deps, sid string, provider *Provider) (revoked bool, err error) {
+	raw, exists, err := d.Valkey.Get(ctx, sessionKeyPrefix+sid)
 	if err != nil {
 		return false, fmt.Errorf("auth: revalidate: get session: %w", err)
 	}
@@ -140,10 +141,12 @@ func RevalidateSession(ctx context.Context, d Deps, token string, provider *Prov
 	if err != nil {
 		// The IdP rejected the refresh token - treat this exactly like an
 		// admin-initiated revoke of this one session (RevokeSessionByID).
-		if delErr := d.Valkey.Del(ctx, sessionKeyPrefix+token); delErr != nil {
+		if delErr := d.Valkey.Del(ctx, sessionKeyPrefix+sid); delErr != nil {
 			return false, fmt.Errorf("auth: revalidate: revoke after IdP rejection: %w", delErr)
 		}
-		if remErr := d.Valkey.RemoveSetMember(ctx, userSessionsKeyPrefix+stored.UserID, token); remErr != nil {
+		_ = d.Valkey.Del(ctx, sessionCountryKeyPrefix+sid)
+		_ = d.Valkey.Del(ctx, sessionDeviceKeyPrefix+sid)
+		if remErr := d.Valkey.RemoveSetMember(ctx, userSessionsKeyPrefix+stored.UserID, sid); remErr != nil {
 			// The session itself is already gone (the Del above succeeded) -
 			// a stale entry left behind in the per-user index is a minor,
 			// self-healing inconsistency (RevokeUserSessions/UpdateSessionsRole
@@ -205,7 +208,7 @@ func RevalidateSession(ctx context.Context, d Deps, token string, provider *Prov
 		return false, fmt.Errorf("auth: revalidate: marshal session: %w", err)
 	}
 
-	ttl, ttlOK, err := d.Valkey.TTL(ctx, sessionKeyPrefix+token)
+	ttl, ttlOK, err := d.Valkey.TTL(ctx, sessionKeyPrefix+sid)
 	if err != nil || !ttlOK || ttl <= 0 {
 		// Lookup failed, or lost a race with the key expiring naturally
 		// between the Get above and here - fall back to a full SessionTTL
@@ -213,7 +216,7 @@ func RevalidateSession(ctx context.Context, d Deps, token string, provider *Prov
 		// negative) TTL.
 		ttl = SessionTTL
 	}
-	if err := d.Valkey.SetWithTTL(ctx, sessionKeyPrefix+token, string(data), ttl); err != nil {
+	if err := d.Valkey.SetWithTTL(ctx, sessionKeyPrefix+sid, string(data), ttl); err != nil {
 		return false, fmt.Errorf("auth: revalidate: store session: %w", err)
 	}
 	return false, nil

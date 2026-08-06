@@ -152,17 +152,20 @@ services:
 
   # ── Valkey (Core only) ───────────────────────────────────────────────────────
   # Password-protected since 2026-07-28. What lives in here is not "cache
-  # data": the session keys are named session:<bearer token>, so anyone who
-  # can run SCAN against this instance reads every live session token
-  # straight out of the key names - no decryption needed, despite the
-  # AES-GCM applied to the values. moduletoken: entries additionally carry
-  # the underlying session token in plaintext JSON. Read access here is
-  # equivalent to impersonating every logged-in user, super-admins included.
+  # data" - it is every live session - but as of 2026-08 it no longer holds
+  # a replayable credential anywhere. Session keys are named
+  # session:<sha256(bearer token)> and moduletoken: entries reference the
+  # underlying session by that same digest, so read access here (a SCAN, or
+  # an RDB/AOF snapshot off the valkey-data volume below) yields hashes, not
+  # tokens: it still exposes who is logged in from where, but no longer lets
+  # the reader impersonate them. See sessionKeyPrefix in
+  # backend/internal/auth/session.go for the full reasoning.
   #
-  # The instance has never had a published port and is only reachable over
-  # modulab-internal, but Postgres on that same network has always had a
-  # password while this did not - the protection was distributed exactly
-  # opposite to the sensitivity of what each holds.
+  # The password stays regardless - the values are still session metadata
+  # under AES-GCM plus a keyspace anyone with access could disrupt by
+  # deletion. The instance has never had a published port and is only
+  # reachable over modulab-internal, but Postgres on that same network has
+  # always had a password while this did not.
   #
   # SearXNG deliberately does NOT share this instance anymore (it used to,
   # via SEARXNG_REDIS_URL=redis://valkey:6379/1) - see searxng-valkey below.

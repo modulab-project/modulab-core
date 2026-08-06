@@ -51,6 +51,33 @@ const SessionTTL = 24 * time.Hour
 // where this is enforced.
 const SessionAbsoluteMaxAge = 30 * 24 * time.Hour
 
+// sessionKeyPrefix namespaces the one key that holds a session's actual
+// (encrypted) contents.
+//
+// The key is sessionKeyPrefix+SessionID(token) - the SHA-256 digest of the
+// bearer token, never the bearer token itself (H-1, security review
+// 2026-08). Before that change the raw token was the key name, which meant
+// anyone able to run a single SCAN against Valkey could read every live
+// session's bearer token straight out of the key listing and replay it -
+// without ever needing to decrypt a value, since the values are the only
+// part protected by the master key. That mattered less for a live SCAN
+// (which already presupposes Valkey access) than for valkey-data being a
+// persistent volume: RDB/AOF snapshots put those raw tokens on the host's
+// disk, so a disk backup or a discarded volume carried usable credentials
+// for up to SessionTTL.
+//
+// Hashing is one-way, so a stolen key name is no longer a credential: an
+// attacker holding sessionKeyPrefix+<digest> cannot derive a token that
+// ValidateSession would accept, because ValidateSession hashes what the
+// client presented and compares by lookup. The raw token now exists in
+// exactly two places - the httpOnly cookie in the user's browser, and the
+// in-flight request - and never at rest anywhere on the server.
+//
+// Every other per-session key (userSessionsKeyPrefix's set members,
+// sessionCountryKeyPrefix, sessionDeviceKeyPrefix, moduleTokenKeyPrefix)
+// follows the same rule; a single one of them still keyed by the raw token
+// would have made this pointless, since they all live in the same keyspace
+// one SCAN walks.
 const sessionKeyPrefix = "session:"
 
 // SessionKeyPrefix exposes sessionKeyPrefix to callers outside this package
@@ -59,13 +86,18 @@ const sessionKeyPrefix = "session:"
 // string in a second place that could silently drift out of sync.
 const SessionKeyPrefix = sessionKeyPrefix
 
-// userSessionsKeyPrefix indexes session tokens by the subject they belong
-// to (key: userSessionsKeyPrefix+UserID, value: a Valkey set of tokens) -
+// userSessionsKeyPrefix indexes sessions by the subject they belong to
+// (key: userSessionsKeyPrefix+UserID, value: a Valkey set of session IDs) -
 // see CreateSession and RevokeUserSessions. Needed because the session key
-// itself (sessionKeyPrefix+token) is only ever looked up by token, never by
-// user; without this index, an admin lock/delete action would have no way
-// to find and kill an already-issued session, and the user could keep
-// using it normally until it naturally expired (up to SessionTTL later).
+// itself is only ever looked up by ID, never by user; without this index,
+// an admin lock/delete action would have no way to find and kill an
+// already-issued session, and the user could keep using it normally until
+// it naturally expired (up to SessionTTL later).
+//
+// The set members are SessionID digests, not raw tokens (H-1, 2026-08) -
+// see sessionKeyPrefix. They are exactly the suffixes of the session keys
+// they point at, so every member can be turned into its session key by
+// prefixing, with no hashing step at the read sites.
 const userSessionsKeyPrefix = "usersessions:"
 
 // sessionCountryKeyPrefix tracks the most recently observed CF-IPCountry
@@ -414,17 +446,22 @@ func CreateSession(ctx context.Context, d Deps, sess Session, refreshToken strin
 	if err != nil {
 		return "", fmt.Errorf("auth: marshal session: %w", err)
 	}
-	if err := d.Valkey.SetWithTTL(ctx, sessionKeyPrefix+token, string(data), SessionTTL); err != nil {
+	// Filed under the token's digest, never the token itself - see
+	// sessionKeyPrefix's doc comment. token is returned to the caller (and
+	// from there into the httpOnly cookie) but deliberately not persisted
+	// anywhere on this side.
+	sid := SessionID(token)
+	if err := d.Valkey.SetWithTTL(ctx, sessionKeyPrefix+sid, string(data), SessionTTL); err != nil {
 		return "", fmt.Errorf("auth: store session: %w", err)
 	}
-	// Indexed by subject too, so RevokeUserSessions can find this token
+	// Indexed by subject too, so RevokeUserSessions can find this session
 	// later if an admin locks or deletes this user before it naturally
 	// expires. Not fatal if this second write fails - the session itself
 	// was already created successfully above - but it does mean a lock
 	// action against this user would not catch this particular session
 	// until it expires on its own, so it is still surfaced as an error
 	// rather than silently swallowed.
-	if err := d.Valkey.AddSetMember(ctx, userSessionsKeyPrefix+sess.UserID, token, SessionTTL); err != nil {
+	if err := d.Valkey.AddSetMember(ctx, userSessionsKeyPrefix+sess.UserID, sid, SessionTTL); err != nil {
 		return "", fmt.Errorf("auth: index session by user: %w", err)
 	}
 	return token, nil
@@ -439,7 +476,7 @@ func CreateSession(ctx context.Context, d Deps, sess Session, refreshToken strin
 // tokens (a user who never logged in, or whose sessions already expired) is
 // not an error.
 func RevokeUserSessions(ctx context.Context, d Deps, subject string) error {
-	tokens, err := d.Valkey.SetMembers(ctx, userSessionsKeyPrefix+subject)
+	sids, err := d.Valkey.SetMembers(ctx, userSessionsKeyPrefix+subject)
 	if err != nil {
 		return fmt.Errorf("auth: list sessions for revocation: %w", err)
 	}
@@ -449,8 +486,8 @@ func RevokeUserSessions(ctx context.Context, d Deps, subject string) error {
 	// copy below. Decoded up front, before any Del, so a decode failure on
 	// one session can't skip revocation for the others.
 	var stored []storedSession
-	for _, token := range tokens {
-		raw, exists, err := d.Valkey.Get(ctx, sessionKeyPrefix+token)
+	for _, sid := range sids {
+		raw, exists, err := d.Valkey.Get(ctx, sessionKeyPrefix+sid)
 		if err != nil || !exists {
 			continue
 		}
@@ -461,10 +498,17 @@ func RevokeUserSessions(ctx context.Context, d Deps, subject string) error {
 	}
 	bestEffortRevokeAtIdP(ctx, d, stored)
 
-	for _, token := range tokens {
-		if err := d.Valkey.Del(ctx, sessionKeyPrefix+token); err != nil {
+	for _, sid := range sids {
+		if err := d.Valkey.Del(ctx, sessionKeyPrefix+sid); err != nil {
 			return fmt.Errorf("auth: revoke session: %w", err)
 		}
+		// The two anomaly baselines shadow this session's key and are keyed
+		// by the same ID, so they can be dropped right here rather than
+		// left to age out on their own SessionTTL - best-effort, since a
+		// leftover baseline is inert once the session it describes is gone
+		// (nothing reads it, and a new session gets a new ID).
+		_ = d.Valkey.Del(ctx, sessionCountryKeyPrefix+sid)
+		_ = d.Valkey.Del(ctx, sessionDeviceKeyPrefix+sid)
 	}
 	if err := d.Valkey.Del(ctx, userSessionsKeyPrefix+subject); err != nil {
 		return err
@@ -498,49 +542,49 @@ func RevokeUserSessions(ctx context.Context, d Deps, subject string) error {
 // way it did when each tab held its own independent sessionStorage token -
 // ending this row signs out every tab of that browser at once.
 //
-// Has to scan every active session and recompute each one's ID to find the
-// match, since Valkey only indexes these keys by token and by user, never
-// by this derived ID - acceptable because the admin calling this already
-// paid that same scan cost once just to load the list this ID came from.
+// A single direct lookup: since the 2026-08 token-hashing pass the session
+// key IS sessionKeyPrefix+id (see sessionKeyPrefix's doc comment), so the
+// full ScanKeysWithPrefix over every active session plus a per-key
+// SessionID recompute that this used to need is gone - id can simply be
+// prefixed. Note that id arrives straight from the admin's request body, so
+// it must never be interpolated into anything but this one key name;
+// prefixing keeps it confined to the session keyspace, where a value that
+// matches nothing just falls through to ok=false.
+//
 // ok is false (not an error) if no session with that ID is currently
 // active - it may have expired or been revoked already between the admin
 // loading the page and clicking the button.
 func RevokeSessionByID(ctx context.Context, d Deps, id string) (bool, error) {
-	keys, err := d.Valkey.ScanKeysWithPrefix(ctx, sessionKeyPrefix)
+	if id == "" {
+		return false, nil
+	}
+	key := sessionKeyPrefix + id
+	raw, exists, err := d.Valkey.Get(ctx, key)
 	if err != nil {
-		return false, fmt.Errorf("auth: revoke session by id: scan: %w", err)
+		return false, fmt.Errorf("auth: revoke session by id: get: %w", err)
 	}
-	for _, key := range keys {
-		token := strings.TrimPrefix(key, sessionKeyPrefix)
-		if SessionID(token) != id {
-			continue
-		}
-		raw, exists, err := d.Valkey.Get(ctx, key)
-		if err != nil {
-			return false, fmt.Errorf("auth: revoke session by id: get: %w", err)
-		}
-		if !exists {
-			return false, nil
-		}
-		var stored storedSession
-		if err := json.Unmarshal([]byte(raw), &stored); err != nil {
-			return false, fmt.Errorf("auth: revoke session by id: decode: %w", err)
-		}
-		// Best-effort: also invalidate the refresh token at the IdP itself,
-		// same reasoning as RevokeUserSessions - before deleting Core's own
-		// copy below, though either order is fine here since this is not
-		// atomic with the Del anyway.
-		bestEffortRevokeAtIdP(ctx, d, []storedSession{stored})
-		if err := d.Valkey.Del(ctx, key); err != nil {
-			return false, fmt.Errorf("auth: revoke session by id: delete: %w", err)
-		}
-		if err := d.Valkey.RemoveSetMember(ctx, userSessionsKeyPrefix+stored.UserID, token); err != nil {
-			return true, fmt.Errorf("auth: revoke session by id: unindex: %w", err)
-		}
-		notifySessionRevokedByAdmin(ctx, d, stored)
-		return true, nil
+	if !exists {
+		return false, nil
 	}
-	return false, nil
+	var stored storedSession
+	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
+		return false, fmt.Errorf("auth: revoke session by id: decode: %w", err)
+	}
+	// Best-effort: also invalidate the refresh token at the IdP itself,
+	// same reasoning as RevokeUserSessions - before deleting Core's own
+	// copy below, though either order is fine here since this is not
+	// atomic with the Del anyway.
+	bestEffortRevokeAtIdP(ctx, d, []storedSession{stored})
+	if err := d.Valkey.Del(ctx, key); err != nil {
+		return false, fmt.Errorf("auth: revoke session by id: delete: %w", err)
+	}
+	_ = d.Valkey.Del(ctx, sessionCountryKeyPrefix+id)
+	_ = d.Valkey.Del(ctx, sessionDeviceKeyPrefix+id)
+	if err := d.Valkey.RemoveSetMember(ctx, userSessionsKeyPrefix+stored.UserID, id); err != nil {
+		return true, fmt.Errorf("auth: revoke session by id: unindex: %w", err)
+	}
+	notifySessionRevokedByAdmin(ctx, d, stored)
+	return true, nil
 }
 
 // notifySessionRevokedByAdmin sends mail.SessionRevokedByAdminMessage to the
@@ -604,15 +648,24 @@ func notifySessionRevokedByAdmin(ctx context.Context, d Deps, stored storedSessi
 // this fix every call to "end this one session of mine" walked every
 // other user's session key too just to find its own.
 func RevokeOwnSessionByID(ctx context.Context, d Deps, subject, id string) (bool, error) {
-	tokens, err := d.Valkey.SetMembers(ctx, userSessionsKeyPrefix+subject)
+	if id == "" {
+		return false, nil
+	}
+	sids, err := d.Valkey.SetMembers(ctx, userSessionsKeyPrefix+subject)
 	if err != nil {
 		return false, fmt.Errorf("auth: revoke own session by id: list: %w", err)
 	}
-	for _, token := range tokens {
-		if SessionID(token) != id {
+	// Still a membership walk rather than RevokeSessionByID's direct
+	// lookup, even though the key name is now derivable from id alone: the
+	// walk is what scopes this to subject's own sessions in the first
+	// place, so replacing it with a direct Get would turn a self-service
+	// endpoint into one that can reach any session whose ID the caller can
+	// name. The set is one user's sessions, so it is a handful of entries.
+	for _, sid := range sids {
+		if sid != id {
 			continue
 		}
-		key := sessionKeyPrefix + token
+		key := sessionKeyPrefix + sid
 		raw, exists, err := d.Valkey.Get(ctx, key)
 		if err != nil {
 			return false, fmt.Errorf("auth: revoke own session by id: get: %w", err)
@@ -631,7 +684,9 @@ func RevokeOwnSessionByID(ctx context.Context, d Deps, subject, id string) (bool
 		if err := d.Valkey.Del(ctx, key); err != nil {
 			return false, fmt.Errorf("auth: revoke own session by id: delete: %w", err)
 		}
-		if err := d.Valkey.RemoveSetMember(ctx, userSessionsKeyPrefix+subject, token); err != nil {
+		_ = d.Valkey.Del(ctx, sessionCountryKeyPrefix+sid)
+		_ = d.Valkey.Del(ctx, sessionDeviceKeyPrefix+sid)
+		if err := d.Valkey.RemoveSetMember(ctx, userSessionsKeyPrefix+subject, sid); err != nil {
 			return true, fmt.Errorf("auth: revoke own session by id: unindex: %w", err)
 		}
 		return true, nil
@@ -685,7 +740,31 @@ func SessionFromRequest(ctx context.Context, d Deps, token, currentIP, currentCo
 // successfully, so the caller gets a valid response regardless. Worst
 // case the session expires on its original schedule rather than sliding.
 func ValidateSession(ctx context.Context, d Deps, token, currentIP, currentCountry, currentUserAgent string) (Session, bool, error) {
-	raw, exists, err := d.Valkey.Get(ctx, sessionKeyPrefix+token)
+	// The one place a raw bearer token is turned into the ID everything
+	// downstream works with (see sessionKeyPrefix). Nothing below this line
+	// - in this function or any it calls - ever sees the token again.
+	return validateSessionByID(ctx, d, SessionID(token), currentIP, currentCountry, currentUserAgent)
+}
+
+// validateSessionByID is ValidateSession's body, split out so callers that
+// already hold a session's ID rather than its bearer token can reuse it
+// without a pointless round trip through a token they do not have.
+// ValidateModuleToken is the reason this exists: a module token record
+// stores only the underlying session's ID (see moduleTokenRecord), so
+// handing that to ValidateSession would hash an already-hashed value and
+// look up a key that can never exist.
+//
+// Unexported on purpose. Every route-facing entry point should take the
+// credential the client actually presented and hash it here, so that "was
+// this ID derived from a token someone proved they hold?" stays a question
+// with exactly two answers in the codebase (ValidateSession, and a module
+// token that was itself minted from a validated session) rather than
+// something any future caller can assert by passing a bare ID in.
+func validateSessionByID(ctx context.Context, d Deps, sid, currentIP, currentCountry, currentUserAgent string) (Session, bool, error) {
+	if sid == "" {
+		return Session{}, false, nil
+	}
+	raw, exists, err := d.Valkey.Get(ctx, sessionKeyPrefix+sid)
 	if err != nil {
 		return Session{}, false, err
 	}
@@ -717,17 +796,19 @@ func ValidateSession(ctx context.Context, d Deps, token, currentIP, currentCount
 	// keys simply age out on their existing TTL instead, same fallback as
 	// the renewal path below.
 	if !sess.CreatedAt.IsZero() && time.Since(sess.CreatedAt) > SessionAbsoluteMaxAge {
-		_ = d.Valkey.Del(ctx, sessionKeyPrefix+token)
-		_ = d.Valkey.RemoveSetMember(ctx, userSessionsKeyPrefix+sess.UserID, token)
+		_ = d.Valkey.Del(ctx, sessionKeyPrefix+sid)
+		_ = d.Valkey.Del(ctx, sessionCountryKeyPrefix+sid)
+		_ = d.Valkey.Del(ctx, sessionDeviceKeyPrefix+sid)
+		_ = d.Valkey.RemoveSetMember(ctx, userSessionsKeyPrefix+sess.UserID, sid)
 		return Session{}, false, nil
 	}
 
 	// Slide the window - best effort, non-fatal if Valkey hiccups here.
-	_ = d.Valkey.Expire(ctx, sessionKeyPrefix+token, SessionTTL)
+	_ = d.Valkey.Expire(ctx, sessionKeyPrefix+sid, SessionTTL)
 	_ = d.Valkey.Expire(ctx, userSessionsKeyPrefix+sess.UserID, SessionTTL)
 
-	checkSessionCountryAnomaly(ctx, d, token, sess, masterKey, currentIP, currentCountry)
-	checkSessionDeviceAnomaly(ctx, d, token, sess, masterKey, currentIP, currentUserAgent)
+	checkSessionCountryAnomaly(ctx, d, sid, sess, masterKey, currentIP, currentCountry)
+	checkSessionDeviceAnomaly(ctx, d, sid, sess, masterKey, currentIP, currentUserAgent)
 
 	return sess, true, nil
 }
@@ -757,7 +838,7 @@ func sessionBaselineChanged(baseline, current string) bool {
 // login already makes the latter far harder) would otherwise never be
 // flagged for as long as that token remains valid. This closes that gap by
 // re-running the same comparison on every request that reaches here, against
-// a baseline (sessionCountryKeyPrefix+token) that itself slides forward -
+// a baseline (sessionCountryKeyPrefix+sid) that itself slides forward -
 // see that key's doc comment for why a fixed baseline is not enough.
 //
 // masterKey is passed in rather than re-resolved here - ValidateSession
@@ -769,11 +850,11 @@ func sessionBaselineChanged(baseline, current string) bool {
 // here degrades to "this particular check was skipped this once", never to
 // a failed request - the session was already successfully validated by the
 // time this runs.
-func checkSessionCountryAnomaly(ctx context.Context, d Deps, token string, sess Session, masterKey, currentIP, currentCountry string) {
+func checkSessionCountryAnomaly(ctx context.Context, d Deps, sid string, sess Session, masterKey, currentIP, currentCountry string) {
 	if currentCountry == "" {
 		return
 	}
-	key := sessionCountryKeyPrefix + token
+	key := sessionCountryKeyPrefix + sid
 	baseline := sess.Country // first check of this session: fall back to the login-time country
 	if prev, exists, err := d.Valkey.Get(ctx, key); err != nil {
 		log.Printf("auth: read session country baseline: %v", err)
@@ -874,11 +955,11 @@ func checkSessionCountryAnomaly(ctx context.Context, d Deps, token string, sess 
 // notification-preference field and mail template they use, which would
 // otherwise need to be threaded through as several more parameters than the
 // shared logic saves.
-func checkSessionDeviceAnomaly(ctx context.Context, d Deps, token string, sess Session, masterKey, currentIP, currentUserAgent string) {
+func checkSessionDeviceAnomaly(ctx context.Context, d Deps, sid string, sess Session, masterKey, currentIP, currentUserAgent string) {
 	if currentUserAgent == "" {
 		return
 	}
-	key := sessionDeviceKeyPrefix + token
+	key := sessionDeviceKeyPrefix + sid
 	baseline := sess.UserAgent // first check of this session: fall back to the login-time device
 	if prev, exists, err := d.Valkey.Get(ctx, key); err != nil {
 		log.Printf("auth: read session device baseline: %v", err)
@@ -1033,12 +1114,28 @@ func resolveHostname(ctx context.Context, d Deps, ip string) string {
 }
 
 // SessionID returns a stable, non-reversible identifier for token (the hex
-// SHA-256 digest). Exposed to the frontend as ActiveSession.ID instead of
-// the token itself, and recomputed by RevokeSessionByID to find the
-// matching key again - same one-way-hash approach used to let an admin
-// reference one specific session without it ever being possible to work
-// backwards from the ID to a token that could be replayed.
+// SHA-256 digest). Since the 2026-08 token-hashing pass (see
+// sessionKeyPrefix's doc comment) this is not just an opaque handle the
+// frontend gets instead of the token - it IS the name every Valkey key
+// belonging to this session is filed under, so ActiveSession.ID and
+// RevokeSessionByID's lookup key are now literally the same string, with no
+// scan-and-recompute step in between.
+//
+// An empty token maps to an empty ID, not to the SHA-256 of the empty
+// string: "no token at all" must stay distinguishable from "some token",
+// otherwise callers that treat a non-empty ID as "the caller has a session"
+// (systemInfoHandler's and MySessionsHandler's ActiveSession.Current
+// marking) would match every unauthenticated request against a fixed,
+// publicly-known digest.
+//
+// A plain unsalted digest is deliberate and sufficient here: token is 256
+// bits of crypto/rand output (randomToken), so there is no dictionary to
+// precompute and no reason to pay for a slow KDF on the hot path -
+// ValidateSession runs this on literally every authenticated request.
 func SessionID(token string) string {
+	if token == "" {
+		return ""
+	}
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
 }
@@ -1077,9 +1174,10 @@ func ListActiveSessions(ctx context.Context, d Deps) ([]ActiveSession, error) {
 		if err != nil {
 			continue
 		}
-		token := strings.TrimPrefix(key, sessionKeyPrefix)
 		as := ActiveSession{
-			ID: SessionID(token),
+			// The key suffix already is the ID (see sessionKeyPrefix) - no
+			// SessionID recompute, and nothing here ever holds a token.
+			ID: strings.TrimPrefix(key, sessionKeyPrefix),
 			// Hostname is deliberately left unset here and filled in by the
 			// bounded-concurrency pass below (L-1, PERFORMANCE_AUDIT.md) -
 			// resolveHostname is the one genuinely slow step in this loop (a
@@ -1157,11 +1255,11 @@ func ListActiveSessions(ctx context.Context, d Deps) ([]ActiveSession, error) {
 // caller's own tokens by construction, not just by a filter that a future
 // edit could accidentally drop.
 func ListActiveSessionsForUser(ctx context.Context, d Deps, subject string) ([]ActiveSession, error) {
-	tokens, err := d.Valkey.SetMembers(ctx, userSessionsKeyPrefix+subject)
+	sids, err := d.Valkey.SetMembers(ctx, userSessionsKeyPrefix+subject)
 	if err != nil {
 		return nil, fmt.Errorf("auth: list active sessions for user: %w", err)
 	}
-	if len(tokens) == 0 {
+	if len(sids) == 0 {
 		return nil, nil
 	}
 
@@ -1170,22 +1268,22 @@ func ListActiveSessionsForUser(ctx context.Context, d Deps, subject string) ([]A
 		return nil, fmt.Errorf("auth: list active sessions for user: resolve master key: %w", err)
 	}
 
-	out := make([]ActiveSession, 0, len(tokens))
-	for _, token := range tokens {
-		key := sessionKeyPrefix + token
+	out := make([]ActiveSession, 0, len(sids))
+	for _, sid := range sids {
+		key := sessionKeyPrefix + sid
 		raw, exists, err := d.Valkey.Get(ctx, key)
 		if err != nil {
-			// A transient Valkey error, not evidence the token is actually
+			// A transient Valkey error, not evidence the session is actually
 			// dead - skip this entry for this call, but don't unindex it.
 			continue
 		}
 		if !exists {
 			// Genuinely expired/revoked on its own - opportunistic cleanup,
-			// same reasoning as UpdateSessionsRole's stale-token removal
+			// same reasoning as UpdateSessionsRole's stale-entry removal
 			// above, instead of only ever relying on the whole set's TTL to
 			// eventually drop it.
-			if err := d.Valkey.RemoveSetMember(ctx, userSessionsKeyPrefix+subject, token); err != nil {
-				log.Printf("auth: list active sessions for user: unindex stale token for %s: %v", subject, err)
+			if err := d.Valkey.RemoveSetMember(ctx, userSessionsKeyPrefix+subject, sid); err != nil {
+				log.Printf("auth: list active sessions for user: unindex stale session for %s: %v", subject, err)
 			}
 			continue
 		}
@@ -1198,7 +1296,7 @@ func ListActiveSessionsForUser(ctx context.Context, d Deps, subject string) ([]A
 			continue
 		}
 		as := ActiveSession{
-			ID:        SessionID(token),
+			ID:        sid,
 			Name:      sess.Name,
 			Email:     sess.Email,
 			Role:      sess.Role,
@@ -1224,9 +1322,26 @@ func ListActiveSessionsForUser(ctx context.Context, d Deps, subject string) ([]A
 	return out, nil
 }
 
-// DeleteSession invalidates token immediately (logout).
+// DeleteSession invalidates token immediately (logout). Takes the raw
+// bearer token, not an ID - its one caller (LogoutHandler) is holding the
+// cookie value, and hashing it here keeps SessionID's use confined to this
+// package the same way ValidateSession does.
+//
+// The per-user index entry is deliberately left behind rather than removed
+// here: this is the self-service logout path and the dangling ID
+// self-heals on the next read (ListActiveSessionsForUser and
+// UpdateSessionsRole both drop set members whose session key is gone), so
+// the extra round trip on every logout buys nothing. The anomaly baselines
+// are dropped, though - unlike the index entry, nothing ever cleans those
+// up on read.
 func DeleteSession(ctx context.Context, vk *valkey.Client, token string) error {
-	return vk.Del(ctx, sessionKeyPrefix+token)
+	sid := SessionID(token)
+	if sid == "" {
+		return nil
+	}
+	_ = vk.Del(ctx, sessionCountryKeyPrefix+sid)
+	_ = vk.Del(ctx, sessionDeviceKeyPrefix+sid)
+	return vk.Del(ctx, sessionKeyPrefix+sid)
 }
 
 // UpdateSessionsRole rewrites Role (and Locked) on every currently active
@@ -1242,23 +1357,23 @@ func DeleteSession(ctx context.Context, vk *valkey.Client, token string) error {
 // Looking up zero tokens (no active session for subject right now) is not
 // an error, same reasoning as RevokeUserSessions.
 func UpdateSessionsRole(ctx context.Context, vk *valkey.Client, subject, role string, locked bool) error {
-	tokens, err := vk.SetMembers(ctx, userSessionsKeyPrefix+subject)
+	sids, err := vk.SetMembers(ctx, userSessionsKeyPrefix+subject)
 	if err != nil {
 		return fmt.Errorf("auth: list sessions for role update: %w", err)
 	}
-	for _, token := range tokens {
-		raw, exists, err := vk.Get(ctx, sessionKeyPrefix+token)
+	for _, sid := range sids {
+		raw, exists, err := vk.Get(ctx, sessionKeyPrefix+sid)
 		if err != nil {
 			return fmt.Errorf("auth: load session for role update: %w", err)
 		}
 		if !exists {
 			// Already expired on its own - nothing to rewrite. Opportunistic
-			// cleanup: drop this dead token from the per-user index now
+			// cleanup: drop this dead entry from the per-user index now
 			// instead of leaving it to linger until the whole set's own TTL
 			// lapses - best-effort, since a failed removal here is no worse
 			// than the lazy cleanup this used to rely on exclusively.
-			if err := vk.RemoveSetMember(ctx, userSessionsKeyPrefix+subject, token); err != nil {
-				log.Printf("auth: update sessions role: unindex stale token for %s: %v", subject, err)
+			if err := vk.RemoveSetMember(ctx, userSessionsKeyPrefix+subject, sid); err != nil {
+				log.Printf("auth: update sessions role: unindex stale session for %s: %v", subject, err)
 			}
 			continue
 		}
@@ -1277,7 +1392,7 @@ func UpdateSessionsRole(ctx context.Context, vk *valkey.Client, subject, role st
 		if err != nil {
 			return fmt.Errorf("auth: marshal session for role update: %w", err)
 		}
-		if err := vk.SetWithTTL(ctx, sessionKeyPrefix+token, string(data), SessionTTL); err != nil {
+		if err := vk.SetWithTTL(ctx, sessionKeyPrefix+sid, string(data), SessionTTL); err != nil {
 			return fmt.Errorf("auth: store updated session: %w", err)
 		}
 	}
@@ -1286,7 +1401,7 @@ func UpdateSessionsRole(ctx context.Context, vk *valkey.Client, subject, role st
 	// RevokeUserSessions's own "session.changed" push above - lets an
 	// already-open tab pick up its new role immediately via
 	// useAuthenticatedSession instead of waiting on the safety-net poll.
-	// Published even when tokens was empty (no active session right now) -
+	// Published even when sids was empty (no active session right now) -
 	// harmless, since nothing is subscribed to notify.UserChannel(subject)
 	// in that case anyway.
 	if pubErr := notify.Publish(ctx, vk, notify.UserChannel(subject), notify.Event{Type: "session.changed"}); pubErr != nil {

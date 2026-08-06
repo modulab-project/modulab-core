@@ -44,16 +44,25 @@ const moduleTokenKeyPrefix = "moduletoken:"
 const ModuleTokenTTL = 20 * time.Minute
 
 // moduleTokenRecord is what's stored in Valkey for a minted module token.
-// SessionToken is the caller's own real session bearer token - not
+// SessionID is the caller's session ID (SessionID(bearer token)) - not
 // duplicated/re-encrypted PII, just a reference so ValidateModuleToken can
-// delegate back to ValidateSession (and therefore automatically inherit
+// delegate back to validateSessionByID (and therefore automatically inherit
 // revocation: if the underlying session is logged out or locked before this
 // module token expires, ValidateModuleToken starts failing too, with no
 // separate revocation bookkeeping needed here). This is never returned to
-// the browser - only the random moduletoken: key is.
+// the browser.
+//
+// It holds the ID rather than the raw session token (H-1, security review
+// 2026-08) for the same reason the session key name does - see
+// sessionKeyPrefix in session.go. This record used to be the one place a
+// live bearer token sat at rest in plaintext JSON even after the key names
+// were fixed, which would have made the rest of that work moot: a module
+// token record is readable by anyone who can read Valkey, and it named a
+// credential good for the full remaining SessionTTL, not just this record's
+// own 20 minutes.
 type moduleTokenRecord struct {
-	Module       string `json:"module"`
-	SessionToken string `json:"session_token"`
+	Module    string `json:"module"`
+	SessionID string `json:"session_id"`
 }
 
 // CreateModuleToken mints a new module-scoped token for module, delegating
@@ -67,12 +76,16 @@ func CreateModuleToken(ctx context.Context, d Deps, sessionToken, module string)
 	if err != nil {
 		return "", err
 	}
-	rec := moduleTokenRecord{Module: module, SessionToken: sessionToken}
+	rec := moduleTokenRecord{Module: module, SessionID: SessionID(sessionToken)}
 	data, err := json.Marshal(rec)
 	if err != nil {
 		return "", fmt.Errorf("auth: marshal module token: %w", err)
 	}
-	if err := d.Valkey.SetWithTTL(ctx, moduleTokenKeyPrefix+token, string(data), ModuleTokenTTL); err != nil {
+	// Keyed by the module token's own digest, same rule as session keys -
+	// otherwise a SCAN would hand out module tokens verbatim, which are
+	// short-lived and narrowly scoped but still directly replayable against
+	// that module's API for up to ModuleTokenTTL.
+	if err := d.Valkey.SetWithTTL(ctx, moduleTokenKeyPrefix+SessionID(token), string(data), ModuleTokenTTL); err != nil {
 		return "", fmt.Errorf("auth: store module token: %w", err)
 	}
 	return token, nil
@@ -86,7 +99,10 @@ func CreateModuleToken(ctx context.Context, d Deps, sessionToken, module string)
 // module token is never valid for longer than both its own TTL AND the
 // underlying session's remain true.
 func ValidateModuleToken(ctx context.Context, d Deps, token, module, currentIP, currentCountry, currentUserAgent string) (Session, bool, error) {
-	raw, exists, err := d.Valkey.Get(ctx, moduleTokenKeyPrefix+token)
+	if token == "" {
+		return Session{}, false, nil
+	}
+	raw, exists, err := d.Valkey.Get(ctx, moduleTokenKeyPrefix+SessionID(token))
 	if err != nil {
 		return Session{}, false, err
 	}
@@ -100,7 +116,13 @@ func ValidateModuleToken(ctx context.Context, d Deps, token, module, currentIP, 
 	if rec.Module != module {
 		return Session{}, false, nil
 	}
-	return ValidateSession(ctx, d, rec.SessionToken, currentIP, currentCountry, currentUserAgent)
+	// validateSessionByID, not ValidateSession: rec.SessionID is already a
+	// digest, so going through ValidateSession would hash it a second time
+	// and look up a key that cannot exist. Passing an ID straight in is
+	// sound here specifically because this record could only have been
+	// written by CreateModuleToken, which is itself only reachable behind a
+	// validated session (modules.ModuleTokenHandler).
+	return validateSessionByID(ctx, d, rec.SessionID, currentIP, currentCountry, currentUserAgent)
 }
 
 // RequireModuleToken is the module-token equivalent of RequireActiveSession:
