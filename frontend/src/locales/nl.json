@@ -674,9 +674,10 @@
       "file_missing": "Nog niet gedownload.",
       "file_build_date": "MaxMind-buildatum: {{date}}",
       "update_timer_title": "Automatisch bijwerken",
-      "interval_label": "Update-interval (uren)",
-      "interval_hint": "Hoe vaak ModuLab bij MaxMind controleert op een nieuwe databaseversie. Standaard: 24 uur.",
-      "interval_validation_error": "Voer een geldig interval groter dan 0 uur in."
+      "check_time_label": "Controletijd",
+      "check_time_hint": "Tijdstip waarop ModuLab dagelijks bij MaxMind controleert op een nieuwe databaseversie.",
+      "check_time_error": "Voer een geldige tijd in (UU:MM).",
+      "check_time_current": "Controletijd: {{time}}"
     }
   },
   "home": {

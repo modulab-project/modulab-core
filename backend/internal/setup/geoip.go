@@ -50,35 +50,61 @@ const (
 	GeoIPLastUpdateErrorSettingKey = "geoip_last_update_error"
 	// GeoIPLastCheckAtSettingKey marks when internal/geoip last actually
 	// attempted a download - unlike GeoIPLastUpdateAtSettingKey (success
-	// only), this is written on every attempt regardless of outcome. Used
-	// exclusively to compute GeoIPUpdateTimer's "next check in ..."
-	// countdown, which must track the real schedule (RunScheduler ticks
-	// every TickInterval no matter whether the previous attempt failed),
-	// not silently freeze at the last success.
+	// only), this is written on every attempt regardless of outcome. Surfaced
+	// as GeoIPUpdateTimer.LastRunAt so the admin page can show "last checked
+	// at ..." even after a run of failures, not silently freeze at the last
+	// success - NextRunAt itself no longer derives from this (see
+	// resolveUpdateTimer's doc comment), only LastRunAt does.
 	GeoIPLastCheckAtSettingKey = "geoip_last_check_at"
-	// GeoIPTickIntervalSecondsSettingKey names the core_settings key
-	// internal/geoip.TickIntervalSeconds reads for how often RunScheduler
-	// re-downloads the databases - exported (not internal/geoip's own
-	// unexported constant) so GeoIPConfigureHandler below can write it
-	// directly, same direction as the three keys above. Deliberately NOT
-	// cleared by GeoIPDeleteHandler: it is a scheduling preference, not a
-	// credential, and an admin re-adding GeoIP later almost certainly wants
-	// whatever interval they'd already picked to still apply.
-	GeoIPTickIntervalSecondsSettingKey = "geoip_tick_interval_seconds"
+	// GeoIPCheckTimeSettingKey names the core_settings key
+	// internal/geoip.CheckTimeRaw reads for the fixed daily time-of-day
+	// ("HH:MM", 24h) RunScheduler downloads at - exported (not internal/
+	// geoip's own unexported constant) so GeoIPConfigureHandler below can
+	// write it directly, same direction as the three keys above. Replaces
+	// the former interval-hours field entirely (2026-08-09): MaxMind only
+	// republishes GeoLite2 weekly, so "check once a day, at a specific
+	// clock time" is both easier for an admin to reason about than a raw
+	// hour count and mirrors admin/system/limits' own
+	// core_update_check_time field (see coreupdate.SettingKeyCheckTime),
+	// which this directly follows the shape of. Deliberately NOT cleared by
+	// GeoIPDeleteHandler: it is a scheduling preference, not a credential,
+	// and an admin re-adding GeoIP later almost certainly wants whatever
+	// check time they'd already picked to still apply.
+	GeoIPCheckTimeSettingKey = "geoip_check_time"
 )
+
+// ParseGeoIPCheckTime parses "HH:MM" (24h) into hour/minute. Deliberately a
+// local copy of coreupdate.ParseTime's exact logic rather than an import of
+// it: this package already avoids importing internal/geoip to sidestep a
+// circular import (see this file's top-of-file doc comment), and reaching
+// into internal/coreupdate - a feature package with nothing to do with
+// GeoIP - just to share one tiny string parser would trade a real circular-
+// import problem for an equally arbitrary cross-feature coupling.
+func ParseGeoIPCheckTime(raw string) (hour, minute int, err error) {
+	parts := strings.SplitN(raw, ":", 2)
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("setup: invalid geoip check time %q (must be HH:MM)", raw)
+	}
+	h, errH := strconv.Atoi(parts[0])
+	m, errM := strconv.Atoi(parts[1])
+	if errH != nil || errM != nil || h < 0 || h > 23 || m < 0 || m > 59 {
+		return 0, 0, fmt.Errorf("setup: invalid geoip check time %q (must be HH:MM, 00:00-23:59)", raw)
+	}
+	return h, m, nil
+}
 
 // GeoIPConfigRequest is the body of POST /v1/admin/geoip/configure.
 type GeoIPConfigRequest struct {
 	AccountID  string `json:"account_id"`
 	LicenseKey string `json:"license_key"`
-	// TickIntervalSeconds is optional - 0 (the Go zero value, indistinguishable
-	// from "field omitted" in JSON) means "leave the current interval
-	// unchanged" rather than "set it to zero", since zero would be nonsensical
-	// anyway (see GeoIPConfigureHandler's validation). The frontend always
-	// sends the currently effective value (from the last GET .../status
-	// response) back here, so in practice this only actually changes when the
-	// admin edits the field.
-	TickIntervalSeconds int `json:"tick_interval_seconds,omitempty"`
+	// CheckTime is optional - "" (indistinguishable from "field omitted" in
+	// JSON) means "leave the current check time unchanged" rather than
+	// "clear it" (see GeoIPConfigureHandler's validation). The frontend
+	// always sends the currently effective value (from the last GET
+	// .../status response) back here, so in practice this only actually
+	// changes when the admin edits the field. "HH:MM", 24h - validated via
+	// ParseGeoIPCheckTime.
+	CheckTime string `json:"check_time,omitempty"`
 }
 
 // GeoIPStatusResponse reports the non-secret half of the configuration.
@@ -105,24 +131,26 @@ type GeoIPStatusResponse struct {
 	// triggerDownload for the exact same reasoning).
 	CityFile GeoIPFileInfo `json:"city_file"`
 	ASNFile  GeoIPFileInfo `json:"asn_file"`
-	// UpdateTimer reports the background refresh schedule - same JSON shape
-	// as adminapi/main.go's systemInfoTimer (last_run_at/next_run_at/
-	// interval_seconds) on purpose, so the frontend's existing SystemInfoTimer
-	// type and TimerCard-style rendering apply here unmodified. Populated
+	// UpdateTimer reports the background refresh schedule - see
+	// GeoIPUpdateTimer's own doc comment for its shape. Populated
 	// unconditionally, even when Configured is false, so the admin page can
-	// still show the configured interval (and "not run yet") rather than the
-	// whole card disappearing.
+	// still show the configured check time (and "not run yet") rather than
+	// the whole card disappearing.
 	UpdateTimer GeoIPUpdateTimer `json:"update_timer"`
 }
 
-// GeoIPUpdateTimer mirrors cmd/core/main.go's systemInfoTimer shape exactly
-// (same field names/JSON tags) - duplicated rather than shared because
-// systemInfoTimer lives in package main, which nothing outside cmd/core can
-// import.
+// GeoIPUpdateTimer reports the GeoIP background refresh schedule. Unlike
+// cmd/core/main.go's systemInfoTimer/adminapi's other timer shapes (last_run_at/
+// next_run_at/interval_seconds), this carries CheckTime instead of an
+// interval: since 2026-08-09 the schedule is "once a day, at a fixed clock
+// time" (see GeoIPCheckTimeSettingKey's doc comment), not a re-arming
+// interval, so NextRunAt is computed from CheckTime and the current wall
+// clock (see resolveUpdateTimer) rather than LastRunAt+interval.
 type GeoIPUpdateTimer struct {
-	LastRunAt       *string `json:"last_run_at,omitempty"`
-	NextRunAt       *string `json:"next_run_at,omitempty"`
-	IntervalSeconds int64   `json:"interval_seconds"`
+	LastRunAt *string `json:"last_run_at,omitempty"`
+	NextRunAt *string `json:"next_run_at,omitempty"`
+	// CheckTime is the currently effective "HH:MM" (24h) daily check time.
+	CheckTime string `json:"check_time"`
 }
 
 // GeoIPFileInfo describes one edition's .mmdb file on disk.
@@ -196,29 +224,44 @@ func ResolveGeoIPConfig(ctx context.Context, pool *db.Pool, masterKey string) (G
 }
 
 // resolveUpdateTimer builds a GeoIPUpdateTimer from GeoIPLastCheckAtSettingKey
-// and the caller-supplied interval - called unconditionally (even when GeoIP
-// is not configured) so the admin page can still show what interval would
-// apply, and "not run yet" rather than the card disappearing.
-// checkIntervalSeconds is a callback (not a plain value) so it can read
-// internal/geoip.TickIntervalSeconds fresh on every call - this package
-// cannot import internal/geoip directly (see this file's top-of-file doc
-// comment), and the interval itself is admin-configurable, so a cached/
-// stale value would show the wrong countdown right after a change.
-func resolveUpdateTimer(ctx context.Context, pool *db.Pool, checkIntervalSeconds func(context.Context) int64) GeoIPUpdateTimer {
-	interval := checkIntervalSeconds(ctx)
-	timer := GeoIPUpdateTimer{IntervalSeconds: interval}
-	lastCheckAt, exists, err := pool.GetSetting(ctx, GeoIPLastCheckAtSettingKey)
-	if err != nil || !exists || lastCheckAt == "" {
-		return timer
+// and the caller-supplied check time - called unconditionally (even when
+// GeoIP is not configured) so the admin page can still show what time would
+// apply, and "not run yet" rather than the card disappearing. checkTimeRaw
+// is a callback (not a plain value) so it can read internal/geoip.
+// CheckTimeRaw fresh on every call - this package cannot import internal/
+// geoip directly (see this file's top-of-file doc comment), and the check
+// time itself is admin-configurable, so a cached/stale value would show the
+// wrong countdown right after a change.
+//
+// NextRunAt is derived purely from the current wall clock and the configured
+// HH:MM (today's occurrence if it hasn't passed yet, otherwise tomorrow's) -
+// unlike the former interval-based calculation, it does NOT depend on
+// LastRunAt at all, since the schedule is now "every day at this clock
+// time" rather than "N seconds after the last attempt".
+func resolveUpdateTimer(ctx context.Context, pool *db.Pool, checkTimeRaw func(context.Context) string) GeoIPUpdateTimer {
+	raw := checkTimeRaw(ctx)
+	timer := GeoIPUpdateTimer{CheckTime: raw}
+
+	if lastCheckAt, exists, err := pool.GetSetting(ctx, GeoIPLastCheckAtSettingKey); err == nil && exists && lastCheckAt != "" {
+		if lastCheck, err := time.Parse(time.RFC3339, lastCheckAt); err == nil {
+			lastStr := lastCheck.UTC().Format(time.RFC3339)
+			timer.LastRunAt = &lastStr
+		}
 	}
-	lastCheck, err := time.Parse(time.RFC3339, lastCheckAt)
+
+	hour, minute, err := ParseGeoIPCheckTime(raw)
 	if err != nil {
+		// Unreachable in practice - checkTimeRaw only ever returns a value
+		// it already validated or the known-good default - but fail closed
+		// (no NextRunAt) rather than panic if that invariant is ever broken.
 		return timer
 	}
-	nextCheck := lastCheck.Add(time.Duration(interval) * time.Second)
-	lastStr := lastCheck.UTC().Format(time.RFC3339)
-	nextStr := nextCheck.UTC().Format(time.RFC3339)
-	timer.LastRunAt = &lastStr
+	now := time.Now()
+	next := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, now.Location())
+	if !next.After(now) {
+		next = next.Add(24 * time.Hour)
+	}
+	nextStr := next.UTC().Format(time.RFC3339)
 	timer.NextRunAt = &nextStr
 	return timer
 }
@@ -229,15 +272,15 @@ func resolveUpdateTimer(ctx context.Context, pool *db.Pool, checkIntervalSeconds
 // internal/geoip.Status, wired up by cmd/core/main.go) - called
 // unconditionally, even when GeoIP is not (or no longer) configured, since
 // GeoIPDeleteHandler leaves already-downloaded files in place.
-// checkIntervalSeconds reads internal/geoip.TickIntervalSeconds - see
-// resolveUpdateTimer's doc comment for why it has to be a callback rather
-// than a plain value passed in once.
-func GeoIPStatusHandler(pool *db.Pool, masterKey string, fileStatus func() (city, asn GeoIPFileInfo), checkIntervalSeconds func(context.Context) int64) http.HandlerFunc {
+// checkTimeRaw reads internal/geoip.CheckTimeRaw - see resolveUpdateTimer's
+// doc comment for why it has to be a callback rather than a plain value
+// passed in once.
+func GeoIPStatusHandler(pool *db.Pool, masterKey string, fileStatus func() (city, asn GeoIPFileInfo), checkTimeRaw func(context.Context) string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
 		cityFile, asnFile := fileStatus()
-		updateTimer := resolveUpdateTimer(ctx, pool, checkIntervalSeconds)
+		updateTimer := resolveUpdateTimer(ctx, pool, checkTimeRaw)
 
 		encAccountID, exists, err := pool.GetSetting(ctx, geoIPAccountIDSettingKey)
 		if err != nil {
@@ -291,9 +334,9 @@ func GeoIPStatusHandler(pool *db.Pool, masterKey string, fileStatus func() (city
 // not called. fileStatus is read AFTER triggerDownload returns, so the
 // response already reflects whatever the just-triggered download produced
 // (or didn't, on failure) rather than requiring a second round-trip to
-// GET .../status to see it. checkIntervalSeconds is passed straight through
+// GET .../status to see it. checkTimeRaw is passed straight through
 // to resolveUpdateTimer - see GeoIPStatusHandler's doc comment.
-func GeoIPConfigureHandler(pool *db.Pool, masterKey string, triggerDownload func(), fileStatus func() (city, asn GeoIPFileInfo), checkIntervalSeconds func(context.Context) int64) http.HandlerFunc {
+func GeoIPConfigureHandler(pool *db.Pool, masterKey string, triggerDownload func(), fileStatus func() (city, asn GeoIPFileInfo), checkTimeRaw func(context.Context) string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -336,13 +379,20 @@ func GeoIPConfigureHandler(pool *db.Pool, masterKey string, triggerDownload func
 			}
 			settings[geoIPLicenseKeySettingKey] = encLicenseKey
 		}
-		// Only overwrite the interval when a positive value was submitted -
-		// see GeoIPConfigRequest.TickIntervalSeconds's doc comment on why 0
-		// means "leave unchanged" rather than "invalid". Written separately
-		// from `settings` above since it's plaintext, not an encrypted
-		// credential.
-		if req.TickIntervalSeconds > 0 {
-			if err := pool.SetSetting(ctx, GeoIPTickIntervalSecondsSettingKey, strconv.Itoa(req.TickIntervalSeconds)); err != nil {
+		// Only overwrite the check time when a non-empty value was
+		// submitted - see GeoIPConfigRequest.CheckTime's doc comment on why
+		// "" means "leave unchanged" rather than "invalid". Written
+		// separately from `settings` above since it's plaintext, not an
+		// encrypted credential. A malformed value IS rejected outright
+		// (unlike the account ID/license key, which have no format to
+		// validate beyond non-empty) so an admin typo never silently reaches
+		// the scheduler.
+		if req.CheckTime != "" {
+			if _, _, err := ParseGeoIPCheckTime(req.CheckTime); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if err := pool.SetSetting(ctx, GeoIPCheckTimeSettingKey, req.CheckTime); err != nil {
 				httperr.Internal(w, err)
 				return
 			}
@@ -371,7 +421,7 @@ func GeoIPConfigureHandler(pool *db.Pool, masterKey string, triggerDownload func
 			LastUpdateError: lastUpdateError,
 			CityFile:        cityFile,
 			ASNFile:         asnFile,
-			UpdateTimer:     resolveUpdateTimer(ctx, pool, checkIntervalSeconds),
+			UpdateTimer:     resolveUpdateTimer(ctx, pool, checkTimeRaw),
 		})
 	}
 }

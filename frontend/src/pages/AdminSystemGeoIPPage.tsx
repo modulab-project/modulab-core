@@ -8,7 +8,7 @@ import {
   deleteGeoipConfig,
   type GeoIPStatus,
   type GeoIPFileInfo,
-  type SystemInfoTimer,
+  type GeoIPUpdateTimer,
 } from "../lib/api";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { useLoginRedirect } from "../lib/useLoginRedirect";
@@ -37,12 +37,11 @@ export default function AdminSystemGeoIPPage() {
   const [status, setStatus] = useState<GeoIPStatus | null>(null);
   const [accountId, setAccountId] = useState("");
   const [licenseKey, setLicenseKey] = useState("");
-  // Edited/displayed in hours (24 by default) rather than raw seconds - a
-  // plain "86400" input field would be unreadable. Kept as a string (not a
-  // number) so the field can be briefly empty while the admin is typing,
-  // same reasoning AdminSystemSmtpPage.tsx's port field has for its own
-  // string state.
-  const [intervalHours, setIntervalHours] = useState("24");
+  // "HH:MM" (24h) - the fixed time of day GeoIP checks MaxMind for a new
+  // database version, once per day. Mirrors admin/system/limits' own
+  // core_update_check_time field (AdminSystemLimitsPage.tsx), down to the
+  // native <input type="time"> control below.
+  const [checkTime, setCheckTime] = useState("03:00");
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -64,11 +63,8 @@ export default function AdminSystemGeoIPPage() {
         if (s.configured) {
           setAccountId(s.account_id ?? "");
         }
-        // Seconds→hours, rounded to 2dp so an odd backend value (e.g. from
-        // manual DB editing) doesn't render as an ugly repeating decimal;
-        // the field still submits whatever the admin leaves in place.
-        if (s.update_timer?.interval_seconds) {
-          setIntervalHours(String(Math.round((s.update_timer.interval_seconds / 3600) * 100) / 100));
+        if (s.update_timer?.check_time) {
+          setCheckTime(s.update_timer.check_time);
         }
       })
       .catch(() => setMsg({ ok: false, text: t("admin.geoip.load_error") }));
@@ -82,9 +78,8 @@ export default function AdminSystemGeoIPPage() {
       setMsg({ ok: false, text: t("admin.geoip.validation_error") });
       return;
     }
-    const hoursValue = Number(intervalHours);
-    if (!Number.isFinite(hoursValue) || hoursValue <= 0) {
-      setMsg({ ok: false, text: t("admin.geoip.interval_validation_error") });
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(checkTime)) {
+      setMsg({ ok: false, text: t("admin.geoip.check_time_error") });
       return;
     }
     setSaving(true);
@@ -94,10 +89,10 @@ export default function AdminSystemGeoIPPage() {
       const result = await configureGeoip({
         account_id: accountId.trim(),
         license_key: licenseKey,
-        // Backend treats 0/omitted as "leave unchanged" (setup.GeoIPConfigRequest's
-        // doc comment) - we always have a valid positive value here, though,
+        // Backend treats "" as "leave unchanged" (setup.GeoIPConfigRequest's
+        // doc comment) - we always have a valid "HH:MM" value here, though,
         // since the validation above already rejected anything else.
-        tick_interval_seconds: Math.round(hoursValue * 3600),
+        check_time: checkTime,
       });
       setStatus(result);
       setLicenseKey("");
@@ -187,11 +182,11 @@ export default function AdminSystemGeoIPPage() {
               className={inputClass} />
           </Field>
           <p className="text-xs text-gray-500 dark:text-gray-400">{t("admin.geoip.hint")}</p>
-          <Field label={t("admin.geoip.interval_label")}>
-            <input type="number" min="1" step="0.5" value={intervalHours}
-              onChange={(e) => setIntervalHours(e.target.value)} className={inputClass} />
+          <Field label={t("admin.geoip.check_time_label")}>
+            <input type="time" value={checkTime}
+              onChange={(e) => setCheckTime(e.target.value)} className={inputClass} />
           </Field>
-          <p className="text-xs text-gray-500 dark:text-gray-400">{t("admin.geoip.interval_hint")}</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">{t("admin.geoip.check_time_hint")}</p>
           <div className="flex gap-3">
             <button type="submit" disabled={saving} className={`flex-1 ${btnPrimary}`}>
               {saving ? t("admin.geoip.saving") : t("admin.geoip.save")}
@@ -233,7 +228,10 @@ export default function AdminSystemGeoIPPage() {
 // helper of that page), and duplicating ~25 lines here beats promoting it to
 // a shared component for its one other call site, same reasoning this
 // file's other local copies (formatBytes, FileStatusRow) already give.
-function UpdateTimerCard({ timer, now, t }: { timer: SystemInfoTimer; now: number; t: TFunction }) {
+// Unlike AdminSystemInfoPage.tsx's own TimerCard (interval-based), this
+// shows the fixed daily check_time instead of an interval - see
+// GeoIPUpdateTimer's Go/TS doc comments for why the schedule changed shape.
+function UpdateTimerCard({ timer, now, t }: { timer: GeoIPUpdateTimer; now: number; t: TFunction }) {
   const nextInMs = timer.next_run_at ? new Date(timer.next_run_at).getTime() - now : null;
   return (
     <div className="mt-6 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/50">
@@ -253,7 +251,7 @@ function UpdateTimerCard({ timer, now, t }: { timer: SystemInfoTimer; now: numbe
         <p className="text-xs text-gray-400 dark:text-gray-500">{t("admin.system_info.not_run_yet")}</p>
       )}
       <p className="mt-2 text-[11px] text-gray-400 dark:text-gray-600">
-        {t("admin.system_info.interval", { duration: formatDuration(timer.interval_seconds) })}
+        {t("admin.geoip.check_time_current", { time: timer.check_time })}
       </p>
     </div>
   );

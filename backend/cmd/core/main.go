@@ -562,18 +562,18 @@ func main() {
 		}
 		return toFileInfo(cityInfo), toFileInfo(asnInfo)
 	}
-	// internal/geoip.TickIntervalSeconds, read fresh on every call (not
-	// cached at startup) - the other half of the same import-direction
-	// bridge as geoipFileStatus above, needed so setup.GeoIPStatusHandler's
-	// "next check in ..." countdown knows the real, currently-configured
-	// schedule without importing internal/geoip itself. Must be a callback,
-	// not a value computed once here: the interval is admin-configurable
-	// (GeoIPConfigureHandler's TickIntervalSeconds field), so a value
-	// captured at startup would go stale the moment an admin changes it.
-	geoipCheckIntervalSeconds := func(ctx context.Context) int64 {
-		return int64(geoip.TickIntervalSeconds(ctx, pool))
+	// internal/geoip.CheckTimeRaw, read fresh on every call (not cached at
+	// startup) - the other half of the same import-direction bridge as
+	// geoipFileStatus above, needed so setup.GeoIPStatusHandler's "next
+	// check in ..." countdown knows the real, currently-configured schedule
+	// without importing internal/geoip itself. Must be a callback, not a
+	// value computed once here: the check time is admin-configurable
+	// (GeoIPConfigureHandler's CheckTime field), so a value captured at
+	// startup would go stale the moment an admin changes it.
+	geoipCheckTimeRaw := func(ctx context.Context) string {
+		return geoip.CheckTimeRaw(ctx, pool)
 	}
-	mux.Handle("GET /v1/admin/geoip/status", adminOnly(setup.GeoIPStatusHandler(pool, cfg.MasterKey, geoipFileStatus, geoipCheckIntervalSeconds)))
+	mux.Handle("GET /v1/admin/geoip/status", adminOnly(setup.GeoIPStatusHandler(pool, cfg.MasterKey, geoipFileStatus, geoipCheckTimeRaw)))
 	mux.Handle("POST /v1/admin/geoip/configure", adminReauthOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		masterKey, err := setup.ResolveMasterKey(r.Context(), pool, cfg.MasterKey)
 		if err != nil {
@@ -597,7 +597,7 @@ func main() {
 			// synchronous is fine here, this never runs longer than a few
 			// tens of seconds even on a cold download.
 			geoip.TriggerNow(r.Context(), geoipDeps)
-		}, geoipFileStatus, geoipCheckIntervalSeconds)(rw, r)
+		}, geoipFileStatus, geoipCheckTimeRaw)(rw, r)
 		if rw.code < 400 {
 			if sess, ok := auth.SessionFromContext(r.Context()); ok {
 				var newReq struct {

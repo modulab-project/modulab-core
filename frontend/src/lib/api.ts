@@ -468,12 +468,22 @@ export interface GeoIPStatus {
   // Go doc comment).
   city_file: GeoIPFileInfo;
   asn_file: GeoIPFileInfo;
-  // Same shape as AdminSystemInfoPage's SystemInfoTimer (module registry
-  // sync) - reused as-is rather than a separate type, so any future
-  // countdown-rendering helper can work with either. Present regardless of
-  // `configured`, so the page can still show the interval and "not run
-  // yet" instead of the section disappearing.
-  update_timer: SystemInfoTimer;
+  // Present regardless of `configured`, so the page can still show the
+  // configured check time and "not run yet" instead of the section
+  // disappearing.
+  update_timer: GeoIPUpdateTimer;
+}
+
+// Mirrors backend/internal/setup.GeoIPUpdateTimer exactly. Distinct from
+// SystemInfoTimer (module registry sync etc.): since 2026-08-09 the GeoIP
+// refresh schedule is "once a day, at a fixed clock time" rather than a
+// re-arming interval, so this carries check_time instead of
+// interval_seconds - see the backend type's Go doc comment.
+export interface GeoIPUpdateTimer {
+  last_run_at?: string;
+  next_run_at?: string;
+  // "HH:MM" (24h), the currently effective daily check time.
+  check_time: string;
 }
 
 export interface GeoIPFileInfo {
@@ -496,12 +506,12 @@ export interface GeoIPFileInfo {
 export interface GeoIPConfigRequest {
   account_id: string;
   license_key: string;
-  // Optional - 0/undefined means "leave the current interval unchanged"
+  // Optional - ""/undefined means "leave the current check time unchanged"
   // (see backend/internal/setup.GeoIPConfigRequest's Go doc comment). The
   // page always sends the currently effective value back (read from the
-  // last status fetch's update_timer.interval_seconds), so this only
-  // actually changes anything when the admin edits the field.
-  tick_interval_seconds?: number;
+  // last status fetch's update_timer.check_time), so this only actually
+  // changes anything when the admin edits the field. "HH:MM", 24h.
+  check_time?: string;
 }
 
 // GET /v1/admin/geoip/status - admin only (enforced server-side).
