@@ -14,6 +14,8 @@ Core backend (Go) and frontend (React/Vite) for ModuLab (https://modulab.app), t
 - **Weather widget** and **web search** (self-hosted via SearXNG) on the home dashboard.
 - **Live updates** over Server-Sent Events (`/v1/events`) for admin notifications (new signups, module updates available, ...).
 - Encryption at rest (AES-256-GCM under a single master key) for every credential, secret, and piece of PII the app stores - OIDC client secret, SMTP credentials, AI provider keys, module gateway credentials, audit log PII, and so on.
+- **GeoIP lookups** (MaxMind GeoLite2 City + ASN) for login/audit context, with admin-managed database updates.
+- **Admin System pages** — General, Security Info, System Info, rate limits, OIDC, SMTP, GeoIP, and Search settings, plus Core self-update checks (`internal/coreupdate`) surfaced in the admin UI.
 
 ## Architecture at a glance
 
@@ -46,7 +48,7 @@ Copy `.env.example` to `.env`, then run `docker compose -f deploy/docker-compose
 
 Core connects to Postgres directly, both in dev and in production - there is no connection pooler in front of it. After copying `.env.example`, override three values in your local `.env`: set `MODULAB_DB_PORT=5432` (the dev stack exposes Postgres directly on 5432), `MODULAB_DB_PASSWORD=modulab-dev` (matching `docker-compose.dev.yml`'s `POSTGRES_PASSWORD`), and `MODULAB_VALKEY_PASSWORD=modulab-dev` (matching that file's `--requirepass`). Without these overrides, the backend cannot reach Postgres or Valkey locally - a missing Valkey password surfaces as `NOAUTH Authentication required` on the first request that touches a session.
 
-On first start, the backend prints a one-time bootstrap token to its log. The entire Setup Wizard API under `/v1/setup/` is locked until that token is supplied via the `X-ModuLab-Bootstrap-Token` header on every request; `/healthz` remains unauthenticated for monitoring. The wizard is fully implemented: `/v1/setup/init` (generates and persists the master key), `/v1/setup/oidc/configure` (stores the OIDC provider's issuer URL, client ID, and an encrypted client secret), `/v1/setup/group-prefix/configure` (defines the OIDC groups-claim prefix), the super-admin's own OIDC login (the same `/v1/auth/login` / `/v1/auth/callback` end users use), and finally `/v1/setup/complete`, which only unlocks the app once every prior step - including a bound super-admin account, not just an attempted login - actually checks out. Each configuration step has a matching `/status` endpoint.
+On first start, the backend prints a one-time bootstrap token to its log. The entire Setup Wizard API under `/v1/setup/` is locked until that token is supplied via the `X-ModuLab-Bootstrap-Token` header on every request; `/healthz` remains unauthenticated for monitoring. The wizard is fully implemented: `/v1/setup/init` (generates and persists the master key), `/v1/setup/oidc/configure` (stores the OIDC provider's issuer URL, client ID, and an encrypted client secret), `/v1/setup/group-prefix/configure` (defines the OIDC groups-claim prefix), the first admin's own OIDC login (the same `/v1/auth/login` / `/v1/auth/callback` end users use), and finally `/v1/setup/complete`, which only unlocks the app once every prior step - including a bound admin account, not just an attempted login - actually checks out. Each configuration step has a matching `/status` endpoint.
 
 See `.env.example` for required environment variables (`MODULAB_MASTER_KEY`, DB/Valkey connection strings, and so on).
 

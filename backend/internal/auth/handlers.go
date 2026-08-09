@@ -222,7 +222,7 @@ func auditLoginFailure(ctx context.Context, d Deps, reason, ip, country, asnOrg 
 // auditLoginFailureWithSubject is auditLoginFailure's counterpart for the
 // one failure reason (access_denied) where Core does know who this was: the
 // IdP successfully authenticated them, they are simply not a member of any
-// of the three configured groups. subject/email, when non-empty, are
+// of either of the two configured groups. subject/email, when non-empty, are
 // recorded as both ActorID/ActorEmail (they are the one who attempted this)
 // and TargetID/TargetEmail (they are also who the outcome applies to) -
 // same "no separate actor" shape audit.EventUserSelfDeleted's doc comment
@@ -405,7 +405,7 @@ func LoginHandler(d Deps) http.HandlerFunc {
 // Dynamic Prefix Hard Gate), JIT-provisions the user row, and issues a
 // session - subject to two access gates, checked in order:
 //
-//  1. Group membership: anyone not in any of the three configured groups
+//  1. Group membership: anyone not in either of the two configured groups
 //     (DeriveRole returns RolePending) is rejected outright with
 //     error=access_denied. No session, no user row, no "pending" screen -
 //     spec section 3.3's hard gate means literally no access for them.
@@ -421,7 +421,7 @@ func LoginHandler(d Deps) http.HandlerFunc {
 //     apart and show the right message for each. The one exception to all
 //     of this is while the Setup Wizard itself is still incomplete
 //     (setup.WizardComplete == false): the very first login has to bind
-//     the first Super-Admin, and there is no admin yet who could have
+//     the first Admin, and there is no admin yet who could have
 //     approved or locked them, so gate 2 is skipped entirely until the
 //     wizard finishes.
 //
@@ -537,7 +537,7 @@ func CallbackHandler(d Deps) http.HandlerFunc {
 		}
 		derivedRole := DeriveRole(claims.Groups, prefix)
 
-		// Gate 1: not in any of the three configured groups at all - no
+		// Gate 1: not in either of the two configured groups at all - no
 		// access whatsoever, not even a pending session. Unlike
 		// nonce_mismatch/exchange_failed above, Core does know who this was
 		// (the IdP successfully authenticated them) - see

@@ -164,7 +164,8 @@ func GetModuleEgressHostsHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 //
 // Note: Install runs synchronously. For large modules (approaching the 100 MB
 // cap) this can take several seconds. The client should show a loading state.
-// A non-blocking job queue (with SSE progress) is planned post-v1.
+// A non-blocking job queue (with SSE progress) remains an open roadmap item
+// (not yet implemented as of v1.1.19).
 func InstallHandler(d Deps, storeDeps store.Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := auth.RequireAdminSession(authDeps, w, r)

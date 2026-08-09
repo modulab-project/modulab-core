@@ -98,10 +98,14 @@ func GroupPrefixStatusHandler(pool *db.Pool) http.HandlerFunc {
 
 // GroupPrefixConfigureHandler validates and persists the group prefix.
 // Spec section 6.5 step 5 frames this as a one-time definition that only an
-// Admin can later change - that restriction depends on the auth/role
-// system (spec section 3.1), which has not landed yet, so it is not
-// enforced here. The bootstrap-token gate (see bootstrap.Manager) is the
-// only access control in front of this endpoint for now.
+// Admin can later change. The auth/role system (internal/auth/role.go) has
+// long since landed, but there is currently no endpoint to change the group
+// prefix after the wizard completes - this handler only ever runs during
+// initial setup. If a post-setup "change group prefix" endpoint is added, it
+// should be gated with the now-existing admin role checks
+// (auth.RequireAdminSession) rather than reintroducing a bespoke check here.
+// The bootstrap-token gate (see bootstrap.Manager) is the only access
+// control in front of this endpoint for now.
 //
 // masterKey is only needed for the audit.Log call below (HMAC-chaining the
 // entry, and encrypting the always-empty ActorEmail field) - the prefix

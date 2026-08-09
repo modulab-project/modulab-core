@@ -1,10 +1,11 @@
 # modulab-core frontend
 
-Minimal React + Vite + TypeScript + Tailwind SPA implementing the Setup
-Wizard (spec section 6.5). Scope is deliberately limited to the wizard for
-now - the login screen, dashboard, and module UI (spec section 6.4) land in
-later Phase 2 work, at which point TanStack Query / i18next / dnd-kit (spec
-section 6.1) get introduced as they're actually needed.
+React 19 + Vite + TypeScript + Tailwind v4 SPA for ModuLab Core. It is the
+full app - dashboard, login, Setup Wizard, user pages, admin pages, and the
+runtime host for installed modules' own UI bundles - not just the Setup
+Wizard. TanStack Query (data fetching/caching) and i18next/react-i18next
+(lazy-loaded per-language translation catalogs, see `src/lib/i18n.ts`) are
+both in active use throughout, not planned additions.
 
 ## Setup
 
@@ -20,14 +21,38 @@ dev server's origin (`http://localhost:5173` by default on both sides - no
 
 ## Routes
 
-- `/setup` - the 6-step Setup Wizard (spec section 6.5 defines 7 steps, but
-  step 2 - "choose your OIDC provider" - is dropped here: it was purely
-  informational, since Core talks to every standard OIDC provider
-  identically, so the wizard goes straight from the bootstrap token into
-  entering OIDC credentials).
+All routes are lazily code-split (`src/App.tsx`) so the initial bundle only
+ships the app shell and router.
+
+- `/` - the home dashboard (`Home.tsx`): quick links, weather, search, news.
+- `/profile`, `/user/feeds`, `/user/search-prefs`, `/user/ai-keys` - per-user
+  settings pages.
+- `/modules/:moduleName` - runtime host for an installed module's own UI
+  bundle (loaded via a dynamic `import()` over a Blob URL, no iframe).
+- `/admin/users` - user approve/lock/unlock/delete management.
+- `/admin/modules/store`, `/admin/modules/installed` - the Module Store and
+  installed-modules views.
+- `/admin/feeds`, `/admin/quick-links`, `/admin/audit` - admin content and
+  audit-log management.
+- `/admin/system/general`, `/admin/system/limits`, `/admin/system/oidc`,
+  `/admin/system/smtp`, `/admin/system/geoip`, `/admin/system/search`,
+  `/admin/system/ai`, `/admin/system/info` - admin system configuration
+  pages (a few legacy paths such as `/admin/smtp`, `/admin/ai`, and
+  `/admin/system/searxng` redirect to their current `/admin/system/...`
+  location for backward compatibility).
+- `/admin/security/info` - security-relevant instance info (TLS, sessions,
+  encryption status).
+- `/setup` - the Setup Wizard: bootstrap token, OIDC provider configuration,
+  group prefix, the first admin's own OIDC login, an SMTP step, and finally
+  completion. Redirects to `/login` automatically once setup is done
+  (`SetupWizard` checks `/healthz`'s `setup_completed` on mount).
 - `/auth/complete` - landing point for the OIDC redirect back from
   `backend/internal/auth`'s `CallbackHandler`; reads the result out of the
-  URL fragment and hands off to `/setup` step 5 (Super-Admin login).
+  URL fragment and hands off to `/setup` or `/login` depending on state.
+- `/login`, `/pending` - the ordinary end-user login screen and the
+  "awaiting admin approval" screen.
+- any other path redirects to `/setup`, which itself redirects onward to
+  `/login` once setup is complete.
 
 ## Build
 

@@ -25,9 +25,10 @@ package auth
 //     logged in before" and "logged in before, still not approved". This
 //     exists specifically so that an operator accidentally adding someone
 //     to a ModuLab group in the IdP does not hand them instant access -
-//     someone still has to approve them first (today: a manual
-//     UPDATE users SET approved = true, since there is no /admin/users UI
-//     yet). This gate is skipped entirely while the Setup Wizard itself is
+//     someone still has to approve them first, via the Admin > Users page
+//     (frontend/src/pages/AdminUsersPage.tsx) and its
+//     GET/POST /v1/admin/users... endpoints (auth/admin.go). This gate is
+//     skipped entirely while the Setup Wizard itself is
 //     still incomplete, since the very first login has to bind the first
 //     Admin and there is no admin yet who could approve them. This
 //     is the only case where role "pending" is actually persisted to a

@@ -148,8 +148,13 @@ func Load() (Config, error) {
 		ModulePIIKey:      modulePIIKey,
 		BootstrapTokenTTL: getEnvDefault("MODULAB_BOOTSTRAP_TOKEN_TTL", "24h"),
 
-		DBHost:     getEnvDefault("MODULAB_DB_HOST", "localhost"),
-		DBPort:     getEnvDefault("MODULAB_DB_PORT", "6432"),
+		DBHost: getEnvDefault("MODULAB_DB_HOST", "localhost"),
+		// Core connects directly to Postgres (no PgBouncer in front of it,
+		// see db.go), so the default matches Postgres's own default port,
+		// not PgBouncer's. Always set MODULAB_DB_PORT explicitly in
+		// production deployments; this fallback only matters for a bare
+		// `go run` against a local Postgres with no .env at all.
+		DBPort:     getEnvDefault("MODULAB_DB_PORT", "5432"),
 		DBName:     getEnvDefault("MODULAB_DB_NAME", "modulab"),
 		DBUser:     getEnvDefault("MODULAB_DB_USER", "modulab"),
 		DBPassword: os.Getenv("MODULAB_DB_PASSWORD"),
