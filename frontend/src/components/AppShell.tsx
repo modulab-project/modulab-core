@@ -1063,15 +1063,17 @@ function ProfilePanelContent({
 
   // Which of the three groups (if any) is open - only one at a time.
   const [openGroup, setOpenGroup] = useState<"modules" | "settings" | "system" | null>(null);
-  // Within the open System group, whether the "Module" row has been drilled
-  // into (showing Modul-Store/Installierte Module instead of the flat list)
-  // - mirrors the Instagram dropdown reference's back-arrow submenu instead
-  // of yet another nested accordion.
-  const [systemDrill, setSystemDrill] = useState(false);
+  // Within the open System group, which of the five thematic categories (if
+  // any) has been drilled into - mirrors the Instagram dropdown reference's
+  // back-arrow submenu instead of yet another nested accordion. null means
+  // the top-level pane (the five category rows) is showing.
+  const [systemDrillGroup, setSystemDrillGroup] = useState<
+    "access-security" | "comms-content" | "external-services" | "modules" | "system-ops" | null
+  >(null);
 
   function toggleGroup(group: "modules" | "settings" | "system") {
     setOpenGroup((prev) => (prev === group ? null : group));
-    if (group !== "system") setSystemDrill(false);
+    if (group !== "system") setSystemDrillGroup(null);
   }
 
   return (
@@ -1139,80 +1141,130 @@ function ProfilePanelContent({
         >
           {/* Horizontal drill-in: two panes side by side inside a clipped
               viewport, slid left/right with translateX instead of navigating
-              away - only the "Module" row leads here, everything else in
-              System is a flat, direct link. */}
+              away. Replaced the old single 13-item flat list (2026-08) with
+              five thematic categories, grouped by what each page actually
+              does rather than by name similarity - GeoIP looks
+              search-adjacent by name but its output (city/ISP for a session
+              IP) only ever feeds the audit log and Security Info, so it
+              lives under Access & Security, not External Services. Both the
+              category row order and each category's own leaf-link order are
+              hardcoded alphabetically by their German label, same
+              convention the old flat list used - not recomputed per active
+              language, so the order doesn't shuffle when switching locale. */}
           <div className="overflow-hidden">
             <div
               className="flex transition-transform duration-200"
-              style={{ width: "200%", transform: systemDrill ? "translateX(-50%)" : "translateX(0)" }}
+              style={{ width: "200%", transform: systemDrillGroup ? "translateX(-50%)" : "translateX(0)" }}
             >
-              {/* Alphabetically sorted (by displayed German label) rather
-                  than grouped by topic - see feedback that flagged the
-                  previous topic-ish-but-not-really order as arbitrary. Two
-                  rows (Single Sign-On, Sicherheitsinfo) use dedicated
-                  shell.* panel labels instead of the admin.*.title keys
-                  their target pages use, so shortening the wording here
-                  doesn't also rename those pages' own headings. */}
               <div className="flex w-1/2 flex-none flex-col">
-                <Link to="/admin/audit" onClick={onClose} className={SUB_ITEM_CLASS}>
-                  {t("shell.audit_link")}
-                </Link>
-                <Link to="/admin/users" onClick={onClose} className={SUB_ITEM_CLASS}>
-                  {t("shell.system_users")}
-                </Link>
-                <Link to="/admin/system/smtp" onClick={onClose} className={SUB_ITEM_CLASS}>
-                  {t("shell.smtp_link")}
-                </Link>
-                <Link to="/admin/feeds" onClick={onClose} className={SUB_ITEM_CLASS}>
-                  {t("shell.feed_sources_link")}
-                </Link>
-                <Link to="/admin/system/geoip" onClick={onClose} className={SUB_ITEM_CLASS}>
-                  {t("admin.geoip.title")}
-                </Link>
-                <Link to="/admin/system/ai" onClick={onClose} className={SUB_ITEM_CLASS}>
-                  {t("admin.ai.title")}
-                </Link>
-                <Link to="/admin/system/limits" onClick={onClose} className={SUB_ITEM_CLASS}>
-                  {t("admin.system_limits.title")}
-                </Link>
-                <button type="button" onClick={() => setSystemDrill(true)} className={SUB_ITEM_CLASS}>
+                <button
+                  type="button"
+                  onClick={() => setSystemDrillGroup("external-services")}
+                  className={SUB_ITEM_CLASS}
+                >
+                  <span>{t("shell.system_group_external_services")}</span>
+                  <i className="ti ti-chevron-right text-[13px] text-gray-400" />
+                </button>
+                <button type="button" onClick={() => setSystemDrillGroup("comms-content")} className={SUB_ITEM_CLASS}>
+                  <span>{t("shell.system_group_comms_content")}</span>
+                  <i className="ti ti-chevron-right text-[13px] text-gray-400" />
+                </button>
+                <button type="button" onClick={() => setSystemDrillGroup("modules")} className={SUB_ITEM_CLASS}>
                   <span>{t("shell.module_management_link")}</span>
                   <i className="ti ti-chevron-right text-[13px] text-gray-400" />
                 </button>
-                <Link to="/admin/quick-links" onClick={onClose} className={SUB_ITEM_CLASS}>
-                  {t("shell.quick_links_link")}
-                </Link>
-                <Link to="/admin/security/info" onClick={onClose} className={SUB_ITEM_CLASS}>
-                  {t("shell.security_info_link")}
-                </Link>
-                <Link to="/admin/system/oidc" onClick={onClose} className={SUB_ITEM_CLASS}>
-                  {t("shell.oidc_link")}
-                </Link>
-                <Link to="/admin/system/general" onClick={onClose} className={SUB_ITEM_CLASS}>
-                  {t("admin.system_general.title")}
-                </Link>
-                <Link to="/admin/system/info" onClick={onClose} className={SUB_ITEM_CLASS}>
-                  {t("admin.system_info.title")}
-                </Link>
-                <Link to="/admin/system/search" onClick={onClose} className={SUB_ITEM_CLASS}>
-                  {t("admin.search.title")}
-                </Link>
+                <button type="button" onClick={() => setSystemDrillGroup("system-ops")} className={SUB_ITEM_CLASS}>
+                  <span>{t("shell.system_group_operations")}</span>
+                  <i className="ti ti-chevron-right text-[13px] text-gray-400" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSystemDrillGroup("access-security")}
+                  className={SUB_ITEM_CLASS}
+                >
+                  <span>{t("shell.system_group_access_security")}</span>
+                  <i className="ti ti-chevron-right text-[13px] text-gray-400" />
+                </button>
               </div>
               <div className="flex w-1/2 flex-none flex-col">
                 <button
                   type="button"
-                  onClick={() => setSystemDrill(false)}
+                  onClick={() => setSystemDrillGroup(null)}
                   className={`${SUB_ITEM_CLASS} justify-start gap-2 pl-2.5 font-medium text-gray-800 dark:text-gray-200`}
                 >
                   <i className="ti ti-chevron-left text-[14px]" />
-                  {t("shell.module_management_link")}
+                  {systemDrillGroup === "external-services" && t("shell.system_group_external_services")}
+                  {systemDrillGroup === "comms-content" && t("shell.system_group_comms_content")}
+                  {systemDrillGroup === "modules" && t("shell.module_management_link")}
+                  {systemDrillGroup === "system-ops" && t("shell.system_group_operations")}
+                  {systemDrillGroup === "access-security" && t("shell.system_group_access_security")}
                 </button>
-                <Link to="/admin/modules/store" onClick={onClose} className={SUB_ITEM_CLASS}>
-                  {t("admin.modules.store_title")}
-                </Link>
-                <Link to="/admin/modules/installed" onClick={onClose} className={SUB_ITEM_CLASS}>
-                  {t("admin.modules.installed_title")}
-                </Link>
+
+                {systemDrillGroup === "external-services" && (
+                  <>
+                    <Link to="/admin/system/ai" onClick={onClose} className={SUB_ITEM_CLASS}>
+                      {t("admin.ai.title")}
+                    </Link>
+                    <Link to="/admin/system/search" onClick={onClose} className={SUB_ITEM_CLASS}>
+                      {t("admin.search.title")}
+                    </Link>
+                  </>
+                )}
+                {systemDrillGroup === "comms-content" && (
+                  <>
+                    <Link to="/admin/system/smtp" onClick={onClose} className={SUB_ITEM_CLASS}>
+                      {t("shell.smtp_link")}
+                    </Link>
+                    <Link to="/admin/feeds" onClick={onClose} className={SUB_ITEM_CLASS}>
+                      {t("shell.feed_sources_link")}
+                    </Link>
+                    <Link to="/admin/quick-links" onClick={onClose} className={SUB_ITEM_CLASS}>
+                      {t("shell.quick_links_link")}
+                    </Link>
+                  </>
+                )}
+                {systemDrillGroup === "modules" && (
+                  <>
+                    <Link to="/admin/modules/installed" onClick={onClose} className={SUB_ITEM_CLASS}>
+                      {t("admin.modules.installed_title")}
+                    </Link>
+                    <Link to="/admin/modules/store" onClick={onClose} className={SUB_ITEM_CLASS}>
+                      {t("admin.modules.store_title")}
+                    </Link>
+                  </>
+                )}
+                {systemDrillGroup === "system-ops" && (
+                  <>
+                    <Link to="/admin/system/limits" onClick={onClose} className={SUB_ITEM_CLASS}>
+                      {t("admin.system_limits.title")}
+                    </Link>
+                    <Link to="/admin/system/general" onClick={onClose} className={SUB_ITEM_CLASS}>
+                      {t("admin.system_general.title")}
+                    </Link>
+                    <Link to="/admin/system/info" onClick={onClose} className={SUB_ITEM_CLASS}>
+                      {t("admin.system_info.title")}
+                    </Link>
+                  </>
+                )}
+                {systemDrillGroup === "access-security" && (
+                  <>
+                    <Link to="/admin/audit" onClick={onClose} className={SUB_ITEM_CLASS}>
+                      {t("shell.audit_link")}
+                    </Link>
+                    <Link to="/admin/users" onClick={onClose} className={SUB_ITEM_CLASS}>
+                      {t("shell.system_users")}
+                    </Link>
+                    <Link to="/admin/system/geoip" onClick={onClose} className={SUB_ITEM_CLASS}>
+                      {t("admin.geoip.title")}
+                    </Link>
+                    <Link to="/admin/security/info" onClick={onClose} className={SUB_ITEM_CLASS}>
+                      {t("shell.security_info_link")}
+                    </Link>
+                    <Link to="/admin/system/oidc" onClick={onClose} className={SUB_ITEM_CLASS}>
+                      {t("shell.oidc_link")}
+                    </Link>
+                  </>
+                )}
               </div>
             </div>
           </div>

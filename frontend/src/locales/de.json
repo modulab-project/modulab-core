@@ -817,6 +817,10 @@
     "audit_link": "Audit-Log",
     "oidc_link": "Single Sign-On",
     "security_info_link": "Sicherheitsinfo",
+    "system_group_access_security": "Zugriff & Sicherheit",
+    "system_group_comms_content": "Kommunikation & Inhalte",
+    "system_group_external_services": "Externe Dienste",
+    "system_group_operations": "System & Betrieb",
     "add_to_homescreen": "Zum Startbildschirm hinzufügen",
     "ios_install": {
       "title": "Zum Startbildschirm hinzufügen",

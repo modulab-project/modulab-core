@@ -817,6 +817,10 @@
     "audit_link": "Registro de auditoría",
     "oidc_link": "Inicio de sesión único",
     "security_info_link": "Información de seguridad",
+    "system_group_access_security": "Acceso y seguridad",
+    "system_group_comms_content": "Comunicación y contenido",
+    "system_group_external_services": "Servicios externos",
+    "system_group_operations": "Sistema y operaciones",
     "add_to_homescreen": "Añadir a pantalla de inicio",
     "ios_install": {
       "title": "Añadir a pantalla de inicio",

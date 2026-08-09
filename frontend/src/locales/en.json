@@ -817,6 +817,10 @@
     "audit_link": "Audit log",
     "oidc_link": "Single sign-on",
     "security_info_link": "Security info",
+    "system_group_access_security": "Access & Security",
+    "system_group_comms_content": "Communication & Content",
+    "system_group_external_services": "External Services",
+    "system_group_operations": "System & Operations",
     "add_to_homescreen": "Add to Home Screen",
     "ios_install": {
       "title": "Add to Home Screen",

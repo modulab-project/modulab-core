@@ -817,6 +817,10 @@
     "audit_link": "Journal d'audit",
     "oidc_link": "Authentification unique",
     "security_info_link": "Informations de sécurité",
+    "system_group_access_security": "Accès & sécurité",
+    "system_group_comms_content": "Communication & contenu",
+    "system_group_external_services": "Services externes",
+    "system_group_operations": "Système & exploitation",
     "add_to_homescreen": "Ajouter à l'écran d'accueil",
     "ios_install": {
       "title": "Ajouter à l'écran d'accueil",

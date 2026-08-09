@@ -817,6 +817,10 @@
     "audit_link": "Auditlogboek",
     "oidc_link": "Single sign-on",
     "security_info_link": "Beveiligingsinfo",
+    "system_group_access_security": "Toegang & beveiliging",
+    "system_group_comms_content": "Communicatie & inhoud",
+    "system_group_external_services": "Externe diensten",
+    "system_group_operations": "Systeem & beheer",
     "add_to_homescreen": "Toevoegen aan beginscherm",
     "ios_install": {
       "title": "Toevoegen aan beginscherm",
