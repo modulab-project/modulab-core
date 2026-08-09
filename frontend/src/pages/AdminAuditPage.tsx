@@ -56,6 +56,7 @@ const EVENT_TYPE_CATEGORIES: { category: string; types: string[] }[] = [
       "config.search_provider.key_cleared",
       "config.search_settings",
       "config.system_limits",
+      "config.system_general",
     ],
   },
   { category: "ai", types: ["ai.user_key_set", "ai.user_key_deleted"] },
@@ -74,6 +75,7 @@ const EVENT_TYPE_CATEGORIES: { category: string; types: string[] }[] = [
       "module.pinned",
       "module.unpinned",
       "module.egress_denied",
+      "module.pii_key_migrated",
     ],
   },
   { category: "feed", types: ["feed.created", "feed.updated", "feed.deleted"] },
@@ -87,7 +89,12 @@ const EVENT_TYPE_CATEGORIES: { category: string; types: string[] }[] = [
   },
   {
     category: "store",
-    types: ["store.sync_triggered", "store.custom_source_added", "store.custom_source_removed"],
+    types: [
+      "store.sync_triggered",
+      "store.custom_source_added",
+      "store.custom_source_updated",
+      "store.custom_source_removed",
+    ],
   },
   { category: "rate_limit", types: ["rate_limit.exceeded"] },
 ];
