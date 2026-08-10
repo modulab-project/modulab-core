@@ -1550,16 +1550,18 @@ function StatusPanelContent({ health }: { health: HealthResponse }) {
 
   return (
     <div className="text-sm">
-      {/* Both rows stay, even though Core and the frontend now ship in one
-          binary and cannot disagree in a correctly built image. That is
-          precisely what makes them useful here: a mismatch on this page
-          means the image was built wrong (the Dockerfile's
-          COPY --from=frontend-builder step did not put the current build
-          into internal/webui/dist), which nothing else surfaces. The footer
-          shows a single version because that is the honest thing to show a
-          normal user. */}
-      <StatusRow icon="ti-server" label={t("shell.status.backend_version")} value={health.version} />
-      <StatusRow icon="ti-browser" label={t("shell.status.frontend_version")} value={FRONTEND_VERSION} />
+      {/* One version, because Core and the frontend ship in the same binary
+          and are built from the same tree - there is no "backend version"
+          and "frontend version" to compare anymore. The second row appears
+          only when they disagree, which leaves exactly two ways to read it:
+          a release landed while this tab was open (the stale-build prompt
+          above says so too), or whoever bumped the version touched
+          version.go and package.json inconsistently. Both are worth
+          showing; neither is worth a permanent row. */}
+      <StatusRow icon="ti-server" label={t("shell.status.version")} value={health.version} />
+      {FRONTEND_VERSION !== health.version && (
+        <StatusRow icon="ti-browser" label={t("shell.status.frontend_version")} value={FRONTEND_VERSION} />
+      )}
       <StatusRow icon="ti-clock" label={t("shell.status.uptime")} value={formatUptime(uptimeSeconds)} />
       <StatusRow icon="ti-database" label={t("shell.status.postgres")} ok={health.postgres_reachable} />
       <StatusRow icon="ti-bolt" label={t("shell.status.valkey")} ok={health.valkey_reachable} />

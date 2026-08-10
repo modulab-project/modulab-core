@@ -121,8 +121,14 @@ export default function AdminSystemInfoPage() {
                 {checking ? t("common.loading") : t("admin.system_info.check_now_button")}
               </button>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <Stat label={t("shell.status.backend_version")} value={info.version} />
-                <Stat label={t("shell.status.frontend_version")} value={FRONTEND_VERSION} />
+                {/* See AppShell's status panel for why this is one value
+                    with a conditional second: Core and the frontend are one
+                    binary now, so a difference is an anomaly rather than
+                    routine information. */}
+                <Stat label={t("shell.status.version")} value={info.version} />
+                {FRONTEND_VERSION !== info.version && (
+                  <Stat label={t("shell.status.frontend_version")} value={FRONTEND_VERSION} />
+                )}
                 <Stat
                   label={t("shell.status.uptime")}
                   value={formatDuration((info.uptime_seconds * 1000 + elapsedMs) / 1000)}

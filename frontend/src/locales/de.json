@@ -840,7 +840,7 @@
     "language": "Sprache",
     "sign_out": "Abmelden",
     "status": {
-      "backend_version": "Backend-Version",
+      "version": "ModuLab-Version",
       "frontend_version": "Frontend-Version",
       "uptime": "Laufzeit",
       "postgres": "PostgreSQL",
