@@ -1334,6 +1334,17 @@ func (r *responseRecorder) WriteHeader(code int) {
 // See adminapi.AdminLimitsHandler's doc comment for the full set of
 // upload-specific limits this now defers to.
 //
+// There is no stack-wide backstop in front of this anymore. deploy/nginx.conf
+// used to cap every request at 25 MB (client_max_body_size), chosen as
+// headroom above this middleware so the proxy layer was never the tightest
+// limit in the chain; that file is gone and Traefik applies no body limit of
+// its own. Reintroducing one at the edge was considered and rejected:
+// Traefik's only mechanism is the buffering middleware, which reads the
+// entire request into memory or onto disk before forwarding and would break
+// the SSE endpoints outright - a worse failure than the one it would
+// prevent. The per-handler http.MaxBytesReader limits are the right layer
+// and already exist; this middleware plus those are now the whole story.
+//
 // The Content-Length pre-check (rather than only relying on
 // http.MaxBytesReader tripping mid-stream) matters for the same reason:
 // MaxBytesReader doesn't send a clean response when the limit is hit — it
