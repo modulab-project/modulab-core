@@ -51,6 +51,7 @@ import (
 	"github.com/modulab-project/modulab-core/backend/internal/valkey"
 	"github.com/modulab-project/modulab-core/backend/internal/version"
 	"github.com/modulab-project/modulab-core/backend/internal/weather"
+	"github.com/modulab-project/modulab-core/backend/internal/webui"
 )
 
 // healthzCacheTTL is how long the NTP drift check and the SearXNG reachability
@@ -330,9 +331,9 @@ func main() {
 		_ = json.NewEncoder(w).Encode(status)
 	})
 
-	// CSP violation reports (secHeadersMiddleware's report-uri/report-to
-	// directives, cspReportHandler's own doc comment for the full
-	// rationale) - deliberately public/unauthenticated, same reasoning as
+	// CSP violation reports (the report-uri/report-to directives in both
+	// apiCSP and spaCSP point here; cspReportHandler's own doc comment has
+	// the full rationale) - deliberately public/unauthenticated, same reasoning as
 	// /healthz above: a violation can be reported from a page a browser
 	// hasn't logged in on yet.
 	mux.HandleFunc("POST /v1/csp-report", cspReportHandler())
@@ -1104,10 +1105,53 @@ func main() {
 		effectiveGroupPrefix = "(not yet configured)"
 	}
 	log.Printf("modulab-core listening on %s (group prefix %q, frontend origin %q)", cfg.HTTPAddr, effectiveGroupPrefix, cfg.FrontendBaseURL)
-	handler := corsMiddleware(cfg.FrontendBaseURL, mux)
-	handler = maxBodyMiddleware(pool, handler)
-	handler = secHeadersMiddleware(handler)
-	handler = globalRateLimitMiddleware(valkeyClient, pool, cfg.MasterKey, authDeps, handler)
+	// The frontend is served by Core itself from the bundle embedded at
+	// compile time (internal/webui). Built once here, so a missing or
+	// broken bundle fails at startup instead of on the first request.
+	webuiHandler, err := webui.Handler()
+	if err != nil {
+		log.Fatalf("frontend bundle: %v", err)
+	}
+
+	// Two chains, dispatched by path prefix below, rather than one chain
+	// around everything.
+	//
+	// The API chain keeps every layer it had. The SPA chain deliberately
+	// skips three of them: corsMiddleware (the SPA is same-origin by
+	// definition), maxBodyMiddleware (a static GET has no body worth
+	// capping) and globalRateLimitMiddleware. That last one is the
+	// expensive part - it runs auth.ValidateSession on every request (a
+	// Valkey GET plus a master-key resolve and an AES-GCM decrypt) and an
+	// IncrExpire on top, while maxBodyMiddleware and the limiter each read
+	// their ceiling from core_settings with an uncached query
+	// (db.GetSetting). A cold SPA load is roughly twenty requests -
+	// index.html, the vendor and route chunks, CSS, the icon webfont, the
+	// PWA icons, manifest.webmanifest, sw.js - so putting those through the
+	// API chain would mean about forty uncached DB queries per page view,
+	// and would spend twenty requests of the 600/minute global budget on
+	// files that need none of it.
+	//
+	// Registering the SPA as a "/" catch-all on mux instead looks simpler
+	// and is wrong: a catch-all is a *full* match, so it outranks Go's 405
+	// fallback and swallows every 404 and 405 the API is supposed to
+	// return. Verified against this route set - POST /v1/events answered
+	// 200 text/html instead of 405, and any mistyped API path handed the
+	// caller index.html to JSON.parse on. Dispatching ahead of the mux
+	// leaves both behaviours intact, because mux never sees a "/" pattern.
+	apiHandler := corsMiddleware(cfg.FrontendBaseURL, mux)
+	apiHandler = maxBodyMiddleware(pool, apiHandler)
+	apiHandler = apiSecHeadersMiddleware(apiHandler)
+	apiHandler = globalRateLimitMiddleware(valkeyClient, pool, cfg.MasterKey, authDeps, apiHandler)
+
+	spaHandler := spaSecHeadersMiddleware(webuiHandler)
+
+	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isAPIPath(r.URL.Path) {
+			apiHandler.ServeHTTP(w, r)
+			return
+		}
+		spaHandler.ServeHTTP(w, r)
+	})
 	// Outermost: must run before every other middleware so a panic anywhere
 	// downstream (a handler, or one of the middlewares above) is still
 	// caught. Go's net/http already recovers a panicking handler goroutine
@@ -1301,73 +1345,141 @@ func maxBodyMiddleware(pool *db.Pool, next http.Handler) http.Handler {
 	})
 }
 
-// secHeadersMiddleware adds defensive HTTP response headers that do not
-// require per-route knowledge. TLS-related headers (HSTS, etc.) are handled
-// by Traefik at the edge and are intentionally omitted here.
+// isAPIPath reports whether a request belongs to Core's API surface rather
+// than to the frontend. These two prefixes are the complete set of patterns
+// registered on mux (every other route lives under /v1/), so everything
+// else is a frontend asset or a client-side route.
 //
-// Content-Security-Policy note: this is Core's API server, not the
-// frontend's own HTTP server (the SPA is built by Vite and served
-// separately, see deploy/nginx.conf for its CSP). Core's own CSP here
-// matters for the handful of responses Core serves directly that a browser
-// renders/executes rather than just consumes as JSON: module UI bundles
+// Kept as a function next to the middlewares it selects between, rather
+// than inlined at the dispatch point in main: adding a Core-served path
+// outside /v1/ means changing this and nothing else, and forgetting it
+// would silently hand that path to the SPA fallback with a 200 instead of
+// reaching its handler.
+func isAPIPath(p string) bool {
+	return p == "/healthz" || p == "/v1" || strings.HasPrefix(p, "/v1/")
+}
+
+// permissionsPolicy default-denies every powerful browser feature, then
+// allows back exactly the three a module actually uses - geolocation
+// (my-place's MapLibre view), clipboard-write (copy buttons), fullscreen
+// (map view's fullscreen control). Scoped to (self) only, never a
+// third-party origin: modules run in this same top-level document (no
+// iframe sandbox yet - see the module-token work in auth/moduletoken.go),
+// so (self) already covers every module's own UI.
+// Camera/microphone/payment/usb/midi/sensors are denied outright - nothing
+// in ModuLab or any current module uses them, so there is no cost to
+// closing them off.
+const permissionsPolicy = "geolocation=(self), clipboard-write=(self), fullscreen=(self), " +
+	"camera=(), microphone=(), payment=(), usb=(), midi=(), " +
+	"magnetometer=(), gyroscope=(), accelerometer=()"
+
+// apiCSP guards the handful of responses Core serves that a browser
+// renders or executes rather than just consuming as JSON: module UI bundles
 // (ModuleBundleHandler, GET /v1/modules/{name}/ui/bundle.js) and storage
 // files (ModuleStorageHandler). script-src 'self' covers the bundle
 // endpoint; object-src/frame-ancestors 'none' block the classic embedding
-// vectors. This intentionally does not attempt to allow the frontend's own
-// blob:-URL module loading (ModulePage.tsx's import(blobUrl); see the
-// Frontend security review) — that decision belongs to the frontend's CSP,
-// not Core's, and blob: script execution should be reconsidered as part of
-// the planned iframe-sandboxed module rendering rather than allowlisted
-// here.
-func secHeadersMiddleware(next http.Handler) http.Handler {
+// vectors.
+//
+// Deliberately stricter than spaCSP below, and deliberately NOT unified
+// with it: this policy governs content Core hands out on behalf of a
+// module, where blob: execution and third-party connect targets have no
+// business being allowed. Widening this to match the SPA's needs would
+// hand every module bundle a larger surface for no reason.
+const apiCSP = "default-src 'none'; " +
+	"script-src 'self'; " +
+	// style-src split into elem/attr (2026-07-23 security pass):
+	// style-src-elem blocks injected <style> blocks and <link>s, which is
+	// the actual CSS-exfiltration/selector-abuse vector; style-src-attr
+	// keeps 'unsafe-inline' because a bare style="..." attribute cannot
+	// carry attacker-controlled selectors on its own.
+	"style-src-elem 'self'; " +
+	"style-src-attr 'unsafe-inline'; " +
+	"img-src 'self' data:; " +
+	"connect-src 'self'; " +
+	"object-src 'none'; " +
+	"frame-ancestors 'none'; " +
+	"base-uri 'none'; " +
+	"report-uri /v1/csp-report; " +
+	"report-to csp-endpoint"
+
+// spaCSP governs the frontend itself, carried over verbatim from the CSP
+// deploy/nginx.conf used to send. It is looser than apiCSP in exactly three
+// places, each of which the SPA genuinely needs:
+//
+//   - script-src 'self' blob:  — ModulePage.tsx loads each installed
+//     module's UI bundle via fetch() + a Blob URL + dynamic import(), since
+//     dynamic import() cannot send an Authorization header (see
+//     fetchModuleBundle). blob: execution is therefore unavoidable with the
+//     current loading mechanism, even though a compromised module bundle
+//     then runs with full DOM access in the top-level frame - see the Core
+//     security review (2026-07) under "Modul-Rendering ohne Sandbox". The
+//     planned fix is moving module rendering into a sandboxed <iframe> with
+//     postMessage RPC, at which point blob: can be dropped here entirely.
+//   - connect-src ... api.maptiler.com — the my-place module's MapView
+//     loads MapLibre style.json and tile data straight from api.maptiler.com
+//     in the browser. Without this, connect-src 'self' blocked every map
+//     request and the map area rendered blank with no visible error
+//     (found 2026-07-03; img-src's blanket https: happens to cover raster
+//     tiles, but vector tile and style JSON fetches go through connect-src).
+//   - font-src 'self' data: and img-src ... blob: https: — the icon webfont
+//     and user-uploaded spot photos, which may be hosted elsewhere.
+//
+// Keep the two policies separate. They were never the same, and the
+// difference is load-bearing.
+const spaCSP = "default-src 'self'; " +
+	"script-src 'self' blob:; " +
+	"style-src-elem 'self'; " +
+	"style-src-attr 'unsafe-inline'; " +
+	"font-src 'self' data:; " +
+	"img-src 'self' data: blob: https:; " +
+	"connect-src 'self' api.maptiler.com; " +
+	"object-src 'none'; " +
+	"frame-ancestors 'none'; " +
+	"base-uri 'none'; " +
+	"report-uri /v1/csp-report; " +
+	"report-to csp-endpoint"
+
+// commonSecHeaders sets the defensive response headers that are identical
+// for the API and the SPA. TLS-related headers (HSTS, etc.) are handled by
+// Traefik at the edge and are intentionally omitted here.
+//
+// Content-Security-Policy is deliberately absent: it is the one header that
+// differs between the two surfaces, and each caller below sets its own. A
+// response that reaches a client without any CSP would mean it went through
+// neither middleware, which the dispatch in main makes impossible.
+func commonSecHeaders(w http.ResponseWriter) {
+	h := w.Header()
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("X-Frame-Options", "DENY")
+	h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+	// report-to/report-uri (added alongside cspReportHandler below): CSP
+	// has blocked violations silently since this header was first
+	// introduced - a real XSS attempt hitting it would leave no trace
+	// anywhere an operator would think to look. report-uri is the
+	// still-universally-supported legacy directive; report-to is the
+	// modern replacement Chrome now prefers, which needs the separate
+	// Reporting-Endpoints header here to name what "csp-endpoint" actually
+	// points at. Sending both costs nothing extra (a browser that
+	// understands report-to ignores report-uri, and vice versa) and covers
+	// every browser either way.
+	h.Set("Reporting-Endpoints", `csp-endpoint="/v1/csp-report"`)
+	h.Set("Permissions-Policy", permissionsPolicy)
+}
+
+// apiSecHeadersMiddleware wraps Core's API surface (see isAPIPath).
+func apiSecHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		// report-to/report-uri (added alongside cspReportHandler below): CSP
-		// has blocked violations silently since this header was first
-		// introduced - a real XSS attempt hitting it would leave no trace
-		// anywhere an operator would think to look. report-uri is the
-		// still-universally-supported legacy directive; report-to is the
-		// modern replacement Chrome now prefers, which needs the separate
-		// Reporting-Endpoints header below to name what "csp-endpoint"
-		// actually points at. Sending both costs nothing extra (a browser
-		// that understands report-to ignores report-uri, and vice versa)
-		// and covers every browser either way.
-		w.Header().Set("Reporting-Endpoints", `csp-endpoint="/v1/csp-report"`)
-		w.Header().Set("Content-Security-Policy",
-			"default-src 'none'; "+
-				"script-src 'self'; "+
-				// Split the same way as deploy/nginx.conf's CSP (2026-07-23
-				// security pass, keep in sync - see that file's comment for
-				// the reasoning): style-src-elem blocks injected <style>
-				// blocks/<link>s (the actual CSS-exfiltration/selector-abuse
-				// vector), style-src-attr keeps 'unsafe-inline' since a bare
-				// style="..." attribute can't carry attacker-controlled
-				// selectors on its own.
-				"style-src-elem 'self'; "+
-				"style-src-attr 'unsafe-inline'; "+
-				"img-src 'self' data:; "+
-				"connect-src 'self'; "+
-				"object-src 'none'; "+
-				"frame-ancestors 'none'; "+
-				"base-uri 'none'; "+
-				"report-uri /v1/csp-report; "+
-				"report-to csp-endpoint")
-		// Permissions-Policy: default-deny every powerful browser feature,
-		// then allow back exactly the three a module actually uses -
-		// geolocation (my-place's MapLibre view), clipboard-write (copy
-		// buttons), fullscreen (map view's fullscreen control). Scoped to
-		// (self) only, never a third-party origin: modules run in this same
-		// top-level document (no iframe sandbox yet - see the module-token
-		// work in auth/moduletoken.go), so (self) already covers every
-		// module's own UI. Camera/microphone/payment/usb/midi/sensors are
-		// denied outright - nothing in ModuLab or any current module uses
-		// them, so there is no cost to closing them off.
-		w.Header().Set("Permissions-Policy",
-			"geolocation=(self), clipboard-write=(self), fullscreen=(self), "+
-				"camera=(), microphone=(), payment=(), usb=(), midi=(), "+
-				"magnetometer=(), gyroscope=(), accelerometer=()")
+		commonSecHeaders(w)
+		w.Header().Set("Content-Security-Policy", apiCSP)
+		next.ServeHTTP(w, r)
+	})
+}
+
+// spaSecHeadersMiddleware wraps the embedded frontend (internal/webui).
+func spaSecHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		commonSecHeaders(w)
+		w.Header().Set("Content-Security-Policy", spaCSP)
 		next.ServeHTTP(w, r)
 	})
 }
@@ -1379,8 +1491,8 @@ func secHeadersMiddleware(next http.Handler) http.Handler {
 // this deliberately unauthenticated endpoint.
 const cspReportMaxBodyBytes = 16 * 1024
 
-// cspReportHandler is POST /v1/csp-report, the target of secHeadersMiddleware's
-// report-uri/report-to CSP directives (see that middleware's doc comment).
+// cspReportHandler is POST /v1/csp-report, the target of the report-uri and
+// report-to directives in both apiCSP and spaCSP (see their doc comments).
 // Deliberately unauthenticated - a violation can fire on the login page
 // itself, before any session exists - and covered only by the global rate
 // limit backstop every route already gets (globalRateLimitMiddleware),
