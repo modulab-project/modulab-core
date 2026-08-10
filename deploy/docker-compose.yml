@@ -370,6 +370,38 @@ services:
       - "traefik.http.middlewares.compress.compress=true"
       - "traefik.http.middlewares.compress.compress.excludedContentTypes=text/event-stream"
       - "traefik.http.routers.modulab.middlewares=hsts,compress"
+      # Streaming endpoints get their own router, deliberately WITHOUT the
+      # compress middleware.
+      #
+      # excludedContentTypes above stops the compression itself - a response
+      # from /v1/events carries no Content-Encoding - but it does not stop
+      # Traefik's compressor from withholding the response headers until the
+      # first body bytes arrive. Measured in the browser against the live
+      # deployment: fetch("/v1/events") did not resolve for 30051 ms, exactly
+      # one heartbeat interval (notify.HeartbeatInterval), even though Core
+      # writes and flushes those headers immediately (auth/events.go). Once
+      # the first byte landed the stream ran on time, so it is a delayed
+      # start rather than a permanent buffer - which is exactly the shape of
+      # bug that a "is the response compressed?" check cannot see, and that
+      # surfaces only as a notification badge staying empty for the first
+      # half minute after every page load.
+      #
+      # KEEP THIS RULE IN SYNC: any new endpoint answering with
+      # text/event-stream must be added here, or it silently inherits that
+      # delay. Current set, from `grep -r text/event-stream backend/`:
+      # GET /v1/events (internal/auth/events.go) and POST /v1/ai/chat
+      # (internal/ai). This duplication is the price of compressing at the
+      # edge instead of inside Core; if the list ever grows past these two,
+      # move compression into the Go handler chain instead, where it can key
+      # off the Content-Type it sets itself.
+      - "traefik.http.routers.modulab-stream.rule=Host(`${MODULAB_DOMAIN}`) && (Path(`/v1/events`) || Path(`/v1/ai/chat`))"
+      - "traefik.http.routers.modulab-stream.entrypoints=websecure"
+      - "traefik.http.routers.modulab-stream.tls.certresolver=le"
+      - "traefik.http.routers.modulab-stream.service=modulab"
+      - "traefik.http.routers.modulab-stream.middlewares=hsts"
+      # Explicit, so this never depends on Traefik's default rule-length
+      # tie-breaking against the catch-all Host() router above.
+      - "traefik.http.routers.modulab-stream.priority=100"
     networks:
       - modulab-internal
 
