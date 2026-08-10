@@ -1,0 +1,26 @@
+# Build context exclusions.
+#
+# Without this file, `docker build` uploaded ~480 MB of context (459 MB
+# frontend/node_modules + 16 MB .git + the local frontend/dist) on every
+# run. Worse than the size: Stage 1 does `COPY frontend/package*.json` ->
+# `npm ci` -> `COPY frontend/ ./`, so a host node_modules directory in the
+# context OVERWRITES the linux/arm64 dependencies npm ci just installed
+# with whatever the host has (darwin binaries on a Mac, plus any iCloud
+# " 2" conflict copies). CI never hit this because a fresh checkout has no
+# node_modules; a local `docker build` did, silently.
+.git
+.gitignore
+**/node_modules
+
+# Build outputs. Both are produced inside the image by Stage 1
+# (`npm run build`), so a stale local copy must never leak into the build.
+frontend/dist
+backend/internal/webui/dist
+
+# Never needed at build time, and .env in particular must not end up in an
+# image layer.
+.env
+.env.local
+**/.DS_Store
+cosign.key
+cosign.pub

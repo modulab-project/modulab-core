@@ -1307,7 +1307,7 @@ func maxBodyMiddleware(pool *db.Pool, next http.Handler) http.Handler {
 //
 // Content-Security-Policy note: this is Core's API server, not the
 // frontend's own HTTP server (the SPA is built by Vite and served
-// separately, see frontend/nginx.conf for its CSP). Core's own CSP here
+// separately, see deploy/nginx.conf for its CSP). Core's own CSP here
 // matters for the handful of responses Core serves directly that a browser
 // renders/executes rather than just consumes as JSON: module UI bundles
 // (ModuleBundleHandler, GET /v1/modules/{name}/ui/bundle.js) and storage

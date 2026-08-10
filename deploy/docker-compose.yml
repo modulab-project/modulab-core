@@ -90,6 +90,17 @@ services:
     restart: unless-stopped
     command:
       - "--log.level=INFO"
+      # Per-request HTTP access log, off by default in Traefik. Until now
+      # the only access log in the whole stack was nginx's own (the
+      # official image writes it to stdout, so `docker compose logs nginx`
+      # happened to double as the request log) - Core has no
+      # request-logging middleware of its own, so without this there would
+      # be no record of who requested what anywhere. Enabled here rather
+      # than added to Core because Traefik is the component that actually
+      # terminates TLS and sees the untrusted client: it logs the real
+      # remote address, the entrypoint and the router that matched, none of
+      # which Core can reconstruct from the proxied request alone.
+      - "--accesslog=true"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
       - "--providers.docker.network=modulab-internal"
