@@ -14,3 +14,10 @@ cosign.pub
 # Go build artifacts
 backend/cmd/core/core
 core
+
+# Embedded frontend build output (backend/internal/webui, see webui.go).
+# The placeholder index.html is committed deliberately - go:embed fails the
+# build on an empty directory - everything else is produced by the build and
+# must never be committed.
+backend/internal/webui/dist/*
+!backend/internal/webui/dist/index.html

@@ -1,0 +1,23 @@
+<!doctype html>
+<!--
+  Committed placeholder. Do not delete.
+
+  go:embed fails the build on a directory with no embeddable files, so an
+  empty dist/ breaks `go build ./...` and the CI "backend" job, which runs
+  without a frontend build.
+
+  A real build replaces this file: the Dockerfile's go-builder stage copies
+  frontend/dist/ into this directory before compiling. If you are looking at
+  this page in a browser, Core was built without that step.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ModuLab (dev placeholder)</title>
+  </head>
+  <body>
+    <h1>ModuLab</h1>
+    <p>Frontend not built. See README.md &rarr; Local development.</p>
+  </body>
+</html>

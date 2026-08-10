@@ -28,6 +28,17 @@ WORKDIR /app/backend
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 COPY backend/ ./
+
+# The frontend bundle has to sit inside internal/webui/ before go build runs:
+# go:embed cannot reach outside its own package directory, so this is the only
+# place it can be embedded from (see internal/webui/webui.go). It also has to
+# happen here rather than being carried in with the COPY above, because
+# .dockerignore excludes backend/internal/webui/dist - that exclusion is what
+# guarantees a stale local build can never leak into the image, and it means
+# the directory does not exist in the context at all until this line creates
+# it. Overwrites the committed placeholder index.html.
+COPY --from=frontend-builder /app/frontend/dist/ ./internal/webui/dist/
+
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /modulab-core ./cmd/core
 
 # ── Stage 3: Final image ──────────────────────────────────────────────────────
