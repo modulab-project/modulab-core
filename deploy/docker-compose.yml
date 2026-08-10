@@ -336,7 +336,40 @@ services:
       # 2026-07-23, when searxng lost its Traefik labels entirely - see that
       # service below.)
       - "traefik.http.middlewares.hsts.headers.stsSeconds=31536000"
-      - "traefik.http.routers.modulab.middlewares=hsts"
+      # Compression. nginx did this (gzip on, plus gzip_proxied any so the
+      # /v1/ JSON responses it proxied were covered as well) and Core does
+      # not - so between removing nginx and adding this label, the frontend
+      # bundle and every API response went out uncompressed. Confirmed
+      # against the live deployment: the entry chunk requested with
+      # "Accept-Encoding: gzip, br, zstd" came back with no Content-Encoding
+      # at all.
+      #
+      # Cloudflare does not cover this, contrary to what nginx.conf's old
+      # gzip comment implied: the origin is DNS-only, not proxied (responses
+      # carry neither "server: cloudflare" nor cf-cache-status), so nothing
+      # between Core and the browser was compressing anything.
+      #
+      # Done here rather than in Core on purpose: Traefik already sits in
+      # front of both the static files and the API, so one middleware covers
+      # what nginx needed gzip_types plus gzip_proxied for, and the Go binary
+      # stays free of a compression dependency.
+      #
+      # text/event-stream is excluded explicitly. Compressing an SSE stream
+      # buffers it, which is precisely the failure nginx needed
+      # "proxy_buffering off" to fix (notification badge only updating after
+      # a manual reload, found 2026-07-04). Re-test the badge after changing
+      # anything here.
+      #
+      # An exclusion list rather than an inclusion list: it means images and
+      # fonts get run through the compressor too, which costs a little CPU
+      # and saves nothing on already-compressed formats. That is the cheaper
+      # mistake - an inclusion list that fails to match "text/html;
+      # charset=utf-8" would silently leave the actual payload uncompressed.
+      # minResponseBodyBytes stays at Traefik's default of 1024, which is
+      # what nginx's gzip_min_length was set to.
+      - "traefik.http.middlewares.compress.compress=true"
+      - "traefik.http.middlewares.compress.compress.excludedContentTypes=text/event-stream"
+      - "traefik.http.routers.modulab.middlewares=hsts,compress"
     networks:
       - modulab-internal
 
