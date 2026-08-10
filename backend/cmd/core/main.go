@@ -1403,7 +1403,8 @@ const apiCSP = "default-src 'none'; " +
 	"report-to csp-endpoint"
 
 // spaCSP governs the frontend itself, carried over verbatim from the CSP
-// deploy/nginx.conf used to send. It is looser than apiCSP in exactly three
+// deploy/nginx.conf sent before that file was removed (see git history if
+// the original is ever needed). It is looser than apiCSP in exactly three
 // places, each of which the SPA genuinely needs:
 //
 //   - script-src 'self' blob:  — ModulePage.tsx loads each installed

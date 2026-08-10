@@ -21,7 +21,7 @@ Core backend (Go) and frontend (React/Vite) for ModuLab (https://modulab.app), t
 
 The backend is written in Go. It serves the REST API under `/v1/`, runs the Setup Wizard, owns auth via OIDC, manages PostgreSQL and Valkey, and supervises a long-lived Deno subprocess that runs Tier 2/3 module handlers as isolated Workers (their own outbound-network allowlist, own DB role/schema). The frontend is React and Vite; each module ships its own independently-built UI bundle (`ui/bundle.js`), which the frontend loads via a dynamic `import()` over a Blob URL and renders directly in the host app - there is no iframe or postMessage boundary between Core and module UI, so the isolation module code gets is on the backend (the sandboxed Deno Worker and its scoped DB role), not in the browser.
 
-Data lives in PostgreSQL (Core's own tables, plus one schema per installed module) and Valkey (sessions, cache, pub/sub, SSE fan-out, job scheduling), with nginx serving the built frontend and proxying `/v1/` to Core so both share one origin. SearXNG powers the search widget. At the edge, Traefik handles TLS termination behind a docker-socket-proxy (so Traefik never touches the real Docker socket directly) and is the only externally exposed component.
+Data lives in PostgreSQL (Core's own tables, plus one schema per installed module) and Valkey (sessions, cache, pub/sub, SSE fan-out, job scheduling), with Core serving the built frontend itself from a bundle embedded into its binary at compile time, so the SPA and the API share one origin without a separate web server in between. SearXNG powers the search widget. At the edge, Traefik handles TLS termination behind a docker-socket-proxy (so Traefik never touches the real Docker socket directly) and is the only externally exposed component.
 
 ## Module tiers
 
@@ -33,7 +33,7 @@ Every module declares a `tier: 1|2|3` in its `manifest.yaml`. This is purely a b
 
 ## Repository layout
 
-The `backend/` directory holds the Go module: API, auth, module orchestrator, and Deno-subprocess supervisor. The `frontend/` directory holds the React/Vite SPA. The `deploy/` directory holds `docker-compose.yml` (the production stack: Core, Postgres, Valkey, nginx, SearXNG, Traefik, and the docker-socket-proxy in front of it) and `docker-compose.dev.yml` (the local dev stack: Postgres, Valkey, and SearXNG only, with Core and the frontend running on the host). There is also a `.env.example` at the repository root.
+The `backend/` directory holds the Go module: API, auth, module orchestrator, and Deno-subprocess supervisor. The `frontend/` directory holds the React/Vite SPA. The `deploy/` directory holds `docker-compose.yml` (the production stack: Core, Postgres, Valkey, SearXNG, Traefik, and the docker-socket-proxy in front of it) and `docker-compose.dev.yml` (the local dev stack: Postgres, Valkey, and SearXNG only, with Core and the frontend running on the host). There is also a `.env.example` at the repository root.
 
 ## Schema changes
 

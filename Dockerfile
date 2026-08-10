@@ -99,17 +99,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy Go binary
 COPY --from=go-builder /modulab-core /usr/local/bin/modulab-core
 
-# Carry the built frontend into the final image. Core itself does NOT read
-# this directory: it has no static-file handler, and there is no
-# MODULAB_FRONTEND_DIR setting anywhere in backend/ - the previous comment
-# here claimed both (corrected 2026-08-10). The only consumer is
-# deploy/Dockerfile.nginx, whose `COPY --from=core-source
-# /app/frontend/dist/` pulls these files back out of this image to build
-# ghcr.io/modulab-project/modulab-core-nginx. This line therefore exists
-# purely to hand the frontend over to the nginx image, and becomes
-# removable the moment that image does.
-COPY --from=frontend-builder /app/frontend/dist/ /app/frontend/dist/
-
 # Module data directory — override with MODULAB_MODULE_DATA_DIR if needed.
 # Mount a persistent volume here in production (see deploy/docker-compose.yml).
 RUN mkdir -p /var/lib/modulab/modules

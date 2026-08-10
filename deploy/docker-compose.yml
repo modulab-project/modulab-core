@@ -6,11 +6,10 @@
 #   docker compose up -d
 #   docker compose logs -f core
 #
-# Upgrading to a new release: every image below (core, nginx) is published
-# by the CI release pipeline (.github/workflows/ci.yml's publish-image /
-# publish-nginx-image jobs) when a GitHub Release is published - there is no
-# local build step involved anymore for either of them, so upgrading is
-# always just:
+# Upgrading to a new release: the core image is published by the CI release
+# pipeline (.github/workflows/ci.yml's publish-image job) when a GitHub
+# Release is published - there is no local build step involved, so upgrading
+# is always just:
 #   docker compose pull
 #   docker compose up -d
 #
@@ -290,62 +289,52 @@ services:
       valkey:
         condition: service_healthy
     healthcheck:
-      # Mirrors the Dockerfile's own HEALTHCHECK; kept here too so
-      # nginx's depends_on below can gate on condition: service_healthy —
+      # Mirrors the Dockerfile's own HEALTHCHECK. Kept here as well because
       # Compose only recognizes a healthy/unhealthy state if a healthcheck
-      # is defined (image-level or here), whichever Compose sees first.
+      # is defined (image-level or here, whichever Compose sees first), and
+      # `docker compose ps` is the first place anyone looks when the site
+      # stops answering.
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
       interval: 30s
       timeout: 5s
       start_period: 15s
       retries: 3
-    networks:
-      - modulab-internal
-
-  # ── Nginx (frontend + API proxy) ─────────────────────────────────────────────
-  # Serves the pre-built frontend from the core image and proxies /v1/ to Core.
-  # Core does not serve static files itself; nginx bridges that gap so that
-  # frontend and API share the same origin without an extra subdomain.
-  #
-  # image:, not build: - deploy/Dockerfile.nginx (still in this repo, used
-  # by the CI release pipeline's publish-nginx-image job) copies its static
-  # files out of a specific tagged core image at build time, so it can only
-  # ever be correct when built right after that exact core image is pushed.
-  # Building it locally on the deployment host had no equivalent guarantee:
-  # `docker compose pull` skips build-only services entirely, and `docker
-  # compose up -d` without `--build` silently reuses whatever nginx image
-  # already happened to be sitting on the host - which is exactly how Core
-  # and Frontend ended up disagreeing on their own version number after the
-  # 1.0.1 release (2026-07-08), and why this needed a manual rebuild to fix.
-  # Pulling a CI-built image instead means a plain `docker compose pull &&
-  # docker compose up -d` is enough for every future release, same as core.
-  nginx:
-    image: ghcr.io/modulab-project/modulab-core-nginx:latest
-    restart: unless-stopped
-    mem_limit: 64m
-    cpus: 0.25
-    volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
-    depends_on:
-      core:
-        condition: service_healthy
+    # Traefik routing. These labels sat on the nginx service until Core
+    # started serving the frontend itself from the bundle embedded in its
+    # binary (backend/internal/webui). nginx existed only to serve those
+    # static files and proxy /v1/ back to Core, which made it a second
+    # reverse proxy behind Traefik with nothing left to do - so the router
+    # points here now and that service is gone, along with deploy/nginx.conf,
+    # deploy/Dockerfile.nginx and the modulab-core-nginx image.
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.modulab.rule=Host(`${MODULAB_DOMAIN}`)"
       - "traefik.http.routers.modulab.entrypoints=websecure"
       - "traefik.http.routers.modulab.tls.certresolver=le"
-      - "traefik.http.services.modulab.loadbalancer.server.port=80"
-      # HSTS: main.go's secHeadersMiddleware doc comment says TLS-related
+      # 8080, not 80 - this is Core's own listen port (see the Dockerfile's
+      # EXPOSE and the healthcheck above); nginx listened on 80.
+      - "traefik.http.services.modulab.loadbalancer.server.port=8080"
+      # HSTS: main.go's commonSecHeaders doc comment says TLS-related
       # headers are "handled by Traefik at the edge" - found during the
       # pre-1.0.7 security pass that this was never actually configured, so
       # every response was silently missing Strict-Transport-Security.
-      # 1 year (31536000s), no includeSubDomains and no preload deliberately:
-      # this is a homelab single-domain deploy behind Let's Encrypt, not a
-      # multi-subdomain estate, and HSTS preload is added to a
-      # browser-shipped list that is extremely hard to reverse - not worth
-      # that lock-in risk here. Applied to both the modulab and searxng
-      # routers below (same MODULAB_DOMAIN) so the header is set regardless
-      # of which path a browser hits first.
+      # 1 year (31536000s), no includeSubDomains and no preload
+      # deliberately: this is a homelab single-domain deploy behind Let's
+      # Encrypt, not a multi-subdomain estate, and HSTS preload is added to
+      # a browser-shipped list that is extremely hard to reverse - not worth
+      # that lock-in risk here.
+      #
+      # Both the middleware definition and the router that uses it have to
+      # live on this service now. Traefik reads middleware definitions from
+      # container labels, so leaving the definition behind on a service that
+      # no longer exists would drop the header with no error anywhere - the
+      # kind of regression nothing surfaces until someone checks the
+      # response headers by hand.
+      #
+      # (The previous version of this comment said the middleware applied
+      # "to both the modulab and searxng routers". That has been wrong since
+      # 2026-07-23, when searxng lost its Traefik labels entirely - see that
+      # service below.)
       - "traefik.http.middlewares.hsts.headers.stsSeconds=31536000"
       - "traefik.http.routers.modulab.middlewares=hsts"
     networks:
