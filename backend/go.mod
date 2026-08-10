@@ -6,7 +6,7 @@ require (
 	github.com/coreos/go-oidc/v3 v3.20.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/oschwald/geoip2-golang/v2 v2.2.0
-	github.com/redis/go-redis/v9 v9.21.0
+	github.com/redis/go-redis/v9 v9.22.0
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sync v0.22.0
 )
