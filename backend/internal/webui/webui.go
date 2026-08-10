@@ -48,7 +48,8 @@ func Dist() (fs.FS, error) {
 
 const (
 	indexFile    = "index.html"
-	assetsPrefix = "assets/"
+	assetsDir    = "assets"
+	assetsPrefix = assetsDir + "/"
 
 	// Cache classes, carried over 1:1 from deploy/nginx.conf.
 	//
@@ -139,8 +140,29 @@ func newHandler(dist fs.FS) (http.Handler, error) {
 
 		etag, ok := etags[name]
 		if !ok {
-			// SPA fallback, equivalent to nginx's
-			// "try_files $uri $uri/ /index.html": any unknown path is a
+			// A miss under assets/ is a real 404, not a client-side route.
+			// nginx drew the same line: "location ^~ /assets/" carried no
+			// try_files, and the ^~ prefix stopped "location /"'s fallback
+			// from ever applying there.
+			//
+			// The distinction matters after a deploy. A browser still
+			// holding the previous release's index.html asks for an asset
+			// hash that no longer exists; answering 200 with the HTML shell
+			// makes the module loader fail on a MIME error ("expected a
+			// JavaScript module script but the server responded with a MIME
+			// type of text/html") and the page goes blank - with a 200 in
+			// the access log and nothing pointing at a stale cache. A 404
+			// says what actually happened, and is what the SPA's own
+			// stale-build detection expects to see.
+			//
+			// The name == assetsDir case covers a request for the directory
+			// itself, which WalkDir never puts in the map.
+			if name == assetsDir || strings.HasPrefix(name, assetsPrefix) {
+				http.NotFound(w, r)
+				return
+			}
+			// SPA fallback for everything else, equivalent to nginx's
+			// "try_files $uri $uri/ /index.html": an unknown path is a
 			// client-side route, so React Router gets to resolve it.
 			name, etag = indexFile, etags[indexFile]
 		}

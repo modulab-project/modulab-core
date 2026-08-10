@@ -792,7 +792,7 @@
     "ai_chat": "AI Chat",
     "all_ok": "All systems normal",
     "attention": "Attention needed",
-    "versions": "Core {{core}} · Frontend {{frontend}}",
+    "versions": "ModuLab {{version}}",
     "stale_version_banner": "A new version is running on the server. Reload to get the latest interface.",
     "reload_now": "Reload now",
     "close": "Close",

@@ -103,13 +103,29 @@ func TestContentTypes(t *testing.T) {
 // Equivalent to nginx's "try_files $uri $uri/ /index.html".
 func TestSPAFallback(t *testing.T) {
 	h := newTestHandler(t)
-	for _, target := range []string{"/", "/settings", "/settings/deep/route", "/modules/my-place", "/assets/"} {
+	for _, target := range []string{"/", "/settings", "/settings/deep/route", "/modules/my-place", "/some.file.with.dots"} {
 		rec := do(t, h, "GET", target, nil)
 		if rec.Code != http.StatusOK {
 			t.Errorf("%s: status = %d, want 200", target, rec.Code)
 		}
 		if !strings.Contains(rec.Body.String(), `<div id="root">`) {
 			t.Errorf("%s: did not serve index.html", target)
+		}
+	}
+}
+
+// A miss under assets/ must NOT fall through to index.html: nginx answered
+// 404 there, and a browser holding a stale index.html depends on that to
+// notice its asset hashes are gone instead of parsing HTML as a module.
+func TestMissingAssetIs404(t *testing.T) {
+	h := newTestHandler(t)
+	for _, target := range []string{"/assets/index-GONE1234.js", "/assets/nope.css", "/assets/", "/assets"} {
+		rec := do(t, h, "GET", target, nil)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s: status = %d, want 404", target, rec.Code)
+		}
+		if strings.Contains(rec.Body.String(), `<div id="root">`) {
+			t.Errorf("%s: served the SPA shell instead of 404ing", target)
 		}
 	}
 }

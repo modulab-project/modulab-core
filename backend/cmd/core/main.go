@@ -19,6 +19,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path"
 	"runtime/debug"
 	"sort"
 	"strconv"
@@ -253,6 +254,22 @@ func main() {
 		log.Printf("setup: wizard already completed in a previous run - bootstrap-token gate stays disabled, no new token issued")
 	} else {
 		bootstrapMgr.LogToken()
+	}
+
+	// The frontend is served by Core itself from the bundle embedded at
+	// compile time (internal/webui). Built here, before the module worker
+	// pool, the job runner and the background workers below start, so the
+	// log.Fatalf on the error path cannot strand a running Deno subprocess
+	// or an open pool - os.Exit skips every deferred cleanup.
+	//
+	// Note what this does NOT catch: a bundle containing nothing but the
+	// committed placeholder index.html is valid as far as this is
+	// concerned, and Core will happily start and serve the "Frontend not
+	// built" page. Only the Dockerfile's COPY --from=frontend-builder step
+	// puts a real build in there.
+	webuiHandler, err := webui.Handler()
+	if err != nil {
+		log.Fatalf("frontend bundle: %v", err)
 	}
 
 	mux := http.NewServeMux()
@@ -1105,14 +1122,6 @@ func main() {
 		effectiveGroupPrefix = "(not yet configured)"
 	}
 	log.Printf("modulab-core listening on %s (group prefix %q, frontend origin %q)", cfg.HTTPAddr, effectiveGroupPrefix, cfg.FrontendBaseURL)
-	// The frontend is served by Core itself from the bundle embedded at
-	// compile time (internal/webui). Built once here, so a missing or
-	// broken bundle fails at startup instead of on the first request.
-	webuiHandler, err := webui.Handler()
-	if err != nil {
-		log.Fatalf("frontend bundle: %v", err)
-	}
-
 	// Two chains, dispatched by path prefix below, rather than one chain
 	// around everything.
 	//
@@ -1138,10 +1147,20 @@ func main() {
 	// 200 text/html instead of 405, and any mistyped API path handed the
 	// caller index.html to JSON.parse on. Dispatching ahead of the mux
 	// leaves both behaviours intact, because mux never sees a "/" pattern.
+	// apiSecHeadersMiddleware sits OUTSIDE globalRateLimitMiddleware, not
+	// inside it. The rate limiter answers 429 itself (rateLimitMiddleware's
+	// http.Error) without ever calling next, and maxBodyMiddleware does the
+	// same for 413 - so with the headers applied further in, every one of
+	// those responses went out with no CSP, no nosniff, no frame-ancestors
+	// and no Permissions-Policy. That was invisible until now because
+	// nginx's server-level "add_header ... always" re-applied the whole set
+	// to every proxied response regardless of status; with nginx gone,
+	// nothing backfills them. Reachable unauthenticated by simply exceeding
+	// the global budget.
 	apiHandler := corsMiddleware(cfg.FrontendBaseURL, mux)
 	apiHandler = maxBodyMiddleware(pool, apiHandler)
-	apiHandler = apiSecHeadersMiddleware(apiHandler)
 	apiHandler = globalRateLimitMiddleware(valkeyClient, pool, cfg.MasterKey, authDeps, apiHandler)
+	apiHandler = apiSecHeadersMiddleware(apiHandler)
 
 	spaHandler := spaSecHeadersMiddleware(webuiHandler)
 
@@ -1356,7 +1375,23 @@ func maxBodyMiddleware(pool *db.Pool, next http.Handler) http.Handler {
 // would silently hand that path to the SPA fallback with a 200 instead of
 // reaching its handler.
 func isAPIPath(p string) bool {
-	return p == "/healthz" || p == "/v1" || strings.HasPrefix(p, "/v1/")
+	// path.Clean before matching, because this dispatch runs *ahead* of
+	// ServeMux and therefore ahead of the canonicalisation the mux would
+	// otherwise have applied. Without it, a leading double slash
+	// ("//v1/auth/me", which a FrontendBaseURL with a trailing slash
+	// produces) fails the HasPrefix test, falls through to the SPA and
+	// answers 200 text/html - so the caller's res.json() blows up on a
+	// parse error instead of seeing the endpoint's real status. Same for a
+	// trailing slash on "/healthz": a monitor pointed at "/healthz/" would
+	// read an unconditional 200 from the SPA handler no matter how unhealthy
+	// Core actually is. nginx normalised both (merge_slashes is on by
+	// default) before proxying, so this restores the old behaviour rather
+	// than inventing one. Clean also strips the trailing slash, so
+	// "/healthz/" resolves to "/healthz" here and then reaches the mux,
+	// which answers 404 for it exactly as it did before.
+	p = path.Clean("/" + p)
+	return p == "/healthz" || strings.HasPrefix(p, "/healthz/") ||
+		p == "/v1" || strings.HasPrefix(p, "/v1/")
 }
 
 // permissionsPolicy default-denies every powerful browser feature, then
@@ -1445,9 +1480,12 @@ const spaCSP = "default-src 'self'; " +
 // Traefik at the edge and are intentionally omitted here.
 //
 // Content-Security-Policy is deliberately absent: it is the one header that
-// differs between the two surfaces, and each caller below sets its own. A
-// response that reaches a client without any CSP would mean it went through
-// neither middleware, which the dispatch in main makes impossible.
+// differs between the two surfaces, and each caller below sets its own.
+//
+// Both wrappers must stay OUTSIDE any middleware that can answer a request
+// on its own - the global rate limiter (429), the body cap (413) and
+// recoverMiddleware (500) all do. Ordering, not the dispatch, is what
+// guarantees every response carries these headers.
 func commonSecHeaders(w http.ResponseWriter) {
 	h := w.Header()
 	h.Set("X-Content-Type-Options", "nosniff")
@@ -1571,6 +1609,17 @@ func recoverMiddleware(next http.Handler) http.Handler {
 			if rec := recover(); rec != nil {
 				log.Printf("main: panic recovered: %v\nrequest: %s %s (from %s)\n%s",
 					rec, r.Method, r.URL.Path, clientIP(r), debug.Stack())
+				// This middleware is the outermost one, so a panic raised
+				// before the per-surface header middleware ran (inside the
+				// rate limiter's own Valkey/DB/audit work, for instance)
+				// would otherwise produce a bare 500 with no security
+				// headers at all. Setting them here costs nothing on the
+				// non-panicking path and closes that gap. The CSP is the
+				// strictest possible one rather than either surface's:
+				// the body is plain text, so nothing needs to be allowed,
+				// and guessing which surface panicked is not worth it.
+				commonSecHeaders(w)
+				w.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
 				http.Error(w, "internal server error", http.StatusInternalServerError)
 			}
 		}()

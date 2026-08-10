@@ -11,7 +11,16 @@
 # Release is published - there is no local build step involved, so upgrading
 # is always just:
 #   docker compose pull
-#   docker compose up -d
+#   docker compose up -d --remove-orphans
+#
+# --remove-orphans is not optional. Compose leaves a container behind when
+# its service disappears from this file - it only prints a hint - and a
+# leftover container keeps its Traefik labels. Traefik's docker provider
+# drops any router or service name that two containers define differently
+# instead of picking one, so an orphan carrying an older definition of
+# routers.modulab / services.modulab takes the site down until it is
+# removed. That is exactly what happens upgrading across the release that
+# deleted the nginx service.
 #
 # Resource limits: every service below sets mem_limit/cpus. These are
 # non-swarm Compose fields (no `deploy:` key or swarm mode needed) and exist

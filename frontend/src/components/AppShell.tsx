@@ -217,7 +217,9 @@ export function AppShell({
   // the running backend has moved on, but this tab is still executing old
   // frontend code. Added 2026-08-05 as a safety net alongside disabling
   // the service worker's app-shell precaching (vite.config.ts) and adding
-  // real Cache-Control headers (deploy/nginx.conf): those two stop this
+  // real Cache-Control headers (now set by Core itself in
+  // backend/internal/webui, previously by deploy/nginx.conf): those two
+  // stop this
   // tab from being handed stale code on its *next* load, but do nothing
   // for a tab that was already open across a deploy - only reloading gets
   // it current code, and nothing prompts that without this check.
@@ -860,7 +862,7 @@ function FooterBar({
         </button>
       )}
       <span>
-        {t("shell.versions", { core: health?.version ?? "…", frontend: FRONTEND_VERSION })}
+        {t("shell.versions", { version: health?.version ?? "…" })}
       </span>
       <span className="flex items-center gap-3">
         <a
@@ -1548,6 +1550,14 @@ function StatusPanelContent({ health }: { health: HealthResponse }) {
 
   return (
     <div className="text-sm">
+      {/* Both rows stay, even though Core and the frontend now ship in one
+          binary and cannot disagree in a correctly built image. That is
+          precisely what makes them useful here: a mismatch on this page
+          means the image was built wrong (the Dockerfile's
+          COPY --from=frontend-builder step did not put the current build
+          into internal/webui/dist), which nothing else surfaces. The footer
+          shows a single version because that is the honest thing to show a
+          normal user. */}
       <StatusRow icon="ti-server" label={t("shell.status.backend_version")} value={health.version} />
       <StatusRow icon="ti-browser" label={t("shell.status.frontend_version")} value={FRONTEND_VERSION} />
       <StatusRow icon="ti-clock" label={t("shell.status.uptime")} value={formatUptime(uptimeSeconds)} />

@@ -14,7 +14,8 @@ import i18n, { ensureLanguage } from "./lib/i18n";
 // index.html. Bundled and fingerprinted by Vite like any other asset, so
 // the app no longer makes a third-party request just to render its own
 // icons, and the CSP's style-src/font-src no longer need a
-// cdnjs.cloudflare.com exception (see nginx.conf).
+// cdnjs.cloudflare.com exception (spaCSP in backend/cmd/core/main.go;
+// it lived in deploy/nginx.conf until Core took over serving the SPA).
 import "@tabler/icons-webfont/dist/tabler-icons.min.css";
 
 // Expose host singletons for module bundles loaded via Blob URL.

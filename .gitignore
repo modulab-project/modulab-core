@@ -11,9 +11,16 @@
 cosign.key
 cosign.pub
 
-# Go build artifacts
+# Go build artifacts.
+#
+# "/core" is anchored to the repository root on purpose. An unanchored
+# "core" matches every entry of that name at any depth - including the
+# package DIRECTORY backend/cmd/core/, which silently excluded every file
+# added there after main.go was first committed. backend/cmd/core/main_test.go
+# was written, passed locally and was never committed or run in CI because
+# of exactly this.
 backend/cmd/core/core
-core
+/core
 
 # Embedded frontend build output (backend/internal/webui, see webui.go).
 # The placeholder index.html is committed deliberately - go:embed fails the

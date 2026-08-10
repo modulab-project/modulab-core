@@ -12,6 +12,12 @@
 .gitignore
 **/node_modules
 
+# Nothing in the Dockerfile copies from deploy/, and that directory holds the
+# .env with MODULAB_MASTER_KEY, the database and Valkey passwords and the
+# Cloudflare token. Excluding it keeps them out of the build context
+# entirely rather than relying on no COPY ever reaching for them.
+deploy/
+
 # Build outputs. Both are produced inside the image by Stage 1
 # (`npm run build`), so a stale local copy must never leak into the build.
 frontend/dist
@@ -19,8 +25,16 @@ backend/internal/webui/dist
 
 # Never needed at build time, and .env in particular must not end up in an
 # image layer.
-.env
-.env.local
+#
+# The "**/" matters: .dockerignore patterns are matched against paths
+# relative to the build-context root, so a bare ".env" excludes only the one
+# at the top. frontend/.env is a real file (see frontend/.env.example, and
+# frontend/.gitignore lists it), it is pulled in by "COPY frontend/ ./", and
+# Vite inlines every VITE_-prefixed value from it straight into the bundle -
+# which is then embedded into the binary and served to every browser. Same
+# class of local-only leak the node_modules note above describes.
+**/.env
+**/.env.*
 **/.DS_Store
 cosign.key
 cosign.pub

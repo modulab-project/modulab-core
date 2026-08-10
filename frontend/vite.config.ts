@@ -32,7 +32,9 @@ export default defineConfig({
     // offline (every page needs /v1 anyway), and vite-plugin-pwa's default
     // generateSW behavior precaches the full JS/CSS/HTML app shell and
     // serves it cache-first from the SW's own Cache Storage, which sits
-    // *in front of* any HTTP Cache-Control header (see deploy/nginx.conf).
+    // *in front of* any HTTP Cache-Control header (those are set by Core
+    // in backend/internal/webui; they lived in deploy/nginx.conf until Core
+    // took over serving the SPA).
     // That's what caused "new version deployed, Core backend already shows
     // it, but the frontend still shows the old build until you manually
     // clear the browser's site data" - the SW's update-and-reload dance
