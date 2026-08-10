@@ -326,6 +326,34 @@ scan_for_large_files() {
   done
 }
 
+# The go:embed placeholder at backend/internal/webui/dist/index.html is
+# committed on purpose - go:embed fails the build outright on a directory
+# with no embeddable files, which would break `go build ./...` and the CI
+# "backend" job. README -> Local development documents copying a real
+# frontend build over it so Core serves the actual SPA on :8080, and the
+# "git add -A" further down would then commit that build's index.html in the
+# placeholder's place.
+#
+# Nothing else notices: go:embed accepts any file, so CI stays green, and
+# production is unaffected because the Dockerfile overwrites the whole
+# directory in its go-builder stage. What breaks is quieter - the repository
+# ends up shipping an index.html referencing asset hashes that were never
+# committed, so the next `go run ./cmd/core` without a frontend build serves
+# a blank page with failing script tags instead of the "Frontend not built"
+# notice the placeholder exists to give.
+#
+# Checked unconditionally rather than against the changed-file list: if the
+# file is untouched the marker is there and this is one grep on 800 bytes.
+scan_for_webui_placeholder() {
+  local f="$ROOT/backend/internal/webui/dist/index.html"
+  [ -f "$f" ] || return 0
+  grep -q "Committed placeholder" "$f" && return 0
+  fail "backend/internal/webui/dist/index.html is a real frontend build, not the committed placeholder."
+  printf "       Restore it before committing:\n"
+  printf "         git checkout -- backend/internal/webui/dist/index.html\n"
+  return 1
+}
+
 # --- 0. Git sanity: stale lock files + genuinely-in-progress states -------
 #
 # "fatal: Unable to create '.../.git/index.lock': File exists" happens when
@@ -865,6 +893,7 @@ else
   SCAN_FAILED=0
   scan_for_conflict_markers "${CHANGED_FILES[@]}" || SCAN_FAILED=1
   scan_for_secrets "${CHANGED_FILES[@]}" || SCAN_FAILED=1
+  scan_for_webui_placeholder || SCAN_FAILED=1
   if [ $SCAN_FAILED -ne 0 ]; then
     fail "Aborting before staging anything — fix the above first."
     exit 1
