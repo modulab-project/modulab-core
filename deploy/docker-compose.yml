@@ -50,10 +50,16 @@ services:
   # volumes, networks, swarm, etc.) is denied by default. Runs on its own
   # network that nothing else in this stack can reach.
   docker-socket-proxy:
-    # Pinned to a version tag rather than "latest" (2026-08-02 ops pass) -
-    # same mutable-tag risk as the other images in this file.
-    # TODO: pin to a specific digest like the other images below once verified (see commented images for the pattern)
-    image: tecnativa/docker-socket-proxy:0.3
+    # Digest-pinned (2026-08-11 security pass) - same reasoning as the
+    # traefik/postgres/valkey services below: a tag like 0.3 is a mutable
+    # pointer, so `docker compose pull` weeks later could silently swap in a
+    # different image for the one container with any path to the Docker
+    # socket. Digest is the multi-arch manifest list digest for tag 0.3
+    # (verified via Docker Hub's tag API, not a single-platform image
+    # digest), matching the tag@sha256:... pattern the other pinned images
+    # use so Dependabot's docker-compose ecosystem entry can track and
+    # advance it going forward.
+    image: tecnativa/docker-socket-proxy:0.3@sha256:9e4b9e7517a6b660f2cc903a19b257b1852d5b3344794e3ea334ff00ae677ac2
     restart: unless-stopped
     environment:
       # Read-only, GET-only endpoints Traefik's Docker provider needs:
