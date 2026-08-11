@@ -103,12 +103,20 @@ type Deps struct {
 
 // RunScheduler is the long-running background goroutine driving the
 // database refresh, on the admin-configured daily check time (CheckTimeRaw).
-// Unlike coreupdate.RunScheduler (which deliberately does NOT run once at
-// startup), this DOES run immediately before entering the tick loop: a
-// fresh install with credentials already configured (e.g. restored from a
-// backup) should not have to wait up to a full day for its first pair of
-// databases - LookupCity/LookupASN would otherwise report ok=false the
-// entire time in between for no good reason.
+// Same "no immediate run at startup" behavior as coreupdate.RunScheduler
+// now (changed 2026-08-11): a process restart - Core update, container
+// restart, crash loop - must NOT itself trigger a download; only the wall
+// clock hitting the configured HH:MM does. Before this change RunScheduler
+// downloaded once unconditionally before entering the tick loop, which
+// meant every restart re-pulled both databases regardless of the admin's
+// chosen check time - surprising and, on a flaky network or a
+// restart-heavy day, needlessly repeated traffic to MaxMind. A fresh
+// install still isn't left without data for a full day: GeoIPConfigureHandler's
+// triggerDownload (-> TriggerNow) already fires an immediate download the
+// moment credentials are first saved, so LookupCity/LookupASN has data as
+// soon as GeoIP is configured; only a later *restart* of an
+// already-configured instance now waits for the next scheduled HH:MM
+// instead of re-downloading right away.
 //
 // Ticks every minute and fires downloadAll at most once per calendar day,
 // the moment the wall clock first matches the configured HH:MM - same
@@ -121,7 +129,6 @@ type Deps struct {
 // re-read used to have here.
 func RunScheduler(ctx context.Context, deps Deps) {
 	Configure(deps.DataDir)
-	downloadAll(ctx, deps)
 
 	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()

@@ -1176,11 +1176,15 @@ func main() {
 	go auth.RunSessionRevalidateWorker(ctx, authDeps)
 
 	// Downloads/refreshes the MaxMind GeoLite2 City + ASN databases once a
-	// day (internal/geoip.RunScheduler), plus once immediately at startup so
-	// a fresh install with credentials already configured (e.g. restored
-	// from a backup) does not wait a full day for its first pair of
-	// databases. A tick before GeoIP has ever been configured via the admin
-	// panel is a quiet no-op, same unconditional-start pattern as
+	// day (internal/geoip.RunScheduler), at the admin-configured check time -
+	// deliberately does NOT also run once at process startup (changed
+	// 2026-08-11): a Core restart must not itself trigger a download, only
+	// the configured HH:MM should (see RunScheduler's own doc comment). A
+	// fresh install still gets its first pair of databases immediately, via
+	// GeoIPConfigureHandler's triggerDownload the moment credentials are
+	// first saved - this scheduler is purely the recurring, restart-
+	// independent refresh. A tick before GeoIP has ever been configured via
+	// the admin panel is a quiet no-op, same unconditional-start pattern as
 	// mail.RunWorker/auth.RunSessionRevalidateWorker above.
 	go geoip.RunScheduler(ctx, geoipDeps)
 
