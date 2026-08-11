@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import i18n, { ensureLanguage } from "../lib/i18n";
 import {
-  getHealth,
+  getHealthDetails,
   getUserPrefs,
   getSystemInfo,
   listAIProviders,
@@ -16,7 +16,7 @@ import {
   updateUserPrefs,
   type AIUserProvider,
   type ChatMessage,
-  type HealthResponse,
+  type HealthDetailsResponse,
   type InstalledModule,
   type Session,
 } from "../lib/api";
@@ -172,7 +172,7 @@ export function AppShell({
 }) {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
-  const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [health, setHealth] = useState<HealthDetailsResponse | null>(null);
   const [openPanel, setOpenPanel] = useState<OpenPanel>(null);
   const [theme, setTheme] = useState<Theme>("light");
   // The actual light/dark class always comes from this, never from `theme`
@@ -210,28 +210,35 @@ export function AppShell({
     return () => mql.removeEventListener("change", onChange);
   }, []);
 
-  // frontendStale: true once a getHealth() response reports a backend
-  // version that no longer matches the JS bundle this tab actually has
-  // loaded (FRONTEND_VERSION, baked in at build time from package.json).
-  // That mismatch means a release happened after this tab's page load -
-  // the running backend has moved on, but this tab is still executing old
-  // frontend code. Added 2026-08-05 as a safety net alongside disabling
-  // the service worker's app-shell precaching (vite.config.ts) and adding
-  // real Cache-Control headers (now set by Core itself in
+  // frontendStale: true once a getHealthDetails() response reports a
+  // backend version that no longer matches the JS bundle this tab actually
+  // has loaded (FRONTEND_VERSION, baked in at build time from
+  // package.json). That mismatch means a release happened after this tab's
+  // page load - the running backend has moved on, but this tab is still
+  // executing old frontend code. Added 2026-08-05 as a safety net alongside
+  // disabling the service worker's app-shell precaching (vite.config.ts)
+  // and adding real Cache-Control headers (now set by Core itself in
   // backend/internal/webui, previously by deploy/nginx.conf): those two
   // stop this
   // tab from being handed stale code on its *next* load, but do nothing
   // for a tab that was already open across a deploy - only reloading gets
   // it current code, and nothing prompts that without this check.
+  //
+  // Reads from GET /v1/health/details, not the public /healthz, since
+  // 2026-08-11: version moved behind "any logged-in session" so an
+  // unauthenticated caller can no longer read the build version off this
+  // instance - see api.ts's HealthResponse/HealthDetailsResponse doc
+  // comments.
   const [frontendStale, setFrontendStale] = useState(false);
 
   // Unconditional on mount, not gated behind a session effect of its own -
   // by the time AppShell renders, the caller has already resolved a
   // session (see lib/useSession.ts), so there is nothing left to wait on
-  // here.
+  // here - which is also exactly why it's safe for this to call the
+  // session-gated /v1/health/details instead of the public /healthz.
   useEffect(() => {
     const checkHealth = () => {
-      getHealth()
+      getHealthDetails()
         .then((h) => {
           setHealth(h);
           setFrontendStale(h.version !== FRONTEND_VERSION);
@@ -816,7 +823,7 @@ function FooterBar({
   onTogglePanel,
 }: {
   isAdmin: boolean;
-  health: HealthResponse | null;
+  health: HealthDetailsResponse | null;
   onTogglePanel: (panel: Exclude<OpenPanel, null>) => void;
 }) {
   const { t } = useTranslation();
@@ -1514,12 +1521,13 @@ function relativeTime(at: number, t: TFunction): string {
   return t("shell.notifications_panel.time_hours_ago", { count: hours });
 }
 
-function StatusPanelContent({ health }: { health: HealthResponse }) {
+function StatusPanelContent({ health }: { health: HealthDetailsResponse }) {
   const { t } = useTranslation();
 
-  // /healthz's uptime_seconds is a snapshot from the moment it was fetched
-  // (AppShell only calls getHealth() once, on mount) - without a ticker the
-  // panel would show a frozen number until the whole page is reloaded.
+  // /v1/health/details's uptime_seconds is a snapshot from the moment it
+  // was fetched (AppShell only calls getHealthDetails() once, on mount) -
+  // without a ticker the panel would show a frozen number until the whole
+  // page is reloaded.
   //
   // This used to count ticks (setElapsedTick(s => s + 1)) instead of reading
   // the clock. Bug found 2026-07-05: setInterval is throttled/paused by the

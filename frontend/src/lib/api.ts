@@ -190,14 +190,38 @@ export function loginRedirectUrl(options?: { reauth?: boolean; returnPath?: stri
   return `${API_BASE_URL}/v1/auth/login${query ? `?${query}` : ""}`;
 }
 
+// HealthResponse is the body of the public, unauthenticated GET /healthz.
+// Deliberately minimal (2026-08-11 security pass): anyone who can reach the
+// container can call this with no session - Docker, Traefik, a tunnel
+// client (e.g. Pangolin/Newt) - so it must not leak recon-useful detail
+// (build version, dependency reachability). setup_completed is the one
+// exception: SetupWizard.tsx/App.tsx/AuthComplete.tsx/useSession.ts all
+// need it before any session/cookie exists, so there is no authenticated
+// endpoint they could call instead. Everything else that used to live here
+// moved to HealthDetailsResponse / getHealthDetails() below.
 export interface HealthResponse {
   status: string;
+  setup_completed: boolean;
+}
+
+// /healthz needs no bootstrap token - it's exempt from that gate in main.go
+// - which is exactly why setup_completed has to be readable through it: the
+// pages calling this run before login exists.
+export function getHealth(): Promise<HealthResponse> {
+  return request<HealthResponse>("/healthz");
+}
+
+// HealthDetailsResponse is the body of GET /v1/health/details - everything
+// /healthz used to expose publicly, now behind "any logged-in session"
+// (not admin-only: AppShell's status badge and stale-frontend check run for
+// every signed-in user). See backend/cmd/core/main.go's healthDetails doc
+// comment for why version lives here and not only in the admin-only
+// GET /v1/admin/system/info.
+export interface HealthDetailsResponse {
   version: string;
   uptime_seconds: number;
   postgres_reachable: boolean;
   valkey_reachable: boolean;
-  master_key_present: boolean;
-  setup_completed: boolean;
   searxng_configured: boolean;
   // Only present when searxng_configured is true.
   searxng_reachable?: boolean;
@@ -213,11 +237,11 @@ export interface HealthResponse {
   modules_failed: number;
 }
 
-// /healthz needs no bootstrap token - it's exempt from that gate in main.go
-// - which is exactly why the footer uses it to read the running version
-// rather than a dedicated authenticated endpoint.
-export function getHealth(): Promise<HealthResponse> {
-  return request<HealthResponse>("/healthz");
+// Requires a valid session (any role) - unlike getHealth(), this is only
+// ever called from inside the authenticated app (AppShell mounts after
+// login), so there is always a cookie to send.
+export function getHealthDetails(): Promise<HealthDetailsResponse> {
+  return request<HealthDetailsResponse>("/v1/health/details");
 }
 
 // Mirrors backend/internal/auth.MeResponse's JSON shape exactly (the

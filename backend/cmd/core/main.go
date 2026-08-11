@@ -109,14 +109,51 @@ func checkNTPAndSearXNGCached(ctx context.Context, baseURL string, searxngConfig
 	return ntpDriftOK, searxngUp
 }
 
+// healthStatus is the body of the public, unauthenticated GET /healthz.
+// Deliberately minimal (2026-08-11 security pass): this endpoint is polled
+// by anyone who can reach the container - Docker, Traefik, and any tunnel
+// client (e.g. Pangolin/Newt) sitting in front of it - with no session and
+// no way to authenticate, so it must not reveal anything an attacker could
+// use for recon (build version - CVE targeting - or internal dependency
+// topology like Postgres/Valkey reachability). The one exception is
+// SetupCompleted: SetupWizard.tsx/App.tsx/AuthComplete.tsx all need it
+// *before* login exists, which is the same reason this endpoint itself has
+// to be unauthenticated - see this field's own doc comment below. Everything
+// that used to live here (version, dependency reachability, module/NTP/
+// SearXNG status) moved to GET /v1/health/details (any logged-in user) and
+// GET /v1/admin/system/info (admin only, adds version + more).
 type healthStatus struct {
-	Status            string `json:"status"`
+	// Status is one of "ok" (Postgres reachable, Core fully serving),
+	// "degraded" (Postgres reachable but Valkey is not - sessions/cache/SSE
+	// are impaired but the app otherwise works, so this is NOT reported as
+	// a 503: restarting the container would not fix a Valkey outage), or
+	// "error" (Postgres unreachable - Core cannot really serve traffic,
+	// reported as 503 so Docker/Traefik/Pangolin actually notice). It never
+	// says *which* dependency is affected - see the package doc comment.
+	Status string `json:"status"`
+	// SetupCompleted must stay in this unauthenticated response: the pages
+	// that read it (SetupWizard.tsx, App.tsx, AuthComplete.tsx) run before
+	// any session/cookie exists, so there is no authenticated endpoint they
+	// could call instead. Low-sensitivity by nature - a single bit that only
+	// carries any signal during the brief window before the wizard first
+	// completes, and never again after.
+	SetupCompleted bool `json:"setup_completed"`
+}
+
+// healthDetails is the body of GET /v1/health/details (any logged-in user,
+// no admin role required - see healthDetailsHandler). Carries everything
+// /healthz used to expose publicly: it backs AppShell.tsx's per-page status
+// badge, which every signed-in user sees, not just admins. Version IS
+// included here (checked against frontend/src/components/AppShell.tsx,
+// which compares it to the bundled frontend's own version for a "please
+// reload" banner and shows it in the status panel - both run for every
+// logged-in user, not just admins, so it has to live at this tier and not
+// only in /v1/admin/system/info's admin-only response).
+type healthDetails struct {
 	Version           string `json:"version"`
 	UptimeSeconds     int64  `json:"uptime_seconds"`
 	PostgresUp        bool   `json:"postgres_reachable"`
 	ValkeyUp          bool   `json:"valkey_reachable"`
-	MasterKeySetUp    bool   `json:"master_key_present"`
-	SetupCompleted    bool   `json:"setup_completed"`
 	SearXNGConfigured bool   `json:"searxng_configured"`
 	// SearXNGUp is nil when SearXNG is not configured (omitted from JSON).
 	// When configured it reflects whether the last ping succeeded.
@@ -127,8 +164,8 @@ type healthStatus struct {
 	// TLS / JWT / audit-log timestamps may be wrong.
 	NTPDriftOK *bool `json:"ntp_drift_ok,omitempty"`
 	// ModulesActive/ModulesDegraded/ModulesFailed summarise
-	// installed_modules.status across every installed module, so an admin
-	// glancing at the System Status panel can see "1 of 3 modules is
+	// installed_modules.status across every installed module, so any
+	// logged-in user glancing at the status badge can see "1 of 3 modules is
 	// degraded" without opening the Modules admin page separately. Degraded
 	// is the status WorkerPool.SetCrashHandler (modules/deno.go) writes when
 	// a Tier 2/3 Deno worker exits unexpectedly - before this field existed,
@@ -276,76 +313,46 @@ func main() {
 
 	// /healthz is intentionally exempt from the bootstrap-token gate: it is
 	// meant for unauthenticated monitoring (e.g. Docker healthchecks,
-	// Traefik) and never reveals anything more sensitive than booleans, plus
-	// the build version - which the frontend's footer also reads from here
-	// rather than duplicating the version string on the client side.
+	// Traefik, a Pangolin/Newt tunnel health probe). Security pass
+	// 2026-08-11: this used to also carry the build version and per-
+	// dependency reachability booleans, which is more than an unauthenticated
+	// caller needs to know - see healthStatus's doc comment. That detail now
+	// lives behind GET /v1/health/details (any logged-in user) and
+	// GET /v1/admin/system/info (admin only).
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		// master_key_present is now always true while Core is running at
-		// all: MODULAB_MASTER_KEY has no database fallback anymore and
-		// config.Load already refused to start Core without it. Kept as a
-		// field (rather than removed) so existing /healthz consumers don't
-		// break, and because "always true" is itself useful confirmation
-		// that this build's startup validation actually ran.
-		status := healthStatus{
-			Status:         "ok",
-			Version:        version.Version,
-			UptimeSeconds:  int64(time.Since(startTime).Seconds()),
-			PostgresUp:     pool.Ping(r.Context()) == nil,
-			ValkeyUp:       valkeyClient.Ping(r.Context()) == nil,
-			MasterKeySetUp: cfg.MasterKey != "",
-			SetupCompleted: bootstrapMgr.Completed(),
+		postgresUp := pool.Ping(r.Context()) == nil
+		valkeyUp := valkeyClient.Ping(r.Context()) == nil
+
+		// Postgres is the core datastore - every request eventually touches
+		// it (sessions land in Valkey, but users/settings/audit/module state
+		// all live in Postgres), so Postgres being down means Core cannot
+		// actually serve traffic even though this process is still up and
+		// answering: "error", reported as 503 so a monitoring/orchestration
+		// layer (Docker healthcheck, Traefik, Pangolin) notices and can act.
+		//
+		// Valkey down does NOT trigger 503: most of the app still works with
+		// Valkey unreachable (only sessions/cache/SSE degrade), and
+		// restarting the container would not fix a Valkey outage - so this
+		// is "degraded" at 200, not an outage signal for orchestration
+		// purposes. Neither state says *which* dependency is affected -
+		// that detail is for /v1/health/details, not an unauthenticated
+		// caller.
+		statusText := "ok"
+		httpCode := http.StatusOK
+		switch {
+		case !postgresUp:
+			statusText = "error"
+			httpCode = http.StatusServiceUnavailable
+		case !valkeyUp:
+			statusText = "degraded"
 		}
-		// SearXNG is optional: only check reachability when a base URL is
-		// saved. GetSearchProviderBaseURL is a fast DB lookup; the Ping adds
-		// ~1 RTT on the internal network (same order of magnitude as the
-		// Postgres/Valkey checks). Kept as its own healthz field (rather than
-		// generalized to "any configured search provider") since SearXNG is
-		// the only provider type with an admin-chosen network address worth
-		// probing this way - Serper is a fixed public API host.
-		var baseURL string
-		var searxngConfigured bool
-		if u, configured, err := pool.GetSearchProviderBaseURL(r.Context(), db.DefaultSearchProviderID); err == nil {
-			status.SearXNGConfigured = configured
-			baseURL, searxngConfigured = u, configured
-		}
-		// NTP drift and SearXNG reachability are both outbound network calls,
-		// so they're cached for healthzCacheTTL (see checkNTPAndSearXNGCached's
-		// doc comment) instead of re-checked on every /healthz request.
-		status.NTPDriftOK, status.SearXNGUp = checkNTPAndSearXNGCached(r.Context(), baseURL, searxngConfigured)
-		// Module worker health summary - best-effort, same as the checks
-		// above: a failed lookup here must not break /healthz itself, it
-		// just leaves the counts at zero (indistinguishable from "no
-		// modules installed", which is an acceptable ambiguity for a
-		// monitoring endpoint that already treats most fields as
-		// best-effort).
-		if installed, err := pool.ListInstalledModules(r.Context()); err == nil {
-			for _, m := range installed {
-				switch m.Status {
-				case db.ModuleStatusActive:
-					status.ModulesActive++
-				case db.ModuleStatusDegraded:
-					status.ModulesDegraded++
-				case db.ModuleStatusFailed:
-					status.ModulesFailed++
-				}
-			}
-		}
+
 		w.Header().Set("Content-Type", "application/json")
-		// Postgres is the core datastore - every request eventually touches it
-		// (sessions land in Valkey, but users/settings/audit/module state all
-		// live in Postgres), so Postgres being down means Core cannot actually
-		// serve traffic even though this process is still up and answering.
-		// A monitoring/orchestration layer (Docker healthcheck, Traefik,
-		// an uptime check) needs a non-2xx to notice that, so this reports
-		// 503 rather than always 200 while still returning the same
-		// informative JSON body. Valkey down does NOT trigger 503 here: most
-		// of the app still works with Valkey unreachable (only
-		// sessions/cache/SSE degrade), so it stays a status field rather
-		// than an outage signal for orchestration purposes.
-		if !status.PostgresUp {
-			w.WriteHeader(http.StatusServiceUnavailable)
-		}
-		_ = json.NewEncoder(w).Encode(status)
+		w.WriteHeader(httpCode)
+		_ = json.NewEncoder(w).Encode(healthStatus{
+			Status:         statusText,
+			SetupCompleted: bootstrapMgr.Completed(),
+		})
 	})
 
 	// CSP violation reports (the report-uri/report-to directives in both
@@ -451,6 +458,71 @@ func main() {
 	mux.HandleFunc("/v1/auth/logout", authRateLimitMiddleware(valkeyClient, pool, cfg.MasterKey, "logout", auth.LogoutHandler(authDeps)))
 	// UI language preference: GET returns {"ui_language":"en|de|"}, PATCH updates.
 	mux.HandleFunc("/v1/user/preferences", auth.UserPrefsHandler(authDeps))
+
+	// GET /v1/health/details — the fuller dependency/status breakdown that
+	// used to live in /healthz's public response. Gated on "any valid
+	// session", deliberately not adminOnly: AppShell.tsx's status badge is
+	// shown to every signed-in user, not just admins, and re-uses this one
+	// request rather than each page doing its own round trip. Same
+	// session-validates-itself pattern as auth.MeHandler above - not
+	// wrapped in adminOnly since a non-admin session must still pass.
+	// Registered here (after authDeps exists), not next to /healthz itself
+	// further up - that one is deliberately public and constructed before
+	// authDeps is even built.
+	mux.HandleFunc("GET /v1/health/details", func(w http.ResponseWriter, r *http.Request) {
+		token := sessionToken(r)
+		if token == "" {
+			http.Error(w, "missing session cookie", http.StatusUnauthorized)
+			return
+		}
+		if _, ok, err := auth.ValidateSession(r.Context(), authDeps, token, clientIP(r), auth.LoginCountry(r), r.Header.Get("User-Agent")); err != nil || !ok {
+			http.Error(w, "invalid or expired session", http.StatusUnauthorized)
+			return
+		}
+
+		details := healthDetails{
+			Version:       version.Version,
+			UptimeSeconds: int64(time.Since(startTime).Seconds()),
+			PostgresUp:    pool.Ping(r.Context()) == nil,
+			ValkeyUp:      valkeyClient.Ping(r.Context()) == nil,
+		}
+		// SearXNG is optional: only check reachability when a base URL is
+		// saved. GetSearchProviderBaseURL is a fast DB lookup; the Ping adds
+		// ~1 RTT on the internal network (same order of magnitude as the
+		// Postgres/Valkey checks). Kept as its own field (rather than
+		// generalized to "any configured search provider") since SearXNG is
+		// the only provider type with an admin-chosen network address worth
+		// probing this way - Serper is a fixed public API host.
+		var baseURL string
+		var searxngConfigured bool
+		if u, configured, err := pool.GetSearchProviderBaseURL(r.Context(), db.DefaultSearchProviderID); err == nil {
+			details.SearXNGConfigured = configured
+			baseURL, searxngConfigured = u, configured
+		}
+		// NTP drift and SearXNG reachability are both outbound network calls,
+		// so they're cached for healthzCacheTTL (see checkNTPAndSearXNGCached's
+		// doc comment) instead of re-checked on every request.
+		details.NTPDriftOK, details.SearXNGUp = checkNTPAndSearXNGCached(r.Context(), baseURL, searxngConfigured)
+		// Module worker health summary - best-effort: a failed lookup here
+		// must not break this endpoint, it just leaves the counts at zero
+		// (indistinguishable from "no modules installed", which is an
+		// acceptable ambiguity for a status badge that already treats most
+		// fields as best-effort).
+		if installed, err := pool.ListInstalledModules(r.Context()); err == nil {
+			for _, m := range installed {
+				switch m.Status {
+				case db.ModuleStatusActive:
+					details.ModulesActive++
+				case db.ModuleStatusDegraded:
+					details.ModulesDegraded++
+				case db.ModuleStatusFailed:
+					details.ModulesFailed++
+				}
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(details)
+	})
 
 	// Spec section 3.5's real-time notification stream (internal/notify):
 	// authenticates its own bearer token from a query parameter rather
@@ -2191,12 +2263,13 @@ func sessionToken(r *http.Request) string {
 }
 
 // systemInfoHandler serves GET /v1/admin/system/info (admin only).
-// Reuses the same best-effort checks as /healthz for the shared fields
-// (dependency reachability, NTP drift, SearXNG) rather than duplicating a
-// second, subtly-different implementation of each — the difference here is
-// the registry-sync countdown and the per-module version table, neither of
-// which /healthz carries since it's meant to stay a cheap, unauthenticated
-// monitoring probe.
+// Reuses the same best-effort checks as GET /v1/health/details for the
+// shared fields (dependency reachability, NTP drift, SearXNG) rather than
+// duplicating a second, subtly-different implementation of each — the
+// difference here is the registry-sync countdown and the per-module version
+// table, neither of which /v1/health/details carries since that one is
+// meant to stay a cheap status badge for any logged-in user, not an
+// admin-only diagnostics page.
 func systemInfoHandler(pool *db.Pool, valkeyClient *valkey.Client, cfg config.Config, startTime time.Time, storeDeps store.Deps, authDeps auth.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
