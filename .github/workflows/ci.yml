@@ -153,12 +153,49 @@ jobs:
     if: github.event_name != 'release'
     permissions:
       contents: read
+    # Postgres and Valkey backing the smoke-boot check below. Same
+    # image+digest pins as deploy/docker-compose.yml's postgres/valkey
+    # services, so this is testing against the same versions production
+    # actually runs, not whatever :latest happens to resolve to on a given
+    # day. Published on the runner's own localhost (not a Docker network),
+    # since the app container below joins the runner's network directly via
+    # --network host to reach them - GitHub-hosted job steps that run
+    # directly on the runner (no `container:` block on this job) always see
+    # service containers on localhost, this just extends that to the
+    # container the build step below produces.
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:16bc17c64a573ef34162af9298258d1aec548232985b33ed7b1eac33ba35c229
+        env:
+          POSTGRES_DB: modulab
+          POSTGRES_USER: modulab
+          POSTGRES_PASSWORD: modulab
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U modulab"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      valkey:
+        image: valkey/valkey:9-alpine@sha256:ee91f7a174ac4d6a6b0685b3a60e321f0a9dbbb691f9b0e285be2ba1d1be8328
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
       # Deliberately no docker/login-action step here - this job has no
       # credentials to push with even if push were accidentally set to true.
+      # load: true (new) pulls the built image into the runner's local
+      # `docker images` so the smoke-boot step below can `docker run` it -
+      # without it, buildx's container driver keeps the result inside its
+      # own builder and `docker run` would fail with "no such image".
       - name: Build image (no push)
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
@@ -166,7 +203,71 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64
           push: false
+          load: true
           tags: modulab-core:ci-${{ github.sha }}
+      # Boots the image just built against real Postgres/Valkey and polls
+      # the unauthenticated GET /healthz until it reports healthy or the
+      # 60s budget runs out. This is deliberately NOT a login/OIDC flow
+      # test (see the e2e job's doc comment above for why that needs a
+      # mock IdP and is intentionally deferred) - it only proves the
+      # container actually starts, connects to its dependencies, and
+      # serves traffic, which catches Dockerfile/entrypoint/startup
+      # regressions the Go/npm unit tests above can't see (e.g. a broken
+      # entrypoint.sh chown, a missing binary in the final image stage, a
+      # config regression that panics before the HTTP server binds).
+      # MODULAB_MASTER_KEY only needs to be valid hex of the right length
+      # here, not secret - this container is destroyed at the end of the
+      # job and never holds real data.
+      - name: Start container and wait for /healthz
+        run: |
+          docker run -d --name modulab-core-smoke \
+            --network host \
+            -e MODULAB_MASTER_KEY="$(openssl rand -hex 32)" \
+            -e MODULAB_DB_HOST=localhost \
+            -e MODULAB_DB_PORT=5432 \
+            -e MODULAB_DB_NAME=modulab \
+            -e MODULAB_DB_USER=modulab \
+            -e MODULAB_DB_PASSWORD=modulab \
+            -e MODULAB_VALKEY_HOST=localhost \
+            -e MODULAB_VALKEY_PORT=6379 \
+            modulab-core:ci-${{ github.sha }}
+
+          code=000
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /tmp/healthz.json -w '%{http_code}' http://localhost:8080/healthz || echo 000)
+            [ "$code" = "200" ] && break
+            sleep 2
+          done
+
+          echo "Last /healthz response (HTTP $code):"
+          cat /tmp/healthz.json 2>/dev/null || echo "(no body)"
+
+          if [ "$code" != "200" ]; then
+            echo "::error::modulab-core did not become healthy within 60s (last HTTP code: $code)"
+            docker logs modulab-core-smoke
+            exit 1
+          fi
+
+          # "ok" or "degraded" both mean the HTTP layer and Postgres are
+          # up - see healthStatus's doc comment in main.go for why a
+          # Valkey-only outage is "degraded" rather than an error. Only
+          # "error" (Postgres unreachable) should fail this check.
+          status=$(jq -r '.status' /tmp/healthz.json)
+          if [ "$status" != "ok" ] && [ "$status" != "degraded" ]; then
+            echo "::error::unexpected /healthz status: $status"
+            docker logs modulab-core-smoke
+            exit 1
+          fi
+      # Runs even if the step above failed, so a broken boot still leaves
+      # its logs visible in the job output for debugging - without
+      # `if: always()` a failed health check would skip straight to the
+      # job's failure summary with no container output attached.
+      - name: Show container logs
+        if: always()
+        run: docker logs modulab-core-smoke || true
+      - name: Stop container
+        if: always()
+        run: docker rm -f modulab-core-smoke || true
 
   # Deliberately not implemented yet - see the decision below before adding
   # real Playwright coverage here.
@@ -308,17 +409,41 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Log in to Docker Hub
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
       # Combines the amd64 and arm64 digests pushed separately above into one
       # multi-platform manifest list under the real tags - this is the step
       # that actually makes `docker pull ghcr.io/.../modulab-core:latest`
       # resolve to the right image per-architecture again.
-      - name: Create manifest list and push
+      - name: Create manifest list and push (ghcr.io)
         working-directory: /tmp/digests
         run: |
           docker buildx imagetools create \
             -t ghcr.io/modulab-project/modulab-core:latest \
             -t ghcr.io/modulab-project/modulab-core:${{ github.event.release.tag_name }} \
             $(printf 'ghcr.io/modulab-project/modulab-core@sha256:%s ' *)
+      # Mirrors the multi-arch manifest just created above to Docker Hub.
+      # Deliberately NOT a second push-by-digest leg in publish-image-build:
+      # docker/build-push-action's outputs field only supports one image
+      # name per push-by-digest build (a comma-separated name= list there
+      # needs the whole field single-quoted, which GitHub Actions' own YAML
+      # quoting can't express without breaking the parser - confirmed via
+      # docker/build-push-action#1067, where exactly this was attempted and
+      # only the last name in the list ever got pushed). `imagetools create`
+      # sidesteps that: given one existing multi-platform source, it does a
+      # "carbon copy" to a new destination/tag, copying whatever blobs the
+      # destination registry doesn't already have - so this reuses the
+      # ghcr.io manifest just created above instead of building or pushing
+      # anything a second time.
+      - name: Copy image to Docker Hub
+        run: |
+          docker buildx imagetools create \
+            -t docker.io/getmodulab/modulab-core:latest \
+            -t docker.io/getmodulab/modulab-core:${{ github.event.release.tag_name }} \
+            ghcr.io/modulab-project/modulab-core:${{ github.event.release.tag_name }}
       - name: Inspect image
         run: docker buildx imagetools inspect ghcr.io/modulab-project/modulab-core:${{ github.event.release.tag_name }}
       # Scans the image that was just published (OS packages + Deno/Go/npm
@@ -362,3 +487,36 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "${{ github.event.release.tag_name }}" sbom.cdx.json --clobber --repo "${{ github.repository }}"
+      # Builds the Docker Hub Full Description from this exact release's
+      # title and notes so the repo page always reflects the version that
+      # was just published, instead of a static README that drifts. The
+      # release title/body go through env vars rather than directly into
+      # the run: script - interpolating untrusted GitHub context straight
+      # into a shell command is a known script-injection vector (a release
+      # body containing e.g. `$(...)` or backticks would otherwise execute
+      # in this step); env vars are substituted after the shell parses the
+      # script, so their contents are inert.
+      - name: Build Docker Hub description
+        env:
+          RELEASE_NAME: ${{ github.event.release.name }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+        run: |
+          {
+            echo "# ${RELEASE_NAME}"
+            echo
+            echo "${RELEASE_BODY}"
+          } > /tmp/dockerhub-readme.md
+      # peter-evans/dockerhub-description pushes short-description (repo
+      # tagline, Docker Hub's 100-char field) and the Full Description
+      # (readme-filepath, Docker Hub's long-form repo page body) together.
+      # SHA-pinned to match this file's convention elsewhere - confirmed via
+      # `git ls-remote --tags` that v5.0.0 is a lightweight tag pointing
+      # directly at this commit (no separate tag object to dereference).
+      - name: Update Docker Hub description
+        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5.0.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: getmodulab/modulab-core
+          short-description: "ModuLab Core - self-hosted modular platform with isolated, sandboxed plugin modules"
+          readme-filepath: /tmp/dockerhub-readme.md
