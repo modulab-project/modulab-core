@@ -80,6 +80,14 @@ ENV COSIGN_VERSION=3.1.1
 # Detect CPU arch at build time so the image works on both x86_64 and arm64
 # (Apple Silicon via `docker buildx build --platform linux/arm64` or plain
 # `docker build` on an M-series Mac with the default linux/arm64 platform).
+#
+# CURL_RETRY below was added 2026-08-12: the Deno/cosign downloads plain
+# `curl -fsSL` failed outright on the first dropped connection (`curl: (56)
+# Connection died`), with no retry at all - one transient TLS/network blip
+# to GitHub's release CDN mid-build meant a full failed build, no different
+# from a real problem. --retry-all-errors (not just curl's default
+# transient-error subset) covers exactly this "connection died" class since
+# it is not one of the codes plain --retry retries on its own.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
@@ -93,18 +101,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
          arm64) DENO_ARCH="aarch64-unknown-linux-gnu"; COSIGN_ARCH="arm64" ;; \
          *) echo "Unsupported arch: $ARCH" && exit 1 ;; \
        esac \
-    && curl -fsSL "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-${DENO_ARCH}.zip" \
+    && CURL_RETRY="--retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 10" \
+    && curl -fsSL $CURL_RETRY "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-${DENO_ARCH}.zip" \
         -o "/tmp/deno-${DENO_ARCH}.zip" \
-    && curl -fsSL "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-${DENO_ARCH}.zip.sha256sum" \
+    && curl -fsSL $CURL_RETRY "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-${DENO_ARCH}.zip.sha256sum" \
         -o /tmp/deno.zip.sha256sum \
     && (cd /tmp && sha256sum -c deno.zip.sha256sum) \
     && unzip "/tmp/deno-${DENO_ARCH}.zip" -d /usr/local/bin \
     && rm "/tmp/deno-${DENO_ARCH}.zip" /tmp/deno.zip.sha256sum \
     && chmod +x /usr/local/bin/deno \
     && deno --version \
-    && curl -fsSL "https://github.com/sigstore/cosign/releases/download/v${COSIGN_VERSION}/cosign-linux-${COSIGN_ARCH}" \
+    && curl -fsSL $CURL_RETRY "https://github.com/sigstore/cosign/releases/download/v${COSIGN_VERSION}/cosign-linux-${COSIGN_ARCH}" \
         -o "/tmp/cosign-linux-${COSIGN_ARCH}" \
-    && curl -fsSL "https://github.com/sigstore/cosign/releases/download/v${COSIGN_VERSION}/cosign_checksums.txt" \
+    && curl -fsSL $CURL_RETRY "https://github.com/sigstore/cosign/releases/download/v${COSIGN_VERSION}/cosign_checksums.txt" \
         -o /tmp/cosign_checksums.txt \
     && (cd /tmp && grep -E "  cosign-linux-${COSIGN_ARCH}\$" cosign_checksums.txt | sha256sum -c -) \
     && mv "/tmp/cosign-linux-${COSIGN_ARCH}" /usr/local/bin/cosign \
