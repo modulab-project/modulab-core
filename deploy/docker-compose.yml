@@ -85,6 +85,11 @@ services:
     cpus: 0.25
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      # See .env.example's "Container clock" section - this image has no
+      # zoneinfo database of its own, so plain TZ=... above cannot resolve
+      # a named zone and silently stays UTC; mounting the host's
+      # already-resolved localtime file works regardless.
+      - /etc/localtime:/etc/localtime:ro
     networks:
       - docker-socket-proxy-internal
     healthcheck:
@@ -154,6 +159,12 @@ services:
       - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
     volumes:
       - traefik-acme:/letsencrypt
+      # See .env.example's "Container clock" section - this image has no
+      # zoneinfo database of its own, so plain TZ=... above cannot resolve
+      # a named zone and silently stays UTC; mounting the host's
+      # already-resolved localtime file works regardless. Affects the
+      # --accesslog=true timestamps above.
+      - /etc/localtime:/etc/localtime:ro
     depends_on:
       docker-socket-proxy:
         condition: service_healthy
@@ -179,6 +190,11 @@ services:
     cpus: 1.0
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      # See .env.example's "Container clock" section - this image has no
+      # zoneinfo database of its own, so plain TZ=... above cannot resolve
+      # a named zone and silently stays UTC; mounting the host's
+      # already-resolved localtime file works regardless.
+      - /etc/localtime:/etc/localtime:ro
     networks:
       - modulab-internal
     healthcheck:
@@ -226,6 +242,8 @@ services:
     cpus: 0.5
     volumes:
       - valkey-data:/data
+      # See .env.example's "Container clock" section.
+      - /etc/localtime:/etc/localtime:ro
     networks:
       - modulab-internal
     healthcheck:
@@ -268,6 +286,9 @@ services:
       TZ: ${TZ:-UTC}
     mem_limit: 128m
     cpus: 0.25
+    volumes:
+      # See .env.example's "Container clock" section.
+      - /etc/localtime:/etc/localtime:ro
     networks:
       - modulab-internal
     healthcheck:
@@ -324,6 +345,11 @@ services:
       # Path must match MODULAB_GEOIP_DATA_DIR's default in
       # internal/config/config.go (/data/geoip).
       - geoip-data:/data/geoip
+      # See .env.example's "Container clock" section - the Core image
+      # already has tzdata installed (Dockerfile), so this is redundant
+      # here specifically, but kept for consistency with every other
+      # service in this file and as a fallback if that ever changes.
+      - /etc/localtime:/etc/localtime:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -484,6 +510,11 @@ services:
     cpus: 0.5
     volumes:
       - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+      # See .env.example's "Container clock" section - this image has no
+      # zoneinfo database of its own, so plain TZ=... above cannot resolve
+      # a named zone and silently stays UTC; mounting the host's
+      # already-resolved localtime file works regardless.
+      - /etc/localtime:/etc/localtime:ro
     depends_on:
       searxng-valkey:
         condition: service_healthy
