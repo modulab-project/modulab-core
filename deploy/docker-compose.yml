@@ -168,7 +168,7 @@ services:
   # ── PostgreSQL ───────────────────────────────────────────────────────────────
   postgres:
     # Digest-pinned - same reasoning as the traefik service above.
-    image: postgres:16-alpine@sha256:16bc17c64a573ef34162af9298258d1aec548232985b33ed7b1eac33ba35c229
+    image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
