@@ -55,7 +55,16 @@ FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639
 # verifier / Tier 2-3 runtime itself, so its own integrity is checked the same
 # way modules.downloadFile + VerifySHA256 already check module ZIPs.
 ENV DENO_VERSION=2.9.0
-ENV COSIGN_VERSION=3.0.6
+# 3.0.6 -> 3.1.1 (2026-08-12): the Trivy scan on the v1.2.1 release image
+# flagged this binary for CVEs with a "Fixed Version" listed - unlike the
+# debian:bookworm-slim base image's findings in the same scan, which mostly
+# have no fix available yet from Debian, these are actually resolved
+# upstream. v3.1.1 is the current latest stable release (confirmed via
+# github.com/sigstore/cosign/releases, 2026-06-09) and pulls in the fixed
+# github.com/sigstore/fulcio (>=1.8.6), github.com/sigstore/rekor (>=1.5.2),
+# and golang.org/x/crypto/x/net/stdlib versions the scan's Fixed Version
+# column pointed at.
+ENV COSIGN_VERSION=3.1.1
 # Detect CPU arch at build time so the image works on both x86_64 and arm64
 # (Apple Silicon via `docker buildx build --platform linux/arm64` or plain
 # `docker build` on an M-series Mac with the default linux/arm64 platform).
