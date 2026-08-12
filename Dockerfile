@@ -65,6 +65,18 @@ ENV DENO_VERSION=2.9.0
 # and golang.org/x/crypto/x/net/stdlib versions the scan's Fixed Version
 # column pointed at.
 ENV COSIGN_VERSION=3.1.1
+# tzdata: the IANA Time Zone Database, needed by setup.SystemTimezoneLocation
+# (backend/internal/setup/timezone.go) so time.LoadLocation can resolve an
+# admin-configured zone name (e.g. "Europe/Berlin") for GeoIP/core-update's
+# scheduled check times - see that file's doc comment for the bug this
+# fixes. debian:bookworm-slim does not include it by default. Installed as
+# a normal OS package (updated on every rebuild via apt, independent of the
+# Go toolchain's own release cycle) rather than Go's time/tzdata
+# blank-import: this base image already has a package manager, so there is
+# no reason to also bake a second, build-time-frozen copy of the same data
+# into the binary - the OS package stays current with every image rebuild,
+# while an embedded copy would only refresh whenever the Go toolchain
+# itself was upgraded.
 # Detect CPU arch at build time so the image works on both x86_64 and arm64
 # (Apple Silicon via `docker buildx build --platform linux/arm64` or plain
 # `docker build` on an M-series Mac with the default linux/arm64 platform).
@@ -74,6 +86,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         unzip \
         passwd \
         gosu \
+        tzdata \
     && ARCH="$(dpkg --print-architecture)" \
     && case "$ARCH" in \
          amd64) DENO_ARCH="x86_64-unknown-linux-gnu"; COSIGN_ARCH="amd64" ;; \

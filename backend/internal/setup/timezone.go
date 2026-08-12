@@ -52,12 +52,11 @@ const (
 )
 
 // ParseSystemTimezone validates raw as an IANA Time Zone Database name and
-// returns the resolved *time.Location. Requires the "time/tzdata" package
-// to be blank-imported somewhere in the binary (see cmd/core/main.go) -
-// the production Docker image's debian:bookworm-slim final stage does not
-// install the OS tzdata package, so without that embedded copy
-// time.LoadLocation would fail closed to UTC for every zone name except
-// "UTC" and "Local" itself.
+// returns the resolved *time.Location. Requires the OS's tzdata package to
+// be installed wherever this runs (see the Dockerfile's final stage's
+// `apt-get install` list) - debian:bookworm-slim does not include it by
+// default, and without it time.LoadLocation would fail closed to UTC for
+// every zone name except "UTC" and "Local" itself.
 func ParseSystemTimezone(raw string) (*time.Location, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

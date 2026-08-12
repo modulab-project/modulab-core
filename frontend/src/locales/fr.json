@@ -444,8 +444,8 @@
       "check_now_error": "Échec de la vérification. Veuillez réessayer."
     },
     "system_general": {
-      "title": "Langue & Instance",
-      "subtitle": "La langue par défaut à l'échelle du système et le nom d'affichage utilisé dans toute l'instance et dans les e-mails système sortants.",
+      "title": "Général et fuseau horaire",
+      "subtitle": "La langue par défaut à l'échelle du système, le nom d'affichage utilisé dans toute l'instance et dans les e-mails système sortants, et le fuseau horaire utilisé pour évaluer chaque heure de vérification planifiée dans ModuLab.",
       "load_error": "Impossible de charger ces paramètres.",
       "save_error": "Échec de l'enregistrement.",
       "saved": "Enregistré",
@@ -606,7 +606,7 @@
         "config_search_provider_key_cleared": "Clé du fournisseur de recherche effacée",
         "config_search_settings": "Paramètres de recherche modifiés",
         "config_system_limits": "Limites système modifiées",
-        "config_system_general": "Paramètres système (langue et instance) modifiés",
+        "config_system_general": "Paramètres système (langue, instance et fuseau horaire) modifiés",
         "ai_user_key_set": "Clé IA personnelle définie",
         "ai_user_key_deleted": "Clé IA personnelle supprimée",
         "search_user_key_set": "Clé de recherche personnelle définie",

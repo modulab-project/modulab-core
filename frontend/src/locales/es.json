@@ -444,8 +444,8 @@
       "check_now_error": "Error al comprobar. Inténtalo de nuevo."
     },
     "system_general": {
-      "title": "Idioma e Instancia",
-      "subtitle": "El idioma predeterminado de todo el sistema y el nombre visible utilizado en toda la instancia y en los correos del sistema salientes.",
+      "title": "General y zona horaria",
+      "subtitle": "El idioma predeterminado de todo el sistema, el nombre visible utilizado en toda la instancia y en los correos del sistema salientes, y la zona horaria con la que se evalúa cada hora de comprobación programada en ModuLab.",
       "load_error": "No se pudieron cargar estos ajustes.",
       "save_error": "Error al guardar.",
       "saved": "Guardado",
@@ -606,7 +606,7 @@
         "config_search_provider_key_cleared": "Clave del proveedor de búsqueda borrada",
         "config_search_settings": "Ajustes de búsqueda modificados",
         "config_system_limits": "Límites del sistema modificados",
-        "config_system_general": "Configuración del sistema (idioma e instancia) modificada",
+        "config_system_general": "Configuración del sistema (idioma, instancia y zona horaria) modificada",
         "ai_user_key_set": "Clave de IA personal establecida",
         "ai_user_key_deleted": "Clave de IA personal eliminada",
         "search_user_key_set": "Clave de búsqueda personal establecida",

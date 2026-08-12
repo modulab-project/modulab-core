@@ -444,8 +444,8 @@
       "check_now_error": "Controle mislukt. Probeer het opnieuw."
     },
     "system_general": {
-      "title": "Taal & Instantie",
-      "subtitle": "De systeembrede standaardtaal en de weergavenaam die in de hele instantie en in uitgaande systeem-e-mails wordt gebruikt.",
+      "title": "Algemeen & tijdzone",
+      "subtitle": "De systeembrede standaardtaal, de weergavenaam die in de hele instantie en in uitgaande systeem-e-mails wordt gebruikt, en de tijdzone waartegen elke geplande controletijd in ModuLab wordt geëvalueerd.",
       "load_error": "Kon deze instellingen niet laden.",
       "save_error": "Opslaan is mislukt.",
       "saved": "Opgeslagen",
@@ -606,7 +606,7 @@
         "config_search_provider_key_cleared": "Zoekprovidersleutel gewist",
         "config_search_settings": "Zoekinstellingen gewijzigd",
         "config_system_limits": "Systeemlimieten gewijzigd",
-        "config_system_general": "Systeeminstellingen (taal & instantie) gewijzigd",
+        "config_system_general": "Systeeminstellingen (taal, instantie & tijdzone) gewijzigd",
         "ai_user_key_set": "Persoonlijke AI-sleutel ingesteld",
         "ai_user_key_deleted": "Persoonlijke AI-sleutel verwijderd",
         "search_user_key_set": "Persoonlijke zoekprovidersleutel ingesteld",

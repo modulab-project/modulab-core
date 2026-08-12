@@ -444,8 +444,8 @@
       "check_now_error": "Check failed. Please try again."
     },
     "system_general": {
-      "title": "Language & Instance",
-      "subtitle": "The system-wide default language, and the display name used throughout the instance and in outgoing system mail.",
+      "title": "General & Timezone",
+      "subtitle": "The system-wide default language, the display name used throughout the instance and in outgoing system mail, and the timezone every scheduled check time in ModuLab is evaluated against.",
       "load_error": "Could not load these settings.",
       "save_error": "Failed to save.",
       "saved": "Saved",
@@ -606,7 +606,7 @@
         "config_search_provider_key_cleared": "Search provider key cleared",
         "config_search_settings": "Search settings changed",
         "config_system_limits": "System limits changed",
-        "config_system_general": "System settings (language & instance) changed",
+        "config_system_general": "System settings (language, instance & timezone) changed",
         "ai_user_key_set": "Personal AI provider key set",
         "ai_user_key_deleted": "Personal AI provider key deleted",
         "search_user_key_set": "Personal search provider key set",

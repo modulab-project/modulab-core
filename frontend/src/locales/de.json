@@ -444,8 +444,8 @@
       "check_now_error": "Prüfung fehlgeschlagen. Bitte erneut versuchen."
     },
     "system_general": {
-      "title": "Sprache & Instanz",
-      "subtitle": "Die systemweite Standardsprache und der Anzeigename, der in der gesamten Instanz sowie in ausgehenden System-E-Mails verwendet wird.",
+      "title": "Allgemein & Zeitzone",
+      "subtitle": "Die systemweite Standardsprache, der Anzeigename, der in der gesamten Instanz sowie in ausgehenden System-E-Mails verwendet wird, und die Zeitzone, anhand derer jede geplante Prüfzeit in ModuLab ausgewertet wird.",
       "load_error": "Diese Einstellungen konnten nicht geladen werden.",
       "save_error": "Speichern fehlgeschlagen.",
       "saved": "Gespeichert",
@@ -606,7 +606,7 @@
         "config_search_provider_key_cleared": "Suchanbieter-Schlüssel gelöscht",
         "config_search_settings": "Sucheinstellungen geändert",
         "config_system_limits": "Systemgrenzwerte geändert",
-        "config_system_general": "Systemeinstellungen (Sprache & Instanz) geändert",
+        "config_system_general": "Systemeinstellungen (Sprache, Instanz & Zeitzone) geändert",
         "ai_user_key_set": "Persönlicher KI-Anbieter-Schlüssel gesetzt",
         "ai_user_key_deleted": "Persönlicher KI-Anbieter-Schlüssel gelöscht",
         "search_user_key_set": "Persönlicher Suchanbieter-Schlüssel gesetzt",
