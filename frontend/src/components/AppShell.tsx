@@ -1146,6 +1146,32 @@ function ProfilePanelContent({
 
   const activeSystemCategory = systemCategories.find((c) => c.key === systemDrillGroup) ?? null;
 
+  // Same locale-sort treatment as systemCategories above, applied to the
+  // other two accordions - "Meine Module" was previously left in whatever
+  // order activeModules came back from the API, and "Einstellungen" was a
+  // fixed 3-item JSX list. Both now resolve their display label first, then
+  // sort by that label in the active language.
+  const sortedActiveModules = useMemo(() => {
+    const locale = i18nInstance.language;
+    const lng = i18nInstance.language?.slice(0, 2) ?? "en";
+    return activeModules
+      .map((mod) => {
+        const mf = mod.manifest as { display_name?: Record<string, string>; name?: string } | null;
+        const label = mf?.display_name?.[lng] ?? mf?.display_name?.["en"] ?? mf?.name ?? mod.name;
+        return { mod, label };
+      })
+      .sort((a, b) => a.label.localeCompare(b.label, locale));
+  }, [activeModules, i18nInstance.language]);
+
+  const settingsLinks = useMemo(() => {
+    const locale = i18nInstance.language;
+    return [
+      { to: "/user/feeds", label: t("shell.my_feeds") },
+      { to: "/user/ai-keys", label: t("shell.ai_providers") },
+      { to: "/user/search-prefs", label: t("shell.search_settings") },
+    ].sort((a, b) => a.label.localeCompare(b.label, locale));
+  }, [t, i18nInstance.language]);
+
   function toggleGroup(group: "modules" | "settings" | "system") {
     setOpenGroup((prev) => (prev === group ? null : group));
     if (group !== "system") setSystemDrillGroup(null);
@@ -1174,13 +1200,9 @@ function ProfilePanelContent({
           open={openGroup === "modules"}
           onToggle={() => toggleGroup("modules")}
         >
-          {activeModules.map((mod) => (
+          {sortedActiveModules.map(({ mod, label }) => (
             <Link key={mod.name} to={`/modules/${mod.name}`} onClick={onClose} className={SUB_ITEM_CLASS}>
-              {(() => {
-                const mf = mod.manifest as { display_name?: Record<string, string>; name?: string } | null;
-                const lng = i18nInstance.language?.slice(0, 2) ?? "en";
-                return mf?.display_name?.[lng] ?? mf?.display_name?.["en"] ?? mf?.name ?? mod.name;
-              })()}
+              {label}
             </Link>
           ))}
         </AccordionGroup>
@@ -1192,15 +1214,11 @@ function ProfilePanelContent({
         open={openGroup === "settings"}
         onToggle={() => toggleGroup("settings")}
       >
-        <Link to="/user/feeds" onClick={onClose} className={SUB_ITEM_CLASS}>
-          {t("shell.my_feeds")}
-        </Link>
-        <Link to="/user/ai-keys" onClick={onClose} className={SUB_ITEM_CLASS}>
-          {t("shell.ai_providers")}
-        </Link>
-        <Link to="/user/search-prefs" onClick={onClose} className={SUB_ITEM_CLASS}>
-          {t("shell.search_settings")}
-        </Link>
+        {settingsLinks.map((link) => (
+          <Link key={link.to} to={link.to} onClick={onClose} className={SUB_ITEM_CLASS}>
+            {link.label}
+          </Link>
+        ))}
       </AccordionGroup>
 
       {/* Admin-only. Before 2026-07-29's role-model change there was a
