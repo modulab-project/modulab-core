@@ -436,7 +436,7 @@
       "core_update_check_weekdays_hint": "Days of the week Core checks GitHub for a newer release.",
       "core_update_check_weekdays_error": "Select at least one day.",
       "core_update_check_time_label": "Check time",
-      "core_update_check_time_hint": "Time of day the check runs on each selected day.",
+      "core_update_check_time_hint": "Time of day the check runs on each selected day, in the configured system timezone ({{timezone}}).",
       "core_update_check_time_error": "Enter a valid time (HH:MM).",
       "check_now_button": "Check now",
       "check_now_update_found": "Version {{version}} is available.",
@@ -460,7 +460,12 @@
       "lang_fr": "French",
       "section_identity": "Instance Identity",
       "instance_name_label": "Instance name",
-      "instance_name_hint": "Shown in place of \"ModuLab\" in system emails (e.g. \"Your {{name}} account is ready\")."
+      "instance_name_hint": "Shown in place of \"ModuLab\" in system emails (e.g. \"Your {{name}} account is ready\").",
+      "section_timezone": "Timezone",
+      "timezone_label": "System timezone",
+      "timezone_hint": "IANA timezone (e.g. \"Europe/Berlin\") every scheduled check time in ModuLab (GeoIP database refresh, update check) is evaluated against.",
+      "timezone_detect_button": "Use my timezone",
+      "timezone_error": "Please select a valid IANA timezone (e.g. \"Europe/Berlin\")."
     },
     "system_info": {
       "title": "System info",
@@ -678,9 +683,9 @@
       "file_build_date": "MaxMind build date: {{date}}",
       "update_timer_title": "Automatic refresh",
       "check_time_label": "Check time",
-      "check_time_hint": "Time of day ModuLab checks MaxMind for a new database version, once per day.",
+      "check_time_hint": "Time of day ModuLab checks MaxMind for a new database version, once per day, in the configured system timezone ({{timezone}}).",
       "check_time_error": "Enter a valid time (HH:MM).",
-      "check_time_current": "Check time: {{time}}"
+      "check_time_current": "Check time: {{time}} ({{timezone}})"
     }
   },
   "home": {

@@ -151,6 +151,14 @@ type GeoIPUpdateTimer struct {
 	NextRunAt *string `json:"next_run_at,omitempty"`
 	// CheckTime is the currently effective "HH:MM" (24h) daily check time.
 	CheckTime string `json:"check_time"`
+	// Timezone is the IANA name (e.g. "Europe/Berlin") CheckTime and
+	// NextRunAt are evaluated against - SystemTimezoneRaw, surfaced here so
+	// the GeoIP admin page can show "03:00 (Europe/Berlin)" next to the
+	// field without a second request to admin/system/general. Added
+	// 2026-08-12 alongside SystemTimezoneLocation - see timezone.go's
+	// top-of-file doc comment for why a fixed check time needs an explicit
+	// zone at all.
+	Timezone string `json:"timezone"`
 }
 
 // GeoIPFileInfo describes one edition's .mmdb file on disk.
@@ -233,14 +241,22 @@ func ResolveGeoIPConfig(ctx context.Context, pool *db.Pool, masterKey string) (G
 // time itself is admin-configurable, so a cached/stale value would show the
 // wrong countdown right after a change.
 //
-// NextRunAt is derived purely from the current wall clock and the configured
-// HH:MM (today's occurrence if it hasn't passed yet, otherwise tomorrow's) -
-// unlike the former interval-based calculation, it does NOT depend on
-// LastRunAt at all, since the schedule is now "every day at this clock
-// time" rather than "N seconds after the last attempt".
+// NextRunAt is derived purely from the current wall clock (in the
+// admin-configured system timezone - see SystemTimezoneLocation) and the
+// configured HH:MM (today's occurrence in that zone if it hasn't passed yet,
+// otherwise tomorrow's) - unlike the former interval-based calculation, it
+// does NOT depend on LastRunAt at all, since the schedule is now "every day
+// at this clock time" rather than "N seconds after the last attempt".
+//
+// Evaluating against SystemTimezoneLocation rather than the container's own
+// wall clock (added 2026-08-12) fixes the same bug internal/geoip.
+// RunScheduler's own fix addresses (see that function's tick loop): without
+// it, a fixed "03:00" always meant 03:00 UTC regardless of what timezone the
+// admin who typed it was actually thinking in.
 func resolveUpdateTimer(ctx context.Context, pool *db.Pool, checkTimeRaw func(context.Context) string) GeoIPUpdateTimer {
 	raw := checkTimeRaw(ctx)
-	timer := GeoIPUpdateTimer{CheckTime: raw}
+	loc := SystemTimezoneLocation(ctx, pool)
+	timer := GeoIPUpdateTimer{CheckTime: raw, Timezone: loc.String()}
 
 	if lastCheckAt, exists, err := pool.GetSetting(ctx, GeoIPLastCheckAtSettingKey); err == nil && exists && lastCheckAt != "" {
 		if lastCheck, err := time.Parse(time.RFC3339, lastCheckAt); err == nil {
@@ -256,8 +272,8 @@ func resolveUpdateTimer(ctx context.Context, pool *db.Pool, checkTimeRaw func(co
 		// (no NextRunAt) rather than panic if that invariant is ever broken.
 		return timer
 	}
-	now := time.Now()
-	next := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, now.Location())
+	now := time.Now().In(loc)
+	next := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, loc)
 	if !next.After(now) {
 		next = next.Add(24 * time.Hour)
 	}

@@ -61,13 +61,15 @@ type FieldKind = "byte" | "count" | "ms" | "seconds" | "minutes";
 // part of the same LimitsSettings object and the same PATCH request -
 // see handleSave.
 type Tab = "uploads" | "ai" | "search" | "modules" | "system" | "updates";
-// NumericFieldKey excludes core_update_check_weekdays/_time - both strings,
-// handled by their own bespoke UI/state above, never through this array's
-// generic integer parse/render loop. Narrowing FIELDS to only the numeric
-// keys (rather than the full keyof LimitsSettings) is what lets
-// `parsed[f.key] = n` in handleSave type-check now that LimitsSettings has
-// non-numeric fields too.
-type NumericFieldKey = keyof Omit<LimitsSettings, "core_update_check_weekdays" | "core_update_check_time">;
+// NumericFieldKey excludes core_update_check_weekdays/_time and
+// system_timezone - all strings, either handled by their own bespoke
+// UI/state above (the first two) or entirely read-only on this page (the
+// last one - see LimitsSettings.system_timezone's doc comment) - never
+// through this array's generic integer parse/render loop. Narrowing FIELDS
+// to only the numeric keys (rather than the full keyof LimitsSettings) is
+// what lets `parsed[f.key] = n` in handleSave type-check now that
+// LimitsSettings has non-numeric fields too.
+type NumericFieldKey = keyof Omit<LimitsSettings, "core_update_check_weekdays" | "core_update_check_time" | "system_timezone">;
 const FIELDS: Array<{ key: NumericFieldKey; kind: FieldKind; tab: Tab; allowZero?: boolean }> = [
   { key: "max_body_bytes", kind: "byte", tab: "uploads" },
   { key: "max_opml_upload_bytes", kind: "byte", tab: "uploads" },
@@ -358,7 +360,7 @@ export default function AdminSystemLimitsPage() {
                   className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-base outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-800"
                 />
                 <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-                  {t("admin.system_limits.core_update_check_time_hint")}
+                  {t("admin.system_limits.core_update_check_time_hint", { timezone: settings?.system_timezone ?? "UTC" })}
                 </p>
               </div>
 

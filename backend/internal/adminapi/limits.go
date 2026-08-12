@@ -158,6 +158,14 @@ const (
 //   - core_update_check_time: "HH:MM" (24h) time of day the check above
 //     runs, on each selected weekday. Must parse via coreupdate.ParseTime.
 //     Default "03:00".
+//   - system_timezone: read-only here (added 2026-08-12) - the IANA zone
+//     name core_update_check_time above is actually evaluated against (see
+//     coreupdate.RunScheduler and setup.SystemTimezoneLocation). Surfaced
+//     on GET so this page can show "03:00 (Europe/Berlin)" next to the
+//     field without a second request to admin/system/general, but it is
+//     NOT settable through PATCH /v1/admin/system/limits - it belongs to
+//     admin/system/general (AdminGeneralHandler), the same page GeoIP's own
+//     check-time field defers to for the identical reason.
 //
 // Every field except deno_conn_pool_size takes effect immediately, on the
 // next request, with no restart required. store_sync_interval_seconds is a
@@ -186,6 +194,8 @@ type LimitsSettings struct {
 	ChatRPMLimit                      int    `json:"chat_rpm_limit"`
 	CoreUpdateCheckWeekdays           string `json:"core_update_check_weekdays"`
 	CoreUpdateCheckTime               string `json:"core_update_check_time"`
+	// SystemTimezone is read-only - see this struct's doc comment above.
+	SystemTimezone string `json:"system_timezone"`
 }
 
 // readRateLimitInt is the shared GetSetting/parse/fallback logic behind
@@ -259,6 +269,7 @@ func currentLimitsSettings(r *http.Request, pool *db.Pool) LimitsSettings {
 		ChatRPMLimit:                      ai.ChatRPMLimit(ctx, pool),
 		CoreUpdateCheckWeekdays:           coreupdate.CheckWeekdaysRaw(ctx, pool),
 		CoreUpdateCheckTime:               coreupdate.CheckTimeRaw(ctx, pool),
+		SystemTimezone:                    setup.SystemTimezoneRaw(ctx, pool),
 	}
 }
 
@@ -393,6 +404,12 @@ func AdminLimitsHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 				}
 			}
 
+			// system_timezone is read-only on this endpoint (see
+			// LimitsSettings's doc comment) - always echo back the actual
+			// stored value rather than whatever the client's body happened
+			// to carry, so a PATCH can never appear to have silently
+			// changed it.
+			body.SystemTimezone = setup.SystemTimezoneRaw(ctx, pool)
 			httperr.JSON(w, http.StatusOK, body)
 
 		default:

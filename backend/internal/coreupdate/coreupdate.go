@@ -22,6 +22,7 @@ import (
 
 	"github.com/modulab-project/modulab-core/backend/internal/db"
 	"github.com/modulab-project/modulab-core/backend/internal/notify"
+	"github.com/modulab-project/modulab-core/backend/internal/setup"
 	"github.com/modulab-project/modulab-core/backend/internal/store"
 	"github.com/modulab-project/modulab-core/backend/internal/valkey"
 	"github.com/modulab-project/modulab-core/backend/internal/version"
@@ -269,6 +270,15 @@ func CheckNow(ctx context.Context, pool *db.Pool, vk *valkey.Client) (CheckResul
 // systemInfoHandler already has CachedResult (last known value, possibly
 // from before a restart) to show in the meantime. Started with
 // `go coreupdate.RunScheduler(ctx, pool, vk)` from main.go.
+//
+// Evaluated against setup.SystemTimezoneLocation, not the container's own
+// wall clock (fixed 2026-08-12, same bug and same fix as internal/geoip.
+// RunScheduler's own): the admin-facing "HH:MM" field is a plain
+// <input type="time"> the browser fills in the admin's local time, but every
+// ModuLab container this project has seen runs its own clock in UTC, with
+// nothing in the UI to hint the two differ. Re-read every tick, same
+// reasoning as CheckWeekdaysRaw/CheckTimeRaw below, so a timezone change on
+// admin/system/general also takes effect on the very next tick.
 func RunScheduler(ctx context.Context, pool *db.Pool, vk *valkey.Client) {
 	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
@@ -278,7 +288,7 @@ func RunScheduler(ctx context.Context, pool *db.Pool, vk *valkey.Client) {
 	for {
 		select {
 		case <-ticker.C:
-			now := time.Now()
+			now := time.Now().In(setup.SystemTimezoneLocation(ctx, pool))
 			today := now.Format("2006-01-02")
 			if today == lastRunDate {
 				continue // already ran today - a missed/duplicate tick within the same minute is a no-op, not a re-run

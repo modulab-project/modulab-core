@@ -186,7 +186,9 @@ export default function AdminSystemGeoIPPage() {
             <input type="time" value={checkTime}
               onChange={(e) => setCheckTime(e.target.value)} className={inputClass} />
           </Field>
-          <p className="text-xs text-gray-500 dark:text-gray-400">{t("admin.geoip.check_time_hint")}</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            {t("admin.geoip.check_time_hint", { timezone: status?.update_timer.timezone ?? "UTC" })}
+          </p>
           <div className="flex gap-3">
             <button type="submit" disabled={saving} className={`flex-1 ${btnPrimary}`}>
               {saving ? t("admin.geoip.saving") : t("admin.geoip.save")}
@@ -251,7 +253,7 @@ function UpdateTimerCard({ timer, now, t }: { timer: GeoIPUpdateTimer; now: numb
         <p className="text-xs text-gray-400 dark:text-gray-500">{t("admin.system_info.not_run_yet")}</p>
       )}
       <p className="mt-2 text-[11px] text-gray-400 dark:text-gray-600">
-        {t("admin.geoip.check_time_current", { time: timer.check_time })}
+        {t("admin.geoip.check_time_current", { time: timer.check_time, timezone: timer.timezone })}
       </p>
     </div>
   );

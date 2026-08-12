@@ -127,6 +127,16 @@ type Deps struct {
 // (not cached at goroutine start) so an admin's settings change takes
 // effect on the very next tick, same reasoning store.RunSync's interval
 // re-read used to have here.
+//
+// Evaluated against setup.SystemTimezoneLocation, not the container's own
+// wall clock (fixed 2026-08-12): every ModuLab deployment this project has
+// seen runs its container clock in UTC, but the admin-facing "HH:MM" field
+// is a plain <input type="time"> the browser fills in local time, with
+// nothing in the UI hinting the two differ - an admin entering "03:00"
+// expecting 3 AM their own time got 3 AM UTC instead, off by whatever their
+// offset from UTC happens to be. Re-read every tick, same reasoning as
+// CheckTimeRaw, so a timezone change on admin/system/general also takes
+// effect on the very next tick.
 func RunScheduler(ctx context.Context, deps Deps) {
 	Configure(deps.DataDir)
 
@@ -139,7 +149,7 @@ func RunScheduler(ctx context.Context, deps Deps) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			now := time.Now()
+			now := time.Now().In(setup.SystemTimezoneLocation(ctx, deps.Pool))
 			today := now.Format("2006-01-02")
 			if today == lastRunDate {
 				continue // already ran today - a missed/duplicate tick within the same minute is a no-op, not a re-run

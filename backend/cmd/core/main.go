@@ -27,6 +27,16 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	// _ "time/tzdata" embeds a full copy of the IANA Time Zone Database
+	// directly into this binary. Added 2026-08-12 alongside
+	// setup.SystemTimezoneLocation: the production image's final stage
+	// (debian:bookworm-slim) does not install the OS tzdata package, so
+	// without this, time.LoadLocation("Europe/Berlin") (or any zone other
+	// than "UTC"/"Local") would fail on every container - silently falling
+	// back to UTC in every scheduler that calls SystemTimezoneLocation,
+	// making the whole system_timezone setting a no-op for anyone who
+	// actually configured a non-UTC zone.
+	_ "time/tzdata"
 
 	"github.com/modulab-project/modulab-core/backend/internal/adminapi"
 	"github.com/modulab-project/modulab-core/backend/internal/ai"

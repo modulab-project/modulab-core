@@ -436,7 +436,7 @@
       "core_update_check_weekdays_hint": "Dagen van de week waarop Core op GitHub controleert op een nieuwere versie.",
       "core_update_check_weekdays_error": "Selecteer ten minste één dag.",
       "core_update_check_time_label": "Controletijd",
-      "core_update_check_time_hint": "Tijdstip waarop de controle wordt uitgevoerd op elke geselecteerde dag.",
+      "core_update_check_time_hint": "Tijdstip waarop de controle wordt uitgevoerd op elke geselecteerde dag, in de geconfigureerde systeemtijdzone ({{timezone}}).",
       "core_update_check_time_error": "Voer een geldige tijd in (UU:MM).",
       "check_now_button": "Nu controleren",
       "check_now_update_found": "Versie {{version}} is beschikbaar.",
@@ -460,7 +460,12 @@
       "lang_fr": "Frans",
       "section_identity": "Instantie-identiteit",
       "instance_name_label": "Instantienaam",
-      "instance_name_hint": "Vervangt \"ModuLab\" in systeem-e-mails (bijv. \"Uw {{name}}-account is klaar\")."
+      "instance_name_hint": "Vervangt \"ModuLab\" in systeem-e-mails (bijv. \"Uw {{name}}-account is klaar\").",
+      "section_timezone": "Tijdzone",
+      "timezone_label": "Systeemtijdzone",
+      "timezone_hint": "IANA-tijdzone (bijv. \"Europe/Berlin\") waartegen elke geplande controletijd in ModuLab (GeoIP-database-update, updatecontrole) wordt geëvalueerd.",
+      "timezone_detect_button": "Mijn tijdzone gebruiken",
+      "timezone_error": "Selecteer een geldige IANA-tijdzone (bijv. \"Europe/Berlin\")."
     },
     "system_info": {
       "title": "Systeeminfo",
@@ -678,9 +683,9 @@
       "file_build_date": "MaxMind-buildatum: {{date}}",
       "update_timer_title": "Automatisch bijwerken",
       "check_time_label": "Controletijd",
-      "check_time_hint": "Tijdstip waarop ModuLab dagelijks bij MaxMind controleert op een nieuwe databaseversie.",
+      "check_time_hint": "Tijdstip waarop ModuLab dagelijks bij MaxMind controleert op een nieuwe databaseversie, in de geconfigureerde systeemtijdzone ({{timezone}}).",
       "check_time_error": "Voer een geldige tijd in (UU:MM).",
-      "check_time_current": "Controletijd: {{time}}"
+      "check_time_current": "Controletijd: {{time}} ({{timezone}})"
     }
   },
   "home": {

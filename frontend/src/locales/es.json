@@ -436,7 +436,7 @@
       "core_update_check_weekdays_hint": "Días de la semana en los que Core comprueba en GitHub si hay una versión más reciente.",
       "core_update_check_weekdays_error": "Selecciona al menos un día.",
       "core_update_check_time_label": "Hora de comprobación",
-      "core_update_check_time_hint": "Hora del día en que se ejecuta la comprobación en cada día seleccionado.",
+      "core_update_check_time_hint": "Hora del día en que se ejecuta la comprobación en cada día seleccionado, en la zona horaria del sistema configurada ({{timezone}}).",
       "core_update_check_time_error": "Introduce una hora válida (HH:MM).",
       "check_now_button": "Comprobar ahora",
       "check_now_update_found": "La versión {{version}} está disponible.",
@@ -460,7 +460,12 @@
       "lang_fr": "Francés",
       "section_identity": "Identidad de la Instancia",
       "instance_name_label": "Nombre de la instancia",
-      "instance_name_hint": "Sustituye a \"ModuLab\" en los correos del sistema (p. ej. \"Su cuenta de {{name}} está lista\")."
+      "instance_name_hint": "Sustituye a \"ModuLab\" en los correos del sistema (p. ej. \"Su cuenta de {{name}} está lista\").",
+      "section_timezone": "Zona horaria",
+      "timezone_label": "Zona horaria del sistema",
+      "timezone_hint": "Zona horaria IANA (p. ej. «Europe/Berlin») con la que se evalúa cada hora de comprobación programada en ModuLab (actualización de la base de datos GeoIP, comprobación de actualizaciones).",
+      "timezone_detect_button": "Usar mi zona horaria",
+      "timezone_error": "Selecciona una zona horaria IANA válida (p. ej. «Europe/Berlin»)."
     },
     "system_info": {
       "title": "Información del sistema",
@@ -678,9 +683,9 @@
       "file_build_date": "Fecha de compilación de MaxMind: {{date}}",
       "update_timer_title": "Actualización automática",
       "check_time_label": "Hora de comprobación",
-      "check_time_hint": "Hora del día a la que ModuLab comprueba diariamente en MaxMind si hay una nueva versión de la base de datos.",
+      "check_time_hint": "Hora del día a la que ModuLab comprueba diariamente en MaxMind si hay una nueva versión de la base de datos, en la zona horaria del sistema configurada ({{timezone}}).",
       "check_time_error": "Introduce una hora válida (HH:MM).",
-      "check_time_current": "Hora de comprobación: {{time}}"
+      "check_time_current": "Hora de comprobación: {{time}} ({{timezone}})"
     }
   },
   "home": {

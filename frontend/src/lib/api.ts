@@ -508,6 +508,11 @@ export interface GeoIPUpdateTimer {
   next_run_at?: string;
   // "HH:MM" (24h), the currently effective daily check time.
   check_time: string;
+  // IANA zone name (e.g. "Europe/Berlin") check_time/next_run_at are
+  // evaluated against - see backend's setup.SystemTimezoneLocation. Added
+  // 2026-08-12 so the page can show "03:00 (Europe/Berlin)" instead of a
+  // bare time that silently meant UTC.
+  timezone: string;
 }
 
 export interface GeoIPFileInfo {
@@ -1109,6 +1114,12 @@ export interface LimitsSettings {
   // core_update_check_time: "HH:MM" (24h) time of day the check above runs.
   // Default "03:00".
   core_update_check_time: string;
+  // system_timezone: read-only here - the IANA zone name
+  // core_update_check_time is actually evaluated against (see backend's
+  // setup.SystemTimezoneLocation). Not settable via PATCH .../limits; it
+  // belongs to /admin/system/general (GeneralSettings.system_timezone) -
+  // surfaced here purely so this page can show it next to the field.
+  system_timezone: string;
 }
 
 // GET /v1/admin/system/limits — admin only.
@@ -1133,9 +1144,15 @@ export function adminPatchLimitsSettings(settings: LimitsSettings): Promise<Limi
 // supported UI languages (matches frontend/src/locales/*.json) outgoing
 // system mail is rendered in (see backend's mail.CurrentBranding);
 // instance_name replaces the literal "ModuLab" in those same mails.
+// system_timezone (added 2026-08-12) is the IANA zone name
+// (e.g. "Europe/Berlin", default "UTC") every admin-configured "HH:MM"
+// schedule in the app (GeoIP's check_time, core_update_check_time) is
+// evaluated against - see backend's setup/timezone.go doc comment for the
+// bug this fixes.
 export interface GeneralSettings {
   system_language: "en" | "de" | "nl" | "es" | "fr";
   instance_name: string;
+  system_timezone: string;
 }
 
 // GET /v1/admin/system/general — admin only.

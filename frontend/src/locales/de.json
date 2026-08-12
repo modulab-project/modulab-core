@@ -436,7 +436,7 @@
       "core_update_check_weekdays_hint": "Wochentage, an denen Core auf GitHub nach einer neueren Version sucht.",
       "core_update_check_weekdays_error": "Bitte mindestens einen Tag auswählen.",
       "core_update_check_time_label": "Prüfzeit",
-      "core_update_check_time_hint": "Uhrzeit, zu der die Prüfung an den ausgewählten Tagen läuft.",
+      "core_update_check_time_hint": "Uhrzeit, zu der die Prüfung an den ausgewählten Tagen läuft, in der konfigurierten System-Zeitzone ({{timezone}}).",
       "core_update_check_time_error": "Bitte eine gültige Uhrzeit eingeben (HH:MM).",
       "check_now_button": "Jetzt prüfen",
       "check_now_update_found": "Version {{version}} ist verfügbar.",
@@ -460,7 +460,12 @@
       "lang_fr": "Französisch",
       "section_identity": "Instanz-Identität",
       "instance_name_label": "Instanzname",
-      "instance_name_hint": "Ersetzt \"ModuLab\" in System-E-Mails (z. B. \"Ihr {{name}}-Konto ist bereit\")."
+      "instance_name_hint": "Ersetzt \"ModuLab\" in System-E-Mails (z. B. \"Ihr {{name}}-Konto ist bereit\").",
+      "section_timezone": "Zeitzone",
+      "timezone_label": "System-Zeitzone",
+      "timezone_hint": "IANA-Zeitzone (z. B. \"Europe/Berlin\"), anhand derer jede geplante Prüfzeit in ModuLab (GeoIP-Datenbankaktualisierung, Update-Prüfung) ausgewertet wird.",
+      "timezone_detect_button": "Meine Zeitzone verwenden",
+      "timezone_error": "Bitte eine gültige IANA-Zeitzone auswählen (z. B. \"Europe/Berlin\")."
     },
     "system_info": {
       "title": "Systeminfo",
@@ -678,9 +683,9 @@
       "file_build_date": "MaxMind-Build-Datum: {{date}}",
       "update_timer_title": "Automatische Aktualisierung",
       "check_time_label": "Prüfzeit",
-      "check_time_hint": "Uhrzeit, zu der ModuLab täglich bei MaxMind nach einer neuen Datenbankversion prüft.",
+      "check_time_hint": "Uhrzeit, zu der ModuLab täglich bei MaxMind nach einer neuen Datenbankversion prüft, in der konfigurierten System-Zeitzone ({{timezone}}).",
       "check_time_error": "Bitte eine gültige Uhrzeit eingeben (HH:MM).",
-      "check_time_current": "Prüfzeit: {{time}}"
+      "check_time_current": "Prüfzeit: {{time}} ({{timezone}})"
     }
   },
   "home": {

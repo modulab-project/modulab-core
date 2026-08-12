@@ -43,9 +43,19 @@ import (
 //     instance after their household). Empty is rejected - PATCH with an
 //     all-whitespace value falls back to mail.DefaultInstanceName instead
 //     of storing a blank Team signature.
+//   - system_timezone: an IANA Time Zone Database name ("Europe/Berlin",
+//     "UTC", ...), validated via setup.ParseSystemTimezone. Added
+//     2026-08-12 (see setup/timezone.go's top-of-file doc comment) so
+//     internal/geoip.RunScheduler and internal/coreupdate.RunScheduler have
+//     one unambiguous, admin-visible zone to evaluate their own
+//     admin-configured "HH:MM" fields against, instead of silently using
+//     the container's own wall clock (UTC in every deployment this project
+//     has seen). Takes effect on the very next scheduler tick, same
+//     "no restart required" property as system_language.
 type GeneralSettings struct {
 	SystemLanguage string `json:"system_language"`
 	InstanceName   string `json:"instance_name"`
+	SystemTimezone string `json:"system_timezone"`
 }
 
 // currentGeneralSettings resolves GeneralSettings from core_settings via
@@ -54,10 +64,12 @@ type GeneralSettings struct {
 // what "current" means, same discipline currentLimitsSettings follows for
 // LimitsSettings.
 func currentGeneralSettings(r *http.Request, pool *db.Pool) GeneralSettings {
-	b := mail.CurrentBranding(r.Context(), pool)
+	ctx := r.Context()
+	b := mail.CurrentBranding(ctx, pool)
 	return GeneralSettings{
 		SystemLanguage: b.Lang,
 		InstanceName:   b.InstanceName,
+		SystemTimezone: setup.SystemTimezoneRaw(ctx, pool),
 	}
 }
 
@@ -101,6 +113,14 @@ func AdminGeneralHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 				http.Error(w, "instance_name must not be empty", http.StatusBadRequest)
 				return
 			}
+			// system_timezone: same "reject outright, don't silently fall
+			// back" treatment core_update_check_time/geoip_check_time get
+			// (see AdminLimitsHandler) - an admin typo here must never
+			// silently reach the schedulers as "UTC after all".
+			if _, err := setup.ParseSystemTimezone(body.SystemTimezone); err != nil {
+				http.Error(w, "system_timezone: "+err.Error(), http.StatusBadRequest)
+				return
+			}
 
 			if err := pool.SetSetting(ctx, mail.SettingKeySystemLanguage, body.SystemLanguage); err != nil {
 				http.Error(w, "database error", http.StatusInternalServerError)
@@ -110,12 +130,16 @@ func AdminGeneralHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 				http.Error(w, "database error", http.StatusInternalServerError)
 				return
 			}
+			if err := pool.SetSetting(ctx, setup.SystemTimezoneSettingKey, body.SystemTimezone); err != nil {
+				http.Error(w, "database error", http.StatusInternalServerError)
+				return
+			}
 
 			// Best-effort audit; a failed write must not block the response -
 			// same reasoning as AdminLimitsHandler's own audit call.
 			sess, _ := auth.SessionFromContext(ctx)
 			if masterKey, err := setup.ResolveMasterKey(ctx, pool, masterKeyEnv); err == nil {
-				detailsJSON, _ := json.Marshal(GeneralSettings{SystemLanguage: body.SystemLanguage, InstanceName: instanceName})
+				detailsJSON, _ := json.Marshal(GeneralSettings{SystemLanguage: body.SystemLanguage, InstanceName: instanceName, SystemTimezone: body.SystemTimezone})
 				if err := audit.Log(ctx, pool, masterKey, audit.LogParams{
 					EventType:  audit.EventConfigSystemGeneral,
 					ActorID:    sess.UserID,
@@ -126,7 +150,7 @@ func AdminGeneralHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 				}
 			}
 
-			httperr.JSON(w, http.StatusOK, GeneralSettings{SystemLanguage: body.SystemLanguage, InstanceName: instanceName})
+			httperr.JSON(w, http.StatusOK, GeneralSettings{SystemLanguage: body.SystemLanguage, InstanceName: instanceName, SystemTimezone: body.SystemTimezone})
 
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
