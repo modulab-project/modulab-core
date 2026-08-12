@@ -62,6 +62,9 @@ services:
     image: tecnativa/docker-socket-proxy:0.3@sha256:9e4b9e7517a6b660f2cc903a19b257b1852d5b3344794e3ea334ff00ae677ac2
     restart: unless-stopped
     environment:
+      # See .env.example's "Container clock" section - defaults to UTC,
+      # same as every other service in this file.
+      TZ: ${TZ:-UTC}
       # Read-only, GET-only endpoints Traefik's Docker provider needs:
       CONTAINERS: 1
       EVENTS: 1
@@ -142,6 +145,10 @@ services:
       - "80:80"
       - "443:443"
     environment:
+      # See .env.example's "Container clock" section - defaults to UTC,
+      # same as every other service in this file. Affects the
+      # --accesslog=true timestamps above.
+      - TZ=${TZ:-UTC}
       # Cloudflare API token — needs Zone:DNS:Edit permission for your domain.
       # Must be exactly 40 characters with no surrounding whitespace.
       - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
@@ -160,6 +167,11 @@ services:
     image: postgres:16-alpine@sha256:16bc17c64a573ef34162af9298258d1aec548232985b33ed7b1eac33ba35c229
     restart: unless-stopped
     environment:
+      # See .env.example's "Container clock" section - defaults to UTC,
+      # same as every other service in this file. Affects log_timestamp
+      # formatting in Postgres's own logs; stored TIMESTAMPTZ values are
+      # unaffected either way (they are always stored/compared in UTC).
+      TZ: ${TZ:-UTC}
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -203,6 +215,9 @@ services:
     # substituted by Compose from .env at parse time.
     command: ["valkey-server", "--requirepass", "${VALKEY_PASSWORD:?VALKEY_PASSWORD must be set in .env}"]
     environment:
+      # See .env.example's "Container clock" section - defaults to UTC,
+      # same as every other service in this file.
+      TZ: ${TZ:-UTC}
       # Same value again as a container env var, purely so the healthcheck
       # below can authenticate - the command line above is already resolved
       # by then and cannot be read back from inside the container.
@@ -247,6 +262,10 @@ services:
   searxng-valkey:
     image: valkey/valkey:9-alpine@sha256:ee91f7a174ac4d6a6b0685b3a60e321f0a9dbbb691f9b0e285be2ba1d1be8328
     restart: unless-stopped
+    environment:
+      # See .env.example's "Container clock" section - defaults to UTC,
+      # same as every other service in this file.
+      TZ: ${TZ:-UTC}
     mem_limit: 128m
     cpus: 0.25
     networks:
@@ -263,6 +282,13 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
+      # See .env.example's "Container clock" section - defaults to UTC,
+      # same as every other service in this file. Unrelated to (and does
+      # not replace) admin/system/general's own system_timezone setting,
+      # which controls GeoIP/core-update's scheduled check times
+      # regardless of this container's own clock - see
+      # backend/internal/setup/timezone.go's doc comment.
+      TZ: ${TZ:-UTC}
       MODULAB_MODULE_DATA_DIR: /var/lib/modulab/modules
       MODULAB_PUBLIC_BASE_URL: https://${MODULAB_DOMAIN}
       MODULAB_FRONTEND_BASE_URL: https://${MODULAB_DOMAIN}
@@ -444,6 +470,9 @@ services:
     image: searxng/searxng:latest@sha256:02d441bbb647b7be422d21041420115cddadac4644368f67c7c7f407bbe72e22
     restart: unless-stopped
     environment:
+      # See .env.example's "Container clock" section - defaults to UTC,
+      # same as every other service in this file.
+      TZ: ${TZ:-UTC}
       SEARXNG_BASE_URL: https://${MODULAB_DOMAIN}/searxng/
       # Points at its own instance (searxng-valkey), not Core's. Was
       # redis://valkey:6379/1 until 2026-07-28 - see the searxng-valkey
