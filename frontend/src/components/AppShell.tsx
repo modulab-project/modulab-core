@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useNavigate, Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import i18n, { ensureLanguage } from "../lib/i18n";
+import i18n, { AVAILABLE_LANGUAGES, ensureLanguage, getLanguageEndonym } from "../lib/i18n";
 import {
   getHealthDetails,
   getUserPrefs,
@@ -1361,14 +1361,18 @@ function ProfilePanelContent({
           }}
           className="rounded-md border border-gray-300 bg-white px-2 py-0.5 text-base font-medium text-gray-700 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
         >
-          {/* Native endonyms intentionally hardcoded, not run through t() -
-              a language switcher must show each option in its own language
-              regardless of the current UI locale (standard convention). */}
-          <option value="en">English</option>
-          <option value="de">Deutsch</option>
-          <option value="fr">Français</option>
-          <option value="es">Español</option>
-          <option value="nl">Nederlands</option>
+          {/* Options come from AVAILABLE_LANGUAGES (auto-discovered from
+              locales/*.json at build time, see lib/i18n.ts) with each
+              option's own native endonym via Intl.DisplayNames - never run
+              through t(), since a language switcher must show each option
+              in its own language regardless of the current UI locale
+              (standard convention). Adding a new locale file is enough to
+              make it show up here, nothing to edit in this component. */}
+          {AVAILABLE_LANGUAGES.map((code) => (
+            <option key={code} value={code}>
+              {getLanguageEndonym(code)}
+            </option>
+          ))}
         </select>
       </div>
       <div className="my-1 h-px bg-gray-200 dark:bg-gray-800" />

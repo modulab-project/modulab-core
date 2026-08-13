@@ -174,8 +174,13 @@ export default function StorePage() {
   const lng = i18nInstance.language?.slice(0, 2) ?? "en";
 
   // Categories present in the current data, alphabetical - so the filter
-  // never offers a category with zero matching entries.
-  const categories = Array.from(new Set(entries.map((e) => e.category).filter(Boolean))).sort();
+  // never offers a category with zero matching entries. Sorted with
+  // localeCompare against the active UI language rather than plain .sort()
+  // (Unicode codepoint order), so diacritics land where that language's
+  // own alphabet actually puts them instead of wherever raw codepoints do.
+  const categories = Array.from(new Set(entries.map((e) => e.category).filter(Boolean))).sort((a, b) =>
+    a.localeCompare(b, i18nInstance.language),
+  );
 
   const searchNeedle = search.trim().toLowerCase();
   const visible = entries.filter((e) => {
