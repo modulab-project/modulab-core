@@ -156,14 +156,8 @@ export default function AdminSystemInfoPage() {
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <InfraRow icon="ti-database" label={t("shell.status.postgres")} ok={info.postgres_reachable} />
                 <InfraRow icon="ti-bolt" label={t("shell.status.valkey")} ok={info.valkey_reachable} />
-                {info.searxng_configured ? (
+                {info.searxng_configured && (
                   <InfraRow icon="ti-search" label={t("shell.status.searxng")} ok={!!info.searxng_reachable} />
-                ) : (
-                  <InfraRow
-                    icon="ti-search"
-                    label={t("shell.status.searxng")}
-                    text={t("shell.status.not_configured")}
-                  />
                 )}
                 {info.ntp_drift_ok !== undefined && (
                   <InfraRow icon="ti-clock" label={t("admin.system_info.ntp_drift")} ok={info.ntp_drift_ok} />

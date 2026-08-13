@@ -1581,10 +1581,8 @@ function StatusPanelContent({ health }: { health: HealthDetailsResponse }) {
       <StatusRow icon="ti-clock" label={t("shell.status.uptime")} value={formatUptime(uptimeSeconds)} />
       <StatusRow icon="ti-database" label={t("shell.status.postgres")} ok={health.postgres_reachable} />
       <StatusRow icon="ti-bolt" label={t("shell.status.valkey")} ok={health.valkey_reachable} />
-      {health.searxng_configured ? (
+      {health.searxng_configured && (
         <StatusRow icon="ti-search" label={t("shell.status.searxng")} ok={health.searxng_reachable} />
-      ) : (
-        <StatusRow icon="ti-search" label={t("shell.status.searxng")} value={t("shell.status.not_configured")} />
       )}
       {health.ntp_drift_ok !== undefined && (
         <StatusRow icon="ti-clock-check" label={t("shell.status.ntp")} ok={health.ntp_drift_ok} />
