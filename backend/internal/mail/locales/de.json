@@ -1,0 +1,44 @@
+{
+  "common": {
+    "greeting": "Hallo{{name}},",
+    "signature": "\nViele Grüße,\nIhr {{instance}}-Team\n",
+    "unknown": "(unbekannt)",
+    "not_provided": "(nicht angegeben)"
+  },
+  "approved": {
+    "subject": "Ihr {{instance}}-Konto ist bereit",
+    "body": "{{greeting}}\n\nGute Nachrichten – ein Administrator hat Ihr {{instance}}-Konto freigegeben. Sie können sich jetzt anmelden:\n\n{{link}}\n{{signature}}"
+  },
+  "locked": {
+    "subject": "Ihr {{instance}}-Konto wurde gesperrt",
+    "body": "{{greeting}}\n\nEin Administrator hat Ihr {{instance}}-Konto gesperrt. Sie können sich erst wieder anmelden, wenn es entsperrt wurde.\n\nWenn Sie glauben, dass dies ein Irrtum ist, wenden Sie sich bitte an Ihren Administrator.\n{{signature}}"
+  },
+  "unlocked": {
+    "subject": "Ihr {{instance}}-Konto wurde entsperrt",
+    "body": "{{greeting}}\n\nIhr {{instance}}-Konto wurde von einem Administrator entsperrt. Sie können sich wieder anmelden:\n\n{{link}}\n{{signature}}"
+  },
+  "deleted": {
+    "subject": "Ihr {{instance}}-Konto wurde gelöscht",
+    "body": "{{greeting}}\n\nIhr {{instance}}-Konto wurde gelöscht und Ihr Zugriff wurde entzogen. Wenn Sie sich später erneut anmelden, müssen Sie erneut freigegeben werden, so als wäre es Ihr erstes Mal.\n{{signature}}"
+  },
+  "pending_approval": {
+    "subject": "Neues {{instance}}-Konto wartet auf Freigabe",
+    "body": "{{greeting}}\n\nEin neues Konto wartet auf Ihre Freigabe:\n\n  Name:    {{requester_name}}\n  E-Mail:  {{requester_email}}\n\nSie können diese Anfrage hier prüfen und freigeben:\n\n  {{link}}/admin/users\n{{signature}}"
+  },
+  "login": {
+    "subject": "Neue Anmeldung bei Ihrem {{instance}}-Konto",
+    "body": "{{greeting}}\n\nBei Ihrem {{instance}}-Konto wurde soeben eine Anmeldung durchgeführt:\n\n  Standort: {{location}}\n  IP:       {{ip}}\n  Gerät:    {{device}}\n\nWenn Sie das waren, ist keine Aktion erforderlich. Falls nicht, überprüfen und beenden Sie Ihre aktiven Sitzungen hier:\n\n  {{link}}/profile\n{{signature}}"
+  },
+  "new_device": {
+    "subject": "Neues Gerät bei Ihrem {{instance}}-Konto erkannt",
+    "body": "{{greeting}}\n\nEine bereits angemeldete Sitzung Ihres {{instance}}-Kontos wurde soeben von einem anderen Gerät/Browser als zuvor verwendet:\n\n  Vorher: {{previous_device}}\n  Jetzt:  {{current_device}}\n  IP:     {{ip}}\n\nWenn Sie das waren (Browser-Update, neues Gerät), ist keine Aktion erforderlich. Falls nicht, überprüfen und beenden Sie Ihre aktiven Sitzungen hier:\n\n  {{link}}/profile\n{{signature}}"
+  },
+  "session_revoked_by_admin": {
+    "subject": "Eine Ihrer {{instance}}-Sitzungen wurde von einem Administrator beendet",
+    "body": "{{greeting}}\n\nEin Administrator hat eine Ihrer aktiven {{instance}}-Sitzungen beendet:\n\n  IP:     {{ip}}\n  Gerät:  {{device}}\n\nSie müssen sich auf diesem Gerät erneut anmelden, wenn Sie dort weiterhin Zugriff benötigen. Bei Fragen wenden Sie sich an Ihren Administrator. Ihre anderen Sitzungen, falls vorhanden, sind nicht betroffen - überprüfen Sie diese hier:\n\n  {{link}}/profile\n{{signature}}"
+  },
+  "anomaly": {
+    "subject": "Neuer Anmeldeort bei Ihrem {{instance}}-Konto erkannt",
+    "body": "{{greeting}}\n\nIhr {{instance}}-Konto wurde soeben aus einem anderen Land als üblich verwendet:\n\n  Vorher: {{previous_country}}\n  Jetzt:  {{country}}\n  IP:     {{ip}}\n\nWenn Sie das waren (Reise, VPN, neues Netzwerk), ist keine Aktion erforderlich. Falls nicht, überprüfen und beenden Sie Ihre aktiven Sitzungen hier:\n\n  {{link}}/profile\n{{signature}}"
+  }
+}

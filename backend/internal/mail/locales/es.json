@@ -1,0 +1,44 @@
+{
+  "common": {
+    "greeting": "Hola{{name}},",
+    "signature": "\nSaludos cordiales,\nEl equipo de {{instance}}\n",
+    "unknown": "(desconocido)",
+    "not_provided": "(no proporcionado)"
+  },
+  "approved": {
+    "subject": "Su cuenta de {{instance}} está lista",
+    "body": "{{greeting}}\n\nBuenas noticias: un administrador ha aprobado su cuenta de {{instance}}. Ya puede iniciar sesión:\n\n{{link}}\n{{signature}}"
+  },
+  "locked": {
+    "subject": "Su cuenta de {{instance}} ha sido bloqueada",
+    "body": "{{greeting}}\n\nUn administrador ha bloqueado su cuenta de {{instance}}. No podrá iniciar sesión hasta que se desbloquee de nuevo.\n\nSi cree que esto es un error, póngase en contacto con su administrador.\n{{signature}}"
+  },
+  "unlocked": {
+    "subject": "Su cuenta de {{instance}} ha sido desbloqueada",
+    "body": "{{greeting}}\n\nSu cuenta de {{instance}} ha sido desbloqueada por un administrador. Ya puede volver a iniciar sesión:\n\n{{link}}\n{{signature}}"
+  },
+  "deleted": {
+    "subject": "Su cuenta de {{instance}} ha sido eliminada",
+    "body": "{{greeting}}\n\nSu cuenta de {{instance}} ha sido eliminada y se ha revocado su acceso. Si inicia sesión de nuevo más adelante, deberá ser aprobado otra vez, como si fuera la primera vez.\n{{signature}}"
+  },
+  "pending_approval": {
+    "subject": "Nueva cuenta de {{instance}} pendiente de aprobación",
+    "body": "{{greeting}}\n\nHay una nueva cuenta esperando su aprobación:\n\n  Nombre:  {{requester_name}}\n  Correo:  {{requester_email}}\n\nPuede revisar y aprobar esta solicitud aquí:\n\n  {{link}}/admin/users\n{{signature}}"
+  },
+  "login": {
+    "subject": "Nuevo inicio de sesión en su cuenta de {{instance}}",
+    "body": "{{greeting}}\n\nSe acaba de iniciar sesión en su cuenta de {{instance}}:\n\n  Ubicación:   {{location}}\n  IP:          {{ip}}\n  Dispositivo: {{device}}\n\nSi fue usted, no es necesario hacer nada. Si no fue usted, revise y finalice sus sesiones activas aquí:\n\n  {{link}}/profile\n{{signature}}"
+  },
+  "new_device": {
+    "subject": "Nuevo dispositivo detectado en su cuenta de {{instance}}",
+    "body": "{{greeting}}\n\nUna sesión ya iniciada en su cuenta de {{instance}} se acaba de usar desde un dispositivo/navegador distinto al anterior:\n\n  Antes:  {{previous_device}}\n  Ahora:  {{current_device}}\n  IP:     {{ip}}\n\nSi fue usted (una actualización del navegador, un equipo nuevo), no es necesario hacer nada. Si no fue usted, revise y finalice sus sesiones activas aquí:\n\n  {{link}}/profile\n{{signature}}"
+  },
+  "session_revoked_by_admin": {
+    "subject": "Un administrador ha finalizado una de sus sesiones de {{instance}}",
+    "body": "{{greeting}}\n\nUn administrador ha finalizado una de sus sesiones activas de {{instance}}:\n\n  IP:           {{ip}}\n  Dispositivo:  {{device}}\n\nDeberá volver a iniciar sesión en ese dispositivo si aún necesita acceso allí. Si tiene preguntas, póngase en contacto con su administrador. El resto de sus sesiones, si las hay, no se ven afectadas: revíselas aquí:\n\n  {{link}}/profile\n{{signature}}"
+  },
+  "anomaly": {
+    "subject": "Nueva ubicación de inicio de sesión detectada en su cuenta de {{instance}}",
+    "body": "{{greeting}}\n\nSu cuenta de {{instance}} se acaba de usar desde un país distinto al habitual:\n\n  Antes:  {{previous_country}}\n  Ahora:  {{country}}\n  IP:     {{ip}}\n\nSi fue usted (viaje, VPN, red nueva), no es necesario hacer nada. Si no fue usted, revise y finalice sus sesiones activas aquí:\n\n  {{link}}/profile\n{{signature}}"
+  }
+}

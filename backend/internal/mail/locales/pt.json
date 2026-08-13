@@ -1,0 +1,44 @@
+{
+  "common": {
+    "greeting": "Olá{{name}},",
+    "signature": "\nAtenciosamente,\nA equipe {{instance}}\n",
+    "unknown": "(desconhecido)",
+    "not_provided": "(não informado)"
+  },
+  "approved": {
+    "subject": "Sua conta {{instance}} está pronta",
+    "body": "{{greeting}}\n\nBoas notícias - um administrador aprovou sua conta {{instance}}. Você já pode entrar:\n\n{{link}}\n{{signature}}"
+  },
+  "locked": {
+    "subject": "Sua conta {{instance}} foi bloqueada",
+    "body": "{{greeting}}\n\nUm administrador bloqueou sua conta {{instance}}. Você não poderá entrar até que ela seja desbloqueada novamente.\n\nSe você acredita que isso foi um engano, entre em contato com o administrador.\n{{signature}}"
+  },
+  "unlocked": {
+    "subject": "Sua conta {{instance}} foi desbloqueada",
+    "body": "{{greeting}}\n\nSua conta {{instance}} foi desbloqueada por um administrador. Você pode entrar novamente:\n\n{{link}}\n{{signature}}"
+  },
+  "deleted": {
+    "subject": "Sua conta {{instance}} foi excluída",
+    "body": "{{greeting}}\n\nSua conta {{instance}} foi excluída e seu acesso foi revogado. Se você entrar novamente mais tarde, precisará ser aprovado de novo, como se fosse a primeira vez.\n{{signature}}"
+  },
+  "pending_approval": {
+    "subject": "Nova conta {{instance}} aguardando aprovação",
+    "body": "{{greeting}}\n\nUma nova conta está aguardando sua aprovação:\n\n  Nome:  {{requester_name}}\n  E-mail: {{requester_email}}\n\nVocê pode revisar e aprovar esta solicitação aqui:\n\n  {{link}}/admin/users\n{{signature}}"
+  },
+  "login": {
+    "subject": "Novo login em sua conta {{instance}}",
+    "body": "{{greeting}}\n\nSua conta {{instance}} acabou de ser acessada:\n\n  Localização: {{location}}\n  IP:          {{ip}}\n  Dispositivo: {{device}}\n\nSe foi você, nenhuma ação é necessária. Se não foi, revise e encerre suas sessões ativas aqui:\n\n  {{link}}/profile\n{{signature}}"
+  },
+  "new_device": {
+    "subject": "Novo dispositivo detectado em sua conta {{instance}}",
+    "body": "{{greeting}}\n\nUma sessão já conectada em sua conta {{instance}} acabou de ser usada em um dispositivo/navegador diferente do anterior:\n\n  Anterior: {{previous_device}}\n  Agora:    {{current_device}}\n  IP:       {{ip}}\n\nSe foi você (uma atualização de navegador, uma máquina nova), nenhuma ação é necessária. Se não foi, revise e encerre suas sessões ativas aqui:\n\n  {{link}}/profile\n{{signature}}"
+  },
+  "session_revoked_by_admin": {
+    "subject": "Uma de suas sessões {{instance}} foi encerrada por um administrador",
+    "body": "{{greeting}}\n\nUm administrador encerrou uma de suas sessões ativas {{instance}}:\n\n  IP:          {{ip}}\n  Dispositivo: {{device}}\n\nVocê precisará entrar novamente nesse dispositivo se ainda precisar de acesso lá. Se tiver dúvidas, entre em contato com o administrador. Suas outras sessões, se houver, não são afetadas - revise-as aqui:\n\n  {{link}}/profile\n{{signature}}"
+  },
+  "anomaly": {
+    "subject": "Novo local de login detectado em sua conta {{instance}}",
+    "body": "{{greeting}}\n\nSua conta {{instance}} acabou de ser usada em um país diferente do habitual:\n\n  Anterior: {{previous_country}}\n  Agora:    {{country}}\n  IP:       {{ip}}\n\nSe foi você (viagem, VPN, nova rede), nenhuma ação é necessária. Se não foi, revise e encerre suas sessões ativas aqui:\n\n  {{link}}/profile\n{{signature}}"
+  }
+}

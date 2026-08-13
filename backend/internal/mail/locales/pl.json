@@ -1,0 +1,44 @@
+{
+  "common": {
+    "greeting": "Cześć{{name}},",
+    "signature": "\nZ poważaniem,\nZespół {{instance}}\n",
+    "unknown": "(nieznany)",
+    "not_provided": "(nie podano)"
+  },
+  "approved": {
+    "subject": "Twoje konto {{instance}} jest gotowe",
+    "body": "{{greeting}}\n\nDobre wieści - administrator zatwierdził Twoje konto {{instance}}. Możesz teraz się zalogować:\n\n{{link}}\n{{signature}}"
+  },
+  "locked": {
+    "subject": "Twoje konto {{instance}} zostało zablokowane",
+    "body": "{{greeting}}\n\nAdministrator zablokował Twoje konto {{instance}}. Nie będziesz mógł się zalogować, dopóki nie zostanie odblokowane.\n\nJeśli uważasz, że to pomyłka, skontaktuj się z administratorem.\n{{signature}}"
+  },
+  "unlocked": {
+    "subject": "Twoje konto {{instance}} zostało odblokowane",
+    "body": "{{greeting}}\n\nTwoje konto {{instance}} zostało odblokowane przez administratora. Możesz ponownie się zalogować:\n\n{{link}}\n{{signature}}"
+  },
+  "deleted": {
+    "subject": "Twoje konto {{instance}} zostało usunięte",
+    "body": "{{greeting}}\n\nTwoje konto {{instance}} zostało usunięte, a Twój dostęp został cofnięty. Jeśli zalogujesz się ponownie później, będziesz musiał zostać ponownie zatwierdzony, tak jakby to był Twój pierwszy raz.\n{{signature}}"
+  },
+  "pending_approval": {
+    "subject": "Nowe konto {{instance}} oczekuje na zatwierdzenie",
+    "body": "{{greeting}}\n\nNowe konto oczekuje na Twoje zatwierdzenie:\n\n  Imię:    {{requester_name}}\n  E-mail:  {{requester_email}}\n\nMożesz sprawdzić i zatwierdzić tę prośbę tutaj:\n\n  {{link}}/admin/users\n{{signature}}"
+  },
+  "login": {
+    "subject": "Nowe logowanie do Twojego konta {{instance}}",
+    "body": "{{greeting}}\n\nWłaśnie zalogowano się do Twojego konta {{instance}}:\n\n  Lokalizacja: {{location}}\n  IP:          {{ip}}\n  Urządzenie:  {{device}}\n\nJeśli to byłeś Ty, nie musisz nic robić. Jeśli nie, sprawdź i zakończ swoje aktywne sesje tutaj:\n\n  {{link}}/profile\n{{signature}}"
+  },
+  "new_device": {
+    "subject": "Wykryto nowe urządzenie na Twoim koncie {{instance}}",
+    "body": "{{greeting}}\n\nJuż zalogowana sesja na Twoim koncie {{instance}} została właśnie użyta z innego urządzenia/przeglądarki niż wcześniej:\n\n  Wcześniej: {{previous_device}}\n  Teraz:     {{current_device}}\n  IP:        {{ip}}\n\nJeśli to byłeś Ty (aktualizacja przeglądarki, nowy komputer), nie musisz nic robić. Jeśli nie, sprawdź i zakończ swoje aktywne sesje tutaj:\n\n  {{link}}/profile\n{{signature}}"
+  },
+  "session_revoked_by_admin": {
+    "subject": "Jedna z Twoich sesji {{instance}} została zakończona przez administratora",
+    "body": "{{greeting}}\n\nAdministrator zakończył jedną z Twoich aktywnych sesji {{instance}}:\n\n  IP:         {{ip}}\n  Urządzenie: {{device}}\n\nBędziesz musiał zalogować się ponownie na tym urządzeniu, jeśli nadal potrzebujesz tam dostępu. W razie pytań skontaktuj się z administratorem. Twoje pozostałe sesje, jeśli istnieją, nie zostały naruszone - sprawdź je tutaj:\n\n  {{link}}/profile\n{{signature}}"
+  },
+  "anomaly": {
+    "subject": "Wykryto nową lokalizację logowania na Twoim koncie {{instance}}",
+    "body": "{{greeting}}\n\nTwoje konto {{instance}} zostało właśnie użyte z innego kraju niż zwykle:\n\n  Wcześniej: {{previous_country}}\n  Teraz:     {{country}}\n  IP:        {{ip}}\n\nJeśli to byłeś Ty (podróż, VPN, nowa sieć), nie musisz nic robić. Jeśli nie, sprawdź i zakończ swoje aktywne sesje tutaj:\n\n  {{link}}/profile\n{{signature}}"
+  }
+}

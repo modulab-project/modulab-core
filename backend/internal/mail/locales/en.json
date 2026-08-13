@@ -1,0 +1,44 @@
+{
+  "common": {
+    "greeting": "Hello{{name}},",
+    "signature": "\nBest regards,\nThe {{instance}} Team\n",
+    "unknown": "(unknown)",
+    "not_provided": "(not provided)"
+  },
+  "approved": {
+    "subject": "Your {{instance}} account is ready",
+    "body": "{{greeting}}\n\nGood news - an administrator has approved your {{instance}} account. You can sign in right away:\n\n{{link}}\n{{signature}}"
+  },
+  "locked": {
+    "subject": "Your {{instance}} account has been locked",
+    "body": "{{greeting}}\n\nAn administrator has locked your {{instance}} account. You will not be able to sign in until it is unlocked again.\n\nIf you believe this was a mistake, please contact your administrator.\n{{signature}}"
+  },
+  "unlocked": {
+    "subject": "Your {{instance}} account has been unlocked",
+    "body": "{{greeting}}\n\nYour {{instance}} account has been unlocked by an administrator. You can sign in again:\n\n{{link}}\n{{signature}}"
+  },
+  "deleted": {
+    "subject": "Your {{instance}} account has been deleted",
+    "body": "{{greeting}}\n\nYour {{instance}} account has been deleted and your access has been revoked. If you sign in again later, you will need to be approved again, as if this were your first time.\n{{signature}}"
+  },
+  "pending_approval": {
+    "subject": "New {{instance}} account awaiting approval",
+    "body": "{{greeting}}\n\nA new account is waiting for your approval:\n\n  Name:  {{requester_name}}\n  Email: {{requester_email}}\n\nYou can review and approve this request here:\n\n  {{link}}/admin/users\n{{signature}}"
+  },
+  "login": {
+    "subject": "New sign-in to your {{instance}} account",
+    "body": "{{greeting}}\n\nYour {{instance}} account was just signed in:\n\n  Location: {{location}}\n  IP:       {{ip}}\n  Device:   {{device}}\n\nIf this was you, no action is needed. If it wasn't, review and end your active sessions here:\n\n  {{link}}/profile\n{{signature}}"
+  },
+  "new_device": {
+    "subject": "New device detected on your {{instance}} account",
+    "body": "{{greeting}}\n\nAn already-signed-in session on your {{instance}} account was just used from a different device/browser than before:\n\n  Previous: {{previous_device}}\n  Now:      {{current_device}}\n  IP:       {{ip}}\n\nIf this was you (a browser update, a new machine), no action is needed. If it wasn't, review and end your active sessions here:\n\n  {{link}}/profile\n{{signature}}"
+  },
+  "session_revoked_by_admin": {
+    "subject": "One of your {{instance}} sessions was ended by an administrator",
+    "body": "{{greeting}}\n\nAn administrator has ended one of your active {{instance}} sessions:\n\n  IP:     {{ip}}\n  Device: {{device}}\n\nYou will need to sign in again on that device if you still need access there. If you have questions, contact your administrator. Your other sessions, if any, are unaffected - review them here:\n\n  {{link}}/profile\n{{signature}}"
+  },
+  "anomaly": {
+    "subject": "New sign-in location detected on your {{instance}} account",
+    "body": "{{greeting}}\n\nYour {{instance}} account was just used from a different country than usual:\n\n  Previous:  {{previous_country}}\n  Now:       {{country}}\n  IP:        {{ip}}\n\nIf this was you (traveling, VPN, a new network), no action is needed. If it wasn't, review and end your active sessions here:\n\n  {{link}}/profile\n{{signature}}"
+  }
+}

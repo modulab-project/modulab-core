@@ -1,0 +1,44 @@
+{
+  "common": {
+    "greeting": "Hallo{{name}},",
+    "signature": "\nMet vriendelijke groet,\nHet {{instance}}-team\n",
+    "unknown": "(onbekend)",
+    "not_provided": "(niet opgegeven)"
+  },
+  "approved": {
+    "subject": "Uw {{instance}}-account is klaar",
+    "body": "{{greeting}}\n\nGoed nieuws - een beheerder heeft uw {{instance}}-account goedgekeurd. U kunt direct inloggen:\n\n{{link}}\n{{signature}}"
+  },
+  "locked": {
+    "subject": "Uw {{instance}}-account is vergrendeld",
+    "body": "{{greeting}}\n\nEen beheerder heeft uw {{instance}}-account vergrendeld. U kunt pas weer inloggen zodra het is ontgrendeld.\n\nAls u denkt dat dit een vergissing is, neem dan contact op met uw beheerder.\n{{signature}}"
+  },
+  "unlocked": {
+    "subject": "Uw {{instance}}-account is ontgrendeld",
+    "body": "{{greeting}}\n\nUw {{instance}}-account is door een beheerder ontgrendeld. U kunt weer inloggen:\n\n{{link}}\n{{signature}}"
+  },
+  "deleted": {
+    "subject": "Uw {{instance}}-account is verwijderd",
+    "body": "{{greeting}}\n\nUw {{instance}}-account is verwijderd en uw toegang is ingetrokken. Als u zich later opnieuw aanmeldt, moet u opnieuw worden goedgekeurd, alsof het uw eerste keer is.\n{{signature}}"
+  },
+  "pending_approval": {
+    "subject": "Nieuw {{instance}}-account wacht op goedkeuring",
+    "body": "{{greeting}}\n\nEr wacht een nieuw account op uw goedkeuring:\n\n  Naam:   {{requester_name}}\n  E-mail: {{requester_email}}\n\nU kunt dit verzoek hier bekijken en goedkeuren:\n\n  {{link}}/admin/users\n{{signature}}"
+  },
+  "login": {
+    "subject": "Nieuwe aanmelding bij uw {{instance}}-account",
+    "body": "{{greeting}}\n\nEr is zojuist ingelogd op uw {{instance}}-account:\n\n  Locatie:  {{location}}\n  IP:       {{ip}}\n  Apparaat: {{device}}\n\nAls u dit was, is geen actie nodig. Zo niet, controleer en beëindig uw actieve sessies hier:\n\n  {{link}}/profile\n{{signature}}"
+  },
+  "new_device": {
+    "subject": "Nieuw apparaat gedetecteerd bij uw {{instance}}-account",
+    "body": "{{greeting}}\n\nEen reeds aangemelde sessie van uw {{instance}}-account werd zojuist gebruikt vanaf een ander apparaat/browser dan voorheen:\n\n  Voorheen: {{previous_device}}\n  Nu:       {{current_device}}\n  IP:       {{ip}}\n\nAls u dit was (browserupdate, nieuwe machine), is geen actie nodig. Zo niet, controleer en beëindig uw actieve sessies hier:\n\n  {{link}}/profile\n{{signature}}"
+  },
+  "session_revoked_by_admin": {
+    "subject": "Een van uw {{instance}}-sessies is beëindigd door een beheerder",
+    "body": "{{greeting}}\n\nEen beheerder heeft een van uw actieve {{instance}}-sessies beëindigd:\n\n  IP:       {{ip}}\n  Apparaat: {{device}}\n\nU moet opnieuw inloggen op dat apparaat als u daar nog steeds toegang nodig heeft. Neem bij vragen contact op met uw beheerder. Uw overige sessies, indien aanwezig, zijn niet beïnvloed - bekijk ze hier:\n\n  {{link}}/profile\n{{signature}}"
+  },
+  "anomaly": {
+    "subject": "Nieuwe aanmeldlocatie gedetecteerd bij uw {{instance}}-account",
+    "body": "{{greeting}}\n\nUw {{instance}}-account is zojuist gebruikt vanuit een ander land dan gebruikelijk:\n\n  Voorheen: {{previous_country}}\n  Nu:       {{country}}\n  IP:       {{ip}}\n\nAls u dit was (op reis, VPN, nieuw netwerk), is geen actie nodig. Zo niet, controleer en beëindig uw actieve sessies hier:\n\n  {{link}}/profile\n{{signature}}"
+  }
+}

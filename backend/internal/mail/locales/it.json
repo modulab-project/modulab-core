@@ -1,0 +1,44 @@
+{
+  "common": {
+    "greeting": "Ciao{{name}},",
+    "signature": "\nCordiali saluti,\nIl team di {{instance}}\n",
+    "unknown": "(sconosciuto)",
+    "not_provided": "(non fornito)"
+  },
+  "approved": {
+    "subject": "Il tuo account {{instance}} è pronto",
+    "body": "{{greeting}}\n\nBuone notizie - un amministratore ha approvato il tuo account {{instance}}. Puoi accedere subito:\n\n{{link}}\n{{signature}}"
+  },
+  "locked": {
+    "subject": "Il tuo account {{instance}} è stato bloccato",
+    "body": "{{greeting}}\n\nUn amministratore ha bloccato il tuo account {{instance}}. Non potrai accedere finché non verrà sbloccato.\n\nSe ritieni che si tratti di un errore, contatta il tuo amministratore.\n{{signature}}"
+  },
+  "unlocked": {
+    "subject": "Il tuo account {{instance}} è stato sbloccato",
+    "body": "{{greeting}}\n\nIl tuo account {{instance}} è stato sbloccato da un amministratore. Puoi accedere di nuovo:\n\n{{link}}\n{{signature}}"
+  },
+  "deleted": {
+    "subject": "Il tuo account {{instance}} è stato eliminato",
+    "body": "{{greeting}}\n\nIl tuo account {{instance}} è stato eliminato e il tuo accesso è stato revocato. Se accedi di nuovo in futuro, dovrai essere approvato di nuovo, come se fosse la prima volta.\n{{signature}}"
+  },
+  "pending_approval": {
+    "subject": "Nuovo account {{instance}} in attesa di approvazione",
+    "body": "{{greeting}}\n\nUn nuovo account è in attesa della tua approvazione:\n\n  Nome:  {{requester_name}}\n  Email: {{requester_email}}\n\nPuoi esaminare e approvare questa richiesta qui:\n\n  {{link}}/admin/users\n{{signature}}"
+  },
+  "login": {
+    "subject": "Nuovo accesso al tuo account {{instance}}",
+    "body": "{{greeting}}\n\nIl tuo account {{instance}} ha appena effettuato l'accesso:\n\n  Posizione: {{location}}\n  IP:        {{ip}}\n  Dispositivo: {{device}}\n\nSe sei stato tu, non è necessaria alcuna azione. In caso contrario, controlla e termina le tue sessioni attive qui:\n\n  {{link}}/profile\n{{signature}}"
+  },
+  "new_device": {
+    "subject": "Nuovo dispositivo rilevato sul tuo account {{instance}}",
+    "body": "{{greeting}}\n\nUna sessione già attiva sul tuo account {{instance}} è stata appena usata da un dispositivo/browser diverso da prima:\n\n  Prima: {{previous_device}}\n  Ora:   {{current_device}}\n  IP:    {{ip}}\n\nSe sei stato tu (un aggiornamento del browser, un nuovo computer), non è necessaria alcuna azione. In caso contrario, controlla e termina le tue sessioni attive qui:\n\n  {{link}}/profile\n{{signature}}"
+  },
+  "session_revoked_by_admin": {
+    "subject": "Una delle tue sessioni {{instance}} è stata terminata da un amministratore",
+    "body": "{{greeting}}\n\nUn amministratore ha terminato una delle tue sessioni attive {{instance}}:\n\n  IP:          {{ip}}\n  Dispositivo: {{device}}\n\nDovrai accedere di nuovo su quel dispositivo se hai ancora bisogno di accedervi. In caso di domande, contatta il tuo amministratore. Le tue altre sessioni, se presenti, non sono interessate - controllale qui:\n\n  {{link}}/profile\n{{signature}}"
+  },
+  "anomaly": {
+    "subject": "Nuova posizione di accesso rilevata sul tuo account {{instance}}",
+    "body": "{{greeting}}\n\nIl tuo account {{instance}} è stato appena usato da un paese diverso dal solito:\n\n  Prima: {{previous_country}}\n  Ora:   {{country}}\n  IP:    {{ip}}\n\nSe sei stato tu (viaggio, VPN, nuova rete), non è necessaria alcuna azione. In caso contrario, controlla e termina le tue sessioni attive qui:\n\n  {{link}}/profile\n{{signature}}"
+  }
+}

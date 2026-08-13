@@ -1,0 +1,44 @@
+{
+  "common": {
+    "greeting": "Bonjour{{name}},",
+    "signature": "\nCordialement,\nL'équipe {{instance}}\n",
+    "unknown": "(inconnu)",
+    "not_provided": "(non renseigné)"
+  },
+  "approved": {
+    "subject": "Votre compte {{instance}} est prêt",
+    "body": "{{greeting}}\n\nBonne nouvelle : un administrateur a approuvé votre compte {{instance}}. Vous pouvez vous connecter dès maintenant :\n\n{{link}}\n{{signature}}"
+  },
+  "locked": {
+    "subject": "Votre compte {{instance}} a été verrouillé",
+    "body": "{{greeting}}\n\nUn administrateur a verrouillé votre compte {{instance}}. Vous ne pourrez pas vous connecter tant qu'il n'aura pas été déverrouillé.\n\nSi vous pensez qu'il s'agit d'une erreur, contactez votre administrateur.\n{{signature}}"
+  },
+  "unlocked": {
+    "subject": "Votre compte {{instance}} a été déverrouillé",
+    "body": "{{greeting}}\n\nVotre compte {{instance}} a été déverrouillé par un administrateur. Vous pouvez vous reconnecter :\n\n{{link}}\n{{signature}}"
+  },
+  "deleted": {
+    "subject": "Votre compte {{instance}} a été supprimé",
+    "body": "{{greeting}}\n\nVotre compte {{instance}} a été supprimé et votre accès a été révoqué. Si vous vous reconnectez plus tard, vous devrez être approuvé à nouveau, comme si c'était la première fois.\n{{signature}}"
+  },
+  "pending_approval": {
+    "subject": "Nouveau compte {{instance}} en attente d'approbation",
+    "body": "{{greeting}}\n\nUn nouveau compte attend votre approbation :\n\n  Nom :     {{requester_name}}\n  E-mail :  {{requester_email}}\n\nVous pouvez examiner et approuver cette demande ici :\n\n  {{link}}/admin/users\n{{signature}}"
+  },
+  "login": {
+    "subject": "Nouvelle connexion à votre compte {{instance}}",
+    "body": "{{greeting}}\n\nVotre compte {{instance}} vient de faire l'objet d'une connexion :\n\n  Lieu :     {{location}}\n  IP :       {{ip}}\n  Appareil : {{device}}\n\nSi c'était vous, aucune action n'est nécessaire. Sinon, consultez et mettez fin à vos sessions actives ici :\n\n  {{link}}/profile\n{{signature}}"
+  },
+  "new_device": {
+    "subject": "Nouvel appareil détecté sur votre compte {{instance}}",
+    "body": "{{greeting}}\n\nUne session déjà connectée sur votre compte {{instance}} vient d'être utilisée depuis un appareil/navigateur différent :\n\n  Avant :      {{previous_device}}\n  Maintenant : {{current_device}}\n  IP :         {{ip}}\n\nSi c'était vous (mise à jour du navigateur, nouvel appareil), aucune action n'est nécessaire. Sinon, consultez et mettez fin à vos sessions actives ici :\n\n  {{link}}/profile\n{{signature}}"
+  },
+  "session_revoked_by_admin": {
+    "subject": "Une de vos sessions {{instance}} a été fermée par un administrateur",
+    "body": "{{greeting}}\n\nUn administrateur a mis fin à l'une de vos sessions actives {{instance}} :\n\n  IP :      {{ip}}\n  Appareil : {{device}}\n\nVous devrez vous reconnecter sur cet appareil si vous avez encore besoin d'y accéder. Pour toute question, contactez votre administrateur. Vos autres sessions, le cas échéant, ne sont pas affectées - consultez-les ici :\n\n  {{link}}/profile\n{{signature}}"
+  },
+  "anomaly": {
+    "subject": "Nouvel emplacement de connexion détecté sur votre compte {{instance}}",
+    "body": "{{greeting}}\n\nVotre compte {{instance}} vient d'être utilisé depuis un pays différent de d'habitude :\n\n  Avant :      {{previous_country}}\n  Maintenant : {{country}}\n  IP :         {{ip}}\n\nSi c'était vous (voyage, VPN, nouveau réseau), aucune action n'est nécessaire. Sinon, consultez et mettez fin à vos sessions actives ici :\n\n  {{link}}/profile\n{{signature}}"
+  }
+}
