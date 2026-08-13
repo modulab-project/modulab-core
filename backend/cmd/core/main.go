@@ -969,7 +969,7 @@ func main() {
 	// (modules already imports store, so the reverse would cycle) — passing
 	// this closure in is how the two meet without that.
 	onStoreSynced := func(syncCtx context.Context) {
-		modules.RunUpdateCheckOnce(syncCtx, moduleDeps, storeDeps)
+		modules.RunUpdateCheckOnce(syncCtx, moduleDeps, storeDeps, authDeps)
 	}
 
 	// Now that moduleDeps exists, start the registry-sync goroutine and wire
@@ -1141,6 +1141,8 @@ func main() {
 	mux.HandleFunc("POST /v1/modules/{name}/restart", modules.RestartModuleHandler(moduleDeps, authDeps))
 	mux.HandleFunc("POST /v1/modules/{name}/pin", modules.PinHandler(moduleDeps, authDeps))
 	mux.HandleFunc("DELETE /v1/modules/{name}/pin", modules.UnpinHandler(moduleDeps, authDeps))
+	mux.HandleFunc("POST /v1/modules/{name}/auto-update", modules.AutoUpdateOnHandler(moduleDeps, authDeps))
+	mux.HandleFunc("DELETE /v1/modules/{name}/auto-update", modules.AutoUpdateOffHandler(moduleDeps, authDeps))
 
 	// Module PII key migration (Part B of the module DB sandbox work, see
 	// docs/Modul-DB-Sandbox_Plan_2026-08-02.md): one-time, hard-to-undo

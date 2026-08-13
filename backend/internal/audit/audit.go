@@ -212,6 +212,16 @@ const (
 	EventModuleRestarted   = "module.restarted"
 	EventModulePinned      = "module.pinned"
 	EventModuleUnpinned    = "module.unpinned"
+	// EventModuleAutoUpdateEnabled/Disabled cover an admin toggling a
+	// module's auto_update flag (AutoUpdateOnHandler/AutoUpdateOffHandler,
+	// modules/handlers.go) - the opt-in that lets RunAutoUpdates
+	// (modules/updater.go) apply future updates itself instead of only
+	// recording available_version. The actual updates that flag then
+	// triggers reuse EventModuleUpdated (Details carries "trigger":"auto"
+	// vs. "manual") rather than a third event type - this pair only covers
+	// the admin's own decision to opt a module in or out.
+	EventModuleAutoUpdateEnabled  = "module.auto_update_enabled"
+	EventModuleAutoUpdateDisabled = "module.auto_update_disabled"
 	// EventModuleEgressDenied is the one module event with no admin actor
 	// behind it: a running Tier 2/3 worker asked Core to grant it network
 	// access to a host outside its manifest's dynamic_egress_allow, and Core

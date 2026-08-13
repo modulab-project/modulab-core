@@ -14,6 +14,8 @@ import {
   uninstallModule,
   pinModule,
   unpinModule,
+  autoUpdateOn,
+  autoUpdateOff,
   type InstalledModule,
 } from "../lib/api";
 import { useAuthenticatedSession } from "../lib/useSession";
@@ -168,6 +170,22 @@ export default function ModulesPage() {
     }
   }
 
+  async function handleToggleAutoUpdate(name: string, currentlyEnabled: boolean) {
+    setBusyName(name);
+    try {
+      const res = currentlyEnabled
+        ? await autoUpdateOff(name)
+        : await autoUpdateOn(name);
+      setModules((prev) =>
+        prev.map((m) => (m.name === name ? { ...m, auto_update: res.auto_update } : m)),
+      );
+    } catch {
+      alert(t("modules.auto_update_error"));
+    } finally {
+      setBusyName(null);
+    }
+  }
+
   if (loading || !session || !isAdmin) return null;
 
   return (
@@ -243,6 +261,12 @@ export default function ModulesPage() {
                       <i
                         className="ti ti-pin text-[13px] text-gray-400 dark:text-gray-500"
                         title={t("modules.pinned")}
+                      />
+                    )}
+                    {mod.auto_update && (
+                      <i
+                        className="ti ti-refresh-dot text-[13px] text-teal-500"
+                        title={t("modules.auto_update_on")}
                       />
                     )}
                     {hasUpdate && (
@@ -327,6 +351,19 @@ export default function ModulesPage() {
                         {t("modules.migrate_pii_key")}
                       </button>
                     )}
+                    <button
+                      type="button"
+                      onClick={() => handleToggleAutoUpdate(mod.name, mod.auto_update)}
+                      disabled={isBusy}
+                      title={mod.auto_update ? t("modules.auto_update_disable") : t("modules.auto_update_enable")}
+                      className={
+                        mod.auto_update
+                          ? "flex h-8 w-8 items-center justify-center rounded-lg border border-teal-200 text-teal-600 hover:bg-teal-50 disabled:opacity-50 dark:border-teal-800 dark:text-teal-400 dark:hover:bg-teal-950"
+                          : "flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 text-gray-400 hover:bg-gray-50 hover:text-gray-700 disabled:opacity-50 dark:border-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+                      }
+                    >
+                      <i className="ti ti-refresh-dot text-[14px]" />
+                    </button>
                     <button
                       type="button"
                       onClick={() => handleTogglePin(mod.name, mod.pinned)}

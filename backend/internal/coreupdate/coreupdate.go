@@ -217,7 +217,7 @@ func parseVersionParts(v string) [3]int {
 // new release would get the same toast repeated on every tick until they
 // upgrade, not just once.
 func CheckNow(ctx context.Context, pool *db.Pool, vk *valkey.Client) (CheckResult, error) {
-	latest, err := store.FetchLatestRelease(ctx, pool, coreRepoURL, "")
+	latest, err := store.FetchLatestRelease(ctx, pool, coreRepoURL, "github", "")
 	if err != nil {
 		return CheckResult{}, fmt.Errorf("coreupdate: check now: %w", err)
 	}

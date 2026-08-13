@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/modulab-project/modulab-core/backend/internal/audit"
+	"github.com/modulab-project/modulab-core/backend/internal/auth"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
 	"github.com/modulab-project/modulab-core/backend/internal/store"
 )
@@ -551,4 +553,139 @@ func (d Deps) updateInstalledModuleRecord(ctx context.Context, name, version str
 		return fmt.Errorf("db: update installed_module record %q: %w", name, err)
 	}
 	return nil
+}
+
+// restartWorkerAfterUpdate stops and restarts name's Deno worker (tier >= 2
+// only - a no-op for tier 1) so it picks up the code an Update() call just
+// applied, re-checking any runtime-discovered egress hosts (see
+// WorkerPool.CurrentModuleEgressHosts) against the new manifest along the
+// way. Extracted from UpdateModuleHandler (handlers.go) so RunAutoUpdates
+// below can apply the exact same sequence for an auto_update-flagged
+// module's background update - previously only the HTTP handler restarted
+// the worker at all, so an admin-triggered update picked up new code
+// immediately while an (as of this change, still hypothetical) automatic one
+// would not have.
+//
+// Errors are logged, not returned: a failed restart here must not undo the
+// update that already succeeded (the DB row is already on the new version),
+// same "best-effort past this point" reasoning Update() itself uses for its
+// own non-fatal steps.
+func restartWorkerAfterUpdate(ctx context.Context, d Deps, authDeps auth.Deps, name string) {
+	// Capture the currently-running worker's actual (runtime-discovered)
+	// egress hosts BEFORE stopping it. Only actually used below if the NEW
+	// manifest declares dynamic_egress: true (see Manifest.DynamicEgress doc
+	// comment for why this must be an explicit opt-in, not a guess based on
+	// "the old worker had hosts the new manifest doesn't").
+	runtimeEgressHosts, hadRuntimeHosts := d.Workers.CurrentModuleEgressHosts(name)
+
+	// row is re-fetched AFTER Update() has already returned (by every
+	// caller), so row.Tier reflects the NEW manifest's tier
+	// (updateInstalledModuleRecord above persists it). Stop() always runs
+	// unconditionally, so a tier>=2 → tier==1 downgrade correctly ends up
+	// with no worker restarted below, and a tier==1 → tier>=2 upgrade
+	// correctly starts one where none ran before.
+	_ = d.Workers.Stop(name)
+	row, found, err := d.DB.GetInstalledModule(ctx, name)
+	if err != nil || !found || row.Tier < 2 {
+		return
+	}
+
+	var mf struct {
+		Handler            string        `json:"handler"`
+		EgressAllowlist    []string      `json:"egress_allowlist"`
+		Jobs               []ManifestJob `json:"jobs"`
+		TLSSkipVerify      bool          `json:"tls_skip_verify"`
+		DynamicEgress      bool          `json:"dynamic_egress"`
+		EgressHostsHandler string        `json:"egress_hosts_handler"`
+		DynamicEgressAllow []string      `json:"dynamic_egress_allow"`
+	}
+	if row.Manifest != nil {
+		_ = json.Unmarshal(row.Manifest, &mf)
+	}
+	if mf.Handler == "" {
+		return
+	}
+
+	destDir := filepath.Join(d.DataDir, name)
+	entrypoint := filepath.Join(destDir, mf.Handler)
+	egressHosts := mf.EgressAllowlist
+	if mf.DynamicEgress && hadRuntimeHosts && len(runtimeEgressHosts) > 0 {
+		// Runtime hosts carried over from the worker we just stopped were
+		// checked against the OLD manifest's policy when they were granted.
+		// This is a module *update*, so the policy may have just changed -
+		// re-check them against the version being installed rather than
+		// grandfathering them in, otherwise tightening dynamic_egress_allow
+		// would have no effect until the next reload happened to come along.
+		egressHosts = carryOverRuntimeEgress(ctx, authDeps, name, runtimeEgressHosts, mf.DynamicEgressAllow, "update")
+	}
+	opts := WorkerOptions{
+		EgressHosts:    egressHosts,
+		Jobs:           ResolveJobEntrypoints(destDir, mf.Jobs, mf.EgressHostsHandler),
+		SkipTLSVerify:  mf.TLSSkipVerify,
+		EgressPolicy:   mf.DynamicEgressAllow,
+		DBRolePassword: moduleDBRolePassword(ctx, d, name),
+		PIIMigrated:    modulePIIMigrated(ctx, d, name),
+	}
+	if err := d.Workers.Start(name, entrypoint, opts); err != nil {
+		log.Printf("modules: update %q: restart worker: %v", name, err)
+		return
+	}
+	if mf.DynamicEgress && mf.EgressHostsHandler != "" {
+		// The just-started worker is a fresher source of truth than whatever
+		// we captured before stopping it above (the update may itself have
+		// changed how hosts are computed) — ask it directly and reload once
+		// more.
+		if hosts, ok := d.Workers.QueryEgressHosts(ctx, name); ok {
+			if err := d.Workers.ReloadEgress(name, hosts); err != nil {
+				log.Printf("modules: update %q: egress hosts reload failed: %v", name, err)
+			}
+		}
+	}
+}
+
+// RunAutoUpdates walks the modules CheckUpdates just found (see
+// RunUpdateCheckOnce, status.go) and, for every one with auto_update enabled
+// (SetModuleAutoUpdate / the "Automatisch aktualisieren" toggle next to Pin
+// in ModulesPage.tsx), applies the update immediately instead of only
+// recording available_version for an admin to act on later.
+//
+// Runs right after every registry sync - the same trigger CheckUpdates
+// itself already runs on - so an auto_update-flagged module updates within
+// the same cycle a manual "check updates" click would have surfaced it in,
+// rather than needing a second, separate scheduler.
+//
+// Deliberately adds no check beyond what Update() itself already enforces
+// (not pinned, sha256 + Cosign verification against the same rules Install
+// uses, tier validation): a module an admin has opted into auto-updating is
+// trusted the same way a manually-triggered update already is - auto_update
+// removes the click, not the safety checks. A module whose Update() call
+// fails (e.g. an official release that briefly has no valid signature) is
+// simply skipped and retried on the next sync, same as it would be if an
+// admin had clicked "update" by hand and gotten an error.
+func RunAutoUpdates(ctx context.Context, d Deps, storeDeps store.Deps, authDeps auth.Deps, updates []UpdateInfo) {
+	for _, u := range updates {
+		row, found, err := d.DB.GetInstalledModule(ctx, u.Name)
+		if err != nil || !found || !row.AutoUpdate {
+			continue
+		}
+
+		entry, found, err := store.GetEntry(ctx, storeDeps.Pool, u.Name)
+		if err != nil || !found {
+			log.Printf("modules: auto-update %q: registry lookup failed: %v", u.Name, err)
+			continue
+		}
+
+		if err := Update(ctx, d, entry); err != nil {
+			log.Printf("modules: auto-update %q: %v", u.Name, err)
+			continue
+		}
+		restartWorkerAfterUpdate(ctx, d, authDeps, u.Name)
+
+		logModuleAudit(ctx, authDeps, audit.LogParams{
+			EventType: audit.EventModuleUpdated,
+			TargetID:  u.Name,
+			Details:   fmt.Sprintf(`{"from_version":%q,"to_version":%q,"trigger":"auto"}`, u.InstalledVersion, u.AvailableVersion),
+		})
+		log.Printf("modules: auto-updated %q: %s → %s", u.Name, u.InstalledVersion, u.AvailableVersion)
+	}
 }

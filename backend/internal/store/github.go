@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -270,6 +271,105 @@ func FetchCommunityRegistry(ctx context.Context, pool *db.Pool) ([]Entry, error)
 	return out, nil
 }
 
+// gitProvider resolves the API/raw-content URLs for one custom source's
+// repo_url, GitHub or a self-hosted Forgejo/Gitea instance (kind ==
+// "forgejo" - see db's custom_sources.kind column comment). Forgejo and
+// Gitea both implement a GitHub-API-compatible /api/v1 surface for releases
+// and repo contents (same JSON shapes as githubRelease/communityRepoItem
+// above - "tag_name", "type"/"name" entries, etc.), so the only real
+// difference custom-source support needs to know about is where the API
+// lives and how raw file URLs are built: api.github.com /
+// raw.githubusercontent.com for GitHub, vs. "<host>/api/v1" /
+// "<host>/<owner>/<repo>/raw/branch/<branch>/<path>" for a self-hosted
+// instance. Every function below that used to hardcode a
+// "https://api.github.com/..." or "https://raw.githubusercontent.com/..."
+// URL now goes through a gitProvider instead, so both kinds share one code
+// path.
+//
+// Deliberately does not support authenticated (private-repo) forgejo
+// sources yet: resolveCustomSourceCredential (installer.go) only ever binds
+// a token to a github.com owner/repo path via githubRepoPath, so a token
+// saved against a "forgejo" source is rejected at add-time instead of
+// silently going unused (see addCustomSourceRequest.Token's doc comment).
+type gitProvider struct {
+	// kind is "github" or "forgejo" - anything else is treated as "github"
+	// (normalizeGitKind), matching a pre-existing custom_sources row's
+	// column default for the same reason CustomSourceRow.Kind defaults to
+	// "github" when empty.
+	kind string
+	// host is the repo's own hostname - "github.com" for kind == "github",
+	// or whatever host repo_url actually points at for kind == "forgejo".
+	host string
+	// repoPath is "owner/repo", parsed out of repo_url.
+	repoPath string
+}
+
+// normalizeGitKind maps any value other than the recognized "forgejo" to
+// "github" - the safe default, and the only value custom_sources rows
+// created before this column existed can have.
+func normalizeGitKind(kind string) string {
+	if kind == "forgejo" {
+		return "forgejo"
+	}
+	return "github"
+}
+
+// parseGitProvider parses repoURL ("https://<host>/<owner>/<repo>") into a
+// gitProvider for the given kind. Returns an error for anything that is not
+// exactly that shape - both isValidCustomSourceRepoURL (custom_sources_
+// handlers.go, checked when the source was added) and this function agree
+// on the same "exactly two non-empty path segments" rule, so this should
+// only ever fail for a row that predates that validation.
+func parseGitProvider(repoURL, kind string) (gitProvider, error) {
+	kind = normalizeGitKind(kind)
+	u, err := url.Parse(repoURL)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return gitProvider{}, fmt.Errorf("invalid repo url %q", repoURL)
+	}
+	path := strings.Trim(u.Path, "/")
+	parts := strings.Split(path, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return gitProvider{}, fmt.Errorf("repo url %q must look like https://<host>/<owner>/<repo>", repoURL)
+	}
+	return gitProvider{kind: kind, host: u.Host, repoPath: path}, nil
+}
+
+// apiBase is the root of the REST API this provider's releases/contents
+// endpoints hang off - "https://api.github.com" for GitHub, or
+// "https://<host>/api/v1" for a self-hosted Forgejo/Gitea instance.
+func (g gitProvider) apiBase() string {
+	if g.kind == "forgejo" {
+		return "https://" + g.host + "/api/v1"
+	}
+	return "https://api.github.com"
+}
+
+// releasesLatestURL is the "latest release" endpoint for this repo.
+func (g gitProvider) releasesLatestURL() string {
+	return g.apiBase() + "/repos/" + g.repoPath + "/releases/latest"
+}
+
+// releasesURL is the "list releases" endpoint for this repo (used when
+// several modules in one monorepo share a release list and disambiguate by
+// tag prefix - see FetchLatestReleaseForPrefix).
+func (g gitProvider) releasesURL() string {
+	return g.apiBase() + "/repos/" + g.repoPath + "/releases"
+}
+
+// contentsRootURL is the repo-root directory-listing endpoint (used to
+// detect a monorepo layout - see fetchCustomMonorepo).
+func (g gitProvider) contentsRootURL() string {
+	return g.apiBase() + "/repos/" + g.repoPath + "/contents/"
+}
+
+// rawURL builds the raw-file URL for path on branch.
+func (g gitProvider) rawURL(branch, path string) string {
+	if g.kind == "forgejo" {
+		return "https://" + g.host + "/" + g.repoPath + "/raw/branch/" + branch + "/" + path
+	}
+	return "https://raw.githubusercontent.com/" + g.repoPath + "/" + branch + "/" + path
+}
+
 // customModuleReleaseAsset is the fixed asset filename every custom-source
 // module's GitHub Release must attach, mirroring the "bare filename,
 // reconstructed from source_repo + tag" convention installer.go's Install/
@@ -285,12 +385,6 @@ const customModuleReleaseAsset = "module.zip"
 // known-main-branch monorepo), an arbitrary third-party repo may default to
 // either.
 var customManifestBranches = []string{"main", "master"}
-
-// customContentsRootURLFmt is the GitHub Contents API URL for a repo's root
-// listing (%s = "owner/repo") - used to detect a monorepo layout (see
-// fetchCustomMonorepo) the same way FetchCommunityRegistry lists
-// modulab-community's own root.
-const customContentsRootURLFmt = "https://api.github.com/repos/%s/contents/"
 
 // customManifest is the subset of a custom source repo's own manifest.yaml
 // (the same file the module ships inside its own module.zip - see
@@ -343,20 +437,20 @@ type customManifest struct {
 // aborting the sync, same as FetchCommunityRegistry's per-directory errors;
 // a single bad subdirectory within an otherwise-valid monorepo is instead
 // just skipped (see fetchCustomMonorepo).
-func FetchCustomRepo(ctx context.Context, pool *db.Pool, repoURL, pubKeyPEM, token string) ([]Entry, error) {
+func FetchCustomRepo(ctx context.Context, pool *db.Pool, repoURL, kind, pubKeyPEM, token string) ([]Entry, error) {
 	timeout := time.Duration(GithubAPITimeoutSeconds(ctx, pool)) * time.Second
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	repoPath := strings.TrimSuffix(strings.TrimPrefix(repoURL, "https://github.com/"), "/")
-	if repoPath == "" || strings.Contains(repoPath, "://") {
-		return nil, fmt.Errorf("store: custom source: invalid repo url %q", repoURL)
+	g, err := parseGitProvider(repoURL, kind)
+	if err != nil {
+		return nil, fmt.Errorf("store: custom source: %w", err)
 	}
 
 	// ── 1. Single module: manifest.yaml at the repo root ──────────────────
-	m, rootErr := fetchCustomManifestAt(ctx, repoPath, "", token)
+	m, rootErr := fetchCustomManifestAt(ctx, g, "", token)
 	if rootErr == nil {
-		version, verr := FetchLatestRelease(ctx, pool, repoURL, token)
+		version, verr := FetchLatestRelease(ctx, pool, repoURL, kind, token)
 		if verr != nil {
 			return nil, fmt.Errorf("store: custom source: latest release for %q: %w", repoURL, verr)
 		}
@@ -364,7 +458,7 @@ func FetchCustomRepo(ctx context.Context, pool *db.Pool, repoURL, pubKeyPEM, tok
 	}
 
 	// ── 2. Monorepo: no root manifest.yaml, scan subdirectories ───────────
-	entries, scanErr := fetchCustomMonorepo(ctx, pool, repoURL, repoPath, pubKeyPEM, token)
+	entries, scanErr := fetchCustomMonorepo(ctx, pool, repoURL, g, pubKeyPEM, token)
 	if scanErr != nil {
 		return nil, fmt.Errorf("store: custom source: no manifest.yaml at repo root (%v) and monorepo scan failed for %q: %w", rootErr, repoURL, scanErr)
 	}
@@ -375,14 +469,14 @@ func FetchCustomRepo(ctx context.Context, pool *db.Pool, repoURL, pubKeyPEM, tok
 }
 
 // fetchCustomManifestAt fetches and parses manifest.yaml at subPath within
-// repoPath ("owner/repo"), trying every branch in customManifestBranches.
-// subPath "" means the repo root (single-module layout); a subdirectory name
-// means the monorepo layout (see FetchCustomRepo). Resolves Logo to an
-// absolute raw.githubusercontent.com URL on the branch that worked. Returns
-// an error if no branch has the file, or if it parses but is missing
-// name/version - both are treated identically by callers (skip this
-// path/module, don't abort the whole source).
-func fetchCustomManifestAt(ctx context.Context, repoPath, subPath, token string) (customManifest, error) {
+// g's repo, trying every branch in customManifestBranches. subPath ""
+// means the repo root (single-module layout); a subdirectory name means the
+// monorepo layout (see FetchCustomRepo). Resolves Logo to an absolute raw
+// file URL (g.rawURL) on the branch that worked. Returns an error if no
+// branch has the file, or if it parses but is missing name/version - both
+// are treated identically by callers (skip this path/module, don't abort
+// the whole source).
+func fetchCustomManifestAt(ctx context.Context, g gitProvider, subPath, token string) (customManifest, error) {
 	manifestRelPath := "manifest.yaml"
 	if subPath != "" {
 		manifestRelPath = subPath + "/manifest.yaml"
@@ -391,7 +485,7 @@ func fetchCustomManifestAt(ctx context.Context, repoPath, subPath, token string)
 	var m customManifest
 	var fetchErr error
 	for _, branch := range customManifestBranches {
-		manifestURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s", repoPath, branch, manifestRelPath)
+		manifestURL := g.rawURL(branch, manifestRelPath)
 		data, err := httpGet(ctx, manifestURL, token)
 		if err != nil {
 			fetchErr = err
@@ -408,7 +502,7 @@ func fetchCustomManifestAt(ctx context.Context, repoPath, subPath, token string)
 			if subPath != "" {
 				logoRelPath = subPath + "/" + m.Logo
 			}
-			m.Logo = fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s", repoPath, branch, logoRelPath)
+			m.Logo = g.rawURL(branch, logoRelPath)
 		}
 		return m, nil
 	}
@@ -427,11 +521,11 @@ func fetchCustomManifestAt(ctx context.Context, repoPath, subPath, token string)
 // its own registry.json", the normal case for a source added before this
 // existed, or one that only ever holds a single module and never bothered.
 // Callers fall back to the module.zip-by-convention scan in that case.
-func fetchCustomRegistryJSON(ctx context.Context, repoPath, token string) ([]officialEntry, error) {
+func fetchCustomRegistryJSON(ctx context.Context, g gitProvider, token string) ([]officialEntry, error) {
 	var lastErr error
 	for _, branch := range customManifestBranches {
-		url := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/registry.json", repoPath, branch)
-		data, err := httpGet(ctx, url, token)
+		u := g.rawURL(branch, "registry.json")
+		data, err := httpGet(ctx, u, token)
 		if err != nil {
 			lastErr = err
 			continue
@@ -475,8 +569,8 @@ func fetchCustomRegistryJSON(ctx context.Context, repoPath, token string) ([]off
 // for a single-module custom source, awkward for a monorepo of several. The
 // module.zip-by-convention scan remains the fallback for sources without a
 // registry.json, so existing custom sources keep working unchanged.
-func fetchCustomMonorepo(ctx context.Context, pool *db.Pool, repoURL, repoPath, pubKeyPEM, token string) ([]Entry, error) {
-	if raw, err := fetchCustomRegistryJSON(ctx, repoPath, token); err != nil {
+func fetchCustomMonorepo(ctx context.Context, pool *db.Pool, repoURL string, g gitProvider, pubKeyPEM, token string) ([]Entry, error) {
+	if raw, err := fetchCustomRegistryJSON(ctx, g, token); err != nil {
 		log.Printf("store: custom source: %q: registry.json found but failed to parse, falling back to module.zip convention: %v", repoURL, err)
 	} else if len(raw) > 0 {
 		out := make([]Entry, 0, len(raw))
@@ -499,8 +593,7 @@ func fetchCustomMonorepo(ctx context.Context, pool *db.Pool, repoURL, repoPath, 
 		return out, nil
 	}
 
-	rootURL := fmt.Sprintf(customContentsRootURLFmt, repoPath)
-	data, err := httpGet(ctx, rootURL, token)
+	data, err := httpGet(ctx, g.contentsRootURL(), token)
 	if err != nil {
 		return nil, fmt.Errorf("list repo root: %w", err)
 	}
@@ -514,12 +607,12 @@ func fetchCustomMonorepo(ctx context.Context, pool *db.Pool, repoURL, repoPath, 
 		if item.Type != "dir" || strings.HasPrefix(item.Name, ".") {
 			continue
 		}
-		m, err := fetchCustomManifestAt(ctx, repoPath, item.Name, token)
+		m, err := fetchCustomManifestAt(ctx, g, item.Name, token)
 		if err != nil {
 			// Not a module directory - skip silently, see doc comment above.
 			continue
 		}
-		version, err := FetchLatestReleaseForPrefix(ctx, pool, repoURL, item.Name, token)
+		version, err := FetchLatestReleaseForPrefix(ctx, pool, repoURL, g.kind, item.Name, token)
 		if err != nil {
 			log.Printf("store: custom source: %q: latest release for %q: %v", repoURL, item.Name, err)
 			continue
@@ -547,26 +640,24 @@ func buildCustomEntry(m customManifest, repoURL, releaseAsset, version, pubKeyPE
 	}
 }
 
-// FetchLatestRelease calls the GitHub Releases API for sourceRepo and returns
-// the tag name of the latest release, or ("", nil) when the repo has no
-// releases yet. Used by the daily update-check for community modules and by
-// FetchCustomRepo for custom sources. token is an optional GitHub PAT
-// (fine-grained or classic) for a private repo - pass "" for a public one
-// (official/community, or a custom source added without a token).
-func FetchLatestRelease(ctx context.Context, pool *db.Pool, sourceRepo, token string) (string, error) {
+// FetchLatestRelease calls the releases API for sourceRepo and returns the
+// tag name of the latest release, or ("", nil) when the repo has no
+// releases yet. Used by the daily update-check for community modules
+// (always kind == "github") and by FetchCustomRepo for custom sources
+// (kind from the custom_sources row). token is an optional PAT for a
+// private repo - pass "" for a public one; only ever honored for kind ==
+// "github" in practice (see addCustomSourceRequest.Token's doc comment).
+func FetchLatestRelease(ctx context.Context, pool *db.Pool, sourceRepo, kind, token string) (string, error) {
 	timeout := time.Duration(GithubAPITimeoutSeconds(ctx, pool)) * time.Second
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// Convert https://github.com/owner/repo → owner/repo for the API path.
-	repoPath := strings.TrimPrefix(sourceRepo, "https://github.com/")
-	repoPath = strings.TrimSuffix(repoPath, "/")
-	if repoPath == "" {
-		return "", fmt.Errorf("store: invalid source_repo %q", sourceRepo)
+	g, err := parseGitProvider(sourceRepo, kind)
+	if err != nil {
+		return "", fmt.Errorf("store: %w", err)
 	}
 
-	url := "https://api.github.com/repos/" + repoPath + "/releases/latest"
-	data, err := httpGet(ctx, url, token)
+	data, err := httpGet(ctx, g.releasesLatestURL(), token)
 	if err != nil {
 		// 404 = no releases yet → not an error, just no version known.
 		return "", nil
@@ -579,7 +670,7 @@ func FetchLatestRelease(ctx context.Context, pool *db.Pool, sourceRepo, token st
 	return rel.TagName, nil
 }
 
-// FetchLatestReleaseForPrefix calls the GitHub Releases *list* API (not
+// FetchLatestReleaseForPrefix calls the releases *list* API (not
 // /releases/latest) and returns the newest release whose tag starts with
 // "<prefix>-", or ("", nil) if none match. Used for a custom monorepo (see
 // FetchCustomRepo/fetchCustomMonorepo) where multiple modules share one
@@ -587,22 +678,20 @@ func FetchLatestRelease(ctx context.Context, pool *db.Pool, sourceRepo, token st
 // "<module-subdirectory>-v1.2.0" - the same convention the official
 // modulab-modules monorepo already uses for its own releases (e.g.
 // "recipes-v0.1.0", see installer.go's zipURL comment). Only the first page
-// (GitHub's default: 30 releases, newest first) is considered - more than
-// that between two syncs of the same monorepo is not a case worth paginating
-// for at this project's scale.
-func FetchLatestReleaseForPrefix(ctx context.Context, pool *db.Pool, sourceRepo, prefix, token string) (string, error) {
+// (30 releases, newest first, on both GitHub and Forgejo/Gitea's default
+// page size) is considered - more than that between two syncs of the same
+// monorepo is not a case worth paginating for at this project's scale.
+func FetchLatestReleaseForPrefix(ctx context.Context, pool *db.Pool, sourceRepo, kind, prefix, token string) (string, error) {
 	timeout := time.Duration(GithubAPITimeoutSeconds(ctx, pool)) * time.Second
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	repoPath := strings.TrimPrefix(sourceRepo, "https://github.com/")
-	repoPath = strings.TrimSuffix(repoPath, "/")
-	if repoPath == "" {
-		return "", fmt.Errorf("store: invalid source_repo %q", sourceRepo)
+	g, err := parseGitProvider(sourceRepo, kind)
+	if err != nil {
+		return "", fmt.Errorf("store: %w", err)
 	}
 
-	url := "https://api.github.com/repos/" + repoPath + "/releases"
-	data, err := httpGet(ctx, url, token)
+	data, err := httpGet(ctx, g.releasesURL(), token)
 	if err != nil {
 		// No releases at all, or repo/API unreachable - not an error, just
 		// nothing installable for this module yet.

@@ -201,6 +201,21 @@ func (p *Pool) EnsureModuleStoreSchema(ctx context.Context) error {
 		return fmt.Errorf("db: ensure installed_modules.logo_url: %w", err)
 	}
 
+	// auto_update: when true, RunUpdateCheckOnce/RunAutoUpdates
+	// (modules/updater.go) apply a newer version to this module itself, on
+	// the same cycle that would otherwise only have set available_version
+	// for an admin to act on manually. Off by default - a module an admin
+	// has never opted in keeps today's behaviour exactly (available_version
+	// only, update() triggered by hand). Independent of pinned: a pinned
+	// module's Update() call always refuses regardless of this flag (see
+	// Update's guard), so the two can be toggled without interaction
+	// concerns - pinned wins if both are somehow set.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE installed_modules ADD COLUMN IF NOT EXISTS auto_update BOOLEAN NOT NULL DEFAULT FALSE
+	`); err != nil {
+		return fmt.Errorf("db: ensure installed_modules.auto_update: %w", err)
+	}
+
 	// ── module_registry ───────────────────────────────────────────────────────
 
 	// Local cache of official registry.json + modulab-community index.
@@ -285,6 +300,35 @@ func (p *Pool) EnsureModuleStoreSchema(ctx context.Context) error {
 		)
 	`); err != nil {
 		return fmt.Errorf("db: ensure custom_sources: %w", err)
+	}
+
+	// kind: which git-hosting API this source speaks - 'github' (the
+	// original, still-default behaviour: api.github.com +
+	// raw.githubusercontent.com) or 'forgejo' (a self-hosted Forgejo/Gitea
+	// instance, whose host is taken from repo_url itself - see
+	// store.gitProvider in github.go). Forgejo and Gitea both implement a
+	// GitHub-API-compatible /api/v1 surface for releases and repo contents,
+	// so this is the only piece of information Core needs to know which URL
+	// shapes to build - not a second credential model or a different
+	// manifest.yaml format. Added after the table's initial release, same
+	// idempotent backfill pattern as token_enc/cosign_sig_url below - a
+	// pre-existing row defaults to 'github', unchanged from its actual
+	// current behaviour.
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE custom_sources ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'github'
+	`); err != nil {
+		return fmt.Errorf("db: ensure custom_sources.kind: %w", err)
+	}
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE custom_sources DROP CONSTRAINT IF EXISTS custom_sources_kind_check
+	`); err != nil {
+		return fmt.Errorf("db: drop custom_sources_kind_check: %w", err)
+	}
+	if _, err := p.Exec(ctx, `
+		ALTER TABLE custom_sources ADD CONSTRAINT custom_sources_kind_check
+		    CHECK (kind IN ('github', 'forgejo'))
+	`); err != nil {
+		return fmt.Errorf("db: ensure custom_sources_kind_check: %w", err)
 	}
 
 	// token_enc: added after the table's initial release, same backfill
@@ -400,6 +444,11 @@ type CustomSourceRow struct {
 	Name    string
 	PubKey  string
 	Token   string
+	// Kind is "github" (default) or "forgejo" - which git-hosting API
+	// FetchCustomRepo (store/github.go) should speak for this source. See
+	// the custom_sources.kind column comment (db.EnsureModuleStoreSchema)
+	// for why these two are the only values.
+	Kind    string
 	AddedBy string
 	AddedAt time.Time
 }
@@ -409,8 +458,10 @@ type CustomSourceRow struct {
 // is stored as plaintext (see the cosign_pubkey column comment). Both
 // pubKeyPEM and token may be empty - an empty token means a public repo, an
 // empty pubKeyPEM falls back to unsigned/unverified installs (see
-// modules.VerifyCosign).
-func (p *Pool) CreateCustomSource(ctx context.Context, repoURL, name, pubKeyPEM, token, addedBy string) (CustomSourceRow, error) {
+// modules.VerifyCosign). kind must already be validated as "github" or
+// "forgejo" by the caller (store.AddCustomSourceHandler) - the column's own
+// CHECK constraint is the actual backstop.
+func (p *Pool) CreateCustomSource(ctx context.Context, repoURL, name, pubKeyPEM, token, kind, addedBy string) (CustomSourceRow, error) {
 	encURL, err := crypto.Encrypt(p.masterKey, repoURL)
 	if err != nil {
 		return CustomSourceRow{}, fmt.Errorf("db: encrypt custom source repo_url: %w", err)
@@ -423,12 +474,15 @@ func (p *Pool) CreateCustomSource(ctx context.Context, repoURL, name, pubKeyPEM,
 	if err != nil {
 		return CustomSourceRow{}, fmt.Errorf("db: encrypt custom source token: %w", err)
 	}
-	r := CustomSourceRow{RepoURL: repoURL, Name: name, PubKey: pubKeyPEM, Token: token, AddedBy: addedBy}
+	if kind == "" {
+		kind = "github"
+	}
+	r := CustomSourceRow{RepoURL: repoURL, Name: name, PubKey: pubKeyPEM, Token: token, Kind: kind, AddedBy: addedBy}
 	err = p.QueryRow(ctx, `
-		INSERT INTO custom_sources (repo_url_enc, name_enc, pubkey, token_enc, added_by)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO custom_sources (repo_url_enc, name_enc, pubkey, token_enc, kind, added_by)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, added_at
-	`, encURL, encName, pubKeyPEM, encToken, addedBy).Scan(&r.ID, &r.AddedAt)
+	`, encURL, encName, pubKeyPEM, encToken, kind, addedBy).Scan(&r.ID, &r.AddedAt)
 	if err != nil {
 		return CustomSourceRow{}, fmt.Errorf("db: create custom_source: %w", err)
 	}
@@ -440,7 +494,7 @@ func (p *Pool) CreateCustomSource(ctx context.Context, repoURL, name, pubKeyPEM,
 // be careful not to leak it back out over the API).
 func (p *Pool) ListCustomSources(ctx context.Context) ([]CustomSourceRow, error) {
 	rows, err := p.Query(ctx, `
-		SELECT id, repo_url_enc, name_enc, pubkey, token_enc, added_by, added_at
+		SELECT id, repo_url_enc, name_enc, pubkey, token_enc, kind, added_by, added_at
 		FROM custom_sources
 		ORDER BY added_at ASC
 	`)
@@ -452,7 +506,7 @@ func (p *Pool) ListCustomSources(ctx context.Context) ([]CustomSourceRow, error)
 	var out []CustomSourceRow
 	for rows.Next() {
 		var r CustomSourceRow
-		if err := rows.Scan(&r.ID, &r.RepoURL, &r.Name, &r.PubKey, &r.Token, &r.AddedBy, &r.AddedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.RepoURL, &r.Name, &r.PubKey, &r.Token, &r.Kind, &r.AddedBy, &r.AddedAt); err != nil {
 			return nil, fmt.Errorf("db: scan custom_source: %w", err)
 		}
 		var decErr error
@@ -576,22 +630,27 @@ const (
 
 // InstalledModuleRow is a full row from installed_modules.
 type InstalledModuleRow struct {
-	Name             string          `json:"name"`
-	Version          string          `json:"version"`
-	Tier             int             `json:"tier"`
-	Source           string          `json:"source"`
-	ReleaseURL       string          `json:"release_url"`
-	SHA256           string          `json:"sha256"`
-	Manifest         json.RawMessage `json:"manifest,omitempty"` // raw JSONB — RawMessage serialises as-is, not base64
-	Status           string          `json:"status"`
-	Pinned           bool            `json:"pinned"`
-	CosignVerified   bool            `json:"cosign_verified"`
-	CachedZipPath    *string         `json:"cached_zip_path,omitempty"`
-	AvailableVersion *string         `json:"available_version,omitempty"`
-	LastUpdateCheck  *time.Time      `json:"last_update_check,omitempty"`
-	LogoURL          *string         `json:"logo_url,omitempty"`
-	InstalledAt      time.Time       `json:"installed_at"`
-	UpdatedAt        time.Time       `json:"updated_at"`
+	Name       string          `json:"name"`
+	Version    string          `json:"version"`
+	Tier       int             `json:"tier"`
+	Source     string          `json:"source"`
+	ReleaseURL string          `json:"release_url"`
+	SHA256     string          `json:"sha256"`
+	Manifest   json.RawMessage `json:"manifest,omitempty"` // raw JSONB — RawMessage serialises as-is, not base64
+	Status     string          `json:"status"`
+	Pinned     bool            `json:"pinned"`
+	// AutoUpdate mirrors Pinned's shape but the opposite direction: when
+	// true, RunAutoUpdates (modules/updater.go) applies a newer version to
+	// this module itself instead of only setting AvailableVersion for an
+	// admin to act on. See SetModuleAutoUpdate below.
+	AutoUpdate       bool       `json:"auto_update"`
+	CosignVerified   bool       `json:"cosign_verified"`
+	CachedZipPath    *string    `json:"cached_zip_path,omitempty"`
+	AvailableVersion *string    `json:"available_version,omitempty"`
+	LastUpdateCheck  *time.Time `json:"last_update_check,omitempty"`
+	LogoURL          *string    `json:"logo_url,omitempty"`
+	InstalledAt      time.Time  `json:"installed_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 	// PIIMigratedAt is nil for a Tier 2/3 module that still needs its
 	// migrate-pii-key handler run (see docs/Modul-DB-Sandbox_Plan_2026-08-02.md
 	// Part B) - the frontend's ModulesPage uses this to show the "Migrate PII
@@ -642,12 +701,12 @@ func (p *Pool) GetInstalledModule(ctx context.Context, name string) (InstalledMo
 	var r InstalledModuleRow
 	err := p.QueryRow(ctx, `
 		SELECT name, version, tier, source, release_url, sha256, manifest,
-		       status, pinned, cosign_verified, cached_zip_path, available_version, last_update_check,
+		       status, pinned, auto_update, cosign_verified, cached_zip_path, available_version, last_update_check,
 		       logo_url, installed_at, updated_at, pii_migrated_at
 		FROM installed_modules WHERE name = $1
 	`, name).Scan(
 		&r.Name, &r.Version, &r.Tier, &r.Source, &r.ReleaseURL, &r.SHA256, &r.Manifest,
-		&r.Status, &r.Pinned, &r.CosignVerified, &r.CachedZipPath, &r.AvailableVersion, &r.LastUpdateCheck,
+		&r.Status, &r.Pinned, &r.AutoUpdate, &r.CosignVerified, &r.CachedZipPath, &r.AvailableVersion, &r.LastUpdateCheck,
 		&r.LogoURL, &r.InstalledAt, &r.UpdatedAt, &r.PIIMigratedAt,
 	)
 	if err != nil {
@@ -663,7 +722,7 @@ func (p *Pool) GetInstalledModule(ctx context.Context, name string) (InstalledMo
 func (p *Pool) ListInstalledModules(ctx context.Context) ([]InstalledModuleRow, error) {
 	rows, err := p.Query(ctx, `
 		SELECT name, version, tier, source, release_url, sha256, manifest,
-		       status, pinned, cosign_verified, cached_zip_path, available_version, last_update_check,
+		       status, pinned, auto_update, cosign_verified, cached_zip_path, available_version, last_update_check,
 		       logo_url, installed_at, updated_at, pii_migrated_at
 		FROM installed_modules ORDER BY name ASC
 	`)
@@ -677,7 +736,7 @@ func (p *Pool) ListInstalledModules(ctx context.Context) ([]InstalledModuleRow, 
 		var r InstalledModuleRow
 		if err := rows.Scan(
 			&r.Name, &r.Version, &r.Tier, &r.Source, &r.ReleaseURL, &r.SHA256, &r.Manifest,
-			&r.Status, &r.Pinned, &r.CosignVerified, &r.CachedZipPath, &r.AvailableVersion, &r.LastUpdateCheck,
+			&r.Status, &r.Pinned, &r.AutoUpdate, &r.CosignVerified, &r.CachedZipPath, &r.AvailableVersion, &r.LastUpdateCheck,
 			&r.LogoURL,
 			&r.InstalledAt, &r.UpdatedAt, &r.PIIMigratedAt,
 		); err != nil {
@@ -736,6 +795,20 @@ func (p *Pool) SetModulePinned(ctx context.Context, name string, pinned bool) (b
 	`, name, pinned)
 	if err != nil {
 		return false, fmt.Errorf("db: set module pinned %q: %w", name, err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// SetModuleAutoUpdate sets or clears the auto_update flag for the named
+// module - see InstalledModuleRow.AutoUpdate and modules.RunAutoUpdates
+// (updater.go) for what this actually controls. Same shape as
+// SetModulePinned right above.
+func (p *Pool) SetModuleAutoUpdate(ctx context.Context, name string, autoUpdate bool) (bool, error) {
+	tag, err := p.Exec(ctx, `
+		UPDATE installed_modules SET auto_update = $2, updated_at = now() WHERE name = $1
+	`, name, autoUpdate)
+	if err != nil {
+		return false, fmt.Errorf("db: set module auto_update %q: %w", name, err)
 	}
 	return tag.RowsAffected() > 0, nil
 }

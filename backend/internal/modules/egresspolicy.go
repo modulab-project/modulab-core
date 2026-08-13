@@ -52,10 +52,14 @@
 package modules
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
 	"strings"
+
+	"github.com/modulab-project/modulab-core/backend/internal/audit"
+	"github.com/modulab-project/modulab-core/backend/internal/auth"
 )
 
 // egressPolicyWildcard is the "any host at all" pattern. Spelled out as a
@@ -225,14 +229,32 @@ func filterEgressHosts(hosts, patterns []string) (allowed, rejected []string) {
 // moment an operator is most likely to be deliberately narrowing a module's
 // reach would be the moment the narrowing did not apply.
 //
-// Logs rather than reporting through onEgressDeny: these hosts were legal
-// when they were granted, so a rejection here is the expected consequence of
-// an operator editing the manifest, not a module reaching past its bound.
-func carryOverRuntimeEgress(moduleName string, hosts, patterns []string, action string) []string {
+// Previously logged only (log.Printf) rather than reporting through
+// onEgressDeny, on the reasoning that these hosts were legal when they were
+// granted, so a rejection here is just the expected consequence of an
+// operator editing the manifest. In practice that left this the one
+// egress-refusal path with no durable trail at all: a live worker's runtime
+// request going outside its bound is audited (main.go's
+// SetEgressDenyHandler → audit.EventModuleEgressDenied), but a host dropped
+// here during an update/restart only ever showed up in a container log an
+// admin is not routinely watching on a homelab instance. Both cases are the
+// same underlying fact - "a host this module previously had is no longer
+// permitted" - so both now produce the same audit event; ActorID/ActorEmail
+// stay empty here too, same "module/manifest-driven, not a human choosing
+// which hosts to drop" reasoning as EventModuleEgressDenied's own doc
+// comment, even though this call happens synchronously inside an admin's
+// update/restart request. The log line is kept alongside the audit write
+// since server logs remain useful for live debugging.
+func carryOverRuntimeEgress(ctx context.Context, authDeps auth.Deps, moduleName string, hosts, patterns []string, action string) []string {
 	allowed, rejected := filterEgressHosts(hosts, patterns)
 	if len(rejected) > 0 {
 		log.Printf("modules: %s %q: dropping carried-over egress hosts %v (outside dynamic_egress_allow=%v)",
 			action, moduleName, rejected, patterns)
+		logModuleAudit(ctx, authDeps, audit.LogParams{
+			EventType: audit.EventModuleEgressDenied,
+			TargetID:  moduleName,
+			Details:   fmt.Sprintf(`{"rejected_hosts":%q,"trigger":%q}`, strings.Join(rejected, ","), action),
+		})
 	}
 	return allowed
 }

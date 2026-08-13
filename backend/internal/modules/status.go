@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/modulab-project/modulab-core/backend/internal/auth"
 	"github.com/modulab-project/modulab-core/backend/internal/db"
 	"github.com/modulab-project/modulab-core/backend/internal/notify"
 	"github.com/modulab-project/modulab-core/backend/internal/store"
@@ -40,19 +41,28 @@ type UpdateInfo struct {
 // on the sync trigger means one code path instead of two, and the System
 // Info page now shows one merged "next check" countdown instead of two
 // timers that always converged on the same event anyway.
-func RunUpdateCheckOnce(ctx context.Context, d Deps, storeDeps store.Deps) {
+//
+// authDeps (added alongside auto_update support) is threaded through to
+// RunAutoUpdates below, which needs it to write an audit_log entry for any
+// module it updates in the background - the same auth.Deps every other
+// module-lifecycle audit write already uses via logModuleAudit.
+func RunUpdateCheckOnce(ctx context.Context, d Deps, storeDeps store.Deps, authDeps auth.Deps) {
 	updates, err := CheckUpdates(ctx, d, storeDeps)
 	if err != nil {
 		log.Printf("modules: update check: %v", err)
 		return
 	}
-	if len(updates) == 0 || d.Valkey == nil {
-		return
+	if len(updates) > 0 && d.Valkey != nil {
+		ev := notify.Event{Type: "module.updates_available", Data: map[string]any{"count": len(updates)}}
+		if err := notify.Publish(ctx, d.Valkey, notify.AdminChannel(), ev); err != nil {
+			log.Printf("modules: update check: publish event: %v", err)
+		}
 	}
-	ev := notify.Event{Type: "module.updates_available", Data: map[string]any{"count": len(updates)}}
-	if err := notify.Publish(ctx, d.Valkey, notify.AdminChannel(), ev); err != nil {
-		log.Printf("modules: update check: publish event: %v", err)
-	}
+
+	// auto_update-flagged modules are applied right away, on the same cycle
+	// the "update available" notification above would otherwise have merely
+	// announced them - see RunAutoUpdates' doc comment (updater.go).
+	RunAutoUpdates(ctx, d, storeDeps, authDeps, updates)
 }
 
 // CheckUpdates compares every installed module against the registry cache and

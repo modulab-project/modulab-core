@@ -18,6 +18,7 @@ import {
   type StoreEntry,
   type InstalledModule,
   type CustomSource,
+  type CustomSourceKind,
 } from "../lib/api";
 import { useAuthenticatedSession } from "../lib/useSession";
 import { useLoginRedirect } from "../lib/useLoginRedirect";
@@ -588,6 +589,7 @@ function CustomSourcesDialog({
   const { t } = useTranslation();
   const [repoUrl, setRepoUrl] = useState("");
   const [name, setName] = useState("");
+  const [kind, setKind] = useState<CustomSourceKind>("github");
   const [pubkey, setPubkey] = useState("");
   const [token, setToken] = useState("");
   const [saving, setSaving] = useState(false);
@@ -624,9 +626,10 @@ function CustomSourcesDialog({
     setFormError(null);
     setSaving(true);
     try {
-      await addCustomSource(repoUrl.trim(), name.trim(), pubkey.trim(), token.trim());
+      await addCustomSource(repoUrl.trim(), name.trim(), kind, pubkey.trim(), token.trim());
       setRepoUrl("");
       setName("");
+      setKind("github");
       setPubkey("");
       setToken("");
       onChanged();
@@ -780,6 +783,11 @@ function CustomSourcesDialog({
                   <div className="min-w-0">
                     <p className="flex flex-wrap items-center gap-1.5 break-words text-sm font-medium">
                       {s.name}
+                      {s.kind === "forgejo" && (
+                        <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-normal text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                          {t("store.custom.kind_forgejo")}
+                        </span>
+                      )}
                       {s.has_token && (
                         <i
                           className="ti ti-lock text-[12px] text-gray-400"
@@ -838,6 +846,40 @@ function CustomSourcesDialog({
         <form onSubmit={handleAdd} className="flex flex-col gap-3">
           <div>
             <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
+              {t("store.custom.kind")}
+            </label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setKind("github")}
+                className={
+                  kind === "github"
+                    ? "flex-1 rounded-lg border border-teal-500 bg-teal-50 px-3 py-2 text-sm font-medium text-teal-700 dark:bg-teal-950 dark:text-teal-300"
+                    : "flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                }
+              >
+                GitHub
+              </button>
+              <button
+                type="button"
+                onClick={() => setKind("forgejo")}
+                className={
+                  kind === "forgejo"
+                    ? "flex-1 rounded-lg border border-teal-500 bg-teal-50 px-3 py-2 text-sm font-medium text-teal-700 dark:bg-teal-950 dark:text-teal-300"
+                    : "flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                }
+              >
+                Forgejo / Gitea
+              </button>
+            </div>
+            {kind === "forgejo" && (
+              <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500">
+                {t("store.custom.kind_forgejo_hint")}
+              </p>
+            )}
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
               {t("store.custom.repo_url")}
             </label>
             <input
@@ -845,7 +887,7 @@ function CustomSourcesDialog({
               required
               value={repoUrl}
               onChange={(e) => setRepoUrl(e.target.value)}
-              placeholder="https://github.com/owner/repo"
+              placeholder={kind === "github" ? "https://github.com/owner/repo" : "https://git.example.com/owner/repo"}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-950"
               style={{ fontSize: 16 }}
             />
@@ -879,23 +921,25 @@ function CustomSourcesDialog({
               {t("store.custom.pubkey_hint")}
             </p>
           </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
-              {t("store.custom.token")}
-            </label>
-            <input
-              type="password"
-              autoComplete="off"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder="ghp_… / github_pat_…"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-xs outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-950"
-              style={{ fontSize: 16 }}
-            />
-            <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500">
-              {t("store.custom.token_hint")}
-            </p>
-          </div>
+          {kind === "github" && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
+                {t("store.custom.token")}
+              </label>
+              <input
+                type="password"
+                autoComplete="off"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="ghp_… / github_pat_…"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-xs outline-none focus:border-teal-500 dark:border-gray-700 dark:bg-gray-950"
+                style={{ fontSize: 16 }}
+              />
+              <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500">
+                {t("store.custom.token_hint")}
+              </p>
+            </div>
+          )}
 
           {formError && <p className="text-xs text-red-600 dark:text-red-400">{formError}</p>}
 

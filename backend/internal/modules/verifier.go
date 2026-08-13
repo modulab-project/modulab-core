@@ -30,6 +30,25 @@ var officialPublicKey string
 // contain a PEM header (e.g. a local dev checkout with a placeholder file).
 var ErrNoPublicKey = fmt.Errorf("modules: official Cosign public key not configured (cosign_pubkey.pem has no PEM header)")
 
+// ErrCosignUnavailable is VerifyCosign's sentinel for "the cosign binary
+// itself cannot be found" (checked via CosignAvailable before ever shelling
+// out - see VerifyCosign). Wrap with errors.Is against this rather than
+// string-matching the wrapping error's text, which always also carries the
+// specific path that was checked.
+//
+// Before this existed, a missing binary fell straight through to
+// exec.Command, whose resulting error - "modules: cosign verify-blob
+// failed: exec: \"cosign\": executable file not found in $PATH" - reads
+// exactly like a syntax/argument mistake in the exec.Command call itself
+// unless you already know to look for it, and gets wrapped a second time by
+// installer.go/updater.go ("install %q: cosign verify: %w") on the way to
+// whichever admin ends up staring at it. System Info's cosign_available
+// field (modules.CosignAvailable) already tells an admin ahead of time
+// whether this will happen; this is what they see if they install anyway
+// before fixing it - now a clear, actionable message instead of a bare exec
+// error.
+var ErrCosignUnavailable = errors.New("cosign binary not available")
+
 // CosignBinaryPath is the default location of the cosign binary. Override via
 // the MODULAB_COSIGN_BINARY_PATH environment variable (read by config.Load).
 // Falls back to searching $PATH when left at the default.
@@ -102,6 +121,14 @@ func VerifyCosign(zipPath, bundlePath, pubKeyPEM, cosignBin string) (bool, error
 	}
 	if pubKeyPEM == "" {
 		pubKeyPEM = officialPublicKey
+	}
+
+	// Checked explicitly, before touching the key file or shelling out, so a
+	// missing binary produces ErrCosignUnavailable's clear message instead of
+	// exec.Command's generic "executable file not found in $PATH" further
+	// down - see ErrCosignUnavailable's doc comment.
+	if !CosignAvailable(cosignBin) {
+		return false, fmt.Errorf("modules: %w: %q not found on $PATH (set MODULAB_COSIGN_BINARY_PATH if it's installed somewhere else)", ErrCosignUnavailable, cosignBin)
 	}
 
 	// Guard: refuse to verify if the resolved key has no PEM header (embedded

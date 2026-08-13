@@ -25,9 +25,13 @@ import (
 // HasToken only says whether one is on file, same pattern as
 // AIProviderRow.HasAdminKey.
 type CustomSourceResponse struct {
-	ID       string `json:"id"`
-	RepoURL  string `json:"repo_url"`
-	Name     string `json:"name"`
+	ID      string `json:"id"`
+	RepoURL string `json:"repo_url"`
+	Name    string `json:"name"`
+	// Kind is "github" or "forgejo" - see db's custom_sources.kind column
+	// comment. Always present (defaults to "github" for rows created before
+	// this field existed).
+	Kind     string `json:"kind"`
 	PubKey   string `json:"pubkey,omitempty"`
 	HasToken bool   `json:"has_token"`
 	AddedBy  string `json:"added_by"`
@@ -39,6 +43,7 @@ func toCustomSourceResponse(r db.CustomSourceRow) CustomSourceResponse {
 		ID:       r.ID,
 		RepoURL:  r.RepoURL,
 		Name:     r.Name,
+		Kind:     r.Kind,
 		PubKey:   r.PubKey,
 		HasToken: r.Token != "",
 		AddedBy:  r.AddedBy,
@@ -73,6 +78,12 @@ func ListCustomSourcesHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 type addCustomSourceRequest struct {
 	RepoURL string `json:"repo_url"`
 	Name    string `json:"name"`
+	// Kind selects which git-hosting API repo_url speaks: "github" (default
+	// when omitted/empty - preserves every existing integration's exact
+	// prior behaviour) or "forgejo" for a self-hosted Forgejo/Gitea
+	// instance. See db's custom_sources.kind column comment and
+	// store.gitProvider (github.go).
+	Kind string `json:"kind"`
 	// PubKey is the Cosign public key (PEM text), manually entered by the
 	// admin - deliberately not auto-fetched from the repo (see Entry.
 	// CosignPubKey's doc comment for the trust-on-first-use reasoning).
@@ -83,6 +94,14 @@ type addCustomSourceRequest struct {
 	// private repo. Empty means the repo is public. Always GCM-encrypted at
 	// rest (db.CreateCustomSource) and never echoed back - see
 	// CustomSourceResponse.HasToken.
+	//
+	// Only honored for kind == "github": resolveCustomSourceCredential
+	// (modules/installer.go) binds a token to a github.com owner/repo path
+	// and never attaches it to any other host, so a token saved against a
+	// "forgejo" source would silently never be used. Rejected outright at
+	// add-time instead, so an admin who sets one gets a clear error rather
+	// than a token that quietly does nothing - private self-hosted sources
+	// are not supported yet.
 	Token string `json:"token"`
 }
 
@@ -112,28 +131,52 @@ func AddCustomSourceHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 		}
 		req.RepoURL = strings.TrimSpace(req.RepoURL)
 		req.Name = strings.TrimSpace(req.Name)
+		req.Kind = strings.TrimSpace(req.Kind)
 		req.PubKey = strings.TrimSpace(req.PubKey)
 		req.Token = strings.TrimSpace(req.Token)
+
+		if req.Kind == "" {
+			req.Kind = "github"
+		}
+		if req.Kind != "github" && req.Kind != "forgejo" {
+			http.Error(w, `kind must be "github" or "forgejo"`, http.StatusBadRequest)
+			return
+		}
 
 		if req.RepoURL == "" {
 			http.Error(w, "repo_url is required", http.StatusBadRequest)
 			return
 		}
-		if !isValidGithubRepoURL(req.RepoURL) {
-			http.Error(w, "repo_url must be a https://github.com/<owner>/<repo> URL", http.StatusBadRequest)
+		if !isValidCustomSourceRepoURL(req.RepoURL, req.Kind) {
+			if req.Kind == "github" {
+				http.Error(w, "repo_url must be a https://github.com/<owner>/<repo> URL", http.StatusBadRequest)
+			} else {
+				http.Error(w, "repo_url must be a https://<host>/<owner>/<repo> URL", http.StatusBadRequest)
+			}
+			return
+		}
+		if req.Kind == "forgejo" && req.Token != "" {
+			http.Error(w, "token is only supported for github custom sources at the moment", http.StatusBadRequest)
 			return
 		}
 		if req.Name == "" {
-			// Default to "<owner>/<repo>" so the admin isn't forced to invent
-			// a label just to add a source.
-			req.Name = strings.TrimPrefix(strings.TrimSuffix(req.RepoURL, "/"), "https://github.com/")
+			// Default to "<owner>/<repo>" (github) or "<host>/<owner>/<repo>"
+			// (forgejo, where the host itself carries useful information -
+			// several self-hosted instances are far more common than several
+			// github.com sources ever are) so the admin isn't forced to
+			// invent a label just to add a source.
+			if req.Kind == "github" {
+				req.Name = strings.TrimPrefix(strings.TrimSuffix(req.RepoURL, "/"), "https://github.com/")
+			} else {
+				req.Name = strings.TrimPrefix(strings.TrimSuffix(req.RepoURL, "/"), "https://")
+			}
 		}
 		if req.PubKey != "" && !strings.Contains(req.PubKey, "-----BEGIN PUBLIC KEY-----") {
 			http.Error(w, "pubkey must be a PEM-encoded public key (or left empty)", http.StatusBadRequest)
 			return
 		}
 
-		row, err := d.Pool.CreateCustomSource(r.Context(), req.RepoURL, req.Name, req.PubKey, req.Token, sess.UserID)
+		row, err := d.Pool.CreateCustomSource(r.Context(), req.RepoURL, req.Name, req.PubKey, req.Token, req.Kind, sess.UserID)
 		if err != nil {
 			log.Printf("store: create custom source: %v", err)
 			http.Error(w, "failed to save custom source", http.StatusInternalServerError)
@@ -144,14 +187,14 @@ func AddCustomSourceHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 			EventType:  audit.EventCustomSourceAdded,
 			ActorID:    sess.UserID,
 			ActorEmail: sess.Email,
-			Details: fmt.Sprintf(`{"repo_url":%q,"name":%q,"has_pubkey":%v,"has_token":%v}`,
-				req.RepoURL, req.Name, req.PubKey != "", req.Token != ""),
+			Details: fmt.Sprintf(`{"repo_url":%q,"name":%q,"kind":%q,"has_pubkey":%v,"has_token":%v}`,
+				req.RepoURL, req.Name, req.Kind, req.PubKey != "", req.Token != ""),
 		})
 
 		// Best-effort immediate fetch - errors are logged, not fatal to the
 		// request (see doc comment above). entries: 1 for a single-module
 		// repo, N for a monorepo (see FetchCustomRepo's doc comment).
-		if entries, err := FetchCustomRepo(r.Context(), d.Pool, row.RepoURL, row.PubKey, row.Token); err != nil {
+		if entries, err := FetchCustomRepo(r.Context(), d.Pool, row.RepoURL, row.Kind, row.PubKey, row.Token); err != nil {
 			log.Printf("store: custom source %q: initial fetch failed: %v", row.RepoURL, err)
 		} else {
 			for _, entry := range entries {
@@ -325,6 +368,40 @@ func isValidGithubRepoURL(s string) bool {
 		return false
 	}
 	parts := strings.Split(rest, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return false
+	}
+	return true
+}
+
+// isValidCustomSourceRepoURL is isValidGithubRepoURL's kind-aware
+// counterpart: for kind == "github" it is exactly isValidGithubRepoURL
+// (including the github.com-only restriction, so a "github" source can
+// never quietly point somewhere else); for kind == "forgejo" it accepts
+// "https://<any host>/<owner>/<repo>" - same shape check (exactly two
+// non-empty path segments, no query/fragment), just without the fixed host.
+// Used instead of a bare url.Parse so githubRepoPath/parseGitProvider
+// (installer.go/github.go) can keep assuming any repo_url that made it into
+// custom_sources already has this shape.
+func isValidCustomSourceRepoURL(s, kind string) bool {
+	if kind == "github" {
+		return isValidGithubRepoURL(s)
+	}
+	const prefix = "https://"
+	if !strings.HasPrefix(s, prefix) {
+		return false
+	}
+	rest := strings.TrimSuffix(s[len(prefix):], "/")
+	slash := strings.Index(rest, "/")
+	if slash <= 0 || slash == len(rest)-1 {
+		return false
+	}
+	host := rest[:slash]
+	path := rest[slash+1:] // expected "owner/repo"
+	if host == "" || strings.EqualFold(host, "github.com") {
+		return false
+	}
+	parts := strings.Split(path, "/")
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return false
 	}

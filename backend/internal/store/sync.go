@@ -165,7 +165,7 @@ func syncAll(ctx context.Context, d Deps) (customErrs map[string]error, offErr, 
 			// Community entries don't carry a version in the index — fetch it
 			// from the GitHub Releases API so the store can show "v1.2.0".
 			if e.LatestVersion == "" {
-				version, err := FetchLatestRelease(ctx, d.Pool, e.SourceRepo, "")
+				version, err := FetchLatestRelease(ctx, d.Pool, e.SourceRepo, "github", "")
 				if err != nil {
 					log.Printf("store: sync: latest release for %q: %v", e.Name, err)
 				} else {
@@ -189,7 +189,7 @@ func syncAll(ctx context.Context, d Deps) (customErrs map[string]error, offErr, 
 		// entries: 1 for a single-module repo, N for a monorepo (see
 		// FetchCustomRepo's doc comment) - all share this source's repo_url
 		// and pubkey.
-		entries, err := FetchCustomRepo(ctx, d.Pool, cs.RepoURL, cs.PubKey, cs.Token)
+		entries, err := FetchCustomRepo(ctx, d.Pool, cs.RepoURL, cs.Kind, cs.PubKey, cs.Token)
 		if err != nil {
 			if customErrs == nil {
 				customErrs = make(map[string]error)

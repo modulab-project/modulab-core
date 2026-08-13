@@ -1632,6 +1632,11 @@ export interface InstalledModule {
   manifest?: Record<string, unknown>;
   status: "installing" | "active" | "degraded" | "failed" | "isolated";
   pinned: boolean;
+  // When true, a future registry sync applies a newer version to this
+  // module automatically instead of only surfacing available_version for
+  // an admin to update by hand — see pinModule/unpinModule's counterparts
+  // autoUpdateOn/autoUpdateOff below.
+  auto_update: boolean;
   cached_zip_path?: string;
   available_version?: string;
   last_update_check?: string;
@@ -1671,17 +1676,25 @@ export function syncStore(): Promise<{ ok: boolean; error?: string }> {
 // Admin-only "HACS-style" custom repositories on top of official/community —
 // mirrors store.CustomSourceResponse in backend/internal/store/custom_sources_handlers.go.
 
+// CustomSourceKind mirrors db's custom_sources.kind column - "github" (the
+// original, still-default behaviour) or "forgejo" for a self-hosted
+// Forgejo/Gitea instance. See store.gitProvider (backend/internal/store/
+// github.go) for what actually differs between the two.
+export type CustomSourceKind = "github" | "forgejo";
+
 export interface CustomSource {
   id: string;
   repo_url: string;
   name: string;
+  kind: CustomSourceKind;
   // PEM text, or empty when the source was added without a signing key (the
   // resulting module installs as unsigned/unverified — see StorePage.tsx's
   // unverified badge).
   pubkey?: string;
   // Whether a GitHub PAT is on file for this source (for a private repo) —
   // the token itself is never sent back once saved, see
-  // store.CustomSourceResponse's has_token on the backend.
+  // store.CustomSourceResponse's has_token on the backend. Only ever
+  // meaningful for kind === "github" — see addCustomSource's doc comment.
   has_token: boolean;
   added_by: string;
   added_at: string;
@@ -1698,15 +1711,19 @@ export function listCustomSources(): Promise<CustomSource[]> {
 // "anlegen" case - see main.go's route registration comment).
 // pubkey and token are both optional; leave pubkey empty for an
 // unsigned/unverified custom source, and token empty for a public repo.
+// token is only honored for kind === "github" — the backend rejects the
+// request outright if it's set alongside kind === "forgejo" (see
+// addCustomSourceRequest.Token's doc comment on the backend).
 export function addCustomSource(
   repoUrl: string,
   name: string,
+  kind: CustomSourceKind,
   pubkey: string,
   token: string,
 ): Promise<CustomSource> {
   return request<CustomSource>("/v1/admin/store/custom-sources", {
     method: "POST",
-    body: JSON.stringify({ repo_url: repoUrl, name, pubkey, token }),
+    body: JSON.stringify({ repo_url: repoUrl, name, kind, pubkey, token }),
   });
 }
 
@@ -1828,6 +1845,23 @@ export function pinModule(name: string): Promise<{ name: string; pinned: boolean
 // DELETE /v1/modules/{name}/pin — admin only.
 export function unpinModule(name: string): Promise<{ name: string; pinned: boolean }> {
   return request<{ name: string; pinned: boolean }>(`/v1/modules/${encodeURIComponent(name)}/pin`, {
+    method: "DELETE",
+  });
+}
+
+// POST /v1/modules/{name}/auto-update — admin only. Opts the module into
+// automatic updates (see RunAutoUpdates in the backend) from the next
+// registry sync onward — still subject to every safety check a manual
+// update goes through (not pinned, sha256 + Cosign verification).
+export function autoUpdateOn(name: string): Promise<{ name: string; auto_update: boolean }> {
+  return request<{ name: string; auto_update: boolean }>(`/v1/modules/${encodeURIComponent(name)}/auto-update`, {
+    method: "POST",
+  });
+}
+
+// DELETE /v1/modules/{name}/auto-update — admin only.
+export function autoUpdateOff(name: string): Promise<{ name: string; auto_update: boolean }> {
+  return request<{ name: string; auto_update: boolean }>(`/v1/modules/${encodeURIComponent(name)}/auto-update`, {
     method: "DELETE",
   });
 }

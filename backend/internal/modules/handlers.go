@@ -437,84 +437,20 @@ func UpdateModuleHandler(d Deps, storeDeps store.Deps, authDeps auth.Deps) http.
 			return
 		}
 
-		// Capture the currently-running worker's actual (runtime-discovered)
-		// egress hosts BEFORE stopping it — see CurrentModuleEgressHosts doc
-		// comment in deno.go. Only actually used below if the NEW manifest
-		// declares dynamic_egress: true (see Manifest.DynamicEgress doc
-		// comment for why this must be an explicit opt-in, not a guess based
-		// on "the old worker had hosts the new manifest doesn't").
-		runtimeEgressHosts, hadRuntimeHosts := d.Workers.CurrentModuleEgressHosts(name)
-
-		// Restart the Deno worker so it picks up the new handler code.
-		//
-		// row is re-fetched AFTER Update() returns, so row.Tier now reflects
-		// the NEW manifest's tier (Update's updateInstalledModuleRecord
-		// persists it - see that function's doc comment; before 2026-07-16 it
-		// didn't, so a tier-changing update left this gate checking the
-		// stale pre-update tier forever). Stop() above always runs
-		// unconditionally, so a tier>=2 → tier==1 downgrade correctly ends
-		// up with no worker restarted below; a tier==1 → tier>=2 upgrade
-		// correctly starts one where none ran before.
-		_ = d.Workers.Stop(name)
+		// Stop/restart the Deno worker (tier >= 2) so it picks up the new
+		// handler code, re-checking any runtime-discovered egress hosts
+		// against the new manifest along the way - shared with the
+		// auto_update background path (RunAutoUpdates in updater.go), which
+		// needs the exact same sequence after its own Update() call.
+		restartWorkerAfterUpdate(r.Context(), d, authDeps, name)
 		row, _, _ := d.DB.GetInstalledModule(r.Context(), name)
-		if row.Tier >= 2 {
-			var mf struct {
-				Handler            string        `json:"handler"`
-				EgressAllowlist    []string      `json:"egress_allowlist"`
-				Jobs               []ManifestJob `json:"jobs"`
-				TLSSkipVerify      bool          `json:"tls_skip_verify"`
-				DynamicEgress      bool          `json:"dynamic_egress"`
-				EgressHostsHandler string        `json:"egress_hosts_handler"`
-				DynamicEgressAllow []string      `json:"dynamic_egress_allow"`
-			}
-			if row.Manifest != nil {
-				_ = json.Unmarshal(row.Manifest, &mf)
-			}
-			if mf.Handler != "" {
-				destDir := filepath.Join(d.DataDir, name)
-				entrypoint := filepath.Join(destDir, mf.Handler)
-				egressHosts := mf.EgressAllowlist
-				if mf.DynamicEgress && hadRuntimeHosts && len(runtimeEgressHosts) > 0 {
-					// Runtime hosts carried over from the worker we just
-					// stopped were checked against the OLD manifest's policy
-					// when they were granted. This is a module *update*, so
-					// the policy may have just changed - re-check them
-					// against the version being installed rather than
-					// grandfathering them in, otherwise tightening
-					// dynamic_egress_allow would have no effect until the
-					// next reload happened to come along.
-					egressHosts = carryOverRuntimeEgress(name, runtimeEgressHosts, mf.DynamicEgressAllow, "update")
-				}
-				opts := WorkerOptions{
-					EgressHosts:    egressHosts,
-					Jobs:           ResolveJobEntrypoints(destDir, mf.Jobs, mf.EgressHostsHandler),
-					SkipTLSVerify:  mf.TLSSkipVerify,
-					EgressPolicy:   mf.DynamicEgressAllow,
-					DBRolePassword: moduleDBRolePassword(r.Context(), d, name),
-					PIIMigrated:    modulePIIMigrated(r.Context(), d, name),
-				}
-				if err := d.Workers.Start(name, entrypoint, opts); err != nil {
-					log.Printf("modules: update %q: restart worker: %v", name, err)
-				} else if mf.DynamicEgress && mf.EgressHostsHandler != "" {
-					// The just-started worker is a fresher source of truth
-					// than whatever we captured before stopping it above
-					// (the update may itself have changed how hosts are
-					// computed) — ask it directly and reload once more.
-					if hosts, ok := d.Workers.QueryEgressHosts(r.Context(), name); ok {
-						if err := d.Workers.ReloadEgress(name, hosts); err != nil {
-							log.Printf("modules: update %q: egress hosts reload failed: %v", name, err)
-						}
-					}
-				}
-			}
-		}
 
 		logModuleAudit(r.Context(), authDeps, audit.LogParams{
 			EventType:  audit.EventModuleUpdated,
 			ActorID:    sess.UserID,
 			ActorEmail: sess.Email,
 			TargetID:   name,
-			Details:    fmt.Sprintf(`{"from_version":%q,"to_version":%q}`, oldVersion, row.Version),
+			Details:    fmt.Sprintf(`{"from_version":%q,"to_version":%q,"trigger":"manual"}`, oldVersion, row.Version),
 		})
 
 		writeModuleJSON(w, http.StatusOK, row)
@@ -587,6 +523,76 @@ func UnpinHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 	}
 }
 
+// ── POST /v1/modules/{name}/auto-update ───────────────────────────────────────
+
+// AutoUpdateOnHandler opts a module into automatic updates: from the next
+// registry sync onward, RunAutoUpdates (updater.go) applies any newer
+// version itself instead of only recording available_version for an admin
+// to act on. Still subject to every safety check Update() itself enforces
+// (not pinned, sha256 + Cosign verification, tier validation) - see
+// RunAutoUpdates' doc comment. Requires admin.
+func AutoUpdateOnHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := auth.RequireAdminSession(authDeps, w, r)
+		if !ok {
+			return
+		}
+
+		name := r.PathValue("name")
+		found, err := d.DB.SetModuleAutoUpdate(r.Context(), name, true)
+		if err != nil {
+			http.Error(w, "failed to enable auto-update", http.StatusInternalServerError)
+			return
+		}
+		if !found {
+			http.Error(w, "module not installed", http.StatusNotFound)
+			return
+		}
+
+		logModuleAudit(r.Context(), authDeps, audit.LogParams{
+			EventType:  audit.EventModuleAutoUpdateEnabled,
+			ActorID:    sess.UserID,
+			ActorEmail: sess.Email,
+			TargetID:   name,
+		})
+
+		writeModuleJSON(w, http.StatusOK, map[string]any{"name": name, "auto_update": true})
+	}
+}
+
+// ── DELETE /v1/modules/{name}/auto-update ─────────────────────────────────────
+
+// AutoUpdateOffHandler opts a module back out of automatic updates. Requires
+// admin.
+func AutoUpdateOffHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := auth.RequireAdminSession(authDeps, w, r)
+		if !ok {
+			return
+		}
+
+		name := r.PathValue("name")
+		found, err := d.DB.SetModuleAutoUpdate(r.Context(), name, false)
+		if err != nil {
+			http.Error(w, "failed to disable auto-update", http.StatusInternalServerError)
+			return
+		}
+		if !found {
+			http.Error(w, "module not installed", http.StatusNotFound)
+			return
+		}
+
+		logModuleAudit(r.Context(), authDeps, audit.LogParams{
+			EventType:  audit.EventModuleAutoUpdateDisabled,
+			ActorID:    sess.UserID,
+			ActorEmail: sess.Email,
+			TargetID:   name,
+		})
+
+		writeModuleJSON(w, http.StatusOK, map[string]any{"name": name, "auto_update": false})
+	}
+}
+
 // ── POST /v1/modules/{name}/restart ───────────────────────────────────────────
 
 // RestartModuleHandler restarts a Tier 2/3 module's Deno worker from its
@@ -633,7 +639,7 @@ func RestartModuleHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 			return
 		}
 
-		if err := restartModuleWorker(r.Context(), d, name); err != nil {
+		if err := restartModuleWorker(r.Context(), d, authDeps, name); err != nil {
 			if errors.Is(err, errModuleManifestNoHandler) {
 				http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 			} else {
@@ -782,7 +788,7 @@ func MigratePIIKeyHandler(d Deps, authDeps auth.Deps) http.HandlerFunc {
 		// natural restart/update) picks up the correct key instead. (No
 		// Tier check here - this handler already refused Tier < 2 modules
 		// earlier, before ever dispatching to a worker.)
-		if err := restartModuleWorker(r.Context(), d, name); err != nil {
+		if err := restartModuleWorker(r.Context(), d, authDeps, name); err != nil {
 			log.Printf("modules: migrate-pii-key %q: post-migration restart failed: %v - restart the module manually to pick up the derived key", name, err)
 		}
 
@@ -814,7 +820,7 @@ var errModuleManifestNoHandler = errors.New("module manifest has no handler")
 // SetModulePIIMigrated). RestartModuleHandler still does its own
 // tier/status/lookup checks before calling this, unchanged from before this
 // was extracted.
-func restartModuleWorker(ctx context.Context, d Deps, name string) error {
+func restartModuleWorker(ctx context.Context, d Deps, authDeps auth.Deps, name string) error {
 	row, found, err := d.DB.GetInstalledModule(ctx, name)
 	if err != nil {
 		return fmt.Errorf("look up module: %w", err)
@@ -847,7 +853,7 @@ func restartModuleWorker(ctx context.Context, d Deps, name string) error {
 	entrypoint := filepath.Join(destDir, mf.Handler)
 	egressHosts := mf.EgressAllowlist
 	if mf.DynamicEgress && hadRuntimeHosts && len(runtimeEgressHosts) > 0 {
-		egressHosts = carryOverRuntimeEgress(name, runtimeEgressHosts, mf.DynamicEgressAllow, "restart")
+		egressHosts = carryOverRuntimeEgress(ctx, authDeps, name, runtimeEgressHosts, mf.DynamicEgressAllow, "restart")
 	}
 	opts := WorkerOptions{
 		EgressHosts:    egressHosts,
