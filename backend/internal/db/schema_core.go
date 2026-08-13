@@ -111,7 +111,8 @@ func (p *Pool) EnsureCoreSchema(ctx context.Context) error {
 	`); err != nil {
 		return fmt.Errorf("db: ensure users.locked: %w", err)
 	}
-	// ui_language stores the user's preferred UI locale ("en" or "de").
+	// ui_language stores the user's preferred UI locale (one of
+	// supportedUILanguages, e.g. "en" or "de").
 	// Plaintext — it is not PII (just a locale code) and therefore does not
 	// need GCM encryption. Empty string means "use browser default".
 	if _, err := p.Exec(ctx, `

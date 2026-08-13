@@ -354,10 +354,30 @@ func (p *Pool) GetUserLanguage(ctx context.Context, userID string) (string, erro
 	return lang, nil
 }
 
-// SetUserLanguage persists the UI language preference for userID. Only "en"
-// and "de" are accepted; any other value is stored as "" (reset to default).
+// supportedUILanguages mirrors the frontend's own auto-discovered set
+// (frontend/src/locales/*.json, see AVAILABLE_LANGUAGES in lib/i18n.ts) -
+// kept as its own literal here rather than shared, since this package has
+// no dependency on the frontend build and adminapi/mail each already keep
+// their own equivalent copy (supportedGeneralLanguages, mail.supportedLangs)
+// for the same reason. A value read back from users.ui_language that isn't
+// one of these is treated as unset rather than persisting a code the
+// frontend never actually offered.
+var supportedUILanguages = map[string]bool{
+	"en": true,
+	"de": true,
+	"nl": true,
+	"es": true,
+	"fr": true,
+	"it": true,
+	"pl": true,
+	"pt": true,
+}
+
+// SetUserLanguage persists the UI language preference for userID. Only a
+// code in supportedUILanguages is accepted; any other value is stored as ""
+// (reset to default).
 func (p *Pool) SetUserLanguage(ctx context.Context, userID, lang string) error {
-	if lang != "en" && lang != "de" {
+	if !supportedUILanguages[lang] {
 		lang = ""
 	}
 	_, err := p.Exec(ctx, `UPDATE users SET ui_language = $1 WHERE id = $2`, lang, userID)

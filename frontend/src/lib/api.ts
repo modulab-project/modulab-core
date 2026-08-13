@@ -1140,7 +1140,7 @@ export function adminPatchLimitsSettings(settings: LimitsSettings): Promise<Limi
 
 // GeneralSettings backs GET/PATCH /v1/admin/system/general - the
 // "Sprache & Region" / "Instanz-Identität" settings page
-// (adminapi.AdminGeneralHandler). system_language drives which of the 5
+// (adminapi.AdminGeneralHandler). system_language drives which of the 8
 // supported UI languages (matches frontend/src/locales/*.json) outgoing
 // system mail is rendered in (see backend's mail.CurrentBranding);
 // instance_name replaces the literal "ModuLab" in those same mails.
@@ -1150,7 +1150,7 @@ export function adminPatchLimitsSettings(settings: LimitsSettings): Promise<Limi
 // evaluated against - see backend's setup/timezone.go doc comment for the
 // bug this fixes.
 export interface GeneralSettings {
-  system_language: "en" | "de" | "nl" | "es" | "fr";
+  system_language: "en" | "de" | "nl" | "es" | "fr" | "it" | "pl" | "pt";
   instance_name: string;
   system_timezone: string;
 }

@@ -1,8 +1,8 @@
 // Branding backs GET/PATCH /v1/admin/system/general (adminapi.AdminGeneralHandler)
 // - the "Sprache & Region" / "Instanz-Identität" admin settings page. Two
 // values, both operator-configured and both affecting every template in
-// templates.go: which of the frontend's 5 supported UI languages
-// (frontend/src/locales/{en,de,nl,es,fr}.json) outgoing system mail is
+// templates.go: which of the frontend's 8 supported UI languages
+// (frontend/src/locales/{en,de,nl,es,fr,it,pl,pt}.json) outgoing system mail is
 // rendered in, and what display name replaces the literal "ModuLab" in
 // mail subjects/signatures (e.g. a homelab operator naming their instance
 // after their household). Both are plain core_settings string rows - see
@@ -53,6 +53,9 @@ var supportedLangs = map[string]bool{
 	"nl": true,
 	"es": true,
 	"fr": true,
+	"it": true,
+	"pl": true,
+	"pt": true,
 }
 
 // Branding is the resolved (fallback-applied) pair of settings every

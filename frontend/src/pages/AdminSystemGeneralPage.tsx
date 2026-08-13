@@ -22,6 +22,9 @@ const LANGUAGES: Array<{ value: GeneralSettings["system_language"]; flag: string
   { value: "nl", flag: "🇳🇱" },
   { value: "es", flag: "🇪🇸" },
   { value: "fr", flag: "🇫🇷" },
+  { value: "it", flag: "🇮🇹" },
+  { value: "pl", flag: "🇵🇱" },
+  { value: "pt", flag: "🇧🇷" },
 ];
 
 // Full IANA Time Zone Database name list, straight from the browser/Node

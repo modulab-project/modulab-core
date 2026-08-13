@@ -33,7 +33,7 @@ import (
 // GeneralSettings is the shape of GET/PATCH /v1/admin/system/general.
 //
 // Configurable settings:
-//   - system_language: one of "en", "de", "nl", "es", "fr" - the language
+//   - system_language: one of "en", "de", "nl", "es", "fr", "it", "pl", "pt" - the language
 //     mail.CurrentBranding resolves for every templates.go message from
 //     this point on. Takes effect immediately, on the next mail sent -
 //     see mail.CurrentBranding's doc comment on why it is re-resolved
@@ -84,6 +84,9 @@ var supportedGeneralLanguages = map[string]bool{
 	"nl": true,
 	"es": true,
 	"fr": true,
+	"it": true,
+	"pl": true,
+	"pt": true,
 }
 
 // AdminGeneralHandler handles GET and PATCH /v1/admin/system/general.
@@ -105,7 +108,7 @@ func AdminGeneralHandler(pool *db.Pool, masterKeyEnv string) http.HandlerFunc {
 			}
 
 			if !supportedGeneralLanguages[body.SystemLanguage] {
-				http.Error(w, "system_language must be one of: en, de, nl, es, fr", http.StatusBadRequest)
+				http.Error(w, "system_language must be one of: en, de, nl, es, fr, it, pl, pt", http.StatusBadRequest)
 				return
 			}
 			instanceName := strings.TrimSpace(body.InstanceName)
