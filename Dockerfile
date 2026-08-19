@@ -22,7 +22,7 @@ RUN npm run build
 # 1.26.4)") - found 2026-07-23 when this pin broke the very first local
 # build after being added. Re-verify against go.mod's required version
 # before bumping this digest in the future.
-FROM golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2 AS go-builder
+FROM golang:1.26.6-alpine@sha256:3889b425f035be855a72fb4755265311293b6d414521f0a519d819df32222d83 AS go-builder
 
 WORKDIR /app/backend
 COPY backend/go.mod backend/go.sum ./
