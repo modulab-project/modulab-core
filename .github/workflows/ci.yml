@@ -82,7 +82,7 @@ jobs:
       # current stable via `go run golang.org/x/vuln/cmd/govulncheck@latest
       # -version` locally on 2026-07-27: govulncheck@v1.6.0.
       - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
 
   frontend:
     runs-on: ubuntu-latest
