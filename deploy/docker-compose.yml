@@ -467,7 +467,7 @@ services:
     # Digest-pinned (2026-07-23 security pass) - was previously "latest"
     # with no version information at all, the worst case of the mutable-tag
     # risk described for the other services in this file. Bump deliberately.
-    image: searxng/searxng:latest@sha256:11a9b34cdc0b1ec2b991470a2762ecb5a1a531898289fb51dcd015260450729e
+    image: searxng/searxng:latest@sha256:b36af7984b87191b595bc5301418ed6432c047668a4547ab531a7439b816fac3
     restart: unless-stopped
     environment:
       SEARXNG_BASE_URL: https://${MODULAB_DOMAIN}/searxng/
