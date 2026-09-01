@@ -105,7 +105,7 @@ services:
     # Digest-pinned (2026-07-23 security pass): a tag like v3 is a mutable
     # pointer, so `docker compose pull` weeks later could silently swap in a
     # different image. Bump this deliberately, not implicitly on every pull.
-    image: traefik:v3@sha256:9c3b91d5fb7770853ca5c1124a23c34bf2d9b47ffaebeab2614cbaf410dcb2ac
+    image: traefik:v3@sha256:9c2a54d87f76f5c2f5f2682c68394af92fb12c0a2686798d6462a3f84bd78eaf
     restart: unless-stopped
     command:
       - "--log.level=INFO"
